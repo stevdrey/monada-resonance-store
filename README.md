@@ -446,7 +446,7 @@ Expected result:
 
 Initial stack:
 
-- Java 25+
+- Java 26
 - Gradle Kotlin DSL
 - JUnit 5
 - Jackson for JSON serialization
