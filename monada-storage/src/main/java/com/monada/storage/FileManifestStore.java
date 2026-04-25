@@ -22,7 +22,13 @@ public class FileManifestStore implements ManifestStore {
 
         Path manifest = root.resolve("manifest.json");
         if (Files.notExists(manifest)) {
-            Files.writeString(manifest, "{\n  \"version\": \"0.1\",\n  \"vectorSegment\": \"vectors/segment-000001.f32\",\n  \"atomSegment\": \"atoms/segment-000001.log\"\n}\n");
+            Files.writeString(manifest, """
+                    {
+                      "version": "0.1",
+                      "vectorSegment": "vectors/segment-000001.f32",
+                      "atomSegment": "atoms/segment-000001.log"
+                    }
+                    """);
         }
     }
 }
