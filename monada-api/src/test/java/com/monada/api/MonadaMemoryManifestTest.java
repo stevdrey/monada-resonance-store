@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class MonadaMemoryManifestTest {
 
@@ -59,7 +60,28 @@ class MonadaMemoryManifestTest {
 
         UncheckedIOException ex = assertThrows(UncheckedIOException.class,
                 () -> MonadaMemory.open(root));
-        assertTrue(ex.getCause().getMessage().toLowerCase().contains("dimensions"));
+        assertTrue(ex.getCause().getMessage().toLowerCase().contains("does not match"),
+                "Expected dimension mismatch message but got: " + ex.getCause().getMessage());
+    }
+
+    @Test
+    void openFailsForUnrecognizedManifestVersion() throws Exception {
+        FileManifestStore manifestStore = new FileManifestStore(root);
+        manifestStore.save(new Manifest(
+                "99.0", 128, "vectors/segment-000001.f32", "atoms/segment-000001.log"));
+
+        UncheckedIOException ex = assertThrows(UncheckedIOException.class,
+                () -> MonadaMemory.open(root));
+        assertTrue(ex.getCause().getMessage().contains("Unsupported manifest version"));
+        assertTrue(ex.getCause().getMessage().contains("99.0"));
+    }
+
+    @Test
+    void resonateNullQueryIsRejectedImmediately() {
+        MonadaMemory memory = MonadaMemory.open(root);
+        NullPointerException ex = assertThrows(NullPointerException.class,
+                () -> memory.resonate(null));
+        assertNotNull(ex.getMessage());
     }
 
     @Test

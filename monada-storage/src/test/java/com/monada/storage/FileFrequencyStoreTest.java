@@ -115,13 +115,40 @@ class FileFrequencyStoreTest {
     }
 
     @Test
-    void fixedDimensionConstructorRejectsMismatchedSegmentSize() throws IOException {
-        // Pre-populate using legacy header mode so segment has a different on-disk layout.
-        FileFrequencyStore legacy = new FileFrequencyStore(root);
-        legacy.save("a", vector(1f, 2f, 3f, 4f));
+    void fixedDimensionConstructorRejectsOversizedSegment() throws IOException {
+        // Segment larger than expected (e.g. post-crash state with one unindexed frame,
+        // or a dimension mismatch): constructor must refuse to open rather than silently
+        // truncate, because the two cases are indistinguishable at the byte level.
+        FileFrequencyStore store = new FileFrequencyStore(root, "vectors/segment-000001.f32", 2);
+        store.save("a", vector(1f, 2f));
+
+        Path segment = root.resolve("vectors/segment-000001.f32");
+        java.io.DataOutputStream dos = new java.io.DataOutputStream(
+                Files.newOutputStream(segment, StandardOpenOption.APPEND));
+        dos.writeFloat(9f);
+        dos.writeFloat(10f);
+        dos.close();
 
         IOException ex = assertThrows(IOException.class,
-                () -> new FileFrequencyStore(root, "vectors/segment-000001.f32", 3));
+                () -> new FileFrequencyStore(root, "vectors/segment-000001.f32", 2));
+        assertTrue(ex.getMessage().toLowerCase().contains("does not match"));
+    }
+
+    @Test
+    void fixedDimensionConstructorRejectsTooShortSegment() throws IOException {
+        // Write two index entries but truncate segment so it cannot satisfy both.
+        FileFrequencyStore store = new FileFrequencyStore(root, "vectors/segment-000001.f32", 2);
+        store.save("a", vector(1f, 2f));
+        store.save("b", vector(3f, 4f));
+
+        // Truncate segment to fewer bytes than required.
+        Path segment = root.resolve("vectors/segment-000001.f32");
+        try (var ch = Files.newByteChannel(segment, StandardOpenOption.WRITE)) {
+            ch.truncate(4); // less than 2 * 2 * 4 = 16 bytes
+        }
+
+        IOException ex = assertThrows(IOException.class,
+                () -> new FileFrequencyStore(root, "vectors/segment-000001.f32", 2));
         assertTrue(ex.getMessage().toLowerCase().contains("does not match"));
     }
 

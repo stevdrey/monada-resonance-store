@@ -18,6 +18,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 public class MonadaMemory {
@@ -50,6 +51,11 @@ public class MonadaMemory {
             Manifest manifest;
             if (existing.isPresent()) {
                 manifest = existing.get();
+                if (!Objects.equals(manifest.version(), MANIFEST_VERSION)) {
+                    throw new IOException(
+                            "Unsupported manifest version '" + manifest.version()
+                                    + "'; expected '" + MANIFEST_VERSION + "'");
+                }
             } else {
                 manifest = new Manifest(
                         MANIFEST_VERSION, DEFAULT_DIMENSIONS, DEFAULT_VECTOR_SEGMENT, DEFAULT_ATOM_SEGMENT);
@@ -72,7 +78,7 @@ public class MonadaMemory {
         for (StoredVector stored : frequencyStore.findAll()) {
             int actual = stored.vector().dimensions();
             if (actual != expected) {
-                throw new IllegalStateException(
+                throw new IOException(
                         "Manifest dimensions (" + expected + ") do not match stored vector dimensions (" + actual
                                 + ") for atomId=" + stored.atomId());
             }

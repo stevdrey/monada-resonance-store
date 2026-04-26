@@ -6,6 +6,7 @@ import com.monada.index.ResonanceIndex;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.Objects;
 
 public class MonadaQuery {
 
@@ -16,7 +17,7 @@ public class MonadaQuery {
     private double threshold = 0.0;
 
     MonadaQuery(String query, FrequencyEncoder encoder, ResonanceIndex resonanceIndex) {
-        this.query = query;
+        this.query = Objects.requireNonNull(query, "query");
         this.encoder = encoder;
         this.resonanceIndex = resonanceIndex;
     }

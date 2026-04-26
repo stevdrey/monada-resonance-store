@@ -50,12 +50,14 @@ public class FileFrequencyStore implements FrequencyStore {
             Files.createFile(vectorMap);
         }
         if (fixedDimensions != null) {
-            long expected = (long) readIndexEntries().size() * fixedDimensions * Float.BYTES;
+            long frameSize = (long) fixedDimensions * Float.BYTES;
+            long indexCount = readIndexEntries().size();
+            long expected = indexCount * frameSize;
             long actual = Files.size(vectorFile);
             if (actual != expected) {
                 throw new IOException(
                         "Vector segment size (" + actual + " bytes) does not match index entries x dimensions x 4 ("
-                                + expected + " bytes); the manifest dimensions may not match the on-disk segment");
+                                + expected + " bytes); manifest dimensions may not match the on-disk segment");
             }
         }
     }
