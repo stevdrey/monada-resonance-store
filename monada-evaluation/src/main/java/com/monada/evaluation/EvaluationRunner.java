@@ -7,7 +7,6 @@ import com.monada.core.ResonanceResult;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -47,14 +46,11 @@ public final class EvaluationRunner {
 
         MonadaMemory memory = MonadaMemory.open(memoryPath);
 
-        // label -> internal atom id (UUID)
-        Map<String, String> labelToId = new HashMap<>();
         // internal atom id -> label (for translating ranked results back to labels)
         Map<String, String> idToLabel = new HashMap<>();
 
         for (DatasetAtom atom : dataset.atoms()) {
             KnowledgeAtom stored = memory.remember(atom.content());
-            labelToId.put(atom.label(), stored.id());
             idToLabel.put(stored.id(), atom.label());
         }
 
@@ -84,7 +80,7 @@ public final class EvaluationRunner {
             queryResults.add(new QueryEvaluation(
                     query.text(),
                     query.expectedLabels(),
-                    Collections.unmodifiableList(rankedLabels),
+                    rankedLabels,
                     precisionByK));
         }
 

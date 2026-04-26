@@ -1,9 +1,11 @@
 package com.monada.evaluation;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
+import java.util.TreeSet;
 
 public record EvaluationReport(
         List<QueryEvaluation> queryResults,
@@ -22,7 +24,9 @@ public record EvaluationReport(
 
         for (QueryEvaluation qr : queryResults) {
             sb.append("Query: ").append(qr.queryText()).append('\n');
-            sb.append("Expected: ").append(String.join(", ", qr.expectedLabels())).append('\n');
+            sb.append("Expected: ")
+                    .append(String.join(", ", new TreeSet<>(qr.expectedLabels())))
+                    .append('\n');
 
             int displayK = Math.min(qr.returnedLabels().size(),
                     qr.precisionByK().keySet().stream().mapToInt(Integer::intValue).max().orElse(3));
@@ -31,7 +35,7 @@ public record EvaluationReport(
                     .append('\n');
 
             for (Map.Entry<Integer, Double> e : qr.precisionByK().entrySet()) {
-                sb.append(String.format("Precision@%d: %.2f%n", e.getKey(), e.getValue()));
+                sb.append(String.format(Locale.ROOT, "Precision@%d: %.2f%n", e.getKey(), e.getValue()));
             }
             sb.append('\n');
         }
@@ -39,7 +43,7 @@ public record EvaluationReport(
         sb.append("Aggregate\n");
         sb.append("---------\n");
         for (Map.Entry<Integer, Double> e : averagePrecisionByK.entrySet()) {
-            sb.append(String.format("Average Precision@%d: %.2f%n", e.getKey(), e.getValue()));
+            sb.append(String.format(Locale.ROOT, "Average Precision@%d: %.2f%n", e.getKey(), e.getValue()));
         }
         return sb.toString();
     }
