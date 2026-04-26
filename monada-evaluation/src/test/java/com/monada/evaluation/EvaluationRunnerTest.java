@@ -10,6 +10,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class EvaluationRunnerTest {
@@ -68,5 +69,11 @@ class EvaluationRunnerTest {
             assertTrue(qr.precisionByK().containsKey(2));
             assertTrue(qr.precisionByK().containsKey(4));
         }
+    }
+
+    @Test
+    void rejectsDuplicateKs() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new EvaluationRunner(List.of(1, 1, 3)));
     }
 }

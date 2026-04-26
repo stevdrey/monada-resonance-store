@@ -8,9 +8,11 @@ import com.monada.core.ResonanceResult;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
 
 /**
@@ -32,9 +34,13 @@ public final class EvaluationRunner {
         if (ks.isEmpty()) {
             throw new IllegalArgumentException("ks must not be empty");
         }
+        Set<Integer> seen = new HashSet<>();
         for (int k : ks) {
             if (k <= 0) {
                 throw new IllegalArgumentException("k values must be > 0, got: " + k);
+            }
+            if (!seen.add(k)) {
+                throw new IllegalArgumentException("k values must be unique, duplicate: " + k);
             }
         }
         this.ks = List.copyOf(ks);
