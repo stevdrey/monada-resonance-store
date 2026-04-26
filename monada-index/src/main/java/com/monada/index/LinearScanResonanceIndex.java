@@ -5,8 +5,10 @@ import com.monada.core.KnowledgeAtom;
 import com.monada.core.ResonanceResult;
 import com.monada.storage.AtomStore;
 import com.monada.storage.FrequencyStore;
+import com.monada.storage.StoredVector;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -26,22 +28,22 @@ public class LinearScanResonanceIndex implements ResonanceIndex {
         if (topK <= 0) {
             throw new IllegalArgumentException("topK must be greater than zero");
         }
-        return frequencyStore.findAll().stream()
-                .map(storedVector -> resultFor(queryVector, storedVector.atomId(), storedVector.vector()))
-                .flatMap(Optional::stream)
-                .filter(result -> result.score() >= threshold)
-                .sorted(Comparator.comparingDouble(ResonanceResult::score).reversed())
-                .limit(topK)
-                .toList();
-    }
-
-    private Optional<ResonanceResult> resultFor(FrequencyVector queryVector, String atomId, FrequencyVector storedVector) {
-        try {
-            Optional<KnowledgeAtom> atom = atomStore.findById(atomId);
-            return atom.map(knowledgeAtom -> new ResonanceResult(knowledgeAtom, cosineSimilarity(queryVector, storedVector)));
-        } catch (IOException e) {
-            throw new IllegalStateException(e);
+        List<ResonanceResult> results = new ArrayList<>();
+        for (StoredVector storedVector : frequencyStore.findAll()) {
+            Optional<KnowledgeAtom> atom = atomStore.findById(storedVector.atomId());
+            if (atom.isEmpty()) {
+                continue;
+            }
+            double score = cosineSimilarity(queryVector, storedVector.vector());
+            if (score >= threshold) {
+                results.add(new ResonanceResult(atom.get(), score));
+            }
         }
+        results.sort(Comparator.comparingDouble(ResonanceResult::score).reversed());
+        if (results.size() > topK) {
+            return results.subList(0, topK);
+        }
+        return results;
     }
 
     private double cosineSimilarity(FrequencyVector left, FrequencyVector right) {

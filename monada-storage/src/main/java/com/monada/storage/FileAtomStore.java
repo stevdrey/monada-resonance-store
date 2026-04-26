@@ -16,12 +16,17 @@ import java.util.Optional;
 
 public class FileAtomStore implements AtomStore {
 
+    private static final String DEFAULT_SEGMENT = "atoms/segment-000001.log";
+
     private final Path atomLog;
 
     public FileAtomStore(Path root) throws IOException {
-        Path atomsDirectory = root.resolve("atoms");
-        Files.createDirectories(atomsDirectory);
-        this.atomLog = atomsDirectory.resolve("segment-000001.log");
+        this(root, DEFAULT_SEGMENT);
+    }
+
+    public FileAtomStore(Path root, String atomSegment) throws IOException {
+        this.atomLog = root.resolve(atomSegment);
+        Files.createDirectories(atomLog.getParent());
         if (Files.notExists(atomLog)) {
             Files.createFile(atomLog);
         }
@@ -29,6 +34,10 @@ public class FileAtomStore implements AtomStore {
 
     @Override
     public void save(KnowledgeAtom atom) throws IOException {
+        if (!atom.metadata().isEmpty()) {
+            throw new IllegalArgumentException(
+                    "FileAtomStore does not persist atom metadata; received " + atom.metadata().size() + " entries for atom " + atom.id());
+        }
         String encodedContent = Base64.getEncoder().encodeToString(atom.content().getBytes(StandardCharsets.UTF_8));
         String line = String.join("\t",
                 atom.id(),
@@ -55,6 +64,10 @@ public class FileAtomStore implements AtomStore {
 
     private KnowledgeAtom parse(String line) {
         String[] parts = line.split("\t", 5);
+        if (parts.length != 5) {
+            throw new IllegalStateException(
+                    "Malformed atom log entry: expected 5 tab-delimited fields but found " + parts.length + " in line: " + line);
+        }
         String content = new String(Base64.getDecoder().decode(parts[4]), StandardCharsets.UTF_8);
         return new KnowledgeAtom(
                 parts[0],

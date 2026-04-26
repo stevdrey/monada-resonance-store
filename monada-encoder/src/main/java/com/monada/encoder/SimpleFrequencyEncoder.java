@@ -9,6 +9,14 @@ import java.util.Locale;
 
 public class SimpleFrequencyEncoder implements FrequencyEncoder {
 
+    private static final ThreadLocal<MessageDigest> DIGEST = ThreadLocal.withInitial(() -> {
+        try {
+            return MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    });
+
     private final int dimensions;
 
     public SimpleFrequencyEncoder(int dimensions) {
@@ -41,12 +49,9 @@ public class SimpleFrequencyEncoder implements FrequencyEncoder {
     }
 
     private byte[] digest(String token) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return digest.digest(token.getBytes(StandardCharsets.UTF_8));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
+        MessageDigest digest = DIGEST.get();
+        digest.reset();
+        return digest.digest(token.getBytes(StandardCharsets.UTF_8));
     }
 
     private int toInt(byte[] bytes, int offset) {
