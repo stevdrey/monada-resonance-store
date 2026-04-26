@@ -88,6 +88,8 @@ public class FileFrequencyStore implements FrequencyStore {
         if (offset == null) {
             return Optional.empty();
         }
+        long fileSize = Files.size(vectorFile);
+        validateOffset(offset, fileSize, atomId);
         try (RandomAccessFile file = new RandomAccessFile(vectorFile.toFile(), "r")) {
             file.seek(offset);
             return Optional.of(readVector(file, atomId, offset));
@@ -98,8 +100,10 @@ public class FileFrequencyStore implements FrequencyStore {
     public List<StoredVector> findAll() throws IOException {
         List<IndexEntry> entries = readIndexEntries();
         List<StoredVector> vectors = new ArrayList<>(entries.size());
+        long fileSize = Files.size(vectorFile);
         try (RandomAccessFile file = new RandomAccessFile(vectorFile.toFile(), "r")) {
             for (IndexEntry entry : entries) {
+                validateOffset(entry.offset(), fileSize, entry.atomId());
                 file.seek(entry.offset());
                 vectors.add(new StoredVector(entry.atomId(), readVector(file, entry.atomId(), entry.offset())));
             }
@@ -161,6 +165,26 @@ public class FileFrequencyStore implements FrequencyStore {
         } catch (EOFException e) {
             throw new IOException(
                     "Vector segment truncated while reading atomId=" + atomId + " at offset=" + offset, e);
+        }
+    }
+
+    private void validateOffset(long offset, long fileSize, String atomId) throws IOException {
+        if (offset < 0) {
+            throw new IOException(
+                    "Negative offset (" + offset + ") in vector index for atomId=" + atomId);
+        }
+        if (offset >= fileSize) {
+            throw new IOException(
+                    "Offset (" + offset + ") is beyond end of vector segment (" + fileSize
+                            + " bytes) for atomId=" + atomId);
+        }
+        if (fixedDimensions != null) {
+            long frameSize = (long) fixedDimensions * Float.BYTES;
+            if (offset % frameSize != 0) {
+                throw new IOException(
+                        "Offset (" + offset + ") is not aligned to frame size (" + frameSize
+                                + " bytes) for atomId=" + atomId);
+            }
         }
     }
 

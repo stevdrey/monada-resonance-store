@@ -180,4 +180,46 @@ class FileFrequencyStoreTest {
         IllegalStateException ex = assertThrows(IllegalStateException.class, store::findAll);
         assertTrue(ex.getMessage().contains("Invalid offset"));
     }
+
+    @Test
+    void negativeOffsetInIndexFailsFast() throws IOException {
+        FileFrequencyStore store = new FileFrequencyStore(root);
+        store.save("a", vector(1f));
+
+        Path indexFile = root.resolve("indexes/vector-map.idx");
+        Files.writeString(indexFile, "b\t-1" + System.lineSeparator(),
+                StandardCharsets.UTF_8, StandardOpenOption.APPEND);
+
+        IOException ex = assertThrows(IOException.class, store::findAll);
+        assertTrue(ex.getMessage().toLowerCase().contains("negative offset"));
+    }
+
+    @Test
+    void outOfRangeOffsetInIndexFailsFast() throws IOException {
+        FileFrequencyStore store = new FileFrequencyStore(root);
+        store.save("a", vector(1f));
+
+        Path indexFile = root.resolve("indexes/vector-map.idx");
+        Files.writeString(indexFile, "b\t999999" + System.lineSeparator(),
+                StandardCharsets.UTF_8, StandardOpenOption.APPEND);
+
+        IOException ex = assertThrows(IOException.class, store::findAll);
+        assertTrue(ex.getMessage().toLowerCase().contains("beyond end"));
+    }
+
+    @Test
+    void misalignedOffsetInFixedDimModeFailsFast() throws IOException {
+        FileFrequencyStore store = new FileFrequencyStore(root, "vectors/segment-000001.f32", 2);
+        store.save("a", vector(1f, 2f));
+        store.save("b", vector(3f, 4f));
+
+        // Corrupt the index to point at a non-aligned offset (e.g. 1 byte into the segment).
+        Path indexFile = root.resolve("indexes/vector-map.idx");
+        List<String> lines = Files.readAllLines(indexFile);
+        lines.set(1, "b\t1"); // offset 1 is not aligned to frameSize=8
+        Files.write(indexFile, lines, StandardCharsets.UTF_8);
+
+        IOException ex = assertThrows(IOException.class, store::findAll);
+        assertTrue(ex.getMessage().toLowerCase().contains("not aligned"));
+    }
 }

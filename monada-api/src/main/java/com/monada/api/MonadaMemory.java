@@ -12,12 +12,10 @@ import com.monada.storage.FileManifestStore;
 import com.monada.storage.FrequencyStore;
 import com.monada.storage.Manifest;
 import com.monada.storage.ManifestStore;
-import com.monada.storage.StoredVector;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -65,23 +63,11 @@ public class MonadaMemory {
             AtomStore atomStore = new FileAtomStore(path, manifest.atomSegment());
             FrequencyStore frequencyStore = new FileFrequencyStore(
                     path, manifest.vectorSegment(), manifest.dimensions());
-            validateDimensions(frequencyStore, manifest.dimensions());
             FrequencyEncoder encoder = new SimpleFrequencyEncoder(manifest.dimensions());
             ResonanceIndex resonanceIndex = new LinearScanResonanceIndex(atomStore, frequencyStore);
             return new MonadaMemory(encoder, atomStore, frequencyStore, resonanceIndex);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
-        }
-    }
-
-    private static void validateDimensions(FrequencyStore frequencyStore, int expected) throws IOException {
-        for (StoredVector stored : frequencyStore.findAll()) {
-            int actual = stored.vector().dimensions();
-            if (actual != expected) {
-                throw new IOException(
-                        "Manifest dimensions (" + expected + ") do not match stored vector dimensions (" + actual
-                                + ") for atomId=" + stored.atomId());
-            }
         }
     }
 
