@@ -485,6 +485,32 @@ Expected relevant atoms:
 - ArangoDB atom
 ```
 
+## 10.1 Running the Evaluation Harness
+
+The `monada-evaluation` module contains a small benchmark dataset and a runner that
+calculates **Precision@K** against a fresh `MonadaMemory` instance.
+
+Run all evaluation tests:
+
+```bash
+./gradlew :monada-evaluation:test
+```
+
+Print a human-readable evaluation report to standard output:
+
+```bash
+./gradlew :monada-evaluation:run -q
+```
+
+The report includes per-query results and aggregate averages for `K = 1, 3, 5`. The
+default dataset lives in
+`com.monada.evaluation.datasets.DefaultDatabasesDataset` and can be replaced by any
+custom `EvaluationDataset` when invoking `EvaluationRunner.run(dataset, path)`.
+
+This harness is intentionally minimal. It exists to provide a reproducible baseline
+so future encoder or index changes can be compared objectively. See the issue for
+follow-up metrics (Recall@K, MRR, ranking stability).
+
 ## 11. Glossary
 
 ### Knowledge Atom
