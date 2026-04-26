@@ -70,12 +70,32 @@ class LinearScanResonanceIndexTest {
     }
 
     @Test
+    void searchLoadsAtomsOnceAndDoesNotUseFindById() throws IOException {
+        int[] findAllCalls = {0};
+        int[] findByIdCalls = {0};
+        AtomStore atoms = new AtomStore() {
+            @Override public void save(KnowledgeAtom atom) { }
+            @Override public Optional<KnowledgeAtom> findById(String id) { findByIdCalls[0]++; return Optional.empty(); }
+            @Override public List<KnowledgeAtom> findAll() { findAllCalls[0]++; return List.of(atom("a"), atom("b")); }
+        };
+        FrequencyStore vectors = new InMemoryFrequencyStore(List.of(
+                new StoredVector("a", new FrequencyVector(new float[]{1f})),
+                new StoredVector("b", new FrequencyVector(new float[]{1f}))
+        ));
+        LinearScanResonanceIndex index = new LinearScanResonanceIndex(atoms, vectors);
+
+        index.search(new FrequencyVector(new float[]{1f}), 5, 0.0);
+        assertEquals(1, findAllCalls[0]);
+        assertEquals(0, findByIdCalls[0]);
+    }
+
+    @Test
     void propagatesIOExceptionFromAtomStore() {
         IOException expected = new IOException("disk failure");
         AtomStore atoms = new AtomStore() {
             @Override public void save(KnowledgeAtom atom) { }
-            @Override public Optional<KnowledgeAtom> findById(String id) throws IOException { throw expected; }
-            @Override public List<KnowledgeAtom> findAll() { return List.of(); }
+            @Override public Optional<KnowledgeAtom> findById(String id) { return Optional.empty(); }
+            @Override public List<KnowledgeAtom> findAll() throws IOException { throw expected; }
         };
         FrequencyStore vectors = new InMemoryFrequencyStore(List.of(
                 new StoredVector("a", new FrequencyVector(new float[]{1f}))

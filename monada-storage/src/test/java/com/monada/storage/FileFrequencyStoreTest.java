@@ -98,6 +98,50 @@ class FileFrequencyStoreTest {
     }
 
     @Test
+    void fixedDimensionStoreWritesRawFloatsAndEnforcesDimension() throws IOException {
+        FileFrequencyStore store = new FileFrequencyStore(root, "vectors/segment-000001.f32", 3);
+        store.save("a", vector(1f, 2f, 3f));
+        store.save("b", vector(4f, 5f, 6f));
+
+        // Each vector is exactly dimensions * 4 bytes; no per-entry int header.
+        long size = Files.size(root.resolve("vectors/segment-000001.f32"));
+        assertEquals(2L * 3 * Float.BYTES, size);
+
+        Optional<FrequencyVector> b = store.findByAtomId("b");
+        assertTrue(b.isPresent());
+        assertArrayEquals(new float[]{4f, 5f, 6f}, b.get().values());
+
+        assertThrows(IllegalArgumentException.class, () -> store.save("c", vector(1f, 2f)));
+    }
+
+    @Test
+    void fixedDimensionConstructorRejectsMismatchedSegmentSize() throws IOException {
+        // Pre-populate using legacy header mode so segment has a different on-disk layout.
+        FileFrequencyStore legacy = new FileFrequencyStore(root);
+        legacy.save("a", vector(1f, 2f, 3f, 4f));
+
+        IOException ex = assertThrows(IOException.class,
+                () -> new FileFrequencyStore(root, "vectors/segment-000001.f32", 3));
+        assertTrue(ex.getMessage().toLowerCase().contains("does not match"));
+    }
+
+    @Test
+    void legacyHeaderRejectsCorruptDimensions() throws IOException {
+        FileFrequencyStore store = new FileFrequencyStore(root);
+        store.save("a", vector(1f, 2f));
+
+        Path segment = root.resolve("vectors/segment-000001.f32");
+        // Overwrite the dimensions header (first 4 bytes) with a negative value.
+        try (var raf = new java.io.RandomAccessFile(segment.toFile(), "rw")) {
+            raf.seek(0);
+            raf.writeInt(-1);
+        }
+
+        IOException ex = assertThrows(IOException.class, store::findAll);
+        assertTrue(ex.getMessage().toLowerCase().contains("invalid vector dimensions"));
+    }
+
+    @Test
     void invalidOffsetFailsFast() throws IOException {
         FileFrequencyStore store = new FileFrequencyStore(root);
         store.save("a", vector(1f));

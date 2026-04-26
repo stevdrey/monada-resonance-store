@@ -5,6 +5,7 @@ import com.monada.storage.Manifest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -56,8 +57,28 @@ class MonadaMemoryManifestTest {
         manifestStore.save(new Manifest(
                 "0.1", 64, "vectors/segment-000001.f32", "atoms/segment-000001.log"));
 
-        IllegalStateException ex = assertThrows(IllegalStateException.class,
+        UncheckedIOException ex = assertThrows(UncheckedIOException.class,
                 () -> MonadaMemory.open(root));
-        assertTrue(ex.getMessage().contains("dimensions"));
+        assertTrue(ex.getCause().getMessage().toLowerCase().contains("dimensions"));
+    }
+
+    @Test
+    void rememberPersistsVectorBeforeAtomSoOrphanVectorsAreSafelyIgnored() throws Exception {
+        MonadaMemory memory = MonadaMemory.open(root);
+        memory.remember("hello world");
+
+        // Simulate a partial failure where the vector was persisted but the atom write was lost,
+        // by truncating the atom log back to the size it had before the second remember.
+        Path atomLog = root.resolve("atoms/segment-000001.log");
+        long atomLogSizeBefore = Files.size(atomLog);
+        memory.remember("orphan vector text");
+        try (var ch = Files.newByteChannel(atomLog, java.nio.file.StandardOpenOption.WRITE)) {
+            ch.truncate(atomLogSizeBefore);
+        }
+
+        MonadaMemory reopened = MonadaMemory.open(root);
+        var results = reopened.resonate("hello world").topK(5).threshold(0.0).execute();
+        assertEquals(1, results.results().size());
+        assertEquals("hello world", results.results().getFirst().atom().content());
     }
 }

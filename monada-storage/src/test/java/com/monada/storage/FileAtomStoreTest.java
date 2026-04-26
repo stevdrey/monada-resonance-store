@@ -49,6 +49,21 @@ class FileAtomStoreTest {
     }
 
     @Test
+    void parseWrapsLowLevelErrorsWithLineContext() throws IOException {
+        FileAtomStore store = new FileAtomStore(root);
+        Path log = root.resolve("atoms/segment-000001.log");
+        // Five fields but weight is not numeric -> NumberFormatException
+        Files.writeString(log,
+                "id-1\tTEXT\tnot-a-number\t2024-01-01T00:00:00Z\taGVsbG8=" + System.lineSeparator(),
+                StandardCharsets.UTF_8, StandardOpenOption.APPEND);
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, store::findAll);
+        assertTrue(ex.getMessage().contains("Corrupt atom log entry"));
+        assertTrue(ex.getMessage().contains("not-a-number"));
+        assertTrue(ex.getCause() instanceof NumberFormatException);
+    }
+
+    @Test
     void parseFailsOnMalformedLineWithDescriptiveError() throws IOException {
         FileAtomStore store = new FileAtomStore(root);
         Path log = root.resolve("atoms/segment-000001.log");

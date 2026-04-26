@@ -29,3 +29,4 @@ replay_pid*
 gradle/
 build/
 
+monada-memory/

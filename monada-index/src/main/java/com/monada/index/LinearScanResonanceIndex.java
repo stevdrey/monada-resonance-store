@@ -10,8 +10,9 @@ import com.monada.storage.StoredVector;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Optional;
+import java.util.Map;
 
 public class LinearScanResonanceIndex implements ResonanceIndex {
 
@@ -28,15 +29,19 @@ public class LinearScanResonanceIndex implements ResonanceIndex {
         if (topK <= 0) {
             throw new IllegalArgumentException("topK must be greater than zero");
         }
+        Map<String, KnowledgeAtom> atomsById = new HashMap<>();
+        for (KnowledgeAtom atom : atomStore.findAll()) {
+            atomsById.put(atom.id(), atom);
+        }
         List<ResonanceResult> results = new ArrayList<>();
         for (StoredVector storedVector : frequencyStore.findAll()) {
-            Optional<KnowledgeAtom> atom = atomStore.findById(storedVector.atomId());
-            if (atom.isEmpty()) {
+            KnowledgeAtom atom = atomsById.get(storedVector.atomId());
+            if (atom == null) {
                 continue;
             }
             double score = cosineSimilarity(queryVector, storedVector.vector());
             if (score >= threshold) {
-                results.add(new ResonanceResult(atom.get(), score));
+                results.add(new ResonanceResult(atom, score));
             }
         }
         results.sort(Comparator.comparingDouble(ResonanceResult::score).reversed());

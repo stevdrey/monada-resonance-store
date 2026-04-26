@@ -41,6 +41,20 @@ class FileManifestStoreTest {
     }
 
     @Test
+    void escapesAndUnescapesSpecialCharactersOnRoundTrip() throws IOException {
+        FileManifestStore store = new FileManifestStore(root);
+        Manifest manifest = new Manifest(
+                "0.1 \"beta\"\n\\release",
+                64,
+                "vectors/seg\t01.f32",
+                "atoms/seg\"01.log");
+        store.save(manifest);
+
+        Manifest loaded = store.load().orElseThrow();
+        assertEquals(manifest, loaded);
+    }
+
+    @Test
     void parseFailsOnMissingFields() throws IOException {
         FileManifestStore store = new FileManifestStore(root);
         Files.createDirectories(root);

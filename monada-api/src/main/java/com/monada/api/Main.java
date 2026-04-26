@@ -2,7 +2,7 @@ package com.monada.api;
 
 public class Main {
 
-    static void main(String[] args) {
+    public static void main(String[] args) {
         var memory = MonadaMemory.open("./monada-memory");
 
         memory.remember("OrientDB is a multi-model database that combines graph and document models.");

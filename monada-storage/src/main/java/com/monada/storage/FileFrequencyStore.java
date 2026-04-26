@@ -18,17 +18,29 @@ import java.util.stream.Stream;
 public class FileFrequencyStore implements FrequencyStore {
 
     private static final String DEFAULT_SEGMENT = "vectors/segment-000001.f32";
+    /** Hard safety cap when we cannot cross-check the on-disk dimension header against a manifest. */
+    private static final int MAX_LEGACY_DIMENSIONS = 1 << 20;
 
     private final Path vectorFile;
     private final Path vectorMap;
+    /** When non-null, vectors are persisted as a raw float32 stream and every vector must match this length. */
+    private final Integer fixedDimensions;
 
     public FileFrequencyStore(Path root) throws IOException {
-        this(root, DEFAULT_SEGMENT);
+        this(root, DEFAULT_SEGMENT, null);
     }
 
     public FileFrequencyStore(Path root, String vectorSegment) throws IOException {
+        this(root, vectorSegment, null);
+    }
+
+    public FileFrequencyStore(Path root, String vectorSegment, Integer fixedDimensions) throws IOException {
+        if (fixedDimensions != null && fixedDimensions <= 0) {
+            throw new IllegalArgumentException("fixedDimensions must be greater than zero");
+        }
         this.vectorFile = root.resolve(vectorSegment);
         this.vectorMap = root.resolve("indexes").resolve("vector-map.idx");
+        this.fixedDimensions = fixedDimensions;
         Files.createDirectories(vectorFile.getParent());
         Files.createDirectories(vectorMap.getParent());
         if (Files.notExists(vectorFile)) {
@@ -37,14 +49,30 @@ public class FileFrequencyStore implements FrequencyStore {
         if (Files.notExists(vectorMap)) {
             Files.createFile(vectorMap);
         }
+        if (fixedDimensions != null) {
+            long expected = (long) readIndexEntries().size() * fixedDimensions * Float.BYTES;
+            long actual = Files.size(vectorFile);
+            if (actual != expected) {
+                throw new IOException(
+                        "Vector segment size (" + actual + " bytes) does not match index entries x dimensions x 4 ("
+                                + expected + " bytes); the manifest dimensions may not match the on-disk segment");
+            }
+        }
     }
 
     @Override
     public void save(String atomId, FrequencyVector vector) throws IOException {
+        float[] values = vector.values();
+        if (fixedDimensions != null && values.length != fixedDimensions) {
+            throw new IllegalArgumentException(
+                    "Vector dimensions (" + values.length + ") do not match store dimensions (" + fixedDimensions
+                            + ") for atomId=" + atomId);
+        }
         long offset = Files.size(vectorFile);
         try (DataOutputStream output = new DataOutputStream(Files.newOutputStream(vectorFile, StandardOpenOption.APPEND))) {
-            float[] values = vector.values();
-            output.writeInt(values.length);
+            if (fixedDimensions == null) {
+                output.writeInt(values.length);
+            }
             for (float value : values) {
                 output.writeFloat(value);
             }
@@ -110,9 +138,19 @@ public class FileFrequencyStore implements FrequencyStore {
         }
     }
 
-    private static FrequencyVector readVector(RandomAccessFile file, String atomId, long offset) throws IOException {
+    private FrequencyVector readVector(RandomAccessFile file, String atomId, long offset) throws IOException {
         try {
-            int dimensions = file.readInt();
+            int dimensions;
+            if (fixedDimensions != null) {
+                dimensions = fixedDimensions;
+            } else {
+                dimensions = file.readInt();
+                if (dimensions <= 0 || dimensions > MAX_LEGACY_DIMENSIONS) {
+                    throw new IOException(
+                            "Invalid vector dimensions (" + dimensions + ") for atomId=" + atomId
+                                    + " at offset=" + offset);
+                }
+            }
             float[] values = new float[dimensions];
             for (int i = 0; i < dimensions; i++) {
                 values[i] = file.readFloat();

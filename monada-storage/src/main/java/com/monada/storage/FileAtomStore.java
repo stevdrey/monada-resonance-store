@@ -68,14 +68,18 @@ public class FileAtomStore implements AtomStore {
             throw new IllegalStateException(
                     "Malformed atom log entry: expected 5 tab-delimited fields but found " + parts.length + " in line: " + line);
         }
-        String content = new String(Base64.getDecoder().decode(parts[4]), StandardCharsets.UTF_8);
-        return new KnowledgeAtom(
-                parts[0],
-                AtomType.valueOf(parts[1]),
-                content,
-                Map.of(),
-                Double.parseDouble(parts[2]),
-                Instant.parse(parts[3])
-        );
+        try {
+            String content = new String(Base64.getDecoder().decode(parts[4]), StandardCharsets.UTF_8);
+            return new KnowledgeAtom(
+                    parts[0],
+                    AtomType.valueOf(parts[1]),
+                    content,
+                    Map.of(),
+                    Double.parseDouble(parts[2]),
+                    Instant.parse(parts[3])
+            );
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("Corrupt atom log entry: " + line, e);
+        }
     }
 }

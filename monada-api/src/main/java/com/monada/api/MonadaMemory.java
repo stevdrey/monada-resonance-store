@@ -57,7 +57,8 @@ public class MonadaMemory {
             }
 
             AtomStore atomStore = new FileAtomStore(path, manifest.atomSegment());
-            FrequencyStore frequencyStore = new FileFrequencyStore(path, manifest.vectorSegment());
+            FrequencyStore frequencyStore = new FileFrequencyStore(
+                    path, manifest.vectorSegment(), manifest.dimensions());
             validateDimensions(frequencyStore, manifest.dimensions());
             FrequencyEncoder encoder = new SimpleFrequencyEncoder(manifest.dimensions());
             ResonanceIndex resonanceIndex = new LinearScanResonanceIndex(atomStore, frequencyStore);
@@ -68,22 +69,23 @@ public class MonadaMemory {
     }
 
     private static void validateDimensions(FrequencyStore frequencyStore, int expected) throws IOException {
-        List<StoredVector> all = frequencyStore.findAll();
-        if (all.isEmpty()) {
-            return;
-        }
-        int actual = all.get(0).vector().dimensions();
-        if (actual != expected) {
-            throw new IllegalStateException(
-                    "Manifest dimensions (" + expected + ") do not match stored vector dimensions (" + actual + ")");
+        for (StoredVector stored : frequencyStore.findAll()) {
+            int actual = stored.vector().dimensions();
+            if (actual != expected) {
+                throw new IllegalStateException(
+                        "Manifest dimensions (" + expected + ") do not match stored vector dimensions (" + actual
+                                + ") for atomId=" + stored.atomId());
+            }
         }
     }
 
     public KnowledgeAtom remember(String text) {
         try {
             KnowledgeAtom atom = KnowledgeAtom.text(text);
-            atomStore.save(atom);
+            // Persist vector first: a partial failure leaves an orphan vector that search
+            // safely ignores, instead of an atom that cannot be recalled by resonance.
             frequencyStore.save(atom.id(), encoder.encode(text));
+            atomStore.save(atom);
             return atom;
         } catch (IOException e) {
             throw new UncheckedIOException(e);
