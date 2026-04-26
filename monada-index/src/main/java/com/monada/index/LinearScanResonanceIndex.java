@@ -46,9 +46,9 @@ public class LinearScanResonanceIndex implements ResonanceIndex {
         }
         results.sort(Comparator.comparingDouble(ResonanceResult::score).reversed());
         if (results.size() > topK) {
-            return results.subList(0, topK);
+            return List.copyOf(results.subList(0, topK));
         }
-        return results;
+        return List.copyOf(results);
     }
 
     private double cosineSimilarity(FrequencyVector left, FrequencyVector right) {

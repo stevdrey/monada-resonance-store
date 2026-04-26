@@ -115,10 +115,10 @@ class FileFrequencyStoreTest {
     }
 
     @Test
-    void fixedDimensionConstructorRejectsOversizedSegment() throws IOException {
-        // Segment larger than expected (e.g. post-crash state with one unindexed frame,
-        // or a dimension mismatch): constructor must refuse to open rather than silently
-        // truncate, because the two cases are indistinguishable at the byte level.
+    void fixedDimensionConstructorRejectsSegmentWithTrailingUnindexedFrame() throws IOException {
+        // A crash after vector append but before index line write leaves an unindexed frame.
+        // The constructor rejects this because it is indistinguishable from a dimension mismatch
+        // at the byte level (e.g. 1 vector at 128 dims = 2 frames at 64 dims).
         FileFrequencyStore store = new FileFrequencyStore(root, "vectors/segment-000001.f32", 2);
         store.save("a", vector(1f, 2f));
 
