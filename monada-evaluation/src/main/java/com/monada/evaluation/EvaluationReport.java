@@ -1,13 +1,13 @@
 package com.monada.evaluation;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.stream.Stream;
+
+import static com.monada.evaluation.EvaluationMaps.sortedCopy;
 
 public record EvaluationReport(
         List<QueryEvaluation> queryResults,
@@ -21,12 +21,6 @@ public record EvaluationReport(
         averagePrecisionByK = sortedCopy(averagePrecisionByK, "averagePrecisionByK");
         averageRecallByK = sortedCopy(averageRecallByK, "averageRecallByK");
         averageHitByK = sortedCopy(averageHitByK, "averageHitByK");
-    }
-
-    private static Map<Integer, Double> sortedCopy(Map<Integer, Double> source, String name) {
-        var sorted = new TreeMap<>(Objects.requireNonNull(source, name));
-        sorted.forEach((k, v) -> Objects.requireNonNull(v, name + " value"));
-        return Collections.unmodifiableMap(sorted);
     }
 
     public String render() {
