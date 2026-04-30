@@ -1,23 +1,28 @@
 package com.monada.evaluation;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.stream.Stream;
+
+import static com.monada.evaluation.EvaluationMaps.sortedCopy;
+import static com.monada.evaluation.EvaluationMaps.validateUnitInterval;
 
 public record EvaluationReport(
         List<QueryEvaluation> queryResults,
-        Map<Integer, Double> averagePrecisionByK
+        Map<Integer, Double> averagePrecisionByK,
+        Map<Integer, Double> averageRecallByK,
+        Map<Integer, Double> averageHitByK,
+        double meanReciprocalRank
 ) {
     public EvaluationReport {
         queryResults = List.copyOf(Objects.requireNonNull(queryResults, "queryResults"));
-        var sortedAveragePrecisionByK =
-                new TreeMap<>(Objects.requireNonNull(averagePrecisionByK, "averagePrecisionByK"));
-        sortedAveragePrecisionByK.forEach((k, v) -> Objects.requireNonNull(v, "averagePrecisionByK value"));
-        averagePrecisionByK = Collections.unmodifiableMap(sortedAveragePrecisionByK);
+        averagePrecisionByK = sortedCopy(averagePrecisionByK, "averagePrecisionByK");
+        averageRecallByK = sortedCopy(averageRecallByK, "averageRecallByK");
+        averageHitByK = sortedCopy(averageHitByK, "averageHitByK");
+        meanReciprocalRank = validateUnitInterval(meanReciprocalRank, "meanReciprocalRank");
     }
 
     public String render() {
@@ -31,23 +36,40 @@ public record EvaluationReport(
                     .append(String.join(", ", new TreeSet<>(qr.expectedLabels())))
                     .append('\n');
 
-            int displayK = Math.min(qr.returnedLabels().size(),
-                    qr.precisionByK().keySet().stream().mapToInt(Integer::intValue).max().orElse(3));
+            int maxK = Stream.of(qr.precisionByK(), qr.recallByK(), qr.hitByK())
+                    .flatMap(m -> m.keySet().stream())
+                    .mapToInt(Integer::intValue)
+                    .max()
+                    .orElse(3);
+            int displayK = Math.min(qr.returnedLabels().size(), maxK);
             sb.append("Top ").append(displayK).append(": ")
                     .append(String.join(", ", qr.returnedLabels().subList(0, displayK)))
-                    .append('\n');
+                    .append("\n\n");
 
-            for (Map.Entry<Integer, Double> e : qr.precisionByK().entrySet()) {
-                sb.append(String.format(Locale.ROOT, "Precision@%d: %.2f%n", e.getKey(), e.getValue()));
-            }
+            appendMetricMap(sb, "Precision", qr.precisionByK());
+            appendMetricMap(sb, "Recall", qr.recallByK());
+            appendMetricMap(sb, "Hit", qr.hitByK());
+            appendScalar(sb, "Reciprocal Rank", qr.reciprocalRank());
             sb.append('\n');
         }
 
         sb.append("Aggregate\n");
         sb.append("---------\n");
-        for (Map.Entry<Integer, Double> e : averagePrecisionByK.entrySet()) {
-            sb.append(String.format(Locale.ROOT, "Average Precision@%d: %.2f%n", e.getKey(), e.getValue()));
-        }
+        appendMetricMap(sb, "Average Precision", averagePrecisionByK);
+        appendMetricMap(sb, "Average Recall", averageRecallByK);
+        appendMetricMap(sb, "Average Hit", averageHitByK);
+        appendScalar(sb, "Mean Reciprocal Rank", meanReciprocalRank);
         return sb.toString();
+    }
+
+    private static void appendMetricMap(StringBuilder sb, String label, Map<Integer, Double> map) {
+        for (Map.Entry<Integer, Double> e : map.entrySet()) {
+            sb.append(String.format(Locale.ROOT, "%s@%d: %.2f%n", label, e.getKey(), e.getValue()));
+        }
+        sb.append('\n');
+    }
+
+    private static void appendScalar(StringBuilder sb, String label, double value) {
+        sb.append(String.format(Locale.ROOT, "%s: %.2f%n", label, value));
     }
 }

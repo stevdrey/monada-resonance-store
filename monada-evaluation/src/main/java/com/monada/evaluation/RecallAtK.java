@@ -1,23 +1,23 @@
 package com.monada.evaluation;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
 /**
- * Pure computation of Precision@K.
+ * Pure computation of Recall@K.
  *
  * <pre>
- *     Precision@K = |{relevant} ∩ topK| / K
+ *     Recall@K = |{relevant} ∩ topK| / |{relevant}|
  * </pre>
  *
- * <p>If {@code ranked} contains fewer than {@code k} elements, only the available
- * elements are considered as retrieved, but the denominator remains {@code k} (standard
- * IR convention).
+ * <p>Each expected label is counted at most once even if it appears multiple
+ * times in {@code ranked} (set-based recall).
  */
-public final class PrecisionAtK {
+public final class RecallAtK {
 
-    private PrecisionAtK() {
+    private RecallAtK() {
     }
 
     public static double compute(Set<String> expected, List<String> ranked, int k) {
@@ -30,14 +30,14 @@ public final class PrecisionAtK {
             throw new IllegalArgumentException("expected must not be empty");
         }
 
-        int limit = Math.min(k, ranked.size());
-        int hits = 0;
-        for (int i = 0; i < limit; i++) {
-            String candidate = ranked.get(i);
+        var limit = Math.min(k, ranked.size());
+        var matched = new HashSet<String>();
+        for (var i = 0; i < limit; i++) {
+            var candidate = ranked.get(i);
             if (candidate != null && expected.contains(candidate)) {
-                hits++;
+                matched.add(candidate);
             }
         }
-        return (double) hits / (double) k;
+        return (double) matched.size() / (double) expected.size();
     }
 }

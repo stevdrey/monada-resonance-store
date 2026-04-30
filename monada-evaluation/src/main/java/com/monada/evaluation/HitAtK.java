@@ -5,19 +5,16 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Pure computation of Precision@K.
+ * Pure computation of Hit@K.
  *
  * <pre>
- *     Precision@K = |{relevant} ∩ topK| / K
+ *     Hit@K = 1.0 if at least one expected label appears within the top K
+ *             results, otherwise 0.0
  * </pre>
- *
- * <p>If {@code ranked} contains fewer than {@code k} elements, only the available
- * elements are considered as retrieved, but the denominator remains {@code k} (standard
- * IR convention).
  */
-public final class PrecisionAtK {
+public final class HitAtK {
 
-    private PrecisionAtK() {
+    private HitAtK() {
     }
 
     public static double compute(Set<String> expected, List<String> ranked, int k) {
@@ -30,14 +27,13 @@ public final class PrecisionAtK {
             throw new IllegalArgumentException("expected must not be empty");
         }
 
-        int limit = Math.min(k, ranked.size());
-        int hits = 0;
-        for (int i = 0; i < limit; i++) {
-            String candidate = ranked.get(i);
+        var limit = Math.min(k, ranked.size());
+        for (var i = 0; i < limit; i++) {
+            var candidate = ranked.get(i);
             if (candidate != null && expected.contains(candidate)) {
-                hits++;
+                return 1.0;
             }
         }
-        return (double) hits / (double) k;
+        return 0.0;
     }
 }
