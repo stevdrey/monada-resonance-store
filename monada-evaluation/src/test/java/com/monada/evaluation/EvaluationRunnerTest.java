@@ -114,4 +114,31 @@ class EvaluationRunnerTest {
         assertThrows(IllegalArgumentException.class,
                 () -> new EvaluationRunner(List.of(1, 1, 3)));
     }
+
+    @Test
+    void fixedValueAssertionsLockMetricSemantics(@TempDir Path tempDir) {
+        var report = new EvaluationRunner().run(DefaultDatabasesDataset.get(), tempDir);
+
+        // Easy single-expected query: encoder is expected to surface ka_postgresql at rank 1.
+        var sqlQuery = report.queryResults().stream()
+                .filter(qr -> qr.queryText().equals("sql relational transactions database"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(1.0, sqlQuery.hitByK().get(1),
+                "Hit@1 should be 1.0 for single-expected query when encoder ranks correctly");
+        assertEquals(1.0, sqlQuery.recallByK().get(1),
+                "Recall@1 == Hit@1 when |expected| == 1");
+        assertEquals(1.0, sqlQuery.reciprocalRank(),
+                "ReciprocalRank should be 1.0 when the only expected label is at rank 1");
+
+        // Multi-expected query: distinguishes Recall@K from Hit@K and Precision@K.
+        var graphDocQuery = report.queryResults().stream()
+                .filter(qr -> qr.queryText().equals("database with graph and document model"))
+                .findFirst()
+                .orElseThrow();
+        assertTrue(graphDocQuery.recallByK().get(1) <= 0.5,
+                "Recall@1 cannot exceed 0.5 with 2 expected labels (K/|expected| ceiling)");
+        assertEquals(1.0, graphDocQuery.hitByK().get(1),
+                "Hit@1 should be 1.0: at least one of the two expected labels is at rank 1");
+    }
 }

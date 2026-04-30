@@ -514,6 +514,11 @@ This harness is intentionally minimal. It exists to provide a reproducible basel
 so future encoder or index changes can be compared objectively. See the issue for
 follow-up metrics (Recall@K, MRR, ranking stability).
 
+**Note on Recall@K**: when a query has more expected labels than `K`, the maximum
+achievable `Recall@K` is `K / |expected|`. For example, a query with two expected
+labels can never exceed `Recall@1 = 0.5`. This is the standard IR definition; small
+values at low `K` do not necessarily indicate an encoder regression.
+
 ## 11. Glossary
 
 ### Knowledge Atom

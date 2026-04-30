@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.stream.Stream;
 
 public record EvaluationReport(
         List<QueryEvaluation> queryResults,
@@ -39,8 +40,12 @@ public record EvaluationReport(
                     .append(String.join(", ", new TreeSet<>(qr.expectedLabels())))
                     .append('\n');
 
-            int displayK = Math.min(qr.returnedLabels().size(),
-                    qr.precisionByK().keySet().stream().mapToInt(Integer::intValue).max().orElse(3));
+            int maxK = Stream.of(qr.precisionByK(), qr.recallByK(), qr.hitByK())
+                    .flatMap(m -> m.keySet().stream())
+                    .mapToInt(Integer::intValue)
+                    .max()
+                    .orElse(3);
+            int displayK = Math.min(qr.returnedLabels().size(), maxK);
             sb.append("Top ").append(displayK).append(": ")
                     .append(String.join(", ", qr.returnedLabels().subList(0, displayK)))
                     .append("\n\n");
