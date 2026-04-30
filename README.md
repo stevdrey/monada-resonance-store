@@ -488,7 +488,10 @@ Expected relevant atoms:
 ## 10.1 Running the Evaluation Harness
 
 The `monada-evaluation` module contains a small benchmark dataset and a runner that
-calculates **Precision@K** against a fresh `MonadaMemory` instance.
+calculates **Precision@K** using a `MonadaMemory` opened at the configured storage
+path. To evaluate against a fresh memory state, use a new or empty directory (for
+example, a temporary directory) for each run; reusing a non-empty directory may reuse
+previously stored atoms and vectors and affect the results.
 
 Run all evaluation tests:
 

@@ -1,5 +1,6 @@
 package com.monada.evaluation;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -13,8 +14,10 @@ public record EvaluationReport(
 ) {
     public EvaluationReport {
         queryResults = List.copyOf(Objects.requireNonNull(queryResults, "queryResults"));
-        averagePrecisionByK = Map.copyOf(
-                new TreeMap<>(Objects.requireNonNull(averagePrecisionByK, "averagePrecisionByK")));
+        var sortedAveragePrecisionByK =
+                new TreeMap<>(Objects.requireNonNull(averagePrecisionByK, "averagePrecisionByK"));
+        sortedAveragePrecisionByK.forEach((k, v) -> Objects.requireNonNull(v, "averagePrecisionByK value"));
+        averagePrecisionByK = Collections.unmodifiableMap(sortedAveragePrecisionByK);
     }
 
     public String render() {

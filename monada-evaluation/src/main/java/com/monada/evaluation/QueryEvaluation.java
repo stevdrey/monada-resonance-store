@@ -1,5 +1,6 @@
 package com.monada.evaluation;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -16,6 +17,9 @@ public record QueryEvaluation(
         Objects.requireNonNull(queryText, "queryText");
         expectedLabels = Set.copyOf(Objects.requireNonNull(expectedLabels, "expectedLabels"));
         returnedLabels = List.copyOf(Objects.requireNonNull(returnedLabels, "returnedLabels"));
-        precisionByK = Map.copyOf(new TreeMap<>(Objects.requireNonNull(precisionByK, "precisionByK")));
+        var sortedPrecisionByK =
+                new TreeMap<>(Objects.requireNonNull(precisionByK, "precisionByK"));
+        sortedPrecisionByK.forEach((k, v) -> Objects.requireNonNull(v, "precisionByK value"));
+        precisionByK = Collections.unmodifiableMap(sortedPrecisionByK);
     }
 }
