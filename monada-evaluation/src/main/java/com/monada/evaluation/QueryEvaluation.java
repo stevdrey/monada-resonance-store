@@ -11,15 +11,23 @@ public record QueryEvaluation(
         String queryText,
         Set<String> expectedLabels,
         List<String> returnedLabels,
-        Map<Integer, Double> precisionByK
+        Map<Integer, Double> precisionByK,
+        Map<Integer, Double> recallByK,
+        Map<Integer, Double> hitByK,
+        double reciprocalRank
 ) {
     public QueryEvaluation {
         Objects.requireNonNull(queryText, "queryText");
         expectedLabels = Set.copyOf(Objects.requireNonNull(expectedLabels, "expectedLabels"));
         returnedLabels = List.copyOf(Objects.requireNonNull(returnedLabels, "returnedLabels"));
-        var sortedPrecisionByK =
-                new TreeMap<>(Objects.requireNonNull(precisionByK, "precisionByK"));
-        sortedPrecisionByK.forEach((k, v) -> Objects.requireNonNull(v, "precisionByK value"));
-        precisionByK = Collections.unmodifiableMap(sortedPrecisionByK);
+        precisionByK = sortedCopy(precisionByK, "precisionByK");
+        recallByK = sortedCopy(recallByK, "recallByK");
+        hitByK = sortedCopy(hitByK, "hitByK");
+    }
+
+    private static Map<Integer, Double> sortedCopy(Map<Integer, Double> source, String name) {
+        var sorted = new TreeMap<>(Objects.requireNonNull(source, name));
+        sorted.forEach((k, v) -> Objects.requireNonNull(v, name + " value"));
+        return Collections.unmodifiableMap(sorted);
     }
 }

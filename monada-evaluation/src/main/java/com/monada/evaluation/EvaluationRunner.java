@@ -50,52 +50,78 @@ public final class EvaluationRunner {
         Objects.requireNonNull(dataset, "dataset");
         Objects.requireNonNull(memoryPath, "memoryPath");
 
-        MonadaMemory memory = MonadaMemory.open(memoryPath);
+        var memory = MonadaMemory.open(memoryPath);
 
         // internal atom id -> label (for translating ranked results back to labels)
-        Map<String, String> idToLabel = new HashMap<>();
+        var idToLabel = new HashMap<String, String>();
 
         for (DatasetAtom atom : dataset.atoms()) {
             KnowledgeAtom stored = memory.remember(atom.content());
             idToLabel.put(stored.id(), atom.label());
         }
 
-        int maxK = ks.stream().mapToInt(Integer::intValue).max().orElse(1);
+        var maxK = ks.stream().mapToInt(Integer::intValue).max().orElse(1);
 
-        List<QueryEvaluation> queryResults = new ArrayList<>(dataset.queries().size());
-        Map<Integer, Double> precisionSums = new TreeMap<>();
-        for (int k : ks) {
+        var queryResults = new ArrayList<QueryEvaluation>(dataset.queries().size());
+        var precisionSums = new TreeMap<Integer, Double>();
+        var recallSums = new TreeMap<Integer, Double>();
+        var hitSums = new TreeMap<Integer, Double>();
+        for (var k : ks) {
             precisionSums.put(k, 0.0);
+            recallSums.put(k, 0.0);
+            hitSums.put(k, 0.0);
         }
+        double reciprocalRankSum = 0.0;
 
         for (EvaluationQuery query : dataset.queries()) {
             MonadaRecall recall = memory.resonate(query.text()).topK(maxK).execute();
 
-            List<String> rankedLabels = new ArrayList<>(recall.results().size());
+            var rankedLabels = new ArrayList<String>(recall.results().size());
             for (ResonanceResult result : recall.results()) {
                 rankedLabels.add(idToLabel.getOrDefault(result.atom().id(), result.atom().id()));
             }
 
-            Map<Integer, Double> precisionByK = new TreeMap<>();
-            for (int k : ks) {
-                double p = PrecisionAtK.compute(query.expectedLabels(), rankedLabels, k);
+            var precisionByK = new TreeMap<Integer, Double>();
+            var recallByK = new TreeMap<Integer, Double>();
+            var hitByK = new TreeMap<Integer, Double>();
+            for (var k : ks) {
+                var p = PrecisionAtK.compute(query.expectedLabels(), rankedLabels, k);
+                var r = RecallAtK.compute(query.expectedLabels(), rankedLabels, k);
+                var h = HitAtK.compute(query.expectedLabels(), rankedLabels, k);
                 precisionByK.put(k, p);
+                recallByK.put(k, r);
+                hitByK.put(k, h);
                 precisionSums.merge(k, p, Double::sum);
+                recallSums.merge(k, r, Double::sum);
+                hitSums.merge(k, h, Double::sum);
             }
+            double rr = ReciprocalRank.compute(query.expectedLabels(), rankedLabels);
+            reciprocalRankSum += rr;
 
             queryResults.add(new QueryEvaluation(
                     query.text(),
                     query.expectedLabels(),
                     rankedLabels,
-                    precisionByK));
+                    precisionByK,
+                    recallByK,
+                    hitByK,
+                    rr));
         }
 
-        Map<Integer, Double> averages = new TreeMap<>();
-        int n = dataset.queries().size();
-        for (Map.Entry<Integer, Double> e : precisionSums.entrySet()) {
-            averages.put(e.getKey(), e.getValue() / n);
-        }
+        var n = dataset.queries().size();
+        var averagePrecision = average(precisionSums, n);
+        var averageRecall = average(recallSums, n);
+        var averageHit = average(hitSums, n);
+        var mrr = n == 0 ? 0.0 : reciprocalRankSum / n;
 
-        return new EvaluationReport(queryResults, averages);
+        return new EvaluationReport(queryResults, averagePrecision, averageRecall, averageHit, mrr);
+    }
+
+    private static Map<Integer, Double> average(Map<Integer, Double> sums, int n) {
+        var averages = new TreeMap<Integer, Double>();
+        for (var e : sums.entrySet()) {
+            averages.put(e.getKey(), n == 0 ? 0.0 : e.getValue() / n);
+        }
+        return averages;
     }
 }

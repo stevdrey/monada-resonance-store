@@ -10,14 +10,22 @@ import java.util.TreeSet;
 
 public record EvaluationReport(
         List<QueryEvaluation> queryResults,
-        Map<Integer, Double> averagePrecisionByK
+        Map<Integer, Double> averagePrecisionByK,
+        Map<Integer, Double> averageRecallByK,
+        Map<Integer, Double> averageHitByK,
+        double meanReciprocalRank
 ) {
     public EvaluationReport {
         queryResults = List.copyOf(Objects.requireNonNull(queryResults, "queryResults"));
-        var sortedAveragePrecisionByK =
-                new TreeMap<>(Objects.requireNonNull(averagePrecisionByK, "averagePrecisionByK"));
-        sortedAveragePrecisionByK.forEach((k, v) -> Objects.requireNonNull(v, "averagePrecisionByK value"));
-        averagePrecisionByK = Collections.unmodifiableMap(sortedAveragePrecisionByK);
+        averagePrecisionByK = sortedCopy(averagePrecisionByK, "averagePrecisionByK");
+        averageRecallByK = sortedCopy(averageRecallByK, "averageRecallByK");
+        averageHitByK = sortedCopy(averageHitByK, "averageHitByK");
+    }
+
+    private static Map<Integer, Double> sortedCopy(Map<Integer, Double> source, String name) {
+        var sorted = new TreeMap<>(Objects.requireNonNull(source, name));
+        sorted.forEach((k, v) -> Objects.requireNonNull(v, name + " value"));
+        return Collections.unmodifiableMap(sorted);
     }
 
     public String render() {
@@ -35,11 +43,21 @@ public record EvaluationReport(
                     qr.precisionByK().keySet().stream().mapToInt(Integer::intValue).max().orElse(3));
             sb.append("Top ").append(displayK).append(": ")
                     .append(String.join(", ", qr.returnedLabels().subList(0, displayK)))
-                    .append('\n');
+                    .append("\n\n");
 
             for (Map.Entry<Integer, Double> e : qr.precisionByK().entrySet()) {
                 sb.append(String.format(Locale.ROOT, "Precision@%d: %.2f%n", e.getKey(), e.getValue()));
             }
+            sb.append('\n');
+            for (Map.Entry<Integer, Double> e : qr.recallByK().entrySet()) {
+                sb.append(String.format(Locale.ROOT, "Recall@%d: %.2f%n", e.getKey(), e.getValue()));
+            }
+            sb.append('\n');
+            for (Map.Entry<Integer, Double> e : qr.hitByK().entrySet()) {
+                sb.append(String.format(Locale.ROOT, "Hit@%d: %.2f%n", e.getKey(), e.getValue()));
+            }
+            sb.append('\n');
+            sb.append(String.format(Locale.ROOT, "Reciprocal Rank: %.2f%n", qr.reciprocalRank()));
             sb.append('\n');
         }
 
@@ -48,6 +66,16 @@ public record EvaluationReport(
         for (Map.Entry<Integer, Double> e : averagePrecisionByK.entrySet()) {
             sb.append(String.format(Locale.ROOT, "Average Precision@%d: %.2f%n", e.getKey(), e.getValue()));
         }
+        sb.append('\n');
+        for (Map.Entry<Integer, Double> e : averageRecallByK.entrySet()) {
+            sb.append(String.format(Locale.ROOT, "Average Recall@%d: %.2f%n", e.getKey(), e.getValue()));
+        }
+        sb.append('\n');
+        for (Map.Entry<Integer, Double> e : averageHitByK.entrySet()) {
+            sb.append(String.format(Locale.ROOT, "Average Hit@%d: %.2f%n", e.getKey(), e.getValue()));
+        }
+        sb.append('\n');
+        sb.append(String.format(Locale.ROOT, "Mean Reciprocal Rank: %.2f%n", meanReciprocalRank));
         return sb.toString();
     }
 }
