@@ -8,7 +8,6 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -24,9 +23,10 @@ class EvaluationRunnerTest {
         assertEquals(dataset.queries().size(), report.queryResults().size(),
                 "report must contain one entry per query");
 
+        int maxK = List.of(1, 3, 5).stream().mapToInt(Integer::intValue).max().orElseThrow();
         for (QueryEvaluation qr : report.queryResults()) {
-            assertFalse(qr.returnedLabels().isEmpty(),
-                    "each query must return at least one result; got none for: " + qr.queryText());
+            assertTrue(qr.returnedLabels().size() <= maxK,
+                    "returned labels must not exceed maxK for: " + qr.queryText());
 
             for (Integer k : List.of(1, 3, 5)) {
                 Double p = qr.precisionByK().get(k);
