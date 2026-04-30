@@ -6,6 +6,7 @@ import java.util.Objects;
 import java.util.Set;
 
 import static com.monada.evaluation.EvaluationMaps.sortedCopy;
+import static com.monada.evaluation.EvaluationMaps.validateUnitInterval;
 
 public record QueryEvaluation(
         String queryText,
@@ -23,5 +24,6 @@ public record QueryEvaluation(
         precisionByK = sortedCopy(precisionByK, "precisionByK");
         recallByK = sortedCopy(recallByK, "recallByK");
         hitByK = sortedCopy(hitByK, "hitByK");
+        reciprocalRank = validateUnitInterval(reciprocalRank, "reciprocalRank");
     }
 }

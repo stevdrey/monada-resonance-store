@@ -20,7 +20,7 @@ public final class ReciprocalRank {
     }
 
     public static double compute(Set<String> expected, List<String> ranked) {
-        Objects.requireNonNull(expected, "expected");
+        EvaluationMaps.validateLabels(expected, "expected");
         Objects.requireNonNull(ranked, "ranked");
         if (expected.isEmpty()) {
             throw new IllegalArgumentException("expected must not be empty");

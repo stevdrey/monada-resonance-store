@@ -18,7 +18,7 @@ public final class HitAtK {
     }
 
     public static double compute(Set<String> expected, List<String> ranked, int k) {
-        Objects.requireNonNull(expected, "expected");
+        EvaluationMaps.validateLabels(expected, "expected");
         Objects.requireNonNull(ranked, "ranked");
         if (k <= 0) {
             throw new IllegalArgumentException("k must be greater than zero");

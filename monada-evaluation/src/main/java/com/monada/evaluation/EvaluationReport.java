@@ -8,6 +8,7 @@ import java.util.TreeSet;
 import java.util.stream.Stream;
 
 import static com.monada.evaluation.EvaluationMaps.sortedCopy;
+import static com.monada.evaluation.EvaluationMaps.validateUnitInterval;
 
 public record EvaluationReport(
         List<QueryEvaluation> queryResults,
@@ -21,6 +22,7 @@ public record EvaluationReport(
         averagePrecisionByK = sortedCopy(averagePrecisionByK, "averagePrecisionByK");
         averageRecallByK = sortedCopy(averageRecallByK, "averageRecallByK");
         averageHitByK = sortedCopy(averageHitByK, "averageHitByK");
+        meanReciprocalRank = validateUnitInterval(meanReciprocalRank, "meanReciprocalRank");
     }
 
     public String render() {
@@ -44,37 +46,30 @@ public record EvaluationReport(
                     .append(String.join(", ", qr.returnedLabels().subList(0, displayK)))
                     .append("\n\n");
 
-            for (Map.Entry<Integer, Double> e : qr.precisionByK().entrySet()) {
-                sb.append(String.format(Locale.ROOT, "Precision@%d: %.2f%n", e.getKey(), e.getValue()));
-            }
-            sb.append('\n');
-            for (Map.Entry<Integer, Double> e : qr.recallByK().entrySet()) {
-                sb.append(String.format(Locale.ROOT, "Recall@%d: %.2f%n", e.getKey(), e.getValue()));
-            }
-            sb.append('\n');
-            for (Map.Entry<Integer, Double> e : qr.hitByK().entrySet()) {
-                sb.append(String.format(Locale.ROOT, "Hit@%d: %.2f%n", e.getKey(), e.getValue()));
-            }
-            sb.append('\n');
-            sb.append(String.format(Locale.ROOT, "Reciprocal Rank: %.2f%n", qr.reciprocalRank()));
+            appendMetricMap(sb, "Precision", qr.precisionByK());
+            appendMetricMap(sb, "Recall", qr.recallByK());
+            appendMetricMap(sb, "Hit", qr.hitByK());
+            appendScalar(sb, "Reciprocal Rank", qr.reciprocalRank());
             sb.append('\n');
         }
 
         sb.append("Aggregate\n");
         sb.append("---------\n");
-        for (Map.Entry<Integer, Double> e : averagePrecisionByK.entrySet()) {
-            sb.append(String.format(Locale.ROOT, "Average Precision@%d: %.2f%n", e.getKey(), e.getValue()));
-        }
-        sb.append('\n');
-        for (Map.Entry<Integer, Double> e : averageRecallByK.entrySet()) {
-            sb.append(String.format(Locale.ROOT, "Average Recall@%d: %.2f%n", e.getKey(), e.getValue()));
-        }
-        sb.append('\n');
-        for (Map.Entry<Integer, Double> e : averageHitByK.entrySet()) {
-            sb.append(String.format(Locale.ROOT, "Average Hit@%d: %.2f%n", e.getKey(), e.getValue()));
-        }
-        sb.append('\n');
-        sb.append(String.format(Locale.ROOT, "Mean Reciprocal Rank: %.2f%n", meanReciprocalRank));
+        appendMetricMap(sb, "Average Precision", averagePrecisionByK);
+        appendMetricMap(sb, "Average Recall", averageRecallByK);
+        appendMetricMap(sb, "Average Hit", averageHitByK);
+        appendScalar(sb, "Mean Reciprocal Rank", meanReciprocalRank);
         return sb.toString();
+    }
+
+    private static void appendMetricMap(StringBuilder sb, String label, Map<Integer, Double> map) {
+        for (Map.Entry<Integer, Double> e : map.entrySet()) {
+            sb.append(String.format(Locale.ROOT, "%s@%d: %.2f%n", label, e.getKey(), e.getValue()));
+        }
+        sb.append('\n');
+    }
+
+    private static void appendScalar(StringBuilder sb, String label, double value) {
+        sb.append(String.format(Locale.ROOT, "%s: %.2f%n", label, value));
     }
 }

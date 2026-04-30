@@ -2,6 +2,7 @@ package com.monada.evaluation;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -61,5 +62,22 @@ class HitAtKTest {
                 () -> HitAtK.compute(null, List.of("A"), 1));
         assertThrows(NullPointerException.class,
                 () -> HitAtK.compute(Set.of("A"), null, 1));
+    }
+
+    @Test
+    void rejectsBlankExpectedElements() {
+        assertThrows(IllegalArgumentException.class,
+                () -> HitAtK.compute(Set.of(" "), List.of("A"), 1));
+        assertThrows(IllegalArgumentException.class,
+                () -> HitAtK.compute(Set.of(""), List.of("A"), 1));
+    }
+
+    @Test
+    void rejectsNullExpectedElements() {
+        var withNull = new HashSet<String>();
+        withNull.add(null);
+        withNull.add("A");
+        assertThrows(IllegalArgumentException.class,
+                () -> HitAtK.compute(withNull, List.of("A"), 1));
     }
 }

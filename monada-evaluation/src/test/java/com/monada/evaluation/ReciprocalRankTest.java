@@ -2,6 +2,7 @@ package com.monada.evaluation;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -54,5 +55,22 @@ class ReciprocalRankTest {
                 () -> ReciprocalRank.compute(null, List.of("A")));
         assertThrows(NullPointerException.class,
                 () -> ReciprocalRank.compute(Set.of("A"), null));
+    }
+
+    @Test
+    void rejectsBlankExpectedElements() {
+        assertThrows(IllegalArgumentException.class,
+                () -> ReciprocalRank.compute(Set.of(" "), List.of("A")));
+        assertThrows(IllegalArgumentException.class,
+                () -> ReciprocalRank.compute(Set.of(""), List.of("A")));
+    }
+
+    @Test
+    void rejectsNullExpectedElements() {
+        var withNull = new HashSet<String>();
+        withNull.add(null);
+        withNull.add("A");
+        assertThrows(IllegalArgumentException.class,
+                () -> ReciprocalRank.compute(withNull, List.of("A")));
     }
 }
