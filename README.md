@@ -520,6 +520,40 @@ Resonance results are ordered deterministically by score descending and then by 
 id ascending, so top-K output is stable across runs and fresh memory directories even
 when scores tie.
 
+## 10.2 Feedback-Aware Ranking
+
+Monada Resonance Store supports a first iteration of **feedback-aware ranking**. Clients can record positive or negative feedback against an atom id for a specific query; future queries that match that exact text re-rank the base resonance results using the aggregated feedback delta.
+
+```java
+memory.feedback("sql relational transactions database",
+                atom.id(),
+                FeedbackSignal.POSITIVE); // default delta = +0.05
+
+memory.feedback("sql relational transactions database",
+                unrelated.id(),
+                FeedbackSignal.NEGATIVE, -0.2); // explicit delta
+```
+
+The ranking formula applied by `FeedbackAwareResonanceIndex` is:
+
+```text
+adjustedScore(atom, query) = baseScore(atom, query) + Σ delta(event)
+    over all events where event.query == query and event.atomId == atom.id
+```
+
+Key properties:
+
+- **Deterministic ordering**: results are sorted by `adjustedScore DESC`, then by `atomId ASC`.
+- **Exact query matching (v1)**: only events with a string-equal `query` field influence ranking.
+- **Threshold-safe promotion**: positive feedback can surface an atom that would otherwise sit just below the caller threshold, because the decorator pulls an expanded candidate pool from the base index and then applies the caller threshold to the adjusted score.
+- **Auditable**: every event is appended to `feedback/feedback-000001.log` as one JSON object per line, including the `createdAt` timestamp.
+
+To run the feedback-aware regression test, which asserts that feedback never degrades the protected baseline metrics (`Hit@1`, `Recall@3`, `Recall@5`, `MRR`):
+
+```bash
+./gradlew :monada-evaluation:test --tests com.monada.evaluation.FeedbackAwareEvaluationTest
+```
+
 **Note on Recall@K**: when a query has more expected labels than `K`, the maximum
 achievable `Recall@K` is `K / |expected|`. For example, a query with two expected
 labels can never exceed `Recall@1 = 0.5`. This is the standard IR definition; small

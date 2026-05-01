@@ -12,10 +12,15 @@ import com.monada.storage.FileManifestStore;
 import com.monada.storage.FrequencyStore;
 import com.monada.storage.Manifest;
 import com.monada.storage.ManifestStore;
+import com.monada.storage.feedback.FeedbackEvent;
+import com.monada.storage.feedback.FeedbackSignal;
+import com.monada.storage.feedback.FeedbackStore;
+import com.monada.storage.feedback.FileFeedbackStore;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -25,17 +30,22 @@ public class MonadaMemory {
     private static final int DEFAULT_DIMENSIONS = 128;
     private static final String DEFAULT_VECTOR_SEGMENT = "vectors/segment-000001.f32";
     private static final String DEFAULT_ATOM_SEGMENT = "atoms/segment-000001.log";
+    private static final double DEFAULT_POSITIVE_DELTA = 0.05;
+    private static final double DEFAULT_NEGATIVE_DELTA = -0.05;
 
     private final FrequencyEncoder encoder;
     private final AtomStore atomStore;
     private final FrequencyStore frequencyStore;
     private final ResonanceIndex resonanceIndex;
+    private final FeedbackStore feedbackStore;
 
-    private MonadaMemory(FrequencyEncoder encoder, AtomStore atomStore, FrequencyStore frequencyStore, ResonanceIndex resonanceIndex) {
+    private MonadaMemory(FrequencyEncoder encoder, AtomStore atomStore, FrequencyStore frequencyStore,
+                         ResonanceIndex resonanceIndex, FeedbackStore feedbackStore) {
         this.encoder = encoder;
         this.atomStore = atomStore;
         this.frequencyStore = frequencyStore;
         this.resonanceIndex = resonanceIndex;
+        this.feedbackStore = feedbackStore;
     }
 
     public static MonadaMemory open(String path) {
@@ -56,16 +66,18 @@ public class MonadaMemory {
                 }
             } else {
                 manifest = new Manifest(
-                        MANIFEST_VERSION, DEFAULT_DIMENSIONS, DEFAULT_VECTOR_SEGMENT, DEFAULT_ATOM_SEGMENT);
+                        MANIFEST_VERSION, DEFAULT_DIMENSIONS, DEFAULT_VECTOR_SEGMENT, DEFAULT_ATOM_SEGMENT,
+                        Manifest.DEFAULT_FEEDBACK_SEGMENT);
                 manifestStore.save(manifest);
             }
 
             AtomStore atomStore = new FileAtomStore(path, manifest.atomSegment());
             FrequencyStore frequencyStore = new FileFrequencyStore(
                     path, manifest.vectorSegment(), manifest.dimensions());
+            FeedbackStore feedbackStore = new FileFeedbackStore(path, manifest.feedbackSegment());
             FrequencyEncoder encoder = new SimpleFrequencyEncoder(manifest.dimensions());
             ResonanceIndex resonanceIndex = new LinearScanResonanceIndex(atomStore, frequencyStore);
-            return new MonadaMemory(encoder, atomStore, frequencyStore, resonanceIndex);
+            return new MonadaMemory(encoder, atomStore, frequencyStore, resonanceIndex, feedbackStore);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -89,6 +101,37 @@ public class MonadaMemory {
     }
 
     public MonadaQuery resonate(String query) {
-        return new MonadaQuery(query, encoder, resonanceIndex);
+        return new MonadaQuery(query, encoder, resonanceIndex, feedbackStore);
+    }
+
+    /**
+     * Record a feedback event for {@code atomId} under {@code query} using the
+     * default delta for the given signal.
+     */
+    public void feedback(String query, String atomId, FeedbackSignal signal) {
+        double delta = switch (signal) {
+            case POSITIVE -> DEFAULT_POSITIVE_DELTA;
+            case NEGATIVE -> DEFAULT_NEGATIVE_DELTA;
+        };
+        feedback(query, atomId, signal, delta);
+    }
+
+    /**
+     * Record a feedback event with an explicit delta magnitude. The sign of
+     * {@code delta} is not constrained; callers decide whether it reinforces
+     * or demotes the atom for the given query.
+     */
+    public void feedback(String query, String atomId, FeedbackSignal signal, double delta) {
+        Objects.requireNonNull(query, "query");
+        Objects.requireNonNull(atomId, "atomId");
+        Objects.requireNonNull(signal, "signal");
+        try {
+            if (atomStore.findById(atomId).isEmpty()) {
+                throw new IllegalArgumentException("Unknown atomId: " + atomId);
+            }
+            feedbackStore.append(new FeedbackEvent(query, atomId, signal, delta, Instant.now()));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 }

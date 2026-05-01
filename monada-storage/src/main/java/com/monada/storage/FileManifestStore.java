@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
 public class FileManifestStore implements ManifestStore {
 
     private static final Pattern STRING_FIELD = Pattern.compile(
-            "\"(version|vectorSegment|atomSegment)\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+            "\"(version|vectorSegment|atomSegment|feedbackSegment)\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
     private static final Pattern INT_FIELD = Pattern.compile(
             "\"(dimensions)\"\\s*:\\s*(-?\\d+)");
 
@@ -48,13 +48,15 @@ public class FileManifestStore implements ManifestStore {
                   "version": "%s",
                   "dimensions": %d,
                   "vectorSegment": "%s",
-                  "atomSegment": "%s"
+                  "atomSegment": "%s",
+                  "feedbackSegment": "%s"
                 }
                 """.formatted(
                 escape(manifest.version()),
                 manifest.dimensions(),
                 escape(manifest.vectorSegment()),
-                escape(manifest.atomSegment()));
+                escape(manifest.atomSegment()),
+                escape(manifest.feedbackSegment()));
         Files.writeString(root.resolve("manifest.json"), json, StandardCharsets.UTF_8);
     }
 
@@ -62,6 +64,7 @@ public class FileManifestStore implements ManifestStore {
         String version = null;
         String vectorSegment = null;
         String atomSegment = null;
+        String feedbackSegment = Manifest.DEFAULT_FEEDBACK_SEGMENT;
         Matcher stringMatcher = STRING_FIELD.matcher(json);
         while (stringMatcher.find()) {
             String value = unescape(stringMatcher.group(2));
@@ -69,6 +72,7 @@ public class FileManifestStore implements ManifestStore {
                 case "version" -> version = value;
                 case "vectorSegment" -> vectorSegment = value;
                 case "atomSegment" -> atomSegment = value;
+                case "feedbackSegment" -> feedbackSegment = value;
             }
         }
         Integer dimensions = null;
@@ -80,7 +84,7 @@ public class FileManifestStore implements ManifestStore {
             throw new IllegalStateException(
                     "Invalid manifest.json: missing one of version/dimensions/vectorSegment/atomSegment");
         }
-        return new Manifest(version, dimensions, vectorSegment, atomSegment);
+        return new Manifest(version, dimensions, vectorSegment, atomSegment, feedbackSegment);
     }
 
     private static String escape(String value) {
