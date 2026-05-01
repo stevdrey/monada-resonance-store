@@ -514,8 +514,8 @@ This harness is intentionally minimal. It exists to provide a reproducible basel
 so future encoder or index changes can be compared objectively.
 
 **Protected baseline and deterministic ranking.** The `DefaultDatabasesDataset` is now
-treated as a regression baseline: `EvaluationBaselineRegressionTest` asserts explicit
-minimum thresholds for `Hit@1`, `Recall@3`, `Recall@5`, and `Mean Reciprocal Rank`.
+treated as a regression baseline: `EvaluationBaselineRegressionTest` asserts exact
+baseline values for `Hit@1`, `Recall@3`, `Recall@5`, and `Mean Reciprocal Rank`.
 Resonance results are ordered deterministically by score descending and then by atom
 id ascending, so top-K output is stable across runs and fresh memory directories even
 when scores tie.

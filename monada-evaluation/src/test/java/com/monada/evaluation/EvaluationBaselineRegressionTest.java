@@ -42,13 +42,13 @@ class EvaluationBaselineRegressionTest {
         var recall5 = report.averageRecallByK().get(5);
         var mrr = report.meanReciprocalRank();
 
-        assertEquals(EXPECTED_AVG_HIT_AT_1, hit1,
+        assertEquals(EXPECTED_AVG_HIT_AT_1, hit1, 1e-15,
                 "Average Hit@1 baseline changed");
-        assertEquals(EXPECTED_AVG_RECALL_AT_3, recall3,
+        assertEquals(EXPECTED_AVG_RECALL_AT_3, recall3, 1e-15,
                 "Average Recall@3 baseline changed");
-        assertEquals(EXPECTED_AVG_RECALL_AT_5, recall5,
+        assertEquals(EXPECTED_AVG_RECALL_AT_5, recall5, 1e-15,
                 "Average Recall@5 baseline changed");
-        assertEquals(EXPECTED_MRR, mrr,
+        assertEquals(EXPECTED_MRR, mrr, 1e-15,
                 "Mean Reciprocal Rank baseline changed");
     }
 
