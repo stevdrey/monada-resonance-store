@@ -13,7 +13,8 @@ final class EvaluationMaps {
 
     static Map<Integer, Double> sortedCopy(Map<Integer, Double> source, String name) {
         var sorted = new TreeMap<>(Objects.requireNonNull(source, name));
-        sorted.forEach((k, v) -> Objects.requireNonNull(v, name + " value"));
+        sorted.forEach((k, v) -> validateUnitInterval(
+                Objects.requireNonNull(v, name + " value"), name + "[" + k + "]"));
         return Collections.unmodifiableMap(sorted);
     }
 

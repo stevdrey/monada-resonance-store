@@ -58,6 +58,23 @@ class EvaluationRecordValidationTest {
     }
 
     @Test
+    void queryEvaluationRejectsInvalidMetricMapValues() {
+        var nan = Map.of(1, Double.NaN);
+        var infinity = Map.of(1, Double.POSITIVE_INFINITY);
+        var negative = Map.of(1, -0.1);
+        var tooLarge = Map.of(1, 1.1);
+
+        assertThrows(IllegalArgumentException.class, () -> new QueryEvaluation(
+                "q", Set.of("a"), List.of("a"), nan, VALID_MAP, VALID_MAP, 1.0));
+        assertThrows(IllegalArgumentException.class, () -> new QueryEvaluation(
+                "q", Set.of("a"), List.of("a"), VALID_MAP, infinity, VALID_MAP, 1.0));
+        assertThrows(IllegalArgumentException.class, () -> new QueryEvaluation(
+                "q", Set.of("a"), List.of("a"), VALID_MAP, VALID_MAP, negative, 1.0));
+        assertThrows(IllegalArgumentException.class, () -> new QueryEvaluation(
+                "q", Set.of("a"), List.of("a"), tooLarge, VALID_MAP, VALID_MAP, 1.0));
+    }
+
+    @Test
     void evaluationReportRejectsNaNMrr() {
         assertThrows(IllegalArgumentException.class, () -> new EvaluationReport(
                 List.of(), VALID_MAP, VALID_MAP, VALID_MAP, Double.NaN));
@@ -85,5 +102,22 @@ class EvaluationRecordValidationTest {
                 List.of(), VALID_MAP, VALID_MAP, VALID_MAP, 0.0));
         assertDoesNotThrow(() -> new EvaluationReport(
                 List.of(), VALID_MAP, VALID_MAP, VALID_MAP, 1.0));
+    }
+
+    @Test
+    void evaluationReportRejectsInvalidMetricMapValues() {
+        var nan = Map.of(1, Double.NaN);
+        var infinity = Map.of(1, Double.POSITIVE_INFINITY);
+        var negative = Map.of(1, -0.1);
+        var tooLarge = Map.of(1, 1.1);
+
+        assertThrows(IllegalArgumentException.class, () -> new EvaluationReport(
+                List.of(), nan, VALID_MAP, VALID_MAP, 1.0));
+        assertThrows(IllegalArgumentException.class, () -> new EvaluationReport(
+                List.of(), VALID_MAP, infinity, VALID_MAP, 1.0));
+        assertThrows(IllegalArgumentException.class, () -> new EvaluationReport(
+                List.of(), VALID_MAP, VALID_MAP, negative, 1.0));
+        assertThrows(IllegalArgumentException.class, () -> new EvaluationReport(
+                List.of(), tooLarge, VALID_MAP, VALID_MAP, 1.0));
     }
 }

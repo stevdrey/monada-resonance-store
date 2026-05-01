@@ -74,6 +74,10 @@ public class MonadaMemory {
     public KnowledgeAtom remember(String text) {
         try {
             KnowledgeAtom atom = KnowledgeAtom.text(text);
+            Optional<KnowledgeAtom> existing = atomStore.findById(atom.id());
+            if (existing.isPresent()) {
+                return existing.get();
+            }
             // Persist vector first: a partial failure leaves an orphan vector that search
             // safely ignores, instead of an atom that cannot be recalled by resonance.
             frequencyStore.save(atom.id(), encoder.encode(text));
