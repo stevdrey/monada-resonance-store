@@ -107,6 +107,59 @@ class LinearScanResonanceIndexTest {
         assertSame(expected, thrown);
     }
 
+    @Test
+    void tieBreaksByAtomIdAscending() throws IOException {
+        // Two atoms share an identical vector -> identical cosine score.
+        // Regardless of insertion order, atom id "a" must precede "b".
+        FrequencyVector shared = new FrequencyVector(new float[]{1f, 0f});
+
+        AtomStore atomsForward = new InMemoryAtomStore(List.of(atom("a"), atom("b")));
+        FrequencyStore vectorsForward = new InMemoryFrequencyStore(List.of(
+                new StoredVector("a", shared),
+                new StoredVector("b", shared)
+        ));
+        List<ResonanceResult> forward = new LinearScanResonanceIndex(atomsForward, vectorsForward)
+                .search(new FrequencyVector(new float[]{1f, 0f}), 5, 0.0);
+
+        AtomStore atomsReversed = new InMemoryAtomStore(List.of(atom("b"), atom("a")));
+        FrequencyStore vectorsReversed = new InMemoryFrequencyStore(List.of(
+                new StoredVector("b", shared),
+                new StoredVector("a", shared)
+        ));
+        List<ResonanceResult> reversed = new LinearScanResonanceIndex(atomsReversed, vectorsReversed)
+                .search(new FrequencyVector(new float[]{1f, 0f}), 5, 0.0);
+
+        assertEquals(2, forward.size());
+        assertEquals("a", forward.get(0).atom().id());
+        assertEquals("b", forward.get(1).atom().id());
+
+        assertEquals(2, reversed.size());
+        assertEquals("a", reversed.get(0).atom().id());
+        assertEquals("b", reversed.get(1).atom().id());
+    }
+
+    @Test
+    void orderingIsStableAcrossRepeatedCalls() throws IOException {
+        AtomStore atoms = new InMemoryAtomStore(List.of(atom("c"), atom("a"), atom("b")));
+        FrequencyVector shared = new FrequencyVector(new float[]{1f, 0f});
+        FrequencyStore vectors = new InMemoryFrequencyStore(List.of(
+                new StoredVector("c", shared),
+                new StoredVector("a", shared),
+                new StoredVector("b", new FrequencyVector(new float[]{1f, 1f}))
+        ));
+        LinearScanResonanceIndex index = new LinearScanResonanceIndex(atoms, vectors);
+        FrequencyVector query = new FrequencyVector(new float[]{1f, 0f});
+
+        List<String> first = index.search(query, 5, 0.0).stream().map(r -> r.atom().id()).toList();
+        List<String> second = index.search(query, 5, 0.0).stream().map(r -> r.atom().id()).toList();
+        List<String> third = index.search(query, 5, 0.0).stream().map(r -> r.atom().id()).toList();
+
+        assertEquals(first, second);
+        assertEquals(second, third);
+        // Tied "a" and "c" must appear in id ascending order, ahead of lower-scoring "b".
+        assertEquals(List.of("a", "c", "b"), first);
+    }
+
     private static final class InMemoryAtomStore implements AtomStore {
         private final List<KnowledgeAtom> atoms;
         InMemoryAtomStore(List<KnowledgeAtom> atoms) { this.atoms = atoms; }

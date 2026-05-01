@@ -37,4 +37,22 @@ class MonadaMemoryIntegrationTest {
         assertTrue(Files.exists(memoryDirectory.resolve("vectors/segment-000001.f32")));
         assertTrue(Files.exists(memoryDirectory.resolve("indexes/vector-map.idx")));
     }
+
+    @Test
+    void rememberingSameContentIsIdempotent() {
+        var memory = MonadaMemory.open(memoryDirectory);
+
+        var first = memory.remember("PostgreSQL is a relational SQL database.");
+        var second = memory.remember("PostgreSQL is a relational SQL database.");
+
+        assertEquals(first.id(), second.id());
+
+        var recall = memory.resonate("relational sql database")
+                .topK(5)
+                .threshold(0.0)
+                .execute();
+
+        assertEquals(1, recall.results().size());
+        assertEquals(first.id(), recall.results().getFirst().atom().id());
+    }
 }

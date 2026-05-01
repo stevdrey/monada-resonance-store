@@ -2,8 +2,6 @@ package com.monada.evaluation;
 
 import com.monada.api.MonadaMemory;
 import com.monada.core.KnowledgeAtom;
-import com.monada.core.MonadaRecall;
-import com.monada.core.ResonanceResult;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -22,6 +20,7 @@ import java.util.TreeMap;
 public final class EvaluationRunner {
 
     public static final List<Integer> DEFAULT_KS = List.of(1, 3, 5);
+    private static final double EVALUATION_THRESHOLD = Double.NEGATIVE_INFINITY;
 
     private final List<Integer> ks;
 
@@ -71,13 +70,16 @@ public final class EvaluationRunner {
             recallSums.put(k, 0.0);
             hitSums.put(k, 0.0);
         }
-        double reciprocalRankSum = 0.0;
+        var reciprocalRankSum = 0.0;
 
-        for (EvaluationQuery query : dataset.queries()) {
-            MonadaRecall recall = memory.resonate(query.text()).topK(maxK).execute();
+        for (var query : dataset.queries()) {
+            var recall = memory.resonate(query.text())
+                    .topK(maxK)
+                    .threshold(EVALUATION_THRESHOLD)
+                    .execute();
 
             var rankedLabels = new ArrayList<String>(recall.results().size());
-            for (ResonanceResult result : recall.results()) {
+            for (var result : recall.results()) {
                 rankedLabels.add(idToLabel.getOrDefault(result.atom().id(), result.atom().id()));
             }
 

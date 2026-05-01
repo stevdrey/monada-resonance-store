@@ -29,22 +29,28 @@ public class LinearScanResonanceIndex implements ResonanceIndex {
         if (topK <= 0) {
             throw new IllegalArgumentException("topK must be greater than zero");
         }
-        Map<String, KnowledgeAtom> atomsById = new HashMap<>();
-        for (KnowledgeAtom atom : atomStore.findAll()) {
+        var atomsById = new HashMap<String, KnowledgeAtom>();
+        for (var atom : atomStore.findAll()) {
             atomsById.put(atom.id(), atom);
         }
-        List<ResonanceResult> results = new ArrayList<>();
-        for (StoredVector storedVector : frequencyStore.findAll()) {
-            KnowledgeAtom atom = atomsById.get(storedVector.atomId());
+        var results = new ArrayList<ResonanceResult>();
+        for (var storedVector : frequencyStore.findAll()) {
+            var atom = atomsById.get(storedVector.atomId());
             if (atom == null) {
                 continue;
             }
-            double score = cosineSimilarity(queryVector, storedVector.vector());
+            var score = cosineSimilarity(queryVector, storedVector.vector());
             if (score >= threshold) {
                 results.add(new ResonanceResult(atom, score));
             }
         }
-        results.sort(Comparator.comparingDouble(ResonanceResult::score).reversed());
+        // Deterministic ordering: primary by score desc, secondary by atom id asc.
+        // The secondary criterion guarantees stable top-K output when two or more
+        // atoms share the same resonance score, independent of storage load order.
+        results.sort(
+                Comparator.comparingDouble(ResonanceResult::score).reversed()
+                        .thenComparing(result -> result.atom().id())
+        );
         if (results.size() > topK) {
             return List.copyOf(results.subList(0, topK));
         }
@@ -52,16 +58,16 @@ public class LinearScanResonanceIndex implements ResonanceIndex {
     }
 
     private double cosineSimilarity(FrequencyVector left, FrequencyVector right) {
-        float[] leftValues = left.values();
-        float[] rightValues = right.values();
+        var leftValues = left.values();
+        var rightValues = right.values();
         if (leftValues.length != rightValues.length) {
             throw new IllegalArgumentException("Vectors must have the same dimensions");
         }
 
-        double dot = 0.0;
-        double leftMagnitude = 0.0;
-        double rightMagnitude = 0.0;
-        for (int i = 0; i < leftValues.length; i++) {
+        var dot = 0.0;
+        var leftMagnitude = 0.0;
+        var rightMagnitude = 0.0;
+        for (var i = 0; i < leftValues.length; i++) {
             dot += leftValues[i] * rightValues[i];
             leftMagnitude += leftValues[i] * leftValues[i];
             rightMagnitude += rightValues[i] * rightValues[i];
