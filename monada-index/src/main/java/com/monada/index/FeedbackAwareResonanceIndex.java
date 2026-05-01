@@ -53,7 +53,7 @@ public final class FeedbackAwareResonanceIndex implements ResonanceIndex {
         // filtered out by the caller threshold on the base score.
         int poolSize = adjustments.isEmpty()
                 ? topK
-                : Math.max(topK, Math.min(topK * CANDIDATE_POOL_MULTIPLIER, Integer.MAX_VALUE));
+                : Math.max(topK, (int) Math.min((long) topK * CANDIDATE_POOL_MULTIPLIER, Integer.MAX_VALUE));
         double basePoolThreshold = adjustments.isEmpty()
                 ? threshold
                 : Double.NEGATIVE_INFINITY;
