@@ -511,8 +511,14 @@ default dataset lives in
 custom `EvaluationDataset` when invoking `EvaluationRunner.run(dataset, path)`.
 
 This harness is intentionally minimal. It exists to provide a reproducible baseline
-so future encoder or index changes can be compared objectively. See the issue for
-remaining follow-up work, such as ranking stability.
+so future encoder or index changes can be compared objectively.
+
+**Protected baseline and deterministic ranking.** The `DefaultDatabasesDataset` is now
+treated as a regression baseline: `EvaluationBaselineRegressionTest` asserts explicit
+minimum thresholds for `Hit@1`, `Recall@3`, `Recall@5`, and `Mean Reciprocal Rank`.
+Resonance results are ordered deterministically by score descending and then by atom
+id ascending, so top-K output is stable across runs and fresh memory directories even
+when scores tie.
 
 **Note on Recall@K**: when a query has more expected labels than `K`, the maximum
 achievable `Recall@K` is `K / |expected|`. For example, a query with two expected

@@ -1,5 +1,6 @@
 package com.monada.core;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
@@ -22,8 +23,13 @@ public record KnowledgeAtom(
     }
 
     public static KnowledgeAtom text(String content) {
+        // Deterministic id derived from content: the same input produces the same id
+        // across JVM runs and fresh memory directories. This keeps recall ordering
+        // reproducible when resonance scores tie and atoms are compared by id.
+        Objects.requireNonNull(content, "content");
+        String id = UUID.nameUUIDFromBytes(content.getBytes(StandardCharsets.UTF_8)).toString();
         return new KnowledgeAtom(
-                UUID.randomUUID().toString(),
+                id,
                 AtomType.TEXT,
                 content,
                 Map.of(),
