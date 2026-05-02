@@ -37,8 +37,22 @@ public class FileFeedbackStore implements FeedbackStore {
     public FileFeedbackStore(Path root, String segment) throws IOException {
         Objects.requireNonNull(root, "root");
         Objects.requireNonNull(segment, "segment");
-        this.logFile = root.resolve(segment);
-        Files.createDirectories(logFile.getParent());
+        if (segment.isBlank()) {
+            throw new IllegalArgumentException("segment must not be blank");
+        }
+        if (segment.endsWith("/") || segment.endsWith("\\")) {
+            throw new IllegalArgumentException("segment must resolve to a file path: " + segment);
+        }
+        Path resolved = root.resolve(segment).toAbsolutePath().normalize();
+        Path normalizedRoot = root.toAbsolutePath().normalize();
+        if (!resolved.startsWith(normalizedRoot) || resolved.equals(normalizedRoot) || resolved.getParent() == null) {
+            throw new IllegalArgumentException("segment must resolve to a file under root: " + segment);
+        }
+        this.logFile = resolved;
+        Files.createDirectories(resolved.getParent());
+        if (Files.isDirectory(resolved)) {
+            throw new IllegalArgumentException("segment must resolve to a file, not a directory: " + segment);
+        }
         if (Files.notExists(logFile)) {
             Files.createFile(logFile);
         }

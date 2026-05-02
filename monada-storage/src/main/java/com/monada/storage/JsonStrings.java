@@ -33,9 +33,12 @@ public final class JsonStrings {
         StringBuilder out = new StringBuilder(value.length());
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
-            if (c != '\\' || i + 1 >= value.length()) {
+            if (c != '\\') {
                 out.append(c);
                 continue;
+            }
+            if (i + 1 >= value.length()) {
+                throw new IllegalStateException("Invalid trailing escape in " + sourceName);
             }
             char next = value.charAt(++i);
             switch (next) {

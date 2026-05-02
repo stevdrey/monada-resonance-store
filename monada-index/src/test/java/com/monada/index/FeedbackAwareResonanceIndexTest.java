@@ -81,13 +81,28 @@ class FeedbackAwareResonanceIndexTest {
         // Delegate returns 3 candidates with scores below 0.5; feedback pushes "c" above.
         var base = List.of(result("a", 0.45), result("b", 0.40), result("c", 0.30));
         var events = List.of(event("q", "c", FeedbackSignal.POSITIVE, 0.30));
-        var index = new FeedbackAwareResonanceIndex(
-                new FakeDelegate(base), new FakeFeedbackStore(events), "q");
+        var delegate = new FakeDelegate(base);
+        var index = new FeedbackAwareResonanceIndex(delegate, new FakeFeedbackStore(events), "q");
 
         // Caller asks for topK=1 with threshold 0.5 — only "c" (0.60) should pass.
         var out = index.search(DUMMY, 1, 0.5);
         assertEquals(List.of("c"), ids(out));
         assertEquals(0.6, out.get(0).score(), 1e-9);
+        assertEquals(4, delegate.lastTopK);
+        assertEquals(0.2, delegate.lastThreshold, 1e-9);
+    }
+
+    @Test
+    void nonPositiveFeedbackDoesNotExpandPoolOrLowerThreshold() throws IOException {
+        var base = List.of(result("a", 0.50), result("b", 0.40), result("c", 0.30));
+        var events = List.of(event("q", "a", FeedbackSignal.NEGATIVE, -0.10));
+        var delegate = new FakeDelegate(base);
+        var index = new FeedbackAwareResonanceIndex(delegate, new FakeFeedbackStore(events), "q");
+
+        index.search(DUMMY, 2, 0.35);
+
+        assertEquals(2, delegate.lastTopK);
+        assertEquals(0.35, delegate.lastThreshold, 1e-9);
     }
 
     private static ResonanceResult result(String id, double score) {
@@ -105,6 +120,8 @@ class FeedbackAwareResonanceIndexTest {
 
     private static final class FakeDelegate implements ResonanceIndex {
         private final List<ResonanceResult> results;
+        private int lastTopK;
+        private double lastThreshold;
 
         FakeDelegate(List<ResonanceResult> results) {
             this.results = results;
@@ -112,6 +129,8 @@ class FeedbackAwareResonanceIndexTest {
 
         @Override
         public List<ResonanceResult> search(FrequencyVector queryVector, int topK, double threshold) {
+            lastTopK = topK;
+            lastThreshold = threshold;
             var sorted = new ArrayList<>(results);
             sorted.sort(Comparator.comparingDouble(ResonanceResult::score).reversed()
                     .thenComparing(r -> r.atom().id()));

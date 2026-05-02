@@ -23,8 +23,8 @@ import java.util.Objects;
  *
  * <p>To let a positive adjustment promote an atom that would have been filtered
  * out by the caller threshold, the decorator fetches an expanded candidate pool
- * from the delegate (using {@code NEGATIVE_INFINITY} threshold and a larger
- * {@code topK}) and then applies the caller threshold to the adjusted score.
+ * from the delegate using the caller threshold minus the maximum positive
+ * adjustment, and then applies the caller threshold to the adjusted score.
  */
 public final class FeedbackAwareResonanceIndex implements ResonanceIndex {
 
@@ -48,15 +48,17 @@ public final class FeedbackAwareResonanceIndex implements ResonanceIndex {
 
         Map<String, Double> adjustments = buildAdjustments();
 
-        // Pull a larger candidate pool with a permissive threshold so that a
-        // positive adjustment can still surface an atom that would have been
-        // filtered out by the caller threshold on the base score.
-        int poolSize = adjustments.isEmpty()
-                ? topK
-                : Math.max(topK, (int) Math.min((long) topK * CANDIDATE_POOL_MULTIPLIER, Integer.MAX_VALUE));
-        double basePoolThreshold = adjustments.isEmpty()
-                ? threshold
-                : Double.NEGATIVE_INFINITY;
+        double maxPositiveDelta = maxPositiveDelta(adjustments);
+        boolean hasPositiveAdjustment = maxPositiveDelta > 0.0;
+
+        // Pull a larger candidate pool only when a positive adjustment can still
+        // surface an atom that would have been filtered out by the caller threshold.
+        int poolSize = hasPositiveAdjustment
+                ? Math.max(topK, (int) Math.min((long) topK * CANDIDATE_POOL_MULTIPLIER, Integer.MAX_VALUE))
+                : topK;
+        double basePoolThreshold = hasPositiveAdjustment
+                ? threshold - maxPositiveDelta
+                : threshold;
 
         List<ResonanceResult> base = delegate.search(queryVector, poolSize, basePoolThreshold);
 
@@ -78,6 +80,14 @@ public final class FeedbackAwareResonanceIndex implements ResonanceIndex {
             return List.copyOf(adjusted.subList(0, topK));
         }
         return List.copyOf(adjusted);
+    }
+
+    private static double maxPositiveDelta(Map<String, Double> adjustments) {
+        return adjustments.values().stream()
+                .mapToDouble(Double::doubleValue)
+                .filter(delta -> delta > 0.0)
+                .max()
+                .orElse(0.0);
     }
 
     private Map<String, Double> buildAdjustments() throws IOException {
