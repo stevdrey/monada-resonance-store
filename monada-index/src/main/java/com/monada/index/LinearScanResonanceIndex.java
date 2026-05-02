@@ -5,14 +5,11 @@ import com.monada.core.KnowledgeAtom;
 import com.monada.core.ResonanceResult;
 import com.monada.storage.AtomStore;
 import com.monada.storage.FrequencyStore;
-import com.monada.storage.StoredVector;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 public class LinearScanResonanceIndex implements ResonanceIndex {
 

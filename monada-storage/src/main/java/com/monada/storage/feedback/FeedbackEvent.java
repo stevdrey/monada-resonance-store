@@ -18,6 +18,12 @@ public record FeedbackEvent(
         if (!Double.isFinite(delta)) {
             throw new IllegalArgumentException("delta must be finite, got: " + delta);
         }
+        if (signal == FeedbackSignal.POSITIVE && delta <= 0.0) {
+            throw new IllegalArgumentException("positive feedback delta must be greater than zero");
+        }
+        if (signal == FeedbackSignal.NEGATIVE && delta >= 0.0) {
+            throw new IllegalArgumentException("negative feedback delta must be less than zero");
+        }
         if (query.isEmpty()) {
             throw new IllegalArgumentException("query must not be empty");
         }

@@ -21,9 +21,9 @@ public class MonadaQuery {
 
     MonadaQuery(String query, FrequencyEncoder encoder, ResonanceIndex resonanceIndex, FeedbackStore feedbackStore) {
         this.query = Objects.requireNonNull(query, "query");
-        this.encoder = encoder;
-        this.resonanceIndex = resonanceIndex;
-        this.feedbackStore = feedbackStore;
+        this.encoder = Objects.requireNonNull(encoder, "encoder");
+        this.resonanceIndex = Objects.requireNonNull(resonanceIndex, "resonanceIndex");
+        this.feedbackStore = Objects.requireNonNull(feedbackStore, "feedbackStore");
     }
 
     public MonadaQuery topK(int topK) {

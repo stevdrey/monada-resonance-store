@@ -117,9 +117,9 @@ public class MonadaMemory {
     }
 
     /**
-     * Record a feedback event with an explicit delta magnitude. The sign of
-     * {@code delta} is not constrained; callers decide whether it reinforces
-     * or demotes the atom for the given query.
+     * Record a feedback event with an explicit delta. The sign of {@code delta}
+     * must match {@code signal}: positive for {@code POSITIVE}, negative for
+     * {@code NEGATIVE}.
      */
     public void feedback(String query, String atomId, FeedbackSignal signal, double delta) {
         Objects.requireNonNull(query, "query");

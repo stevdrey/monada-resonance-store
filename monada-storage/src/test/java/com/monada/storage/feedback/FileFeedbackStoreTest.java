@@ -82,5 +82,13 @@ class FileFeedbackStoreTest {
                 () -> new FeedbackEvent("q", "", FeedbackSignal.POSITIVE, 0.05, Instant.EPOCH));
         assertThrows(IllegalArgumentException.class,
                 () -> new FeedbackEvent("q", "a", FeedbackSignal.POSITIVE, Double.NaN, Instant.EPOCH));
+        assertThrows(IllegalArgumentException.class,
+                () -> new FeedbackEvent("q", "a", FeedbackSignal.POSITIVE, -0.05, Instant.EPOCH));
+        assertThrows(IllegalArgumentException.class,
+                () -> new FeedbackEvent("q", "a", FeedbackSignal.POSITIVE, 0.0, Instant.EPOCH));
+        assertThrows(IllegalArgumentException.class,
+                () -> new FeedbackEvent("q", "a", FeedbackSignal.NEGATIVE, 0.05, Instant.EPOCH));
+        assertThrows(IllegalArgumentException.class,
+                () -> new FeedbackEvent("q", "a", FeedbackSignal.NEGATIVE, 0.0, Instant.EPOCH));
     }
 }
