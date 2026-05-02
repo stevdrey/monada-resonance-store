@@ -32,20 +32,23 @@ public class MonadaMemory {
     private static final String DEFAULT_ATOM_SEGMENT = "atoms/segment-000001.log";
     private static final double DEFAULT_POSITIVE_DELTA = 0.05;
     private static final double DEFAULT_NEGATIVE_DELTA = -0.05;
+    private static final int DEFAULT_KNOWN_ATOM_ID_CACHE_SIZE = 1024;
 
     private final FrequencyEncoder encoder;
     private final AtomStore atomStore;
     private final FrequencyStore frequencyStore;
     private final ResonanceIndex resonanceIndex;
     private final FeedbackStore feedbackStore;
+    private final KnownAtomIdCache knownAtomIds;
 
     private MonadaMemory(FrequencyEncoder encoder, AtomStore atomStore, FrequencyStore frequencyStore,
-                         ResonanceIndex resonanceIndex, FeedbackStore feedbackStore) {
+                         ResonanceIndex resonanceIndex, FeedbackStore feedbackStore, KnownAtomIdCache knownAtomIds) {
         this.encoder = encoder;
         this.atomStore = atomStore;
         this.frequencyStore = frequencyStore;
         this.resonanceIndex = resonanceIndex;
         this.feedbackStore = feedbackStore;
+        this.knownAtomIds = knownAtomIds;
     }
 
     public static MonadaMemory open(String path) {
@@ -77,7 +80,8 @@ public class MonadaMemory {
             FeedbackStore feedbackStore = new FileFeedbackStore(path, manifest.feedbackSegment());
             FrequencyEncoder encoder = new SimpleFrequencyEncoder(manifest.dimensions());
             ResonanceIndex resonanceIndex = new LinearScanResonanceIndex(atomStore, frequencyStore);
-            return new MonadaMemory(encoder, atomStore, frequencyStore, resonanceIndex, feedbackStore);
+            return new MonadaMemory(encoder, atomStore, frequencyStore, resonanceIndex, feedbackStore,
+                    new KnownAtomIdCache(DEFAULT_KNOWN_ATOM_ID_CACHE_SIZE));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -88,12 +92,14 @@ public class MonadaMemory {
             KnowledgeAtom atom = KnowledgeAtom.text(text);
             Optional<KnowledgeAtom> existing = atomStore.findById(atom.id());
             if (existing.isPresent()) {
+                knownAtomIds.remember(existing.get().id());
                 return existing.get();
             }
             // Persist vector first: a partial failure leaves an orphan vector that search
             // safely ignores, instead of an atom that cannot be recalled by resonance.
             frequencyStore.save(atom.id(), encoder.encode(text));
             atomStore.save(atom);
+            knownAtomIds.remember(atom.id());
             return atom;
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -126,12 +132,14 @@ public class MonadaMemory {
         Objects.requireNonNull(atomId, "atomId");
         Objects.requireNonNull(signal, "signal");
         try {
-            if (atomStore.findById(atomId).isEmpty()) {
+            if (!knownAtomIds.contains(atomId) && atomStore.findById(atomId).isEmpty()) {
                 throw new IllegalArgumentException("Unknown atomId: " + atomId);
             }
+            knownAtomIds.remember(atomId);
             feedbackStore.append(new FeedbackEvent(query, atomId, signal, delta, Instant.now()));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
     }
+
 }

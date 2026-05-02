@@ -1,5 +1,7 @@
 package com.monada.storage.feedback;
 
+import com.monada.storage.JsonStrings;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -48,8 +50,8 @@ public class FileFeedbackStore implements FeedbackStore {
         String line = """
                 {"query":"%s","atomId":"%s","signal":"%s","delta":%s,"createdAt":"%s"}
                 """.formatted(
-                escape(event.query()),
-                escape(event.atomId()),
+                JsonStrings.escape(event.query()),
+                JsonStrings.escape(event.atomId()),
                 event.signal().name(),
                 formatDelta(event.delta()),
                 event.createdAt().toString()).strip();
@@ -88,7 +90,7 @@ public class FileFeedbackStore implements FeedbackStore {
         String createdAt = null;
         Matcher stringMatcher = STRING_FIELD.matcher(line);
         while (stringMatcher.find()) {
-            String value = unescape(stringMatcher.group(2));
+            String value = JsonStrings.unescape(stringMatcher.group(2), "feedback log");
             switch (stringMatcher.group(1)) {
                 case "query" -> query = value;
                 case "atomId" -> atomId = value;
@@ -115,60 +117,5 @@ public class FileFeedbackStore implements FeedbackStore {
     private static String formatDelta(double delta) {
         // Use Double.toString for a round-trippable representation.
         return Double.toString(delta);
-    }
-
-    private static String escape(String value) {
-        StringBuilder out = new StringBuilder(value.length() + 2);
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            switch (c) {
-                case '"' -> out.append("\\\"");
-                case '\\' -> out.append("\\\\");
-                case '\b' -> out.append("\\b");
-                case '\f' -> out.append("\\f");
-                case '\n' -> out.append("\\n");
-                case '\r' -> out.append("\\r");
-                case '\t' -> out.append("\\t");
-                default -> {
-                    if (c < 0x20) {
-                        out.append(String.format("\\u%04x", (int) c));
-                    } else {
-                        out.append(c);
-                    }
-                }
-            }
-        }
-        return out.toString();
-    }
-
-    private static String unescape(String value) {
-        StringBuilder out = new StringBuilder(value.length());
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            if (c != '\\' || i + 1 >= value.length()) {
-                out.append(c);
-                continue;
-            }
-            char next = value.charAt(++i);
-            switch (next) {
-                case '"' -> out.append('"');
-                case '\\' -> out.append('\\');
-                case '/' -> out.append('/');
-                case 'b' -> out.append('\b');
-                case 'f' -> out.append('\f');
-                case 'n' -> out.append('\n');
-                case 'r' -> out.append('\r');
-                case 't' -> out.append('\t');
-                case 'u' -> {
-                    if (i + 4 >= value.length()) {
-                        throw new IllegalStateException("Invalid \\u escape in feedback log");
-                    }
-                    out.append((char) Integer.parseInt(value.substring(i + 1, i + 5), 16));
-                    i += 4;
-                }
-                default -> throw new IllegalStateException("Invalid escape \\" + next + " in feedback log");
-            }
-        }
-        return out.toString();
     }
 }

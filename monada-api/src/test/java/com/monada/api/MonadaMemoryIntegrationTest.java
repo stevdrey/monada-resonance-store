@@ -1,5 +1,6 @@
 package com.monada.api;
 
+import com.monada.storage.feedback.FeedbackSignal;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -8,6 +9,7 @@ import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MonadaMemoryIntegrationTest {
@@ -54,5 +56,33 @@ class MonadaMemoryIntegrationTest {
 
         assertEquals(1, recall.results().size());
         assertEquals(first.id(), recall.results().getFirst().atom().id());
+    }
+
+    @Test
+    void feedbackAcceptsRememberedAtomsAndRejectsUnknownAtoms() {
+        var memory = MonadaMemory.open(memoryDirectory);
+        var atom = memory.remember("SQLite is an embedded relational database.");
+
+        memory.feedback("embedded relational database", atom.id(), FeedbackSignal.POSITIVE);
+        memory.feedback("embedded relational database", atom.id(), FeedbackSignal.POSITIVE);
+
+        var ex = assertThrows(IllegalArgumentException.class,
+                () -> memory.feedback("embedded relational database", "missing-atom", FeedbackSignal.POSITIVE));
+        assertTrue(ex.getMessage().contains("Unknown atomId"));
+    }
+
+    @Test
+    void feedbackAcceptsAtomsAfterReopenViaStorageFallback() {
+        var memory = MonadaMemory.open(memoryDirectory);
+        var atom = memory.remember("DuckDB is an embedded analytical database.");
+
+        var reopened = MonadaMemory.open(memoryDirectory);
+        reopened.feedback("embedded analytical database", atom.id(), FeedbackSignal.POSITIVE);
+
+        var recall = reopened.resonate("embedded analytical database")
+                .topK(1)
+                .threshold(0.0)
+                .execute();
+        assertEquals(atom.id(), recall.results().getFirst().atom().id());
     }
 }
