@@ -1,5 +1,7 @@
 package com.monada.storage;
 
+import com.monada.storage.feedback.FeedbackStore;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -64,7 +66,7 @@ public class FileManifestStore implements ManifestStore {
         String version = null;
         String vectorSegment = null;
         String atomSegment = null;
-        String feedbackSegment = Manifest.DEFAULT_FEEDBACK_SEGMENT;
+        String feedbackSegment = FeedbackStore.DEFAULT_SEGMENT;
         Matcher stringMatcher = STRING_FIELD.matcher(json);
         while (stringMatcher.find()) {
             String value = unescape(stringMatcher.group(2));

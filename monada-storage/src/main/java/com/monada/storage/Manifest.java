@@ -1,10 +1,10 @@
 package com.monada.storage;
 
+import com.monada.storage.feedback.FeedbackStore;
+
 import java.util.Objects;
 
 public record Manifest(String version, int dimensions, String vectorSegment, String atomSegment, String feedbackSegment) {
-    public static final String DEFAULT_FEEDBACK_SEGMENT = "feedback/feedback-000001.log";
-
     public Manifest {
         Objects.requireNonNull(version, "version");
         Objects.requireNonNull(vectorSegment, "vectorSegment");
@@ -20,6 +20,6 @@ public record Manifest(String version, int dimensions, String vectorSegment, Str
      * feedback segment path. Prefer the canonical constructor in new code.
      */
     public Manifest(String version, int dimensions, String vectorSegment, String atomSegment) {
-        this(version, dimensions, vectorSegment, atomSegment, DEFAULT_FEEDBACK_SEGMENT);
+        this(version, dimensions, vectorSegment, atomSegment, FeedbackStore.DEFAULT_SEGMENT);
     }
 }

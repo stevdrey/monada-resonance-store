@@ -67,7 +67,7 @@ public class MonadaMemory {
             } else {
                 manifest = new Manifest(
                         MANIFEST_VERSION, DEFAULT_DIMENSIONS, DEFAULT_VECTOR_SEGMENT, DEFAULT_ATOM_SEGMENT,
-                        Manifest.DEFAULT_FEEDBACK_SEGMENT);
+                        FeedbackStore.DEFAULT_SEGMENT);
                 manifestStore.save(manifest);
             }
 

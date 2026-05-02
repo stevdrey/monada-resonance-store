@@ -31,7 +31,8 @@ class FileFeedbackStoreTest {
 
         List<FeedbackEvent> all = store.findAll();
         assertEquals(List.of(e1, e2), all);
-        assertTrue(Files.isRegularFile(root.resolve(FileFeedbackStore.DEFAULT_SEGMENT)));
+        assertTrue(Files.isRegularFile(root.resolve(FeedbackStore.DEFAULT_SEGMENT)));
+        assertEquals(2, Files.readAllLines(root.resolve(FeedbackStore.DEFAULT_SEGMENT), StandardCharsets.UTF_8).size());
     }
 
     @Test
@@ -66,7 +67,7 @@ class FileFeedbackStoreTest {
     void blankLinesAreTolerated() throws IOException {
         var store = new FileFeedbackStore(root);
         store.append(new FeedbackEvent("q", "a", FeedbackSignal.POSITIVE, 0.05, Instant.EPOCH));
-        Path logFile = root.resolve(FileFeedbackStore.DEFAULT_SEGMENT);
+        Path logFile = root.resolve(FeedbackStore.DEFAULT_SEGMENT);
         Files.writeString(logFile,
                 Files.readString(logFile, StandardCharsets.UTF_8) + "\n\n",
                 StandardCharsets.UTF_8);

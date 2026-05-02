@@ -21,8 +21,6 @@ import java.util.regex.Pattern;
  */
 public class FileFeedbackStore implements FeedbackStore {
 
-    public static final String DEFAULT_SEGMENT = "feedback/feedback-000001.log";
-
     private static final Pattern STRING_FIELD = Pattern.compile(
             "\"(query|atomId|signal|createdAt)\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
     private static final Pattern NUMBER_FIELD = Pattern.compile(
@@ -31,7 +29,7 @@ public class FileFeedbackStore implements FeedbackStore {
     private final Path logFile;
 
     public FileFeedbackStore(Path root) throws IOException {
-        this(root, DEFAULT_SEGMENT);
+        this(root, FeedbackStore.DEFAULT_SEGMENT);
     }
 
     public FileFeedbackStore(Path root, String segment) throws IOException {
@@ -47,7 +45,6 @@ public class FileFeedbackStore implements FeedbackStore {
     @Override
     public void append(FeedbackEvent event) throws IOException {
         Objects.requireNonNull(event, "event");
-        // Text block keeps the on-disk JSON shape visible next to the code that writes it.
         String line = """
                 {"query":"%s","atomId":"%s","signal":"%s","delta":%s,"createdAt":"%s"}
                 """.formatted(
@@ -55,19 +52,18 @@ public class FileFeedbackStore implements FeedbackStore {
                 escape(event.atomId()),
                 event.signal().name(),
                 formatDelta(event.delta()),
-                event.createdAt().toString());
-        Files.writeString(logFile, line, StandardCharsets.UTF_8,
+                event.createdAt().toString()).strip();
+        Files.writeString(logFile, line + System.lineSeparator(), StandardCharsets.UTF_8,
                 StandardOpenOption.APPEND);
     }
 
     @Override
     public List<FeedbackEvent> findAll() throws IOException {
         var events = new ArrayList<FeedbackEvent>();
-        for (String line : Files.readAllLines(logFile, StandardCharsets.UTF_8)) {
-            if (line.isBlank()) {
-                continue;
-            }
-            events.add(parse(line));
+        try (var lines = Files.lines(logFile, StandardCharsets.UTF_8)) {
+            lines.filter(line -> !line.isBlank())
+                    .map(FileFeedbackStore::parse)
+                    .forEach(events::add);
         }
         return List.copyOf(events);
     }
@@ -76,10 +72,11 @@ public class FileFeedbackStore implements FeedbackStore {
     public List<FeedbackEvent> findByQuery(String query) throws IOException {
         Objects.requireNonNull(query, "query");
         var filtered = new ArrayList<FeedbackEvent>();
-        for (FeedbackEvent event : findAll()) {
-            if (event.query().equals(query)) {
-                filtered.add(event);
-            }
+        try (var lines = Files.lines(logFile, StandardCharsets.UTF_8)) {
+            lines.filter(line -> !line.isBlank())
+                    .map(FileFeedbackStore::parse)
+                    .filter(event -> event.query().equals(query))
+                    .forEach(filtered::add);
         }
         return List.copyOf(filtered);
     }
