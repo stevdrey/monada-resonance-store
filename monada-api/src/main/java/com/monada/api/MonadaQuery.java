@@ -2,7 +2,9 @@ package com.monada.api;
 
 import com.monada.core.MonadaRecall;
 import com.monada.encoder.FrequencyEncoder;
+import com.monada.index.FeedbackAwareResonanceIndex;
 import com.monada.index.ResonanceIndex;
+import com.monada.storage.feedback.FeedbackStore;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -13,13 +15,15 @@ public class MonadaQuery {
     private final String query;
     private final FrequencyEncoder encoder;
     private final ResonanceIndex resonanceIndex;
+    private final FeedbackStore feedbackStore;
     private int topK = 10;
     private double threshold = 0.0;
 
-    MonadaQuery(String query, FrequencyEncoder encoder, ResonanceIndex resonanceIndex) {
+    MonadaQuery(String query, FrequencyEncoder encoder, ResonanceIndex resonanceIndex, FeedbackStore feedbackStore) {
         this.query = Objects.requireNonNull(query, "query");
-        this.encoder = encoder;
-        this.resonanceIndex = resonanceIndex;
+        this.encoder = Objects.requireNonNull(encoder, "encoder");
+        this.resonanceIndex = Objects.requireNonNull(resonanceIndex, "resonanceIndex");
+        this.feedbackStore = Objects.requireNonNull(feedbackStore, "feedbackStore");
     }
 
     public MonadaQuery topK(int topK) {
@@ -37,7 +41,8 @@ public class MonadaQuery {
 
     public MonadaRecall execute() {
         try {
-            return new MonadaRecall(resonanceIndex.search(encoder.encode(query), topK, threshold));
+            ResonanceIndex index = new FeedbackAwareResonanceIndex(resonanceIndex, feedbackStore, query);
+            return new MonadaRecall(index.search(encoder.encode(query), topK, threshold));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

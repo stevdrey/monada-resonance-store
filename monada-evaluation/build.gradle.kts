@@ -5,6 +5,7 @@ plugins {
 dependencies {
     implementation(project(":monada-core"))
     implementation(project(":monada-api"))
+    testImplementation(project(":monada-storage"))
 }
 
 application {

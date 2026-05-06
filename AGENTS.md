@@ -194,3 +194,18 @@ Document why a design decision exists, not only what was changed.
 The next critical architectural milestone is improving the encoder from random vectors to deterministic normalized frequency vectors.
 
 Without deterministic encoding, resonance is structurally functional but not meaningful.
+
+## Feedback-Aware Ranking (v1)
+
+Feedback ranking is available as an explicit decorator around the base resonance
+index. Keep these invariants when evolving it:
+
+- `LinearScanResonanceIndex` stays responsible for raw resonance only.
+- `FeedbackAwareResonanceIndex` applies `adjusted = base + Σ delta` for events
+  whose `query` string matches exactly.
+- Ordering remains `adjusted DESC, atom id ASC` to preserve determinism.
+- Feedback events are persisted append-only in `feedback/feedback-000001.log`
+  as one JSON object per line; the log must stay inspectable.
+- The protected baseline in `EvaluationBaselineRegressionTest` and the
+  feedback-aware assertions in `FeedbackAwareEvaluationTest` must not be weakened
+  without an intentional baseline update and a rationale in the same commit.
