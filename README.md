@@ -554,6 +554,49 @@ To run the feedback-aware regression test, which asserts that feedback never deg
 ./gradlew :monada-evaluation:test --tests com.monada.evaluation.FeedbackAwareEvaluationTest
 ```
 
+### Validating ranking changes: did feedback help, hurt, or stay the same?
+
+The feedback-aware decorator is also explicitly evaluated in terms of four guiding questions:
+
+```text
+Did feedback improve the ranking?
+Did feedback maintain the ranking?
+Did feedback degrade the ranking?
+Which query/result changed and why?
+```
+
+The `monada-evaluation` module exposes a small comparison API for this purpose:
+
+- `RankingChange` — `IMPROVED`, `MAINTAINED`, or `DEGRADED`.
+- `QueryRankingComparison` — per-query before/after labels with a `RankingChange`.
+- `EvaluationComparison` — both `EvaluationReport`s plus the per-query view and an aggregate `RankingChange`.
+- `EvaluationComparator` — compares two reports over the same dataset.
+
+The aggregate classification is driven by four protected metrics (`Hit@1`, `Recall@3`, `Recall@5`, `MRR`):
+
+- any of those metrics dropping beyond `epsilon` → `DEGRADED`;
+- any of those metrics rising beyond `epsilon` and none dropping → `IMPROVED`;
+- otherwise → `MAINTAINED`.
+
+The per-query classification compares the rank of the first expected label in the returned list:
+
+- moves to a smaller rank → `IMPROVED`;
+- moves to a larger rank → `DEGRADED`;
+- identical labels (or same first-expected rank) → `MAINTAINED`.
+
+`FeedbackAwareEvaluationTest` uses this comparator to assert, at evaluation level:
+
+- wrapping the base index with `FeedbackAwareResonanceIndex` without any feedback events does not change any returned label or protected metric;
+- positive feedback over expected labels does not classify as `DEGRADED`;
+- negative feedback against a non-relevant atom drops it in rank without degrading protected metrics;
+- feedback recorded for one query has no effect on any unrelated query (returned labels and per-query metrics stay identical to the no-feedback baseline).
+
+To run the comparator unit tests on their own:
+
+```bash
+./gradlew :monada-evaluation:test --tests com.monada.evaluation.EvaluationComparatorTest
+```
+
 **Note on Recall@K**: when a query has more expected labels than `K`, the maximum
 achievable `Recall@K` is `K / |expected|`. For example, a query with two expected
 labels can never exceed `Recall@1 = 0.5`. This is the standard IR definition; small
