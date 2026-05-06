@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -14,8 +15,8 @@ class EvaluationComparatorTest {
     @Test
     void identicalReportsAreClassifiedAsMaintained() {
         var report = report(
-                queryEval("q", Set.of("a"), List.of("a", "b"), 1.0, 1.0, 1.0),
-                queryEval("r", Set.of("b"), List.of("b", "a"), 1.0, 1.0, 1.0));
+                queryEval("q", Set.of("a"), List.of("a", "b")),
+                queryEval("r", Set.of("b"), List.of("b", "a")));
         var comparison = new EvaluationComparator().compare(report, report);
 
         assertEquals(RankingChange.MAINTAINED, comparison.aggregate());
@@ -26,10 +27,8 @@ class EvaluationComparatorTest {
 
     @Test
     void higherMrrInAfterIsClassifiedAsImproved() {
-        var before = report(0.5,
-                queryEval("q", Set.of("a"), List.of("b", "a"), 0.0, 0.5, 0.5));
-        var after = report(1.0,
-                queryEval("q", Set.of("a"), List.of("a", "b"), 1.0, 1.0, 1.0));
+        var before = report(queryEval("q", Set.of("a"), List.of("b", "a")));
+        var after = report(queryEval("q", Set.of("a"), List.of("a", "b")));
 
         var comparison = new EvaluationComparator().compare(before, after);
 
@@ -39,10 +38,8 @@ class EvaluationComparatorTest {
 
     @Test
     void lowerHit1InAfterIsClassifiedAsDegraded() {
-        var before = report(1.0,
-                queryEval("q", Set.of("a"), List.of("a", "b"), 1.0, 1.0, 1.0));
-        var after = report(0.5,
-                queryEval("q", Set.of("a"), List.of("b", "a"), 0.0, 0.5, 0.5));
+        var before = report(queryEval("q", Set.of("a"), List.of("a", "b")));
+        var after = report(queryEval("q", Set.of("a"), List.of("b", "a")));
 
         var comparison = new EvaluationComparator().compare(before, after);
 
@@ -54,10 +51,8 @@ class EvaluationComparatorTest {
     void perQueryReorderingThatPreservesFirstExpectedRankIsMaintained() {
         // Query has expected={a}. First expected hit is at rank 0 in both runs.
         // The non-relevant labels reorder, but the metric-relevant rank does not change.
-        var before = report(1.0,
-                queryEval("q", Set.of("a"), List.of("a", "b", "c"), 1.0, 1.0, 1.0));
-        var after = report(1.0,
-                queryEval("q", Set.of("a"), List.of("a", "c", "b"), 1.0, 1.0, 1.0));
+        var before = report(queryEval("q", Set.of("a"), List.of("a", "b", "c")));
+        var after = report(queryEval("q", Set.of("a"), List.of("a", "c", "b")));
 
         var comparison = new EvaluationComparator().compare(before, after);
 
@@ -67,10 +62,8 @@ class EvaluationComparatorTest {
 
     @Test
     void perQueryFirstExpectedHitMovingUpIsImproved() {
-        var before = report(0.5,
-                queryEval("q", Set.of("a"), List.of("b", "a"), 0.0, 0.5, 0.5));
-        var after = report(1.0,
-                queryEval("q", Set.of("a"), List.of("a", "b"), 1.0, 1.0, 1.0));
+        var before = report(queryEval("q", Set.of("a"), List.of("b", "a")));
+        var after = report(queryEval("q", Set.of("a"), List.of("a", "b")));
 
         var comparison = new EvaluationComparator().compare(before, after);
 
@@ -79,10 +72,8 @@ class EvaluationComparatorTest {
 
     @Test
     void perQueryFirstExpectedHitMovingDownIsDegraded() {
-        var before = report(1.0,
-                queryEval("q", Set.of("a"), List.of("a", "b"), 1.0, 1.0, 1.0));
-        var after = report(0.5,
-                queryEval("q", Set.of("a"), List.of("b", "a"), 0.0, 0.5, 0.5));
+        var before = report(queryEval("q", Set.of("a"), List.of("a", "b")));
+        var after = report(queryEval("q", Set.of("a"), List.of("b", "a")));
 
         var comparison = new EvaluationComparator().compare(before, after);
 
@@ -91,22 +82,23 @@ class EvaluationComparatorTest {
 
     @Test
     void differencesWithinEpsilonAreClassifiedAsMaintained() {
-        var before = report(0.5,
-                queryEval("q", Set.of("a"), List.of("a", "b"), 0.5, 0.5, 0.5));
-        var after = report(0.5 + 1e-13,
-                queryEval("q", Set.of("a"), List.of("a", "b"), 0.5, 0.5, 0.5));
+        // Use a deliberately large epsilon so the natural metric jumps from these
+        // label-driven inputs (MRR rises by 0.5, Hit@1 by 1.0) sit within the
+        // tolerance and the comparator treats the change as MAINTAINED.
+        var before = report(queryEval("q", Set.of("a"), List.of("b", "a")));
+        var after = report(queryEval("q", Set.of("a"), List.of("a", "b")));
 
-        var comparison = new EvaluationComparator().compare(before, after);
+        var comparison = new EvaluationComparator(2.0).compare(before, after);
 
         assertEquals(RankingChange.MAINTAINED, comparison.aggregate());
     }
 
     @Test
     void rejectsReportsWithDifferentNumberOfQueries() {
-        var a = report(queryEval("q", Set.of("a"), List.of("a"), 1.0, 1.0, 1.0));
+        var a = report(queryEval("q", Set.of("a"), List.of("a")));
         var b = report(
-                queryEval("q", Set.of("a"), List.of("a"), 1.0, 1.0, 1.0),
-                queryEval("r", Set.of("b"), List.of("b"), 1.0, 1.0, 1.0));
+                queryEval("q", Set.of("a"), List.of("a")),
+                queryEval("r", Set.of("b"), List.of("b")));
 
         assertThrows(IllegalArgumentException.class, () -> new EvaluationComparator().compare(a, b));
     }
@@ -114,19 +106,19 @@ class EvaluationComparatorTest {
     @Test
     void rejectsReportsWithDifferentQueryOrder() {
         var a = report(
-                queryEval("first", Set.of("a"), List.of("a"), 1.0, 1.0, 1.0),
-                queryEval("second", Set.of("b"), List.of("b"), 1.0, 1.0, 1.0));
+                queryEval("first", Set.of("a"), List.of("a")),
+                queryEval("second", Set.of("b"), List.of("b")));
         var b = report(
-                queryEval("second", Set.of("b"), List.of("b"), 1.0, 1.0, 1.0),
-                queryEval("first", Set.of("a"), List.of("a"), 1.0, 1.0, 1.0));
+                queryEval("second", Set.of("b"), List.of("b")),
+                queryEval("first", Set.of("a"), List.of("a")));
 
         assertThrows(IllegalArgumentException.class, () -> new EvaluationComparator().compare(a, b));
     }
 
     @Test
     void rejectsReportsWithDifferentExpectedLabelsForSameQuery() {
-        var a = report(queryEval("q", Set.of("a"), List.of("a"), 1.0, 1.0, 1.0));
-        var b = report(queryEval("q", Set.of("b"), List.of("b"), 1.0, 1.0, 1.0));
+        var a = report(queryEval("q", Set.of("a"), List.of("a")));
+        var b = report(queryEval("q", Set.of("b"), List.of("b")));
 
         assertThrows(IllegalArgumentException.class, () -> new EvaluationComparator().compare(a, b));
     }
@@ -141,66 +133,81 @@ class EvaluationComparatorTest {
 
     // ----- helpers -----
 
+    /**
+     * Builds a {@link QueryEvaluation} whose per-query metrics are computed from
+     * {@code expected} and {@code returned} via the same helpers used by
+     * {@link EvaluationRunner}, so the resulting record is internally consistent
+     * with what a real run would produce (Hit@K, Recall@K, Precision@K and
+     * reciprocal rank all derived from the same label inputs).
+     */
     private static QueryEvaluation queryEval(String text,
                                              Set<String> expected,
-                                             List<String> returned,
-                                             double hit1,
-                                             double recall3,
-                                             double recall5) {
+                                             List<String> returned) {
         return new QueryEvaluation(
                 text,
                 expected,
                 returned,
-                Map.of(1, hit1, 3, hit1, 5, hit1),
-                Map.of(1, hit1, 3, recall3, 5, recall5),
-                Map.of(1, hit1, 3, hit1, 5, hit1),
-                hit1);
+                metricByK(expected, returned, PrecisionAtK::compute),
+                metricByK(expected, returned, RecallAtK::compute),
+                metricByK(expected, returned, HitAtK::compute),
+                ReciprocalRank.compute(expected, returned));
     }
 
-    private static EvaluationReport report(QueryEvaluation... queries) {
-        double mrr = 0.0;
-        for (QueryEvaluation q : queries) {
-            mrr += q.reciprocalRank();
+    private static Map<Integer, Double> metricByK(Set<String> expected,
+                                                  List<String> returned,
+                                                  KMetric metric) {
+        var map = new TreeMap<Integer, Double>();
+        for (int k : EvaluationRunner.DEFAULT_KS) {
+            map.put(k, metric.apply(expected, returned, k));
         }
-        mrr = queries.length == 0 ? 0.0 : mrr / queries.length;
-        return reportWithMrr(mrr, queries);
+        return map;
     }
 
-    private static EvaluationReport report(double mrr, QueryEvaluation... queries) {
-        return reportWithMrr(mrr, queries);
-    }
-
-    private static EvaluationReport reportWithMrr(double mrr, QueryEvaluation... queries) {
-        // Average each metric using the same logic the runner uses, so the report's
-        // aggregate maps stay consistent with the per-query maps regardless of how
-        // the test constructs them.
-        double avgHit1 = average(queries, q -> q.hitByK().get(1));
-        double avgHit3 = average(queries, q -> q.hitByK().get(3));
-        double avgHit5 = average(queries, q -> q.hitByK().get(5));
-        double avgRecall1 = average(queries, q -> q.recallByK().get(1));
-        double avgRecall3 = average(queries, q -> q.recallByK().get(3));
-        double avgRecall5 = average(queries, q -> q.recallByK().get(5));
-        double avgPrecision1 = average(queries, q -> q.precisionByK().get(1));
-        double avgPrecision3 = average(queries, q -> q.precisionByK().get(3));
-        double avgPrecision5 = average(queries, q -> q.precisionByK().get(5));
-
+    /**
+     * Mirrors {@link EvaluationRunner}'s aggregation: averages each per-query
+     * metric across all queries and uses the average reciprocal rank as the
+     * report's {@code meanReciprocalRank}, so the resulting report is
+     * internally consistent with what a full evaluation run would produce.
+     */
+    private static EvaluationReport report(QueryEvaluation... queries) {
+        if (queries.length == 0) {
+            throw new IllegalArgumentException("queries must not be empty");
+        }
+        int n = queries.length;
+        var avgPrecision = averageByK(queries, QueryEvaluation::precisionByK);
+        var avgRecall = averageByK(queries, QueryEvaluation::recallByK);
+        var avgHit = averageByK(queries, QueryEvaluation::hitByK);
+        double rrSum = 0.0;
+        for (var q : queries) {
+            rrSum += q.reciprocalRank();
+        }
         return new EvaluationReport(
                 List.of(queries),
-                Map.of(1, avgPrecision1, 3, avgPrecision3, 5, avgPrecision5),
-                Map.of(1, avgRecall1, 3, avgRecall3, 5, avgRecall5),
-                Map.of(1, avgHit1, 3, avgHit3, 5, avgHit5),
-                mrr);
+                avgPrecision,
+                avgRecall,
+                avgHit,
+                rrSum / n);
     }
 
-    private static double average(QueryEvaluation[] queries,
-                                  java.util.function.ToDoubleFunction<QueryEvaluation> f) {
-        if (queries.length == 0) {
-            return 0.0;
+    private static Map<Integer, Double> averageByK(
+            QueryEvaluation[] queries,
+            java.util.function.Function<QueryEvaluation, Map<Integer, Double>> extractor) {
+        var sums = new TreeMap<Integer, Double>();
+        for (var q : queries) {
+            for (var entry : extractor.apply(q).entrySet()) {
+                sums.merge(entry.getKey(), entry.getValue(), Double::sum);
+            }
         }
-        double sum = 0.0;
-        for (QueryEvaluation q : queries) {
-            sum += f.applyAsDouble(q);
+        var avg = new TreeMap<Integer, Double>();
+        int n = queries.length;
+        for (var entry : sums.entrySet()) {
+            avg.put(entry.getKey(), entry.getValue() / n);
         }
-        return sum / queries.length;
+        return avg;
+    }
+
+    @FunctionalInterface
+    private interface KMetric {
+        double apply(Set<String> expected, List<String> ranked, int k);
     }
 }
