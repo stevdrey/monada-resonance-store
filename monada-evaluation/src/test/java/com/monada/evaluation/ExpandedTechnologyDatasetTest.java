@@ -86,15 +86,25 @@ class ExpandedTechnologyDatasetTest {
     void datasetIncludesAllQueryDifficultyTypes() {
         var dataset = ExpandedTechnologyDataset.get();
 
-        // At least one query with multiple expected labels (multi-relevant)
         var hasMultiRelevant = dataset.queries().stream()
                 .anyMatch(q -> q.expectedLabels().size() > 1);
         assertTrue(hasMultiRelevant, "dataset must include at least one multi-relevant query");
 
-        // At least one query with exactly one expected label (direct)
         var hasDirect = dataset.queries().stream()
                 .anyMatch(q -> q.expectedLabels().size() == 1);
         assertTrue(hasDirect, "dataset must include at least one direct query");
+
+        assertQueryExists(dataset, "graph database for nodes and relationships");
+        assertQueryExists(dataset, "graph and document database model");
+        assertQueryExists(dataset, "fast memory cache for temporary lookups");
+        assertQueryExists(dataset, "similarity search over high dimensional representations");
+        assertQueryExists(dataset, "memory recall improved by user signals");
+    }
+
+    private static void assertQueryExists(EvaluationDataset dataset, String text) {
+        var exists = dataset.queries().stream()
+                .anyMatch(q -> q.text().equals(text));
+        assertTrue(exists, "dataset must include query: " + text);
     }
 
     private static void assertFiniteUnitInterval(double value, String label) {
