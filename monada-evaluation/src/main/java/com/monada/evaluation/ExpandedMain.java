@@ -6,7 +6,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
-import java.util.stream.Stream;
 
 /**
  * Entry point for running the expanded evaluation dataset from the command line:

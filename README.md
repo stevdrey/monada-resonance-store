@@ -525,14 +525,14 @@ when scores tie.
 The `ExpandedTechnologyDataset` is a larger and harder evaluation suite designed to
 expose encoder and ranking limitations before optimizing. It covers four concept
 groups (databases/storage, search/retrieval, AI memory/representation, distributed
-systems) with ~35 atoms and ~18 queries of varying difficulty.
+systems) with 33 atoms and 18 queries of varying difficulty.
  
 **Key differences from the default baseline:**
  
 | Aspect | `DefaultDatabasesDataset` | `ExpandedTechnologyDataset` |
 |--------|--------------------------|----------------------------|
 | Purpose | Protected regression baseline | Exploratory stress test |
-| Size | 8 atoms, 6 queries | 35 atoms, 18 queries |
+| Size | 8 atoms, 6 queries | 33 atoms, 18 queries |
 | Metric thresholds | Locked in `EvaluationBaselineRegressionTest` | Not locked; lower scores expected |
 | Query types | Direct, multi-relevant | Direct, multi-relevant, synonym/paraphrase, confusable, feedback-sensitive |
  

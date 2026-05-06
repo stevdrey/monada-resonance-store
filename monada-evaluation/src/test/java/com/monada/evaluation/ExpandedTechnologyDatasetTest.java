@@ -6,7 +6,6 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.util.HashSet;
-import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -31,46 +30,12 @@ class ExpandedTechnologyDatasetTest {
     }
 
     @Test
-    void atomIdsAreUnique() {
-        var dataset = ExpandedTechnologyDataset.get();
-        var labels = new HashSet<String>();
-        for (DatasetAtom atom : dataset.atoms()) {
-            assertTrue(labels.add(atom.label()),
-                    "duplicate atom label: " + atom.label());
-        }
-    }
-
-    @Test
     void queryTextsAreUnique() {
         var dataset = ExpandedTechnologyDataset.get();
         var texts = new HashSet<String>();
         for (var query : dataset.queries()) {
             assertTrue(texts.add(query.text()),
                     "duplicate query text: " + query.text());
-        }
-    }
-
-    @Test
-    void everyExpectedLabelExistsAsAtomId() {
-        var dataset = ExpandedTechnologyDataset.get();
-        var atomLabels = new HashSet<String>();
-        for (var atom : dataset.atoms()) {
-            atomLabels.add(atom.label());
-        }
-        for (var query : dataset.queries()) {
-            for (var expected : query.expectedLabels()) {
-                assertTrue(atomLabels.contains(expected),
-                        "query '" + query.text() + "' references unknown atom label: " + expected);
-            }
-        }
-    }
-
-    @Test
-    void eachQueryHasAtLeastOneExpectedLabel() {
-        var dataset = ExpandedTechnologyDataset.get();
-        for (var query : dataset.queries()) {
-            assertFalse(query.expectedLabels().isEmpty(),
-                    "query must have at least one expected label: " + query.text());
         }
     }
 

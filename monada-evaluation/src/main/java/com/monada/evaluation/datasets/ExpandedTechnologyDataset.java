@@ -113,7 +113,7 @@ public final class ExpandedTechnologyDataset {
                         "distributed search engine with inverted indexes",
                         Set.of("ka_elasticsearch", "ka_inverted_index")),
                 new EvaluationQuery(
-                        "embedded key-value storage engine",
+                        "embedded lightweight storage engine",
                         Set.of("ka_rocksdb", "ka_sqlite")),
 
                 // --- Multi-relevant queries ---
