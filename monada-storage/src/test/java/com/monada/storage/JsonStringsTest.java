@@ -16,6 +16,14 @@ class JsonStringsTest {
     }
 
     @Test
+    void unescapeRejectsInvalidUnicodeHex() {
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> JsonStrings.unescape("\\uZZZZ", "test source"));
+        assertTrue(ex.getMessage().contains("test source"));
+        assertTrue(ex.getMessage().contains("ZZZZ"));
+    }
+
+    @Test
     void escapeAndUnescapeRoundTrip() {
         String value = "quotes \" slash \\ newline\n tab\t";
         assertEquals(value, JsonStrings.unescape(JsonStrings.escape(value), "test source"));

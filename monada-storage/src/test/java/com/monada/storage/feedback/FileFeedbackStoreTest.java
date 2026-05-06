@@ -75,6 +75,17 @@ class FileFeedbackStoreTest {
     }
 
     @Test
+    void corruptLogEntryIncludesLineInErrorMessage() throws IOException {
+        var store = new FileFeedbackStore(root);
+        Path logFile = root.resolve(FeedbackStore.DEFAULT_SEGMENT);
+        String corrupt = "{\"query\":\"q\",\"atomId\":\"a\",\"signal\":\"BOGUS\",\"delta\":0.05,\"createdAt\":\"2026-05-01T00:00:00Z\"}";
+        Files.writeString(logFile, corrupt + System.lineSeparator(), StandardCharsets.UTF_8);
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, store::findAll);
+        assertTrue(ex.getMessage().contains(corrupt));
+    }
+
+    @Test
     void rejectsInvalidEventFields() {
         assertThrows(NullPointerException.class,
                 () -> new FeedbackEvent(null, "a", FeedbackSignal.POSITIVE, 0.05, Instant.EPOCH));

@@ -538,7 +538,7 @@ The ranking formula applied by `FeedbackAwareResonanceIndex` is:
 
 ```text
 adjustedScore(atom, query) = baseScore(atom, query) + Σ delta(event)
-    over all events where event.query == query and event.atomId == atom.id
+    over all events where event.query.equals(query) and event.atomId.equals(atom.id)
 ```
 
 Key properties:

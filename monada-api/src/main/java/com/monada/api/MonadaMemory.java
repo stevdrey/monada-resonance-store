@@ -115,6 +115,7 @@ public class MonadaMemory {
      * default delta for the given signal.
      */
     public void feedback(String query, String atomId, FeedbackSignal signal) {
+        Objects.requireNonNull(signal, "signal");
         double delta = switch (signal) {
             case POSITIVE -> DEFAULT_POSITIVE_DELTA;
             case NEGATIVE -> DEFAULT_NEGATIVE_DELTA;

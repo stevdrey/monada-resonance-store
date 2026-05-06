@@ -54,7 +54,13 @@ public final class JsonStrings {
                     if (i + 4 >= value.length()) {
                         throw new IllegalStateException("Invalid \\u escape in " + sourceName);
                     }
-                    out.append((char) Integer.parseInt(value.substring(i + 1, i + 5), 16));
+                    String hex = value.substring(i + 1, i + 5);
+                    try {
+                        out.append((char) Integer.parseInt(hex, 16));
+                    } catch (NumberFormatException e) {
+                        throw new IllegalStateException(
+                                "Invalid \\u hex sequence \\u" + hex + " in " + sourceName, e);
+                    }
                     i += 4;
                 }
                 default -> throw new IllegalStateException("Invalid escape \\" + next + " in " + sourceName);

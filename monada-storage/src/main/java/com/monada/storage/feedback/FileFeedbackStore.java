@@ -120,12 +120,16 @@ public class FileFeedbackStore implements FeedbackStore {
         if (query == null || atomId == null || signal == null || createdAt == null || delta == null) {
             throw new IllegalStateException("Malformed feedback log entry: " + line);
         }
-        return new FeedbackEvent(
-                query,
-                atomId,
-                FeedbackSignal.valueOf(signal),
-                delta,
-                Instant.parse(createdAt));
+        try {
+            return new FeedbackEvent(
+                    query,
+                    atomId,
+                    FeedbackSignal.valueOf(signal),
+                    delta,
+                    Instant.parse(createdAt));
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("Malformed feedback log entry: " + line, e);
+        }
     }
 
     private static String formatDelta(double delta) {
