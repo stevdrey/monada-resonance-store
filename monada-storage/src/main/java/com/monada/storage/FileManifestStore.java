@@ -7,15 +7,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class FileManifestStore implements ManifestStore {
-
-    private static final Pattern STRING_FIELD = Pattern.compile(
-            "\"(version|vectorSegment|atomSegment|feedbackSegment)\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
-    private static final Pattern INT_FIELD = Pattern.compile(
-            "\"(dimensions)\"\\s*:\\s*(-?\\d+)");
 
     private final Path root;
 
@@ -63,29 +56,16 @@ public class FileManifestStore implements ManifestStore {
     }
 
     private static Manifest parse(String json) {
-        String version = null;
-        String vectorSegment = null;
-        String atomSegment = null;
-        String feedbackSegment = FeedbackStore.DEFAULT_SEGMENT;
-        Matcher stringMatcher = STRING_FIELD.matcher(json);
-        while (stringMatcher.find()) {
-            String value = JsonStrings.unescape(stringMatcher.group(2), "manifest.json");
-            switch (stringMatcher.group(1)) {
-                case "version" -> version = value;
-                case "vectorSegment" -> vectorSegment = value;
-                case "atomSegment" -> atomSegment = value;
-                case "feedbackSegment" -> feedbackSegment = value;
-            }
-        }
-        Integer dimensions = null;
-        Matcher intMatcher = INT_FIELD.matcher(json);
-        if (intMatcher.find()) {
-            dimensions = Integer.parseInt(intMatcher.group(2));
-        }
+        var fields = JsonStrings.parseFlat(json, "manifest.json");
+        String version = fields.get("version");
+        String vectorSegment = fields.get("vectorSegment");
+        String atomSegment = fields.get("atomSegment");
+        String feedbackSegment = fields.getOrDefault("feedbackSegment", FeedbackStore.DEFAULT_SEGMENT);
+        String dimensions = fields.get("dimensions");
         if (version == null || vectorSegment == null || atomSegment == null || dimensions == null) {
             throw new IllegalStateException(
                     "Invalid manifest.json: missing one of version/dimensions/vectorSegment/atomSegment");
         }
-        return new Manifest(version, dimensions, vectorSegment, atomSegment, feedbackSegment);
+        return new Manifest(version, Integer.parseInt(dimensions), vectorSegment, atomSegment, feedbackSegment);
     }
 }

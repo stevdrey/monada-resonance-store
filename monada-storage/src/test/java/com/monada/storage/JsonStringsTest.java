@@ -28,4 +28,23 @@ class JsonStringsTest {
         String value = "quotes \" slash \\ newline\n tab\t";
         assertEquals(value, JsonStrings.unescape(JsonStrings.escape(value), "test source"));
     }
+
+    @Test
+    void parseFlatExtractsFieldsCorrectly() {
+        var fields = JsonStrings.parseFlat(
+                "{\"query\":\"alpha\",\"delta\":0.05,\"createdAt\":\"2026-05-01T00:00:00Z\"}",
+                "test source");
+        assertEquals("alpha", fields.get("query"));
+        assertEquals("0.05", fields.get("delta"));
+        assertEquals("2026-05-01T00:00:00Z", fields.get("createdAt"));
+    }
+
+    @Test
+    void parseFlatIgnoresEmbeddedFieldPatterns() {
+        var fields = JsonStrings.parseFlat(
+                "{\"query\":\"contains \\\"delta\\\": 99.9 inside text\",\"delta\":0.05}",
+                "test source");
+        assertEquals("contains \"delta\": 99.9 inside text", fields.get("query"));
+        assertEquals("0.05", fields.get("delta"));
+    }
 }

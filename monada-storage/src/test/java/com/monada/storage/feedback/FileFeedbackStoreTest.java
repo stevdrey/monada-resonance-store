@@ -64,6 +64,21 @@ class FileFeedbackStoreTest {
     }
 
     @Test
+    void queryContainingJsonFieldPatternRoundTrips() throws IOException {
+        var store = new FileFeedbackStore(root);
+        var event = new FeedbackEvent(
+                "query contains \"delta\": 99.9 and \"signal\":\"NEGATIVE\" text",
+                "ka_embedded",
+                FeedbackSignal.POSITIVE,
+                0.25,
+                Instant.parse("2026-05-01T00:00:00Z"));
+
+        store.append(event);
+
+        assertEquals(List.of(event), store.findAll());
+    }
+
+    @Test
     void blankLinesAreTolerated() throws IOException {
         var store = new FileFeedbackStore(root);
         store.append(new FeedbackEvent("q", "a", FeedbackSignal.POSITIVE, 0.05, Instant.EPOCH));

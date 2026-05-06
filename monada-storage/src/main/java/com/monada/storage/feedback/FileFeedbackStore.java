@@ -11,8 +11,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Append-only JSON-lines feedback log.
@@ -22,11 +20,6 @@ import java.util.regex.Pattern;
  * matching the style of {@code FileManifestStore}.
  */
 public class FileFeedbackStore implements FeedbackStore {
-
-    private static final Pattern STRING_FIELD = Pattern.compile(
-            "\"(query|atomId|signal|createdAt)\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
-    private static final Pattern NUMBER_FIELD = Pattern.compile(
-            "\"(delta)\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?(?:[eE][-+]?\\d+)?)");
 
     private final Path logFile;
 
@@ -98,34 +91,21 @@ public class FileFeedbackStore implements FeedbackStore {
     }
 
     private static FeedbackEvent parse(String line) {
-        String query = null;
-        String atomId = null;
-        String signal = null;
-        String createdAt = null;
-        Matcher stringMatcher = STRING_FIELD.matcher(line);
-        while (stringMatcher.find()) {
-            String value = JsonStrings.unescape(stringMatcher.group(2), "feedback log");
-            switch (stringMatcher.group(1)) {
-                case "query" -> query = value;
-                case "atomId" -> atomId = value;
-                case "signal" -> signal = value;
-                case "createdAt" -> createdAt = value;
-            }
-        }
-        Double delta = null;
-        Matcher numberMatcher = NUMBER_FIELD.matcher(line);
-        if (numberMatcher.find()) {
-            delta = Double.parseDouble(numberMatcher.group(2));
-        }
-        if (query == null || atomId == null || signal == null || createdAt == null || delta == null) {
-            throw new IllegalStateException("Malformed feedback log entry: " + line);
-        }
         try {
+            var fields = JsonStrings.parseFlat(line, "feedback log");
+            String query = fields.get("query");
+            String atomId = fields.get("atomId");
+            String signal = fields.get("signal");
+            String delta = fields.get("delta");
+            String createdAt = fields.get("createdAt");
+            if (query == null || atomId == null || signal == null || delta == null || createdAt == null) {
+                throw new IllegalStateException("Malformed feedback log entry: " + line);
+            }
             return new FeedbackEvent(
                     query,
                     atomId,
                     FeedbackSignal.valueOf(signal),
-                    delta,
+                    Double.parseDouble(delta),
                     Instant.parse(createdAt));
         } catch (RuntimeException e) {
             throw new IllegalStateException("Malformed feedback log entry: " + line, e);
