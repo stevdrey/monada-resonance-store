@@ -11,3 +11,10 @@ dependencies {
 application {
     mainClass.set("com.monada.evaluation.Main")
 }
+
+tasks.register<JavaExec>("runExpanded") {
+    description = "Run the expanded technology evaluation dataset (exploratory, not protected baseline)"
+    group = "application"
+    mainClass.set("com.monada.evaluation.ExpandedMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
