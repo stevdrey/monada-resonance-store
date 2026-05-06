@@ -10,6 +10,7 @@ public final class JsonStrings {
     }
 
     public static String escape(String value) {
+        Objects.requireNonNull(value, "value");
         StringBuilder out = new StringBuilder(value.length() + 2);
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
@@ -34,6 +35,8 @@ public final class JsonStrings {
     }
 
     public static String unescape(String value, String sourceName) {
+        Objects.requireNonNull(value, "value");
+        Objects.requireNonNull(sourceName, "sourceName");
         StringBuilder out = new StringBuilder(value.length());
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);

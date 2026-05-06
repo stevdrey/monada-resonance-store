@@ -9,6 +9,27 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class JsonStringsTest {
 
     @Test
+    void escapeRejectsNullValueWithParameterName() {
+        NullPointerException ex = assertThrows(NullPointerException.class,
+                () -> JsonStrings.escape(null));
+        assertEquals("value", ex.getMessage());
+    }
+
+    @Test
+    void unescapeRejectsNullValueWithParameterName() {
+        NullPointerException ex = assertThrows(NullPointerException.class,
+                () -> JsonStrings.unescape(null, "test source"));
+        assertEquals("value", ex.getMessage());
+    }
+
+    @Test
+    void unescapeRejectsNullSourceNameWithParameterName() {
+        NullPointerException ex = assertThrows(NullPointerException.class,
+                () -> JsonStrings.unescape("value", null));
+        assertEquals("sourceName", ex.getMessage());
+    }
+
+    @Test
     void unescapeRejectsTrailingBackslash() {
         IllegalStateException ex = assertThrows(IllegalStateException.class,
                 () -> JsonStrings.unescape("bad\\", "test source"));
