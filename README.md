@@ -520,7 +520,53 @@ Resonance results are ordered deterministically by score descending and then by 
 id ascending, so top-K output is stable across runs and fresh memory directories even
 when scores tie.
 
-## 10.2 Feedback-Aware Ranking
+## 10.2 Expanded Technology Dataset (Exploratory)
+ 
+The `ExpandedTechnologyDataset` is a larger and harder evaluation suite designed to
+expose encoder and ranking limitations before optimizing. It covers four concept
+groups (databases/storage, search/retrieval, AI memory/representation, distributed
+systems) with 33 atoms and 18 queries of varying difficulty.
+ 
+**Key differences from the default baseline:**
+ 
+| Aspect | `DefaultDatabasesDataset` | `ExpandedTechnologyDataset` |
+|--------|--------------------------|----------------------------|
+| Purpose | Protected regression baseline | Exploratory stress test |
+| Size | 8 atoms, 6 queries | 33 atoms, 18 queries |
+| Metric thresholds | Locked in `EvaluationBaselineRegressionTest` | Not locked; lower scores expected |
+| Query types | Direct, multi-relevant | Direct, multi-relevant, synonym/paraphrase, confusable, feedback-sensitive |
+ 
+Run the expanded evaluation report:
+ 
+```bash
+./gradlew :monada-evaluation:runExpanded -q
+```
+ 
+Run expanded dataset tests:
+ 
+```bash
+./gradlew :monada-evaluation:test --tests com.monada.evaluation.ExpandedTechnologyDatasetTest
+```
+ 
+### Known weaknesses exposed by the expanded dataset
+ 
+The following limitations are expected with the current `SimpleFrequencyEncoder`:
+ 
+- **Synonym/paraphrase queries rank poorly** because the encoder is token-hash based;
+  terms with different surface forms but similar meaning share no vector signal.
+- **Semantically related terms without token overlap** are not handled well; for
+  example, "splitting data across multiple machines" may not strongly activate
+  `ka_sharding` because the atom description uses different vocabulary.
+- **Feedback is exact-query scoped** and does not generalize across paraphrases; a
+  feedback event recorded for "fast cache" has no effect on a query phrased as
+  "temporary lookup store".
+- **Confusable queries** with many nearby atoms may rank non-preferred atoms higher
+  than expected because the encoder treats all overlapping tokens equally.
+ 
+These weaknesses are intentional measurement points for future encoder and
+ranking improvements.
+ 
+## 10.3 Feedback-Aware Ranking
 
 Monada Resonance Store supports a first iteration of **feedback-aware ranking**. Clients can record positive or negative feedback against an atom id for a specific query; future queries that match that exact text re-rank the base resonance results using the aggregated feedback delta.
 

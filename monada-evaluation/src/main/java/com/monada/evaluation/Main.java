@@ -5,8 +5,6 @@ import com.monada.evaluation.datasets.DefaultDatabasesDataset;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Comparator;
-import java.util.stream.Stream;
 
 /**
  * Entry point for running the evaluation harness from the command line:
@@ -29,22 +27,7 @@ public final class Main {
                     .run(DefaultDatabasesDataset.get(), workdir);
             System.out.println(report.render());
         } finally {
-            deleteRecursively(workdir);
-        }
-    }
-
-    private static void deleteRecursively(Path path) throws IOException {
-        if (!Files.exists(path)) {
-            return;
-        }
-        try (Stream<Path> walk = Files.walk(path)) {
-            walk.sorted(Comparator.reverseOrder()).forEach(p -> {
-                try {
-                    Files.deleteIfExists(p);
-                } catch (IOException ignored) {
-                    // best effort cleanup
-                }
-            });
+            EvaluationTempDirectories.deleteRecursively(workdir);
         }
     }
 }
