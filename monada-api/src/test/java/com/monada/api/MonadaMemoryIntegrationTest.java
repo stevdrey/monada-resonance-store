@@ -78,6 +78,20 @@ class MonadaMemoryIntegrationTest {
     }
 
     @Test
+    void stopWordOnlyQueryReturnsNoResultsAfterAtomsExist() {
+        var memory = MonadaMemory.open(memoryDirectory);
+        memory.remember("Redis is an in-memory data structure store often used as a cache.");
+        memory.remember("SQLite is an embedded relational database.");
+
+        var recall = memory.resonate("the and of")
+                .topK(5)
+                .threshold(0.0)
+                .execute();
+
+        assertTrue(recall.results().isEmpty());
+    }
+
+    @Test
     void feedbackAcceptsRememberedAtomsAndRejectsUnknownAtoms() {
         var memory = MonadaMemory.open(memoryDirectory);
         var atom = memory.remember("SQLite is an embedded relational database.");

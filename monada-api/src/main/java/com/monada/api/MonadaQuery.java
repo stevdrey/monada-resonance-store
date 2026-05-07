@@ -9,6 +9,7 @@ import com.monada.storage.feedback.FeedbackStore;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.List;
 import java.util.Objects;
 
 public class MonadaQuery {
@@ -47,7 +48,11 @@ public class MonadaQuery {
         try {
             ResonanceIndex index = new FeedbackAwareResonanceIndex(resonanceIndex, feedbackStore, query);
             var normalizedQuery = queryNormalizer.normalize(query);
-            var queryVector = encoder.encode(normalizedQuery.enrichedText());
+            var enrichedQuery = normalizedQuery.enrichedText();
+            if (enrichedQuery.isBlank()) {
+                return new MonadaRecall(List.of());
+            }
+            var queryVector = encoder.encode(enrichedQuery);
             return new MonadaRecall(index.search(queryVector, topK, threshold));
         } catch (IOException e) {
             throw new UncheckedIOException(e);

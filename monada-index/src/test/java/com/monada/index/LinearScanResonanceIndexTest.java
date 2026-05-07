@@ -70,6 +70,24 @@ class LinearScanResonanceIndexTest {
     }
 
     @Test
+    void duplicateStoredVectorsReturnHighestScoringResultPerAtom() throws IOException {
+        AtomStore atoms = new InMemoryAtomStore(List.of(atom("a"), atom("b")));
+        FrequencyStore vectors = new InMemoryFrequencyStore(List.of(
+                new StoredVector("a", new FrequencyVector(new float[]{0f, 1f})),
+                new StoredVector("b", new FrequencyVector(new float[]{1f, 1f})),
+                new StoredVector("a", new FrequencyVector(new float[]{1f, 0f}))
+        ));
+        LinearScanResonanceIndex index = new LinearScanResonanceIndex(atoms, vectors);
+
+        List<ResonanceResult> results = index.search(new FrequencyVector(new float[]{1f, 0f}), 10, 0.0);
+
+        assertEquals(2, results.size());
+        assertEquals("a", results.get(0).atom().id());
+        assertEquals(1.0, results.get(0).score());
+        assertEquals("b", results.get(1).atom().id());
+    }
+
+    @Test
     void searchLoadsAtomsOnceAndDoesNotUseFindById() throws IOException {
         int[] findAllCalls = {0};
         int[] findByIdCalls = {0};

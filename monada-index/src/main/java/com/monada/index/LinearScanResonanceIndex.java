@@ -30,7 +30,7 @@ public class LinearScanResonanceIndex implements ResonanceIndex {
         for (var atom : atomStore.findAll()) {
             atomsById.put(atom.id(), atom);
         }
-        var results = new ArrayList<ResonanceResult>();
+        var resultsByAtomId = new HashMap<String, ResonanceResult>();
         for (var storedVector : frequencyStore.findAll()) {
             var atom = atomsById.get(storedVector.atomId());
             if (atom == null) {
@@ -38,9 +38,13 @@ public class LinearScanResonanceIndex implements ResonanceIndex {
             }
             var score = cosineSimilarity(queryVector, storedVector.vector());
             if (score >= threshold) {
-                results.add(new ResonanceResult(atom, score));
+                var current = resultsByAtomId.get(atom.id());
+                if (current == null || score > current.score()) {
+                    resultsByAtomId.put(atom.id(), new ResonanceResult(atom, score));
+                }
             }
         }
+        var results = new ArrayList<>(resultsByAtomId.values());
         // Deterministic ordering: primary by score desc, secondary by atom id asc.
         // The secondary criterion guarantees stable top-K output when two or more
         // atoms share the same resonance score, independent of storage load order.
