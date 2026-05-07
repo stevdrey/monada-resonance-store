@@ -2,6 +2,8 @@ package com.monada.api;
 
 import com.monada.core.KnowledgeAtom;
 import com.monada.encoder.FrequencyEncoder;
+import com.monada.encoder.LexicalEnrichmentPipeline;
+import com.monada.encoder.QueryNormalizer;
 import com.monada.encoder.SimpleFrequencyEncoder;
 import com.monada.index.LinearScanResonanceIndex;
 import com.monada.index.ResonanceIndex;
@@ -21,6 +23,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -35,15 +38,17 @@ public class MonadaMemory {
     private static final int DEFAULT_KNOWN_ATOM_ID_CACHE_SIZE = 1024;
 
     private final FrequencyEncoder encoder;
+    private final QueryNormalizer queryNormalizer;
     private final AtomStore atomStore;
     private final FrequencyStore frequencyStore;
     private final ResonanceIndex resonanceIndex;
     private final FeedbackStore feedbackStore;
     private final KnownAtomIdCache knownAtomIds;
 
-    private MonadaMemory(FrequencyEncoder encoder, AtomStore atomStore, FrequencyStore frequencyStore,
+    private MonadaMemory(FrequencyEncoder encoder, QueryNormalizer queryNormalizer, AtomStore atomStore, FrequencyStore frequencyStore,
                          ResonanceIndex resonanceIndex, FeedbackStore feedbackStore, KnownAtomIdCache knownAtomIds) {
         this.encoder = encoder;
+        this.queryNormalizer = queryNormalizer;
         this.atomStore = atomStore;
         this.frequencyStore = frequencyStore;
         this.resonanceIndex = resonanceIndex;
@@ -79,8 +84,9 @@ public class MonadaMemory {
                     path, manifest.vectorSegment(), manifest.dimensions());
             FeedbackStore feedbackStore = new FileFeedbackStore(path, manifest.feedbackSegment());
             FrequencyEncoder encoder = new SimpleFrequencyEncoder(manifest.dimensions());
+            QueryNormalizer queryNormalizer = new LexicalEnrichmentPipeline();
             ResonanceIndex resonanceIndex = new LinearScanResonanceIndex(atomStore, frequencyStore);
-            return new MonadaMemory(encoder, atomStore, frequencyStore, resonanceIndex, feedbackStore,
+            return new MonadaMemory(encoder, queryNormalizer, atomStore, frequencyStore, resonanceIndex, feedbackStore,
                     new KnownAtomIdCache(DEFAULT_KNOWN_ATOM_ID_CACHE_SIZE));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -88,16 +94,20 @@ public class MonadaMemory {
     }
 
     public KnowledgeAtom remember(String text) {
+        return remember(text, List.of());
+    }
+
+    public KnowledgeAtom remember(String text, List<String> aliases) {
         try {
-            KnowledgeAtom atom = KnowledgeAtom.text(text);
-            Optional<KnowledgeAtom> existing = atomStore.findById(atom.id());
+            var atom = KnowledgeAtom.text(text, aliases);
+            var existing = atomStore.findById(atom.id());
             if (existing.isPresent()) {
                 knownAtomIds.remember(existing.get().id());
                 return existing.get();
             }
             // Persist vector first: a partial failure leaves an orphan vector that search
             // safely ignores, instead of an atom that cannot be recalled by resonance.
-            frequencyStore.save(atom.id(), encoder.encode(text));
+            frequencyStore.save(atom.id(), encoder.encode(atom.searchableContent()));
             atomStore.save(atom);
             knownAtomIds.remember(atom.id());
             return atom;
@@ -107,7 +117,7 @@ public class MonadaMemory {
     }
 
     public MonadaQuery resonate(String query) {
-        return new MonadaQuery(query, encoder, resonanceIndex, feedbackStore);
+        return new MonadaQuery(query, encoder, queryNormalizer, resonanceIndex, feedbackStore);
     }
 
     /**

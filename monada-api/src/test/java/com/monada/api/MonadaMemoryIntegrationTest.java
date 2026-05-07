@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -56,6 +57,24 @@ class MonadaMemoryIntegrationTest {
 
         assertEquals(1, recall.results().size());
         assertEquals(first.id(), recall.results().getFirst().atom().id());
+    }
+
+    @Test
+    void aliasesContributeToStoredVectorWithoutReplacingOriginalContent() {
+        var memory = MonadaMemory.open(memoryDirectory);
+        var atom = memory.remember("CQRS separates the read model from the write model.",
+                List.of("command query responsibility segregation", "read path write path"));
+
+        var recall = memory.resonate("command query responsibility segregation")
+                .topK(1)
+                .threshold(0.0)
+                .execute();
+
+        assertEquals(atom.id(), recall.results().getFirst().atom().id());
+        assertEquals("CQRS separates the read model from the write model.",
+                recall.results().getFirst().atom().content());
+        assertEquals(List.of("command query responsibility segregation", "read path write path"),
+                recall.results().getFirst().atom().aliases());
     }
 
     @Test

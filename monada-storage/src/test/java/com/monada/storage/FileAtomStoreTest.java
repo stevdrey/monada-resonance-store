@@ -11,9 +11,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -29,20 +28,35 @@ class FileAtomStoreTest {
 
     @Test
     void savesAndReadsBackAtom() throws IOException {
-        FileAtomStore store = new FileAtomStore(root);
-        KnowledgeAtom original = atom("a-1", "hello world", Map.of());
+        var store = new FileAtomStore(root);
+        var original = atom("a-1", "hello world", Map.of());
         store.save(original);
 
-        Optional<KnowledgeAtom> found = store.findById("a-1");
+        var found = store.findById("a-1");
         assertTrue(found.isPresent());
         assertEquals("hello world", found.get().content());
         assertEquals(AtomType.TEXT, found.get().type());
     }
 
     @Test
+    void savesAndReadsBackAliases() throws IOException {
+        var store = new FileAtomStore(root);
+        var original = new KnowledgeAtom("a-2", AtomType.TEXT, "CQRS",
+                List.of("command query responsibility segregation", "read path write path"),
+                Map.of(), 1.0, Instant.parse("2024-01-01T00:00:00Z"));
+        store.save(original);
+
+        var found = store.findById("a-2").orElseThrow();
+
+        assertEquals(original.aliases(), found.aliases());
+        assertEquals("CQRS command query responsibility segregation read path write path",
+                found.searchableContent());
+    }
+
+    @Test
     void rejectsAtomWithNonEmptyMetadata() throws IOException {
-        FileAtomStore store = new FileAtomStore(root);
-        KnowledgeAtom withMetadata = atom("a-2", "x", Map.of("k", "v"));
+        var store = new FileAtomStore(root);
+        var withMetadata = atom("a-2", "x", Map.of("k", "v"));
         IllegalArgumentException ex = assertThrows(
                 IllegalArgumentException.class, () -> store.save(withMetadata));
         assertTrue(ex.getMessage().contains("metadata"));
@@ -50,8 +64,8 @@ class FileAtomStoreTest {
 
     @Test
     void parseWrapsLowLevelErrorsWithLineContext() throws IOException {
-        FileAtomStore store = new FileAtomStore(root);
-        Path log = root.resolve("atoms/segment-000001.log");
+        var store = new FileAtomStore(root);
+        var log = root.resolve("atoms/segment-000001.log");
         // Five fields but weight is not numeric -> NumberFormatException
         Files.writeString(log,
                 "id-1\tTEXT\tnot-a-number\t2024-01-01T00:00:00Z\taGVsbG8=" + System.lineSeparator(),
@@ -65,13 +79,27 @@ class FileAtomStoreTest {
 
     @Test
     void parseFailsOnMalformedLineWithDescriptiveError() throws IOException {
-        FileAtomStore store = new FileAtomStore(root);
-        Path log = root.resolve("atoms/segment-000001.log");
+        var store = new FileAtomStore(root);
+        var log = root.resolve("atoms/segment-000001.log");
         Files.writeString(log, "only-one-field" + System.lineSeparator(),
                 StandardCharsets.UTF_8, StandardOpenOption.APPEND);
 
         IllegalStateException ex = assertThrows(IllegalStateException.class, store::findAll);
         assertTrue(ex.getMessage().contains("Malformed atom log entry"));
-        assertTrue(ex.getMessage().contains("expected 5"));
+        assertTrue(ex.getMessage().contains("expected 5 or 6"));
+    }
+
+    @Test
+    void parsesLegacyFiveFieldAtomLogEntriesWithEmptyAliases() throws IOException {
+        var store = new FileAtomStore(root);
+        var log = root.resolve("atoms/segment-000001.log");
+        Files.writeString(log,
+                "legacy-id\tTEXT\t1.0\t2024-01-01T00:00:00Z\tbGVnYWN5IGNvbnRlbnQ=" + System.lineSeparator(),
+                StandardCharsets.UTF_8, StandardOpenOption.APPEND);
+
+        var found = store.findById("legacy-id").orElseThrow();
+
+        assertEquals("legacy content", found.content());
+        assertEquals(List.of(), found.aliases());
     }
 }

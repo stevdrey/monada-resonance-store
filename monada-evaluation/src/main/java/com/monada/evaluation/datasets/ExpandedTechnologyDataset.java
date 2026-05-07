@@ -34,7 +34,8 @@ public final class ExpandedTechnologyDataset {
                 new DatasetAtom("ka_oracle",
                         "Oracle Database is an enterprise relational database with advanced SQL, partitioning, and high availability."),
                 new DatasetAtom("ka_redis",
-                        "Redis is an in-memory key-value data store commonly used for caching and fast lookups."),
+                        "Redis is an in-memory key-value data store commonly used for caching and fast lookups.",
+                        List.of("temporary lookup cache", "fast repeated access", "cache layer")),
                 new DatasetAtom("ka_elasticsearch",
                         "Elasticsearch is a distributed search and analytics engine based on inverted indexes."),
                 new DatasetAtom("ka_neo4j",
@@ -66,7 +67,8 @@ public final class ExpandedTechnologyDataset {
                 new DatasetAtom("ka_ranking",
                         "Ranking orders search results by relevance score so the most useful items appear first."),
                 new DatasetAtom("ka_reranking",
-                        "Re-ranking refines an initial retrieval list using a more expensive model to improve precision at the top."),
+                        "Re-ranking refines an initial retrieval list using a more expensive model to improve precision at the top.",
+                        List.of("second pass model", "reranking", "improving search results order")),
 
                 // --- AI memory and representation ---
                 new DatasetAtom("ka_knowledge_atoms",
@@ -78,7 +80,8 @@ public final class ExpandedTechnologyDataset {
                 new DatasetAtom("ka_associative_memory",
                         "Associative memory retrieves stored patterns by similarity to a given cue, even with partial or noisy input."),
                 new DatasetAtom("ka_resonance_recall",
-                        "Resonance recall activates stored knowledge whose frequency representation is close to the query vector."),
+                        "Resonance recall activates stored knowledge whose frequency representation is close to the query vector.",
+                        List.of("frequency closeness", "memory recall by resonance similarity", "resonance activation")),
                 new DatasetAtom("ka_feedback_aware_ranking",
                         "Feedback-aware ranking adjusts retrieval scores based on accumulated user signals to improve future recall."),
                 new DatasetAtom("ka_query_normalization",
@@ -90,7 +93,9 @@ public final class ExpandedTechnologyDataset {
                 new DatasetAtom("ka_append_only_log",
                         "An append-only log is a data structure where new entries are always written at the end, preserving history."),
                 new DatasetAtom("ka_cqrs",
-                        "CQRS separates the read model from the write model so each can be optimized independently."),
+                        "CQRS separates the read model from the write model so each can be optimized independently.",
+                        List.of("command query responsibility segregation", "separate read write model",
+                                "separate read and write model", "read path write path", "read model write model")),
                 new DatasetAtom("ka_consensus",
                         "Consensus algorithms allow distributed nodes to agree on a single value even in the presence of failures."),
                 new DatasetAtom("ka_replication",
@@ -98,7 +103,8 @@ public final class ExpandedTechnologyDataset {
                 new DatasetAtom("ka_sharding",
                         "Sharding partitions data across multiple nodes so each node stores only a subset of the total dataset."),
                 new DatasetAtom("ka_caching",
-                        "Caching stores frequently accessed data in a fast layer to reduce latency and backend load.")
+                        "Caching stores frequently accessed data in a fast layer to reduce latency and backend load.",
+                        List.of("temporary lookup", "fast repeated access", "cache layer"))
         );
 
         var queries = List.of(
