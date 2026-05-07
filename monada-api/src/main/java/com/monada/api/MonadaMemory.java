@@ -3,8 +3,8 @@ package com.monada.api;
 import com.monada.core.KnowledgeAtom;
 import com.monada.encoder.FrequencyEncoder;
 import com.monada.encoder.LexicalEnrichmentPipeline;
-import com.monada.encoder.QueryNormalizer;
 import com.monada.encoder.SimpleFrequencyEncoder;
+import com.monada.encoder.TextNormalizer;
 import com.monada.index.LinearScanResonanceIndex;
 import com.monada.index.ResonanceIndex;
 import com.monada.storage.AtomStore;
@@ -38,17 +38,17 @@ public class MonadaMemory {
     private static final int DEFAULT_KNOWN_ATOM_ID_CACHE_SIZE = 1024;
 
     private final FrequencyEncoder encoder;
-    private final QueryNormalizer queryNormalizer;
+    private final TextNormalizer textNormalizer;
     private final AtomStore atomStore;
     private final FrequencyStore frequencyStore;
     private final ResonanceIndex resonanceIndex;
     private final FeedbackStore feedbackStore;
     private final KnownAtomIdCache knownAtomIds;
 
-    private MonadaMemory(FrequencyEncoder encoder, QueryNormalizer queryNormalizer, AtomStore atomStore, FrequencyStore frequencyStore,
+    private MonadaMemory(FrequencyEncoder encoder, TextNormalizer textNormalizer, AtomStore atomStore, FrequencyStore frequencyStore,
                          ResonanceIndex resonanceIndex, FeedbackStore feedbackStore, KnownAtomIdCache knownAtomIds) {
         this.encoder = encoder;
-        this.queryNormalizer = queryNormalizer;
+        this.textNormalizer = textNormalizer;
         this.atomStore = atomStore;
         this.frequencyStore = frequencyStore;
         this.resonanceIndex = resonanceIndex;
@@ -84,9 +84,9 @@ public class MonadaMemory {
                     path, manifest.vectorSegment(), manifest.dimensions());
             FeedbackStore feedbackStore = new FileFeedbackStore(path, manifest.feedbackSegment());
             FrequencyEncoder encoder = new SimpleFrequencyEncoder(manifest.dimensions());
-            QueryNormalizer queryNormalizer = new LexicalEnrichmentPipeline();
+            TextNormalizer textNormalizer = new LexicalEnrichmentPipeline();
             ResonanceIndex resonanceIndex = new LinearScanResonanceIndex(atomStore, frequencyStore);
-            return new MonadaMemory(encoder, queryNormalizer, atomStore, frequencyStore, resonanceIndex, feedbackStore,
+            return new MonadaMemory(encoder, textNormalizer, atomStore, frequencyStore, resonanceIndex, feedbackStore,
                     new KnownAtomIdCache(DEFAULT_KNOWN_ATOM_ID_CACHE_SIZE));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -107,7 +107,8 @@ public class MonadaMemory {
             }
             // Persist vector first: a partial failure leaves an orphan vector that search
             // safely ignores, instead of an atom that cannot be recalled by resonance.
-            frequencyStore.save(atom.id(), encoder.encode(atom.searchableContent()));
+            var searchableText = textNormalizer.normalize(atom.searchableContent()).enrichedText();
+            frequencyStore.save(atom.id(), encoder.encode(searchableText));
             atomStore.save(atom);
             knownAtomIds.remember(atom.id());
             return atom;
@@ -117,7 +118,7 @@ public class MonadaMemory {
     }
 
     public MonadaQuery resonate(String query) {
-        return new MonadaQuery(query, encoder, queryNormalizer, resonanceIndex, feedbackStore);
+        return new MonadaQuery(query, encoder, textNormalizer, resonanceIndex, feedbackStore);
     }
 
     /**

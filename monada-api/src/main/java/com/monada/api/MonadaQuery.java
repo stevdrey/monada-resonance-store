@@ -2,7 +2,7 @@ package com.monada.api;
 
 import com.monada.core.MonadaRecall;
 import com.monada.encoder.FrequencyEncoder;
-import com.monada.encoder.QueryNormalizer;
+import com.monada.encoder.TextNormalizer;
 import com.monada.index.FeedbackAwareResonanceIndex;
 import com.monada.index.ResonanceIndex;
 import com.monada.storage.feedback.FeedbackStore;
@@ -16,17 +16,17 @@ public class MonadaQuery {
 
     private final String query;
     private final FrequencyEncoder encoder;
-    private final QueryNormalizer queryNormalizer;
+    private final TextNormalizer textNormalizer;
     private final ResonanceIndex resonanceIndex;
     private final FeedbackStore feedbackStore;
     private int topK = 10;
     private double threshold = 0.0;
 
-    MonadaQuery(String query, FrequencyEncoder encoder, QueryNormalizer queryNormalizer,
+    MonadaQuery(String query, FrequencyEncoder encoder, TextNormalizer textNormalizer,
                 ResonanceIndex resonanceIndex, FeedbackStore feedbackStore) {
         this.query = Objects.requireNonNull(query, "query");
         this.encoder = Objects.requireNonNull(encoder, "encoder");
-        this.queryNormalizer = Objects.requireNonNull(queryNormalizer, "queryNormalizer");
+        this.textNormalizer = Objects.requireNonNull(textNormalizer, "textNormalizer");
         this.resonanceIndex = Objects.requireNonNull(resonanceIndex, "resonanceIndex");
         this.feedbackStore = Objects.requireNonNull(feedbackStore, "feedbackStore");
     }
@@ -47,8 +47,8 @@ public class MonadaQuery {
     public MonadaRecall execute() {
         try {
             ResonanceIndex index = new FeedbackAwareResonanceIndex(resonanceIndex, feedbackStore, query);
-            var normalizedQuery = queryNormalizer.normalize(query);
-            var enrichedQuery = normalizedQuery.enrichedText();
+            var normalizedText = textNormalizer.normalize(query);
+            var enrichedQuery = normalizedText.enrichedText();
             if (enrichedQuery.isBlank()) {
                 return new MonadaRecall(List.of());
             }

@@ -43,7 +43,7 @@ public record KnowledgeAtom(
     public static KnowledgeAtom text(String content, List<String> aliases) {
         Objects.requireNonNull(content, "content");
         aliases = List.copyOf(Objects.requireNonNull(aliases, "aliases"));
-        String id = deterministicId(content, aliases);
+        String id = deterministicId(content);
         return new KnowledgeAtom(
                 id,
                 AtomType.TEXT,
@@ -62,19 +62,10 @@ public record KnowledgeAtom(
         return content + " " + String.join(" ", aliases);
     }
 
-    private static String deterministicId(String content, List<String> aliases) {
+    private static String deterministicId(String content) {
         // Deterministic id derived from content: the same input produces the same id
         // across JVM runs and fresh memory directories. This keeps recall ordering
         // reproducible when resonance scores tie and atoms are compared by id.
-        //
-        // Note: UUID.nameUUIDFromBytes uses MD5 internally, which is not resistant to
-        // intentional collision attacks. For the local embedded MVP this is acceptable
-        // because inputs are developer-controlled. If untrusted content is ever accepted,
-        // switch to a stronger digest (e.g. SHA-256) for id generation.
-        if (aliases.isEmpty()) {
-            return UUID.nameUUIDFromBytes(content.getBytes(StandardCharsets.UTF_8)).toString();
-        }
-        String source = content + "\u001F" + String.join("\u001F", aliases);
-        return UUID.nameUUIDFromBytes(source.getBytes(StandardCharsets.UTF_8)).toString();
+        return UUID.nameUUIDFromBytes(content.getBytes(StandardCharsets.UTF_8)).toString();
     }
 }

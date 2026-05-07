@@ -18,10 +18,23 @@ class LexicalEnrichmentPipelineTest {
         var first = normalizer.normalize("separate read and write paths for optimization");
         var second = normalizer.normalize("separate read and write paths for optimization");
 
-        assertEquals(first, second);
+        assertEquals(first.original(), second.original());
+        assertEquals(first.normalized(), second.normalized());
+        assertEquals(first.expansions(), second.expansions());
         assertEquals("separate read write path optimization", first.normalized());
         assertEquals("separate read write path optimization cqrs command query responsibility segregation",
                 first.enrichedText());
+    }
+
+    @Test
+    void normalizesGenericSearchableText() {
+        TextNormalizer normalizer = new LexicalEnrichmentPipeline();
+
+        var normalized = normalizer.normalize("The indexes and queries for temporary lookups");
+
+        assertEquals("index query temporary lookup", normalized.normalized());
+        assertTrue(normalized.expansions().contains("cache"));
+        assertTrue(normalized.expansions().contains("redis"));
     }
 
     @Test

@@ -37,8 +37,13 @@ public final class LexicalEnrichmentPipeline implements QueryNormalizer {
 
     @Override
     public NormalizedQuery normalize(String query) {
-        Objects.requireNonNull(query, "query");
-        var tokens = tokenize(query);
+        var normalized = normalizeText(query);
+        return new NormalizedQuery(normalized.original(), normalized.normalized(), normalized.expansions());
+    }
+
+    public NormalizedText normalizeText(String text) {
+        Objects.requireNonNull(text, "text");
+        var tokens = tokenize(text);
         var kept = new ArrayList<String>();
         for (var token : tokens) {
             var normalized = plurals.getOrDefault(token, token);
@@ -54,7 +59,7 @@ public final class LexicalEnrichmentPipeline implements QueryNormalizer {
                 expansions.addAll(entry.getValue());
             }
         }
-        return new NormalizedQuery(query, normalized, List.copyOf(expansions));
+        return new NormalizedText(text, normalized, List.copyOf(expansions));
     }
 
     private List<String> tokenize(String query) {
@@ -84,7 +89,7 @@ public final class LexicalEnrichmentPipeline implements QueryNormalizer {
             if (key.isBlank()) {
                 throw new IllegalArgumentException("synonym keys must not be blank");
             }
-            for (var value : values) {
+            for (String value : values) {
                 Objects.requireNonNull(value, "synonym value");
                 if (value.isBlank()) {
                     throw new IllegalArgumentException("synonym values must not be blank");

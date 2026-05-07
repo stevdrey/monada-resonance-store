@@ -21,6 +21,18 @@ class KnowledgeAtomTest {
     }
 
     @Test
+    void aliasesDoNotChangeContentDerivedId() {
+        var withoutAliases = KnowledgeAtom.text("CQRS separates read and write models.");
+        var withAliases = KnowledgeAtom.text("CQRS separates read and write models.",
+                List.of("command query responsibility segregation", "read path write path"));
+
+        assertEquals(withoutAliases.id(), withAliases.id(),
+                "Aliases must not create alternate ids for the same content");
+        assertNotEquals(withoutAliases.searchableContent(), withAliases.searchableContent(),
+                "Aliases should still affect searchable content");
+    }
+
+    @Test
     void textProducesDifferentIdForDifferentContent() {
         var a = KnowledgeAtom.text("alpha");
         var b = KnowledgeAtom.text("beta");

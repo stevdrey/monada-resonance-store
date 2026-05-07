@@ -92,6 +92,19 @@ class MonadaMemoryIntegrationTest {
     }
 
     @Test
+    void atomSearchableContentIsNormalizedBeforeEncoding() {
+        var memory = MonadaMemory.open(memoryDirectory);
+        var atom = memory.remember("Operational indexes support analytical queries.");
+
+        var recall = memory.resonate("operational index support analytical query")
+                .topK(1)
+                .threshold(0.99)
+                .execute();
+
+        assertEquals(atom.id(), recall.results().getFirst().atom().id());
+    }
+
+    @Test
     void feedbackAcceptsRememberedAtomsAndRejectsUnknownAtoms() {
         var memory = MonadaMemory.open(memoryDirectory);
         var atom = memory.remember("SQLite is an embedded relational database.");

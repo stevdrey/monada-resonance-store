@@ -13,6 +13,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 public class FileAtomStore implements AtomStore {
 
@@ -90,8 +91,7 @@ public class FileAtomStore implements AtomStore {
     private String encodeAliases(List<String> aliases) {
         return aliases.stream()
                 .map(alias -> Base64.getEncoder().encodeToString(alias.getBytes(StandardCharsets.UTF_8)))
-                .reduce((left, right) -> left + "," + right)
-                .orElse("");
+                .collect(Collectors.joining(","));
     }
 
     private List<String> decodeAliases(String encodedAliases) {
