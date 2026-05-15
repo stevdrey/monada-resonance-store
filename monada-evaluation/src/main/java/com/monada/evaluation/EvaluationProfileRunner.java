@@ -29,8 +29,6 @@ import java.util.Optional;
  */
 public final class EvaluationProfileRunner {
 
-    private static final double EVALUATION_THRESHOLD = Double.NEGATIVE_INFINITY;
-
     private final EvaluationRunner evaluationRunner;
     private final EvaluationComparator comparator;
 

@@ -9,6 +9,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -108,7 +109,7 @@ class EvaluationProfileRunnerTest {
         double lexicalMrr = lexicalReport.meanReciprocalRank();
         // Aggregate change must be IMPROVED or MAINTAINED (never DEGRADED).
         var aggregateChange = comparison.aggregateChangeByProfile().get(EvaluationProfile.LEXICAL_ENRICHED);
-        assertFalse(aggregateChange == RankingChange.DEGRADED,
+        assertNotEquals(RankingChange.DEGRADED, aggregateChange,
                 "Lexical enrichment must not degrade aggregate metrics vs RAW; MRR: raw="
                         + rawMrr + ", lexical=" + lexicalMrr);
     }

@@ -1,8 +1,10 @@
 package com.monada.evaluation;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Classifies why a retrieval query did not produce a perfect result.
@@ -101,7 +103,9 @@ public final class RetrievalFailureClassifier {
      * token overlap, making a synonym or alias addition the most likely fix.
      */
     private static boolean isPossibleAliasGap(String queryText, Set<String> expectedLabels) {
-        var queryTokens = Set.of(queryText.toLowerCase().split("[^a-z0-9]+"));
+        var queryTokens = Arrays.stream(queryText.toLowerCase().split("[^a-z0-9]+"))
+                .filter(t -> !t.isBlank())
+                .collect(Collectors.toSet());
         for (String label : expectedLabels) {
             // Labels use underscore-separated identifiers (e.g. ka_cosine_similarity).
             var labelTokens = label.toLowerCase().split("[^a-z0-9]+");
