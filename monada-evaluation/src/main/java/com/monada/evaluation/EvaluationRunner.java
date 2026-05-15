@@ -55,7 +55,7 @@ public final class EvaluationRunner {
         var idToLabel = new HashMap<String, String>();
 
         for (DatasetAtom atom : dataset.atoms()) {
-            KnowledgeAtom stored = memory.remember(atom.content());
+            KnowledgeAtom stored = memory.remember(atom.content(), atom.aliases());
             idToLabel.put(stored.id(), atom.label());
         }
 

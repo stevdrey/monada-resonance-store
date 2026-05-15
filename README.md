@@ -356,12 +356,15 @@ Stores metadata about the memory store:
 
 ### `atoms/segment-000001.log`
 
-Append-only JSON lines file:
+Append-only tab-delimited log. The current MVP stores atom content and aliases as
+Base64 text so each entry remains one inspectable line:
 
-```json
-{"id":"ka_001","type":"CONCEPT","content":"OrientDB is a multi-model database that combines graph and document models.","weight":1.0}
-{"id":"ka_002","type":"CONCEPT","content":"ArangoDB is a multi-model database with document, graph and search capabilities.","weight":1.0}
+```text
+<id>	<type>	<weight>	<createdAt>	<base64-content>	<base64-alias>[,<base64-alias>...]
 ```
+
+Legacy five-field entries without aliases are still readable and load with an
+empty alias list.
 
 ### `vectors/segment-000001.f32`
 
@@ -521,37 +524,64 @@ id ascending, so top-K output is stable across runs and fresh memory directories
 when scores tie.
 
 ## 10.2 Expanded Technology Dataset (Exploratory)
- 
+
 The `ExpandedTechnologyDataset` is a larger and harder evaluation suite designed to
 expose encoder and ranking limitations before optimizing. It covers four concept
 groups (databases/storage, search/retrieval, AI memory/representation, distributed
 systems) with 33 atoms and 18 queries of varying difficulty.
- 
+
 **Key differences from the default baseline:**
- 
+
 | Aspect | `DefaultDatabasesDataset` | `ExpandedTechnologyDataset` |
 |--------|--------------------------|----------------------------|
 | Purpose | Protected regression baseline | Exploratory stress test |
 | Size | 8 atoms, 6 queries | 33 atoms, 18 queries |
 | Metric thresholds | Locked in `EvaluationBaselineRegressionTest` | Not locked; lower scores expected |
 | Query types | Direct, multi-relevant | Direct, multi-relevant, synonym/paraphrase, confusable, feedback-sensitive |
- 
+
 Run the expanded evaluation report:
- 
+
 ```bash
 ./gradlew :monada-evaluation:runExpanded -q
 ```
- 
+
 Run expanded dataset tests:
- 
+
 ```bash
 ./gradlew :monada-evaluation:test --tests com.monada.evaluation.ExpandedTechnologyDatasetTest
 ```
- 
+
+### Lexical enrichment before encoding
+
+Before the query reaches `SimpleFrequencyEncoder`, Monada applies a deterministic
+lexical preprocessing step. The original query text remains visible in evaluation
+reports and remains the identity used by feedback-aware ranking; only the encoded
+query text is normalized/enriched.
+
+The default English lexical resources live under:
+
+```text
+monada-encoder/src/main/resources/com/monada/encoder/lexical/en/
+├── stopwords.txt
+├── plurals.properties
+└── synonyms.properties
+```
+
+This keeps stop words, plural mappings, and technical synonyms explicit and
+reviewable, and leaves room for future language-specific resource folders.
+
+Lower-casing is already performed by `SimpleFrequencyEncoder`; the lexical layer
+also lowercases while tokenizing so stop-word, plural, and synonym resources match
+deterministically before encoding.
+
+Knowledge atoms can also carry aliases. Aliases are persisted with the atom and
+are included in the vectorized searchable content, while `atom.content()` remains
+the original primary content returned in recall results.
+
 ### Known weaknesses exposed by the expanded dataset
- 
+
 The following limitations are expected with the current `SimpleFrequencyEncoder`:
- 
+
 - **Synonym/paraphrase queries rank poorly** because the encoder is token-hash based;
   terms with different surface forms but similar meaning share no vector signal.
 - **Semantically related terms without token overlap** are not handled well; for
@@ -562,10 +592,10 @@ The following limitations are expected with the current `SimpleFrequencyEncoder`
   "temporary lookup store".
 - **Confusable queries** with many nearby atoms may rank non-preferred atoms higher
   than expected because the encoder treats all overlapping tokens equally.
- 
+
 These weaknesses are intentional measurement points for future encoder and
 ranking improvements.
- 
+
 ## 10.3 Feedback-Aware Ranking
 
 Monada Resonance Store supports a first iteration of **feedback-aware ranking**. Clients can record positive or negative feedback against an atom id for a specific query; future queries that match that exact text re-rank the base resonance results using the aggregated feedback delta.

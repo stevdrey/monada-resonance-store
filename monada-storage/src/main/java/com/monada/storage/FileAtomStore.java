@@ -10,9 +10,11 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 public class FileAtomStore implements AtomStore {
 
@@ -39,12 +41,14 @@ public class FileAtomStore implements AtomStore {
                     "FileAtomStore does not persist atom metadata; received " + atom.metadata().size() + " entries for atom " + atom.id());
         }
         String encodedContent = Base64.getEncoder().encodeToString(atom.content().getBytes(StandardCharsets.UTF_8));
+        String encodedAliases = encodeAliases(atom.aliases());
         String line = String.join("\t",
                 atom.id(),
                 atom.type().name(),
                 Double.toString(atom.weight()),
                 atom.createdAt().toString(),
-                encodedContent
+                encodedContent,
+                encodedAliases
         );
         Files.writeString(atomLog, line + System.lineSeparator(), StandardOpenOption.APPEND);
     }
@@ -56,24 +60,33 @@ public class FileAtomStore implements AtomStore {
 
     @Override
     public List<KnowledgeAtom> findAll() throws IOException {
-        return Files.readAllLines(atomLog).stream()
-                .filter(line -> !line.isBlank())
-                .map(this::parse)
-                .toList();
+        // Last-wins per atom id: if the same id appears multiple times (e.g. after an
+        // alias merge), the most recently appended entry supersedes earlier ones.
+        // Insertion order is preserved based on the first occurrence of each id.
+        var byId = new LinkedHashMap<String, KnowledgeAtom>();
+        for (var line : Files.readAllLines(atomLog)) {
+            if (!line.isBlank()) {
+                var atom = parse(line);
+                byId.put(atom.id(), atom);
+            }
+        }
+        return List.copyOf(byId.values());
     }
 
     private KnowledgeAtom parse(String line) {
-        String[] parts = line.split("\t", 5);
-        if (parts.length != 5) {
+        String[] parts = line.split("\t", -1);
+        if (parts.length != 5 && parts.length != 6) {
             throw new IllegalStateException(
-                    "Malformed atom log entry: expected 5 tab-delimited fields but found " + parts.length + " in line: " + line);
+                    "Malformed atom log entry: expected 5 or 6 tab-delimited fields but found " + parts.length + " in line: " + line);
         }
         try {
             String content = new String(Base64.getDecoder().decode(parts[4]), StandardCharsets.UTF_8);
+            List<String> aliases = parts.length == 6 ? decodeAliases(parts[5]) : List.of();
             return new KnowledgeAtom(
                     parts[0],
                     AtomType.valueOf(parts[1]),
                     content,
+                    aliases,
                     Map.of(),
                     Double.parseDouble(parts[2]),
                     Instant.parse(parts[3])
@@ -81,5 +94,20 @@ public class FileAtomStore implements AtomStore {
         } catch (RuntimeException e) {
             throw new IllegalStateException("Corrupt atom log entry: " + line, e);
         }
+    }
+
+    private String encodeAliases(List<String> aliases) {
+        return aliases.stream()
+                .map(alias -> Base64.getEncoder().encodeToString(alias.getBytes(StandardCharsets.UTF_8)))
+                .collect(Collectors.joining(","));
+    }
+
+    private List<String> decodeAliases(String encodedAliases) {
+        if (encodedAliases.isBlank()) {
+            return List.of();
+        }
+        return List.of(encodedAliases.split(",")).stream()
+                .map(alias -> new String(Base64.getDecoder().decode(alias), StandardCharsets.UTF_8))
+                .toList();
     }
 }
