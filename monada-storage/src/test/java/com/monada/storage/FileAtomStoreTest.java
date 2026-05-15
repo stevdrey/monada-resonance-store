@@ -102,4 +102,45 @@ class FileAtomStoreTest {
         assertEquals("legacy content", found.content());
         assertEquals(List.of(), found.aliases());
     }
+
+    @Test
+    void latestEntryWinsWhenSameIdAppearsMultipleTimes() throws IOException {
+        var store = new FileAtomStore(root);
+        var first = new KnowledgeAtom("dup-id", AtomType.TEXT, "content",
+                List.of("alias-a"), Map.of(), 1.0, Instant.parse("2024-01-01T00:00:00Z"));
+        var second = new KnowledgeAtom("dup-id", AtomType.TEXT, "content",
+                List.of("alias-a", "alias-b"), Map.of(), 1.0, Instant.parse("2024-01-01T00:00:00Z"));
+        store.save(first);
+        store.save(second);
+
+        var found = store.findById("dup-id").orElseThrow();
+        assertEquals(List.of("alias-a", "alias-b"), found.aliases(),
+                "findById must return the last-appended entry for a given id");
+
+        var all = store.findAll();
+        assertEquals(1, all.size(),
+                "findAll must deduplicate entries with the same id, keeping the last one");
+        assertEquals(List.of("alias-a", "alias-b"), all.getFirst().aliases());
+    }
+
+    @Test
+    void findAllPreservesFirstSeenInsertionOrderAfterDeduplication() throws IOException {
+        var store = new FileAtomStore(root);
+        var a = new KnowledgeAtom("id-a", AtomType.TEXT, "alpha",
+                List.of(), Map.of(), 1.0, Instant.parse("2024-01-01T00:00:00Z"));
+        var b = new KnowledgeAtom("id-b", AtomType.TEXT, "beta",
+                List.of(), Map.of(), 1.0, Instant.parse("2024-01-01T00:00:00Z"));
+        var aUpdated = new KnowledgeAtom("id-a", AtomType.TEXT, "alpha",
+                List.of("extra"), Map.of(), 1.0, Instant.parse("2024-01-01T00:00:00Z"));
+        store.save(a);
+        store.save(b);
+        store.save(aUpdated);
+
+        var all = store.findAll();
+        assertEquals(2, all.size());
+        assertEquals("id-a", all.get(0).id(),
+                "id-a was seen first and must appear first even after being updated");
+        assertEquals("id-b", all.get(1).id());
+        assertEquals(List.of("extra"), all.get(0).aliases());
+    }
 }

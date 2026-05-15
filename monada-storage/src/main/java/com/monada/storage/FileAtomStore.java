@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -59,10 +60,17 @@ public class FileAtomStore implements AtomStore {
 
     @Override
     public List<KnowledgeAtom> findAll() throws IOException {
-        return Files.readAllLines(atomLog).stream()
-                .filter(line -> !line.isBlank())
-                .map(this::parse)
-                .toList();
+        // Last-wins per atom id: if the same id appears multiple times (e.g. after an
+        // alias merge), the most recently appended entry supersedes earlier ones.
+        // Insertion order is preserved based on the first occurrence of each id.
+        var byId = new LinkedHashMap<String, KnowledgeAtom>();
+        for (var line : Files.readAllLines(atomLog)) {
+            if (!line.isBlank()) {
+                var atom = parse(line);
+                byId.put(atom.id(), atom);
+            }
+        }
+        return List.copyOf(byId.values());
     }
 
     private KnowledgeAtom parse(String line) {

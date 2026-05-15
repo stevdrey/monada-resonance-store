@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -102,8 +103,18 @@ public class MonadaMemory {
             var atom = KnowledgeAtom.text(text, aliases);
             var existing = atomStore.findById(atom.id());
             if (existing.isPresent()) {
-                knownAtomIds.remember(existing.get().id());
-                return existing.get();
+                var merged = mergeAliases(existing.get(), aliases);
+                if (merged == existing.get()) {
+                    // No new aliases; idempotent return.
+                    knownAtomIds.remember(merged.id());
+                    return merged;
+                }
+                // New aliases were added: re-encode and append updated entries.
+                var searchableText = textNormalizer.normalize(merged.searchableContent()).enrichedText();
+                frequencyStore.save(merged.id(), encoder.encode(searchableText));
+                atomStore.save(merged);
+                knownAtomIds.remember(merged.id());
+                return merged;
             }
             // Persist vector first: a partial failure leaves an orphan vector that search
             // safely ignores, instead of an atom that cannot be recalled by resonance.
@@ -115,6 +126,32 @@ public class MonadaMemory {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    /**
+     * Returns {@code existing} unchanged if {@code newAliases} adds nothing new.
+     * Otherwise returns a new atom with the union of existing and new aliases
+     * (existing order first, then new aliases in caller order, deduped).
+     */
+    private static KnowledgeAtom mergeAliases(KnowledgeAtom existing, List<String> newAliases) {
+        if (newAliases.isEmpty()) {
+            return existing;
+        }
+        var merged = new LinkedHashSet<>(existing.aliases());
+        merged.addAll(newAliases);
+        var mergedList = List.copyOf(merged);
+        if (mergedList.equals(existing.aliases())) {
+            return existing;
+        }
+        return new KnowledgeAtom(
+                existing.id(),
+                existing.type(),
+                existing.content(),
+                mergedList,
+                existing.metadata(),
+                existing.weight(),
+                existing.createdAt()
+        );
     }
 
     public MonadaQuery resonate(String query) {

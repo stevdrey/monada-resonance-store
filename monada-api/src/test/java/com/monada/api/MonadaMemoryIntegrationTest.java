@@ -105,6 +105,52 @@ class MonadaMemoryIntegrationTest {
     }
 
     @Test
+    void rememberWithNewAliasesMergesAndPreservesContentDerivedId() {
+        var memory = MonadaMemory.open(memoryDirectory);
+        var first = memory.remember("Apache Kafka is a distributed event streaming platform.");
+        var second = memory.remember("Apache Kafka is a distributed event streaming platform.",
+                List.of("kafka", "event streaming"));
+
+        assertEquals(first.id(), second.id(),
+                "Content-derived id must not change after alias merge");
+        assertEquals(List.of("kafka", "event streaming"), second.aliases());
+
+        var recall = memory.resonate("event streaming")
+                .topK(1)
+                .threshold(0.0)
+                .execute();
+        assertEquals(first.id(), recall.results().getFirst().atom().id(),
+                "Atom must be recallable via the newly added alias");
+    }
+
+    @Test
+    void twoSuccessiveAliasMergesProduceUnionInOrder() {
+        var memory = MonadaMemory.open(memoryDirectory);
+        memory.remember("Apache Flink is a stateful stream processing framework.",
+                List.of("stream processing"));
+        var merged = memory.remember("Apache Flink is a stateful stream processing framework.",
+                List.of("flink", "stateful computation"));
+
+        assertEquals(List.of("stream processing", "flink", "stateful computation"),
+                merged.aliases(),
+                "Alias union must preserve existing order then append new aliases");
+    }
+
+    @Test
+    void rememberWithSameAliasesIsIdempotent() throws Exception {
+        var memory = MonadaMemory.open(memoryDirectory);
+        memory.remember("ClickHouse is an OLAP column-store database.", List.of("column store", "olap"));
+        memory.remember("ClickHouse is an OLAP column-store database.", List.of("column store", "olap"));
+
+        var atomLog = memoryDirectory.resolve("atoms/segment-000001.log");
+        long lineCount = java.nio.file.Files.lines(atomLog)
+                .filter(l -> !l.isBlank())
+                .count();
+        assertEquals(1, lineCount,
+                "Calling remember with identical aliases must not append a new atom log entry");
+    }
+
+    @Test
     void feedbackAcceptsRememberedAtomsAndRejectsUnknownAtoms() {
         var memory = MonadaMemory.open(memoryDirectory);
         var atom = memory.remember("SQLite is an embedded relational database.");
