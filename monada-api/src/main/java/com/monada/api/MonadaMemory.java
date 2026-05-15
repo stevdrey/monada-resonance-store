@@ -2,7 +2,6 @@ package com.monada.api;
 
 import com.monada.core.KnowledgeAtom;
 import com.monada.encoder.FrequencyEncoder;
-import com.monada.encoder.LexicalEnrichmentPipeline;
 import com.monada.encoder.SimpleFrequencyEncoder;
 import com.monada.encoder.TextNormalizer;
 import com.monada.index.LinearScanResonanceIndex;
@@ -45,9 +44,11 @@ public class MonadaMemory {
     private final ResonanceIndex resonanceIndex;
     private final FeedbackStore feedbackStore;
     private final KnownAtomIdCache knownAtomIds;
+    private final boolean feedbackAwareRanking;
 
     private MonadaMemory(FrequencyEncoder encoder, TextNormalizer textNormalizer, AtomStore atomStore, FrequencyStore frequencyStore,
-                         ResonanceIndex resonanceIndex, FeedbackStore feedbackStore, KnownAtomIdCache knownAtomIds) {
+                         ResonanceIndex resonanceIndex, FeedbackStore feedbackStore, KnownAtomIdCache knownAtomIds,
+                         boolean feedbackAwareRanking) {
         this.encoder = encoder;
         this.textNormalizer = textNormalizer;
         this.atomStore = atomStore;
@@ -55,6 +56,7 @@ public class MonadaMemory {
         this.resonanceIndex = resonanceIndex;
         this.feedbackStore = feedbackStore;
         this.knownAtomIds = knownAtomIds;
+        this.feedbackAwareRanking = feedbackAwareRanking;
     }
 
     public static MonadaMemory open(String path) {
@@ -62,6 +64,15 @@ public class MonadaMemory {
     }
 
     public static MonadaMemory open(Path path) {
+        return open(path, MonadaMemoryOptions.defaults());
+    }
+
+    public static MonadaMemory open(String path, MonadaMemoryOptions options) {
+        return open(Path.of(path), options);
+    }
+
+    public static MonadaMemory open(Path path, MonadaMemoryOptions options) {
+        Objects.requireNonNull(options, "options");
         try {
             ManifestStore manifestStore = new FileManifestStore(path);
             Optional<Manifest> existing = manifestStore.load();
@@ -85,10 +96,10 @@ public class MonadaMemory {
                     path, manifest.vectorSegment(), manifest.dimensions());
             FeedbackStore feedbackStore = new FileFeedbackStore(path, manifest.feedbackSegment());
             FrequencyEncoder encoder = new SimpleFrequencyEncoder(manifest.dimensions());
-            TextNormalizer textNormalizer = new LexicalEnrichmentPipeline();
             ResonanceIndex resonanceIndex = new LinearScanResonanceIndex(atomStore, frequencyStore);
-            return new MonadaMemory(encoder, textNormalizer, atomStore, frequencyStore, resonanceIndex, feedbackStore,
-                    new KnownAtomIdCache(DEFAULT_KNOWN_ATOM_ID_CACHE_SIZE));
+            return new MonadaMemory(encoder, options.textNormalizer(), atomStore, frequencyStore, resonanceIndex,
+                    feedbackStore, new KnownAtomIdCache(DEFAULT_KNOWN_ATOM_ID_CACHE_SIZE),
+                    options.feedbackAwareRanking());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -155,7 +166,7 @@ public class MonadaMemory {
     }
 
     public MonadaQuery resonate(String query) {
-        return new MonadaQuery(query, encoder, textNormalizer, resonanceIndex, feedbackStore);
+        return new MonadaQuery(query, encoder, textNormalizer, resonanceIndex, feedbackStore, feedbackAwareRanking);
     }
 
     /**
