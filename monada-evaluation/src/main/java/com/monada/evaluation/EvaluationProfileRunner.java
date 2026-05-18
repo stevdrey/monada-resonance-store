@@ -1,7 +1,6 @@
 package com.monada.evaluation;
 
 import com.monada.api.MonadaMemory;
-import com.monada.core.KnowledgeAtom;
 import com.monada.storage.feedback.FeedbackSignal;
 
 import java.io.IOException;
@@ -125,11 +124,14 @@ public final class EvaluationProfileRunner {
         var options = profile.toMemoryOptions();
         var memory = MonadaMemory.open(profileDir, options);
 
-        // Atom label → KnowledgeAtom id mapping (needed for feedback seeding).
+        // Seed atoms exactly once with the profile's options and obtain the
+        // atomId -> label mapping required to translate ranked results back.
+        var idToLabel = evaluationRunner.seedAtoms(dataset, memory);
+
+        // Invert idToLabel for feedback seeding by expected label.
         var labelToAtomId = new HashMap<String, String>();
-        for (var atom : dataset.atoms()) {
-            var stored = memory.remember(atom.content(), atom.aliases());
-            labelToAtomId.put(atom.label(), stored.id());
+        for (var entry : idToLabel.entrySet()) {
+            labelToAtomId.put(entry.getValue(), entry.getKey());
         }
 
         // Seed deterministic positive feedback for feedback-aware profiles.
@@ -145,7 +147,7 @@ public final class EvaluationProfileRunner {
             }
         }
 
-        return evaluationRunner.run(dataset, profileDir);
+        return evaluationRunner.evaluate(dataset, memory, idToLabel);
     }
 
     /**

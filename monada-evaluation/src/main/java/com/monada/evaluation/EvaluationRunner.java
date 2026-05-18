@@ -1,6 +1,7 @@
 package com.monada.evaluation;
 
 import com.monada.api.MonadaMemory;
+import com.monada.api.MonadaMemoryOptions;
 import com.monada.core.KnowledgeAtom;
 
 import java.nio.file.Path;
@@ -46,19 +47,47 @@ public final class EvaluationRunner {
     }
 
     public EvaluationReport run(EvaluationDataset dataset, Path memoryPath) {
+        return run(dataset, memoryPath, MonadaMemoryOptions.defaults());
+    }
+
+    /**
+     * Evaluates {@code dataset} using a {@link MonadaMemory} opened with the
+     * given {@link MonadaMemoryOptions}. This overload is required by the
+     * profile-aware A/B harness to guarantee that both atom encoding and
+     * query execution use the same configured options end-to-end.
+     */
+    public EvaluationReport run(EvaluationDataset dataset, Path memoryPath, MonadaMemoryOptions options) {
         Objects.requireNonNull(dataset, "dataset");
         Objects.requireNonNull(memoryPath, "memoryPath");
+        Objects.requireNonNull(options, "options");
 
-        var memory = MonadaMemory.open(memoryPath);
+        var memory = MonadaMemory.open(memoryPath, options);
+        var idToLabel = seedAtoms(dataset, memory);
+        return evaluate(dataset, memory, idToLabel);
+    }
 
-        // internal atom id -> label (for translating ranked results back to labels)
+    /**
+     * Appends every atom in {@code dataset} to {@code memory} exactly once and
+     * returns the mapping {@code atomId -> label}. Package-private so that
+     * {@link EvaluationProfileRunner} can seed atoms with profile-specific
+     * options and then seed feedback before evaluating.
+     */
+    Map<String, String> seedAtoms(EvaluationDataset dataset, MonadaMemory memory) {
         var idToLabel = new HashMap<String, String>();
-
         for (DatasetAtom atom : dataset.atoms()) {
             KnowledgeAtom stored = memory.remember(atom.content(), atom.aliases());
             idToLabel.put(stored.id(), atom.label());
         }
+        return idToLabel;
+    }
 
+    /**
+     * Runs every query in {@code dataset} against an already-seeded
+     * {@code memory} and aggregates metrics. Package-private so that
+     * {@link EvaluationProfileRunner} can reuse the query phase without
+     * reopening memory with default options.
+     */
+    EvaluationReport evaluate(EvaluationDataset dataset, MonadaMemory memory, Map<String, String> idToLabel) {
         var maxK = ks.stream().mapToInt(Integer::intValue).max().orElse(1);
 
         var queryResults = new ArrayList<QueryEvaluation>(dataset.queries().size());
