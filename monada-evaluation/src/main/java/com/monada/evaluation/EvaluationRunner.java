@@ -2,7 +2,6 @@ package com.monada.evaluation;
 
 import com.monada.api.MonadaMemory;
 import com.monada.api.MonadaMemoryOptions;
-import com.monada.core.KnowledgeAtom;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
