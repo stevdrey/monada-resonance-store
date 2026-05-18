@@ -209,3 +209,37 @@ index. Keep these invariants when evolving it:
 - The protected baseline in `EvaluationBaselineRegressionTest` and the
   feedback-aware assertions in `FeedbackAwareEvaluationTest` must not be weakened
   without an intentional baseline update and a rationale in the same commit.
+
+## A/B Evaluation Harness (Fase E)
+
+The project now supports multi-profile A/B evaluation via `EvaluationProfileRunner`.
+
+Key invariants:
+
+- Each profile runs in its own isolated subdirectory under the base path to avoid
+  cross-profile contamination.
+- The first profile in the list is the baseline; all others are compared against it
+  using `EvaluationComparator`.
+- Three standard profiles are provided as constants on `EvaluationProfile`:
+  `RAW`, `LEXICAL_ENRICHED`, and `LEXICAL_ENRICHED_WITH_FEEDBACK`.
+- `RAW` uses `NoOpTextNormalizer` (no stop-word removal, no synonyms, no plurals)
+  and disables feedback-aware ranking. It represents the encoder's raw capability.
+- `LEXICAL_ENRICHED_WITH_FEEDBACK` seeds one deterministic positive feedback event
+  per query (query text → lexicographically smallest expected atom) before measuring.
+  This is intentional and deterministic; it should never be random.
+- `MonadaMemory.open(path)` default behavior is unchanged: it still uses
+  `LexicalEnrichmentPipeline` and enables feedback-aware ranking, equivalent to
+  `MonadaMemoryOptions.defaults()`.
+- `MonadaMemoryOptions` is the evaluation-oriented configuration API. The feedback
+  flag controls whether `FeedbackAwareResonanceIndex` wraps the base index at query
+  time; `false` skips the wrapper entirely (the raw `ResonanceIndex` is used directly).
+- `RetrievalFailureClassifier` classifies non-perfect queries by failure type. These
+  classifications are heuristic and informative — they guide the next improvement
+  decision (more aliases, better encoder, feedback, etc.), but are not regression guards.
+- The report rendered by `EvaluationProfileComparison.render()` is exploratory output.
+  Do not turn its metric values into protected regression assertions unless explicitly
+  asked.
+- Run the comparison from the command line:
+  ```
+  ./gradlew :monada-evaluation:runProfileComparison -q
+  ```
