@@ -225,8 +225,8 @@ Key invariants:
 - `RAW` uses `NoOpTextNormalizer` (no stop-word removal, no synonyms, no plurals)
   and disables feedback-aware ranking. It represents the encoder's raw capability.
 - `LEXICAL_ENRICHED_WITH_FEEDBACK` seeds one deterministic positive feedback event
-  per query (query text → first expected atom) before measuring. This is intentional
-  and deterministic; it should never be random.
+  per query (query text → lexicographically smallest expected atom) before measuring.
+  This is intentional and deterministic; it should never be random.
 - `MonadaMemory.open(path)` default behavior is unchanged: it still uses
   `LexicalEnrichmentPipeline` and enables feedback-aware ranking, equivalent to
   `MonadaMemoryOptions.defaults()`.

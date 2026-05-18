@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,8 +24,8 @@ import java.util.Objects;
  *
  * <p>For profiles with {@link EvaluationProfile#feedbackAware()} == {@code true},
  * the runner seeds one deterministic positive feedback event per query (query text →
- * first expected atom's id) before measuring. This allows the comparison report to
- * show the measurable effect of feedback-aware ranking.
+ * lexicographically smallest expected atom's id) before measuring. This allows the
+ * comparison report to show the measurable effect of feedback-aware ranking.
  */
 public final class EvaluationProfileRunner {
 
@@ -77,7 +78,7 @@ public final class EvaluationProfileRunner {
 
         // Build per-query results.
         var perQuery = new ArrayList<QueryProfileResult>(dataset.queries().size());
-        for (int qi = 0; qi < dataset.queries().size(); qi++) {
+        for (var qi = 0; qi < dataset.queries().size(); qi++) {
             var query = dataset.queries().get(qi);
             var returnedByProfile = new LinkedHashMap<EvaluationProfile, List<String>>();
             var changeByProfile = new LinkedHashMap<EvaluationProfile, RankingChange>();
@@ -89,16 +90,16 @@ public final class EvaluationProfileRunner {
 
             // Classify change vs. base (base profile gets MAINTAINED by definition).
             changeByProfile.put(baseProfile, RankingChange.MAINTAINED);
-            for (int pi = 1; pi < profiles.size(); pi++) {
+            for (var pi = 1; pi < profiles.size(); pi++) {
                 var profile = profiles.get(pi);
                 var beforeQE = baseReport.queryResults().get(qi);
                 var afterQE = reportByProfile.get(profile).queryResults().get(qi);
                 changeByProfile.put(profile, classifyQueryChange(beforeQE, afterQE));
             }
 
-            // Classify failure using the best-performing profile (last in list, or base if only one).
-            var bestQE = reportByProfile.get(profiles.get(profiles.size() - 1)).queryResults().get(qi);
-            var failureType = RetrievalFailureClassifier.classify(bestQE);
+            // Classify failure using the last profile in the list (which is the base profile when only one is provided).
+            var lastProfileQE = reportByProfile.get(profiles.get(profiles.size() - 1)).queryResults().get(qi);
+            var failureType = RetrievalFailureClassifier.classify(lastProfileQE);
 
             perQuery.add(new QueryProfileResult(
                     query.text(),
@@ -111,7 +112,7 @@ public final class EvaluationProfileRunner {
         // Build aggregate change map.
         var aggregateChange = new LinkedHashMap<EvaluationProfile, RankingChange>();
         aggregateChange.put(baseProfile, RankingChange.MAINTAINED);
-        for (int pi = 1; pi < profiles.size(); pi++) {
+        for (var pi = 1; pi < profiles.size(); pi++) {
             var profile = profiles.get(pi);
             var comparison = comparator.compare(baseReport, reportByProfile.get(profile));
             aggregateChange.put(profile, comparison.aggregate());
@@ -126,17 +127,18 @@ public final class EvaluationProfileRunner {
 
         // Atom label → KnowledgeAtom id mapping (needed for feedback seeding).
         var labelToAtomId = new HashMap<String, String>();
-        for (DatasetAtom atom : dataset.atoms()) {
-            KnowledgeAtom stored = memory.remember(atom.content(), atom.aliases());
+        for (var atom : dataset.atoms()) {
+            var stored = memory.remember(atom.content(), atom.aliases());
             labelToAtomId.put(atom.label(), stored.id());
         }
 
         // Seed deterministic positive feedback for feedback-aware profiles.
         if (profile.feedbackAware()) {
             for (var query : dataset.queries()) {
-                // Use the first expected label as the feedback target.
-                var firstExpected = query.expectedLabels().iterator().next();
-                var atomId = labelToAtomId.get(firstExpected);
+                // Use the lexicographically smallest expected label as the feedback target
+                // to guarantee determinism across JVM runs (Set.copyOf iteration order is unspecified).
+                var targetLabel = Collections.min(query.expectedLabels());
+                var atomId = labelToAtomId.get(targetLabel);
                 if (atomId != null) {
                     memory.feedback(query.text(), atomId, FeedbackSignal.POSITIVE);
                 }
@@ -154,8 +156,8 @@ public final class EvaluationProfileRunner {
         if (before.returnedLabels().equals(after.returnedLabels())) {
             return RankingChange.MAINTAINED;
         }
-        int beforeRank = firstExpectedRank(before.expectedLabels(), before.returnedLabels());
-        int afterRank = firstExpectedRank(after.expectedLabels(), after.returnedLabels());
+        var beforeRank = firstExpectedRank(before.expectedLabels(), before.returnedLabels());
+        var afterRank = firstExpectedRank(after.expectedLabels(), after.returnedLabels());
         if (afterRank < beforeRank) {
             return RankingChange.IMPROVED;
         }
@@ -166,7 +168,7 @@ public final class EvaluationProfileRunner {
     }
 
     private static int firstExpectedRank(java.util.Set<String> expected, List<String> returned) {
-        for (int i = 0; i < returned.size(); i++) {
+        for (var i = 0; i < returned.size(); i++) {
             if (expected.contains(returned.get(i))) {
                 return i;
             }
