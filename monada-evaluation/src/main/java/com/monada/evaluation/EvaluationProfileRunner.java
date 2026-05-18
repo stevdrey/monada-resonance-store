@@ -12,7 +12,6 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 
 /**
  * Runs the same {@link EvaluationDataset} across multiple {@link EvaluationProfile}s
@@ -60,8 +59,7 @@ public final class EvaluationProfileRunner {
         }
 
         var reportByProfile = new LinkedHashMap<EvaluationProfile, EvaluationReport>();
-        var perQueryByProfile = new LinkedHashMap<EvaluationProfile, List<String>>();
-
+        
         for (var profile : profiles) {
             var profileDir = basePath.resolve(sanitize(profile.name()));
             try {

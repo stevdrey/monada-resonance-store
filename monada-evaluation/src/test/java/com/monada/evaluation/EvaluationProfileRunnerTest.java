@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests for {@link EvaluationProfileRunner} using {@link DefaultDatabasesDataset}.
@@ -105,8 +106,8 @@ class EvaluationProfileRunnerTest {
         var lexicalReport = comparison.reportByProfile().get(EvaluationProfile.LEXICAL_ENRICHED);
 
         // Lexical enrichment should not degrade MRR on the default dataset.
-        double rawMrr = rawReport.meanReciprocalRank();
-        double lexicalMrr = lexicalReport.meanReciprocalRank();
+        var rawMrr = rawReport.meanReciprocalRank();
+        var lexicalMrr = lexicalReport.meanReciprocalRank();
         // Aggregate change must be IMPROVED or MAINTAINED (never DEGRADED).
         var aggregateChange = comparison.aggregateChangeByProfile().get(EvaluationProfile.LEXICAL_ENRICHED);
         assertNotEquals(RankingChange.DEGRADED, aggregateChange,
@@ -124,10 +125,10 @@ class EvaluationProfileRunnerTest {
         assertFalse(rendered.isBlank(), "render() must not produce blank output");
         // Basic structural markers.
         assertNotNull(rendered);
-        assert rendered.contains("A/B Evaluation Profile Comparison");
-        assert rendered.contains("RAW");
-        assert rendered.contains("LEXICAL_ENRICHED");
-        assert rendered.contains("Aggregate");
+        assertTrue(rendered.contains("A/B Evaluation Profile Comparison"));
+        assertTrue(rendered.contains("RAW"));
+        assertTrue(rendered.contains("LEXICAL_ENRICHED"));
+        assertTrue(rendered.contains("Aggregate"));
     }
 
     @Test
