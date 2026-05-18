@@ -8,7 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
@@ -56,6 +56,14 @@ public final class EvaluationProfileRunner {
         Objects.requireNonNull(basePath, "basePath");
         if (profiles.isEmpty()) {
             throw new IllegalArgumentException("profiles must not be empty");
+        }
+        var sanitizedNames = new HashSet<String>();
+        for (var p : profiles) {
+            var sanitized = sanitize(p.name());
+            if (!sanitizedNames.add(sanitized)) {
+                throw new IllegalArgumentException(
+                        "profiles produce duplicate sanitized directory name: '" + sanitized + "'");
+            }
         }
 
         var reportByProfile = new LinkedHashMap<EvaluationProfile, EvaluationReport>();
@@ -124,18 +132,13 @@ public final class EvaluationProfileRunner {
         var options = profile.toMemoryOptions();
         var memory = MonadaMemory.open(profileDir, options);
 
-        // Seed atoms exactly once with the profile's options and obtain the
-        // atomId -> label mapping required to translate ranked results back.
-        var idToLabel = evaluationRunner.seedAtoms(dataset, memory);
-
-        // Invert idToLabel for feedback seeding by expected label.
-        var labelToAtomId = new HashMap<String, String>();
-        for (var entry : idToLabel.entrySet()) {
-            labelToAtomId.put(entry.getValue(), entry.getKey());
-        }
+        // Seed atoms exactly once with the profile's options and obtain both
+        // atomId->label and label->atomId mappings required for ranking and feedback.
+        var seeding = evaluationRunner.seedAtoms(dataset, memory);
 
         // Seed deterministic positive feedback for feedback-aware profiles.
         if (profile.feedbackAware()) {
+            var labelToAtomId = seeding.labelToAtomId();
             for (var query : dataset.queries()) {
                 // Use the lexicographically smallest expected label as the feedback target
                 // to guarantee determinism across JVM runs (Set.copyOf iteration order is unspecified).
@@ -147,7 +150,7 @@ public final class EvaluationProfileRunner {
             }
         }
 
-        return evaluationRunner.evaluate(dataset, memory, idToLabel);
+        return evaluationRunner.evaluate(dataset, memory, seeding.idToLabel());
     }
 
     /**

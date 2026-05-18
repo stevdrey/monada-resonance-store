@@ -1,7 +1,9 @@
 package com.monada.evaluation;
 
+import com.monada.api.MonadaMemory;
 import com.monada.api.MonadaMemoryOptions;
 import com.monada.evaluation.datasets.DefaultDatabasesDataset;
+import com.monada.storage.feedback.FeedbackSignal;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -81,37 +83,44 @@ class EvaluationProfileIsolationTest {
     }
 
     /**
-     * When {@link EvaluationProfile#RAW} is the only profile, feedback-aware
-     * ranking must be disabled at query time. Even if a feedback log existed on
-     * disk from a previous run, no positive adjustment should be applied
-     * because RAW disables {@code FeedbackAwareResonanceIndex}.
+     * When the {@link EvaluationProfile#RAW} profile is used, feedback-aware
+     * ranking must be fully disabled at query time: even a large positive delta
+     * seeded for the weaker atom must not change the top-1 result.
      *
-     * <p>This test sanity-checks the RAW profile by running it in isolation and
-     * asserting that the report is produced without exception and uses only the
-     * NoOp-encoded vectors. The structural assertion guards against
-     * regressions where the profile runner would silently re-enable feedback
-     * via default options.
+     * <p>Opens a memory with {@code RAW} options directly, queries before and
+     * after seeding a {@code POSITIVE} feedback event with a delta large enough
+     * to flip ranking if {@link com.monada.index.FeedbackAwareResonanceIndex}
+     * were applied, and asserts that the top-ranked atom is the same.
      */
     @Test
     void rawProfileQueriesAreIndependentOfFeedbackAwareRanking(@TempDir Path basePath) {
-        var dataset = new EvaluationDataset(
-                List.of(
-                        new DatasetAtom("ka_a", "append only log storage immutable sequence"),
-                        new DatasetAtom("ka_b", "binary search tree sorted key lookup")
-                ),
-                List.of(
-                        new EvaluationQuery("append only log immutable", Set.of("ka_a"))
-                )
-        );
+        var query = "append only log immutable";
+        var memory = MonadaMemory.open(basePath, EvaluationProfile.RAW.toMemoryOptions());
 
-        var comparison = new EvaluationProfileRunner()
-                .run(dataset, List.of(EvaluationProfile.RAW), basePath);
-        var rawReport = comparison.reportByProfile().get(EvaluationProfile.RAW);
+        var atomA = memory.remember("append only log storage immutable sequence");
+        var atomB = memory.remember("binary search tree sorted key lookup");
 
-        // Sanity: the query must produce at least one returned label.
-        var returned = rawReport.queryResults().get(0).returnedLabels();
-        assertTrue(returned.size() >= 1,
-                "RAW profile must still produce ranked results for matching tokens.");
+        var before = memory.resonate(query).topK(2).threshold(Double.NEGATIVE_INFINITY).execute();
+        assertTrue(before.results().size() >= 1,
+                "RAW profile must produce at least one result for a matching query.");
+        var topIdBefore = before.results().get(0).atom().id();
+
+        // Seed a large positive feedback for the weaker atom (atomB). If
+        // FeedbackAwareResonanceIndex were active, this would boost atomB's
+        // score by 0.9 and could flip the ranking.
+        memory.feedback(query, atomB.id(), FeedbackSignal.POSITIVE, 0.9);
+
+        var after = memory.resonate(query).topK(2).threshold(Double.NEGATIVE_INFINITY).execute();
+        var topIdAfter = after.results().get(0).atom().id();
+
+        assertEquals(topIdBefore, topIdAfter,
+                "RAW profile must not apply feedback-aware ranking: top-1 must remain "
+                        + "the same atom before and after seeding positive feedback for the "
+                        + "weaker atom. If this fails, FeedbackAwareResonanceIndex is being "
+                        + "applied even though feedbackAware=false.");
+        assertEquals(atomA.id(), topIdAfter,
+                "The strongly matching atom (append/log/immutable tokens) must remain top-1 "
+                        + "regardless of the feedback boost on the weaker atom.");
     }
 
     /**

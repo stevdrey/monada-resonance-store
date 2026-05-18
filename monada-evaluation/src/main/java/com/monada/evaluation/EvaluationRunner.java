@@ -6,6 +6,7 @@ import com.monada.core.KnowledgeAtom;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -62,23 +63,42 @@ public final class EvaluationRunner {
         Objects.requireNonNull(options, "options");
 
         var memory = MonadaMemory.open(memoryPath, options);
-        var idToLabel = seedAtoms(dataset, memory);
-        return evaluate(dataset, memory, idToLabel);
+        var seeding = seedAtoms(dataset, memory);
+        return evaluate(dataset, memory, seeding.idToLabel());
     }
 
     /**
      * Appends every atom in {@code dataset} to {@code memory} exactly once and
-     * returns the mapping {@code atomId -> label}. Package-private so that
+     * returns a {@link DatasetSeeding} carrying both the {@code atomId -> label}
+     * and {@code label -> atomId} mappings. Package-private so that
      * {@link EvaluationProfileRunner} can seed atoms with profile-specific
      * options and then seed feedback before evaluating.
+     *
+     * @throws IllegalArgumentException if the dataset contains a duplicate label, or
+     *                                  if two atoms with different labels collide on
+     *                                  the same content-derived atom id
      */
-    Map<String, String> seedAtoms(EvaluationDataset dataset, MonadaMemory memory) {
+    DatasetSeeding seedAtoms(EvaluationDataset dataset, MonadaMemory memory) {
         var idToLabel = new HashMap<String, String>();
-        for (DatasetAtom atom : dataset.atoms()) {
-            KnowledgeAtom stored = memory.remember(atom.content(), atom.aliases());
-            idToLabel.put(stored.id(), atom.label());
+        var labelToAtomId = new HashMap<String, String>();
+        for (var atom : dataset.atoms()) {
+            var label = atom.label();
+            if (labelToAtomId.containsKey(label)) {
+                throw new IllegalArgumentException("duplicate dataset label: " + label);
+            }
+            var stored = memory.remember(atom.content(), atom.aliases());
+            var id = stored.id();
+            var priorLabel = idToLabel.put(id, label);
+            if (priorLabel != null && !priorLabel.equals(label)) {
+                throw new IllegalArgumentException(
+                        "two dataset atoms share content-derived id '" + id
+                                + "': labels=[" + priorLabel + ", " + label + "]");
+            }
+            labelToAtomId.put(label, id);
         }
-        return idToLabel;
+        return new DatasetSeeding(
+                Collections.unmodifiableMap(idToLabel),
+                Collections.unmodifiableMap(labelToAtomId));
     }
 
     /**
