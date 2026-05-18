@@ -1,10 +1,11 @@
 package com.monada.evaluation;
 
 import com.monada.api.MonadaMemory;
-import com.monada.core.KnowledgeAtom;
+import com.monada.api.MonadaMemoryOptions;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -46,19 +47,66 @@ public final class EvaluationRunner {
     }
 
     public EvaluationReport run(EvaluationDataset dataset, Path memoryPath) {
+        return run(dataset, memoryPath, MonadaMemoryOptions.defaults());
+    }
+
+    /**
+     * Evaluates {@code dataset} using a {@link MonadaMemory} opened with the
+     * given {@link MonadaMemoryOptions}. This overload is required by the
+     * profile-aware A/B harness to guarantee that both atom encoding and
+     * query execution use the same configured options end-to-end.
+     */
+    public EvaluationReport run(EvaluationDataset dataset, Path memoryPath, MonadaMemoryOptions options) {
         Objects.requireNonNull(dataset, "dataset");
         Objects.requireNonNull(memoryPath, "memoryPath");
+        Objects.requireNonNull(options, "options");
 
-        var memory = MonadaMemory.open(memoryPath);
+        var memory = MonadaMemory.open(memoryPath, options);
+        var seeding = seedAtoms(dataset, memory);
+        return evaluate(dataset, memory, seeding.idToLabel());
+    }
 
-        // internal atom id -> label (for translating ranked results back to labels)
+    /**
+     * Appends every atom in {@code dataset} to {@code memory} exactly once and
+     * returns a {@link DatasetSeeding} carrying both the {@code atomId -> label}
+     * and {@code label -> atomId} mappings. Package-private so that
+     * {@link EvaluationProfileRunner} can seed atoms with profile-specific
+     * options and then seed feedback before evaluating.
+     *
+     * @throws IllegalArgumentException if the dataset contains a duplicate label, or
+     *                                  if two atoms with different labels collide on
+     *                                  the same content-derived atom id
+     */
+    DatasetSeeding seedAtoms(EvaluationDataset dataset, MonadaMemory memory) {
         var idToLabel = new HashMap<String, String>();
-
-        for (DatasetAtom atom : dataset.atoms()) {
-            KnowledgeAtom stored = memory.remember(atom.content(), atom.aliases());
-            idToLabel.put(stored.id(), atom.label());
+        var labelToAtomId = new HashMap<String, String>();
+        for (var atom : dataset.atoms()) {
+            var label = atom.label();
+            if (labelToAtomId.containsKey(label)) {
+                throw new IllegalArgumentException("duplicate dataset label: " + label);
+            }
+            var stored = memory.remember(atom.content(), atom.aliases());
+            var id = stored.id();
+            var priorLabel = idToLabel.put(id, label);
+            if (priorLabel != null && !priorLabel.equals(label)) {
+                throw new IllegalArgumentException(
+                        "two dataset atoms share content-derived id '" + id
+                                + "': labels=[" + priorLabel + ", " + label + "]");
+            }
+            labelToAtomId.put(label, id);
         }
+        return new DatasetSeeding(
+                Collections.unmodifiableMap(idToLabel),
+                Collections.unmodifiableMap(labelToAtomId));
+    }
 
+    /**
+     * Runs every query in {@code dataset} against an already-seeded
+     * {@code memory} and aggregates metrics. Package-private so that
+     * {@link EvaluationProfileRunner} can reuse the query phase without
+     * reopening memory with default options.
+     */
+    EvaluationReport evaluate(EvaluationDataset dataset, MonadaMemory memory, Map<String, String> idToLabel) {
         var maxK = ks.stream().mapToInt(Integer::intValue).max().orElse(1);
 
         var queryResults = new ArrayList<QueryEvaluation>(dataset.queries().size());
