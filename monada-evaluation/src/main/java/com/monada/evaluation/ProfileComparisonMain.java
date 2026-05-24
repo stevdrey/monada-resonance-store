@@ -35,6 +35,7 @@ public final class ProfileComparisonMain {
         try {
             var profiles = List.of(
                     EvaluationProfile.RAW,
+                    EvaluationProfile.UNWEIGHTED_LEXICAL_ENRICHED,
                     EvaluationProfile.LEXICAL_ENRICHED,
                     EvaluationProfile.LEXICAL_ENRICHED_WITH_FEEDBACK
             );

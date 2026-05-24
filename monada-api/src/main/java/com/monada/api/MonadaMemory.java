@@ -2,8 +2,11 @@ package com.monada.api;
 
 import com.monada.core.KnowledgeAtom;
 import com.monada.encoder.FrequencyEncoder;
+import com.monada.encoder.LexicalExpansionOptions;
 import com.monada.encoder.SimpleFrequencyEncoder;
 import com.monada.encoder.TextNormalizer;
+import com.monada.encoder.WeightedText;
+import com.monada.encoder.WeightedToken;
 import com.monada.index.LinearScanResonanceIndex;
 import com.monada.index.ResonanceIndex;
 import com.monada.storage.AtomStore;
@@ -22,6 +25,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -45,10 +49,11 @@ public class MonadaMemory {
     private final FeedbackStore feedbackStore;
     private final KnownAtomIdCache knownAtomIds;
     private final boolean feedbackAwareRanking;
+    private final LexicalExpansionOptions expansionOptions;
 
     private MonadaMemory(FrequencyEncoder encoder, TextNormalizer textNormalizer, AtomStore atomStore, FrequencyStore frequencyStore,
                          ResonanceIndex resonanceIndex, FeedbackStore feedbackStore, KnownAtomIdCache knownAtomIds,
-                         boolean feedbackAwareRanking) {
+                         boolean feedbackAwareRanking, LexicalExpansionOptions expansionOptions) {
         this.encoder = encoder;
         this.textNormalizer = textNormalizer;
         this.atomStore = atomStore;
@@ -57,6 +62,7 @@ public class MonadaMemory {
         this.feedbackStore = feedbackStore;
         this.knownAtomIds = knownAtomIds;
         this.feedbackAwareRanking = feedbackAwareRanking;
+        this.expansionOptions = Objects.requireNonNull(expansionOptions, "expansionOptions");
     }
 
     public static MonadaMemory open(String path) {
@@ -99,7 +105,7 @@ public class MonadaMemory {
             ResonanceIndex resonanceIndex = new LinearScanResonanceIndex(atomStore, frequencyStore);
             return new MonadaMemory(encoder, options.textNormalizer(), atomStore, frequencyStore, resonanceIndex,
                     feedbackStore, new KnownAtomIdCache(DEFAULT_KNOWN_ATOM_ID_CACHE_SIZE),
-                    options.feedbackAwareRanking());
+                    options.feedbackAwareRanking(), options.expansionOptions());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -121,22 +127,40 @@ public class MonadaMemory {
                     return merged;
                 }
                 // New aliases were added: re-encode and append updated entries.
-                var searchableText = textNormalizer.normalize(merged.searchableContent()).enrichedText();
-                frequencyStore.save(merged.id(), encoder.encode(searchableText));
+                frequencyStore.save(merged.id(), encoder.encode(getWeightedTextForAtom(merged)));
                 atomStore.save(merged);
                 knownAtomIds.remember(merged.id());
                 return merged;
             }
             // Persist vector first: a partial failure leaves an orphan vector that search
             // safely ignores, instead of an atom that cannot be recalled by resonance.
-            var searchableText = textNormalizer.normalize(atom.searchableContent()).enrichedText();
-            frequencyStore.save(atom.id(), encoder.encode(searchableText));
+            frequencyStore.save(atom.id(), encoder.encode(getWeightedTextForAtom(atom)));
             atomStore.save(atom);
             knownAtomIds.remember(atom.id());
             return atom;
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    private WeightedText getWeightedTextForAtom(KnowledgeAtom atom) {
+        List<WeightedToken> tokens = new ArrayList<>();
+        
+        // Normalize core content and assign original/expansion weights
+        var normalizedContent = textNormalizer.normalize(atom.content());
+        tokens.addAll(normalizedContent.toWeightedText(expansionOptions).tokens());
+        
+        // Normalize each alias as secondary support text
+        for (String alias : atom.aliases()) {
+            var normalizedAlias = textNormalizer.normalize(alias);
+            var aliasOptions = new LexicalExpansionOptions(
+                expansionOptions.expansionWeight(),
+                expansionOptions.expansionWeight() * expansionOptions.expansionWeight()
+            );
+            tokens.addAll(normalizedAlias.toWeightedText(aliasOptions).tokens());
+        }
+        
+        return new WeightedText(tokens);
     }
 
     /**
@@ -166,7 +190,7 @@ public class MonadaMemory {
     }
 
     public MonadaQuery resonate(String query) {
-        return new MonadaQuery(query, encoder, textNormalizer, resonanceIndex, feedbackStore, feedbackAwareRanking);
+        return new MonadaQuery(query, encoder, textNormalizer, resonanceIndex, feedbackStore, feedbackAwareRanking, expansionOptions);
     }
 
     /**

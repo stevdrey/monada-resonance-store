@@ -1,6 +1,7 @@
 package com.monada.api;
 
 import com.monada.encoder.LexicalEnrichmentPipeline;
+import com.monada.encoder.LexicalExpansionOptions;
 import com.monada.encoder.TextNormalizer;
 
 import java.util.Objects;
@@ -19,10 +20,16 @@ import java.util.Objects;
  */
 public record MonadaMemoryOptions(
         TextNormalizer textNormalizer,
-        boolean feedbackAwareRanking
+        boolean feedbackAwareRanking,
+        LexicalExpansionOptions expansionOptions
 ) {
+    public MonadaMemoryOptions(TextNormalizer textNormalizer, boolean feedbackAwareRanking) {
+        this(textNormalizer, feedbackAwareRanking, LexicalExpansionOptions.DEFAULT);
+    }
+
     public MonadaMemoryOptions {
         Objects.requireNonNull(textNormalizer, "textNormalizer");
+        Objects.requireNonNull(expansionOptions, "expansionOptions");
     }
 
     /**
@@ -30,6 +37,6 @@ public record MonadaMemoryOptions(
      * normalizer with feedback-aware ranking enabled.
      */
     public static MonadaMemoryOptions defaults() {
-        return new MonadaMemoryOptions(new LexicalEnrichmentPipeline(), true);
+        return new MonadaMemoryOptions(new LexicalEnrichmentPipeline(), true, LexicalExpansionOptions.DEFAULT);
     }
 }
