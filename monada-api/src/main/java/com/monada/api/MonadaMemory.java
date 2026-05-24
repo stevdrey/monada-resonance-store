@@ -151,13 +151,15 @@ public class MonadaMemory {
         tokens.addAll(normalizedContent.toWeightedText(expansionOptions).tokens());
         
         // Normalize each alias as secondary support text
-        for (String alias : atom.aliases()) {
-            var normalizedAlias = textNormalizer.normalize(alias);
+        if (!atom.aliases().isEmpty()) {
             var aliasOptions = new LexicalExpansionOptions(
                 expansionOptions.expansionWeight(),
                 expansionOptions.expansionWeight() * expansionOptions.expansionWeight()
             );
-            tokens.addAll(normalizedAlias.toWeightedText(aliasOptions).tokens());
+            for (String alias : atom.aliases()) {
+                var normalizedAlias = textNormalizer.normalize(alias);
+                tokens.addAll(normalizedAlias.toWeightedText(aliasOptions).tokens());
+            }
         }
         
         return new WeightedText(tokens);

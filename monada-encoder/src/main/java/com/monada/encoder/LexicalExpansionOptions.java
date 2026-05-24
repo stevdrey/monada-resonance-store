@@ -13,8 +13,5 @@ public record LexicalExpansionOptions(
         if (expansionWeight <= 0.0) {
             throw new IllegalArgumentException("expansionWeight must be positive");
         }
-        if (expansionWeight > originalWeight) {
-            throw new IllegalArgumentException("expansionWeight must be less than or equal to originalWeight");
-        }
     }
 }
