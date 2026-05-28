@@ -154,7 +154,7 @@ public class MonadaMemory {
         if (!atom.aliases().isEmpty()) {
             var aliasOptions = new LexicalExpansionOptions(
                 expansionOptions.expansionWeight(),
-                expansionOptions.expansionWeight() * expansionOptions.expansionWeight()
+                Math.min(expansionOptions.expansionWeight(), expansionOptions.expansionWeight() * expansionOptions.expansionWeight())
             );
             for (String alias : atom.aliases()) {
                 var normalizedAlias = textNormalizer.normalize(alias);
