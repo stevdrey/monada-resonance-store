@@ -33,7 +33,7 @@ public class SimpleFrequencyEncoder implements FrequencyEncoder {
 
         for (String token : tokens) {
             if (!token.isBlank()) {
-                addToken(vector, token);
+                addToken(vector, token, 1.0);
             }
         }
 
@@ -41,11 +41,23 @@ public class SimpleFrequencyEncoder implements FrequencyEncoder {
         return new FrequencyVector(vector);
     }
 
-    private void addToken(float[] vector, String token) {
+    @Override
+    public FrequencyVector encode(WeightedText weightedText) {
+        float[] vector = new float[dimensions];
+        for (WeightedToken wt : weightedText.tokens()) {
+            if (!wt.token().isBlank()) {
+                addToken(vector, wt.token(), wt.weight());
+            }
+        }
+        normalize(vector);
+        return new FrequencyVector(vector);
+    }
+
+    private void addToken(float[] vector, String token, double weight) {
         byte[] digest = digest(token);
         int bucket = Math.floorMod(toInt(digest, 0), dimensions);
         float sign = Math.floorMod(toInt(digest, 4), 2) == 0 ? 1.0f : -1.0f;
-        vector[bucket] += sign;
+        vector[bucket] += (float) (sign * weight);
     }
 
     private byte[] digest(String token) {

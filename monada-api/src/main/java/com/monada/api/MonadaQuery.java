@@ -2,6 +2,7 @@ package com.monada.api;
 
 import com.monada.core.MonadaRecall;
 import com.monada.encoder.FrequencyEncoder;
+import com.monada.encoder.LexicalExpansionOptions;
 import com.monada.encoder.TextNormalizer;
 import com.monada.index.FeedbackAwareResonanceIndex;
 import com.monada.index.ResonanceIndex;
@@ -20,17 +21,25 @@ public class MonadaQuery {
     private final ResonanceIndex resonanceIndex;
     private final FeedbackStore feedbackStore;
     private final boolean feedbackAwareRanking;
+    private final LexicalExpansionOptions expansionOptions;
     private int topK = 10;
     private double threshold = 0.0;
 
     MonadaQuery(String query, FrequencyEncoder encoder, TextNormalizer textNormalizer,
                 ResonanceIndex resonanceIndex, FeedbackStore feedbackStore, boolean feedbackAwareRanking) {
+        this(query, encoder, textNormalizer, resonanceIndex, feedbackStore, feedbackAwareRanking, LexicalExpansionOptions.DEFAULT);
+    }
+
+    MonadaQuery(String query, FrequencyEncoder encoder, TextNormalizer textNormalizer,
+                ResonanceIndex resonanceIndex, FeedbackStore feedbackStore, boolean feedbackAwareRanking,
+                LexicalExpansionOptions expansionOptions) {
         this.query = Objects.requireNonNull(query, "query");
         this.encoder = Objects.requireNonNull(encoder, "encoder");
         this.textNormalizer = Objects.requireNonNull(textNormalizer, "textNormalizer");
         this.resonanceIndex = Objects.requireNonNull(resonanceIndex, "resonanceIndex");
         this.feedbackStore = Objects.requireNonNull(feedbackStore, "feedbackStore");
         this.feedbackAwareRanking = feedbackAwareRanking;
+        this.expansionOptions = Objects.requireNonNull(expansionOptions, "expansionOptions");
     }
 
     public MonadaQuery topK(int topK) {
@@ -52,11 +61,10 @@ public class MonadaQuery {
                     ? new FeedbackAwareResonanceIndex(resonanceIndex, feedbackStore, query)
                     : resonanceIndex;
             var normalizedText = textNormalizer.normalize(query);
-            var enrichedQuery = normalizedText.enrichedText();
-            if (enrichedQuery.isBlank()) {
+            if (normalizedText.enrichedText().isBlank()) {
                 return new MonadaRecall(List.of());
             }
-            var queryVector = encoder.encode(enrichedQuery);
+            var queryVector = encoder.encode(normalizedText.toWeightedText(expansionOptions));
             return new MonadaRecall(index.search(queryVector, topK, threshold));
         } catch (IOException e) {
             throw new UncheckedIOException(e);

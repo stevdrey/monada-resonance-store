@@ -2,6 +2,7 @@ package com.monada.evaluation;
 
 import com.monada.api.MonadaMemoryOptions;
 import com.monada.encoder.LexicalEnrichmentPipeline;
+import com.monada.encoder.LexicalExpansionOptions;
 import com.monada.encoder.NoOpTextNormalizer;
 import com.monada.encoder.TextNormalizer;
 
@@ -24,8 +25,13 @@ import java.util.Objects;
 public record EvaluationProfile(
         String name,
         TextNormalizer textNormalizer,
-        boolean feedbackAware
+        boolean feedbackAware,
+        LexicalExpansionOptions expansionOptions
 ) {
+
+    public EvaluationProfile(String name, TextNormalizer textNormalizer, boolean feedbackAware) {
+        this(name, textNormalizer, feedbackAware, LexicalExpansionOptions.DEFAULT);
+    }
 
     /** Raw profile: no lexical enrichment, no feedback-aware ranking. */
     public static final EvaluationProfile RAW =
@@ -45,16 +51,31 @@ public record EvaluationProfile(
     public static final EvaluationProfile LEXICAL_ENRICHED_WITH_FEEDBACK =
             new EvaluationProfile("LEXICAL_ENRICHED_WITH_FEEDBACK", new LexicalEnrichmentPipeline(), true);
 
+    /**
+     * Lexical enrichment utilizing unscaled/full-weight expansion terms (both original
+     * content and synonym expansion terms at weight 1.0).
+     *
+     * <p>Note: While this uses unweighted expansion options (1.0, 1.0), it does not strictly
+     * replicate historical behavior because MonadaMemory now separates core content and
+     * alias normalization, allowing it to maintain perfect cosine rank even without scaled
+     * weights. This profile is useful for evaluating the independent effect of full expansion
+     * weights on overall recall/aggregate precision metrics.
+     */
+    public static final EvaluationProfile LEXICAL_ENRICHED_FULL_EXPANSION_WEIGHT =
+            new EvaluationProfile("LEXICAL_ENRICHED_FULL_EXPANSION_WEIGHT", new LexicalEnrichmentPipeline(), false,
+                    new LexicalExpansionOptions(1.0, 1.0));
+
     public EvaluationProfile {
         Objects.requireNonNull(name, "name");
         if (name.isBlank()) {
             throw new IllegalArgumentException("name must not be blank");
         }
         Objects.requireNonNull(textNormalizer, "textNormalizer");
+        Objects.requireNonNull(expansionOptions, "expansionOptions");
     }
 
     /** Returns the {@link MonadaMemoryOptions} that correspond to this profile. */
     public MonadaMemoryOptions toMemoryOptions() {
-        return new MonadaMemoryOptions(textNormalizer, feedbackAware);
+        return new MonadaMemoryOptions(textNormalizer, feedbackAware, expansionOptions);
     }
 }

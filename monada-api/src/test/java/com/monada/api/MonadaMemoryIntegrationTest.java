@@ -1,5 +1,7 @@
 package com.monada.api;
 
+import com.monada.encoder.LexicalEnrichmentPipeline;
+import com.monada.encoder.LexicalExpansionOptions;
 import com.monada.storage.feedback.FeedbackSignal;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -176,5 +178,18 @@ class MonadaMemoryIntegrationTest {
                 .threshold(0.0)
                 .execute();
         assertEquals(atom.id(), recall.results().getFirst().atom().id());
+    }
+
+    @Test
+    void customLargeExpansionWeightsDoesNotCrashWithAliases() {
+        var customOptions = new MonadaMemoryOptions(
+                new LexicalEnrichmentPipeline(),
+                true,
+                new LexicalExpansionOptions(2.0, 1.2) // expansionWeight > 1.0 (1.2 * 1.2 = 1.44 > 1.2)
+        );
+        var memory = MonadaMemory.open(memoryDirectory, customOptions);
+        var atom = memory.remember("Redis is a key-value store.", List.of("in-memory db", "cache"));
+        
+        assertEquals(List.of("in-memory db", "cache"), atom.aliases());
     }
 }
