@@ -127,6 +127,20 @@ class ExpandedTechnologyDatasetTest {
                 3, "ka_resonance_recall");
     }
 
+    @Test
+    void cosineSimilarityRemainsRank1WithLexicalEnriched(@TempDir Path tempDir) {
+        var dataset = ExpandedTechnologyDataset.get();
+        var report = new EvaluationRunner().run(dataset, tempDir);
+
+        var result = report.queryResults().stream()
+                .filter(qr -> qr.queryText().equals("measuring directional alignment between vectors"))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals("ka_cosine_similarity", result.returnedLabels().getFirst(),
+                "ka_cosine_similarity must be rank 1 for query 'measuring directional alignment between vectors'");
+    }
+
     private static void assertQueryExists(EvaluationDataset dataset, String text) {
         var exists = dataset.queries().stream()
                 .anyMatch(q -> q.text().equals(text));

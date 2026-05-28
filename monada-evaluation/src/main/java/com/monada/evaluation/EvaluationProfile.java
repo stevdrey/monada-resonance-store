@@ -51,9 +51,18 @@ public record EvaluationProfile(
     public static final EvaluationProfile LEXICAL_ENRICHED_WITH_FEEDBACK =
             new EvaluationProfile("LEXICAL_ENRICHED_WITH_FEEDBACK", new LexicalEnrichmentPipeline(), true);
 
-    /** Unweighted lexical enrichment (the old behavior for comparison). */
-    public static final EvaluationProfile UNWEIGHTED_LEXICAL_ENRICHED =
-            new EvaluationProfile("UNWEIGHTED_LEXICAL_ENRICHED", new LexicalEnrichmentPipeline(), false,
+    /**
+     * Lexical enrichment utilizing unscaled/full-weight expansion terms (both original
+     * content and synonym expansion terms at weight 1.0).
+     *
+     * <p>Note: While this uses unweighted expansion options (1.0, 1.0), it does not strictly
+     * replicate historical behavior because MonadaMemory now separates core content and
+     * alias normalization, allowing it to maintain perfect cosine rank even without scaled
+     * weights. This profile is useful for evaluating the independent effect of full expansion
+     * weights on overall recall/aggregate precision metrics.
+     */
+    public static final EvaluationProfile LEXICAL_ENRICHED_FULL_EXPANSION_WEIGHT =
+            new EvaluationProfile("LEXICAL_ENRICHED_FULL_EXPANSION_WEIGHT", new LexicalEnrichmentPipeline(), false,
                     new LexicalExpansionOptions(1.0, 1.0));
 
     public EvaluationProfile {
