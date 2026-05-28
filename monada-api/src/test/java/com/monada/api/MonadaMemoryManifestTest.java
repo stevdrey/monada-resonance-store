@@ -77,6 +77,23 @@ class MonadaMemoryManifestTest {
     }
 
     @Test
+    void openSupportsLegacyManifestVersionWithLegacyWeightsFallback() throws Exception {
+        FileManifestStore manifestStore = new FileManifestStore(root);
+        manifestStore.save(new Manifest(
+                "0.1", 128, "vectors/segment-000001.f32", "atoms/segment-000001.log"));
+
+        MonadaMemory memory = MonadaMemory.open(root);
+
+        java.lang.reflect.Field field = MonadaMemory.class.getDeclaredField("expansionOptions");
+        field.setAccessible(true);
+        com.monada.encoder.LexicalExpansionOptions opts =
+                (com.monada.encoder.LexicalExpansionOptions) field.get(memory);
+
+        assertEquals(1.0, opts.originalWeight());
+        assertEquals(1.0, opts.expansionWeight());
+    }
+
+    @Test
     void resonateNullQueryIsRejectedImmediately() {
         MonadaMemory memory = MonadaMemory.open(root);
         NullPointerException ex = assertThrows(NullPointerException.class,

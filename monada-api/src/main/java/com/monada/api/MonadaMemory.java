@@ -33,7 +33,7 @@ import java.util.Optional;
 
 public class MonadaMemory {
 
-    private static final String MANIFEST_VERSION = "0.1";
+    private static final String MANIFEST_VERSION = "0.2";
     private static final int DEFAULT_DIMENSIONS = 128;
     private static final String DEFAULT_VECTOR_SEGMENT = "vectors/segment-000001.f32";
     private static final String DEFAULT_ATOM_SEGMENT = "atoms/segment-000001.log";
@@ -83,12 +83,17 @@ public class MonadaMemory {
             ManifestStore manifestStore = new FileManifestStore(path);
             Optional<Manifest> existing = manifestStore.load();
             Manifest manifest;
+            LexicalExpansionOptions actualExpansionOptions = options.expansionOptions();
             if (existing.isPresent()) {
                 manifest = existing.get();
                 if (!Objects.equals(manifest.version(), MANIFEST_VERSION)) {
-                    throw new IOException(
-                            "Unsupported manifest version '" + manifest.version()
-                                    + "'; expected '" + MANIFEST_VERSION + "'");
+                    if (Objects.equals(manifest.version(), "0.1")) {
+                        actualExpansionOptions = new LexicalExpansionOptions(1.0, 1.0);
+                    } else {
+                        throw new IOException(
+                                "Unsupported manifest version '" + manifest.version()
+                                        + "'; expected '" + MANIFEST_VERSION + "' or '0.1'");
+                    }
                 }
             } else {
                 manifest = new Manifest(
@@ -105,7 +110,7 @@ public class MonadaMemory {
             ResonanceIndex resonanceIndex = new LinearScanResonanceIndex(atomStore, frequencyStore);
             return new MonadaMemory(encoder, options.textNormalizer(), atomStore, frequencyStore, resonanceIndex,
                     feedbackStore, new KnownAtomIdCache(DEFAULT_KNOWN_ATOM_ID_CACHE_SIZE),
-                    options.feedbackAwareRanking(), options.expansionOptions());
+                    options.feedbackAwareRanking(), actualExpansionOptions);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
