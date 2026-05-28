@@ -68,19 +68,54 @@ public final class VectorRebuilder {
             Files.createDirectories(targetVectorFile.getParent());
             Files.createDirectories(targetVectorMap.getParent());
 
-            Files.move(tempVectorFile, targetVectorFile, StandardCopyOption.REPLACE_EXISTING);
-            Files.move(tempVectorMap, targetVectorMap, StandardCopyOption.REPLACE_EXISTING);
+            var targetVectorFileBak = root.resolve(manifest.vectorSegment() + ".bak");
+            var targetVectorMapBak = root.resolve("indexes/vector-map.idx.bak");
 
-            var profile = MonadaMemory.getExpectedProfile(dimensions, targetOptions);
-            var updatedManifest = new Manifest(
-                    "0.3",
-                    dimensions,
-                    manifest.vectorSegment(),
-                    manifest.atomSegment(),
-                    manifest.feedbackSegment(),
-                    profile
-            );
-            manifestStore.save(updatedManifest);
+            boolean backedUp = false;
+            try {
+                if (Files.exists(targetVectorFile)) {
+                    Files.move(targetVectorFile, targetVectorFileBak, StandardCopyOption.REPLACE_EXISTING);
+                }
+                if (Files.exists(targetVectorMap)) {
+                    Files.move(targetVectorMap, targetVectorMapBak, StandardCopyOption.REPLACE_EXISTING);
+                }
+                backedUp = true;
+
+                Files.move(tempVectorFile, targetVectorFile, StandardCopyOption.REPLACE_EXISTING);
+                Files.move(tempVectorMap, targetVectorMap, StandardCopyOption.REPLACE_EXISTING);
+
+                var profile = MonadaMemory.getExpectedProfile(dimensions, targetOptions);
+                var updatedManifest = new Manifest(
+                        "0.3",
+                        dimensions,
+                        manifest.vectorSegment(),
+                        manifest.atomSegment(),
+                        manifest.feedbackSegment(),
+                        profile
+                );
+                manifestStore.save(updatedManifest);
+
+                if (Files.exists(targetVectorFileBak)) {
+                    Files.delete(targetVectorFileBak);
+                }
+                if (Files.exists(targetVectorMapBak)) {
+                    Files.delete(targetVectorMapBak);
+                }
+            } catch (IOException e) {
+                if (backedUp) {
+                    try {
+                        if (Files.exists(targetVectorFileBak)) {
+                            Files.move(targetVectorFileBak, targetVectorFile, StandardCopyOption.REPLACE_EXISTING);
+                        }
+                        if (Files.exists(targetVectorMapBak)) {
+                            Files.move(targetVectorMapBak, targetVectorMap, StandardCopyOption.REPLACE_EXISTING);
+                        }
+                    } catch (IOException rollbackEx) {
+                        e.addSuppressed(rollbackEx);
+                    }
+                }
+                throw e;
+            }
 
         } finally {
             deleteDirectory(tempDir);

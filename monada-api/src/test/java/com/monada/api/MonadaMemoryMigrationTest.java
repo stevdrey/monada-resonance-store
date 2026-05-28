@@ -7,7 +7,9 @@ import com.monada.storage.Manifest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -110,5 +112,45 @@ class MonadaMemoryMigrationTest {
         assertEquals("0.3", manifest.version());
         assertEquals("NoOpTextNormalizer", manifest.encodingProfile().normalizer());
         assertEquals(0.8, manifest.encodingProfile().expansionWeight());
+    }
+
+    @Test
+    void rebuildRollsBackOnFailure() throws Exception {
+        var memory = MonadaMemory.open(root);
+        var vectorFile = root.resolve("vectors/segment-000001.f32");
+        var vectorMap = root.resolve("indexes/vector-map.idx");
+        assertTrue(Files.exists(vectorFile));
+        assertTrue(Files.exists(vectorMap));
+        var originalVectorSize = Files.size(vectorFile);
+        var originalMapSize = Files.size(vectorMap);
+        var originalVectorBytes = Files.readAllBytes(vectorFile);
+        var originalMapBytes = Files.readAllBytes(vectorMap);
+
+        var targetOptions = new MonadaMemoryOptions(
+                new NoOpTextNormalizer(),
+                true,
+                new LexicalExpansionOptions(1.0, 0.8)
+        );
+
+        // Make manifest.json read-only to force manifestStore.save to fail
+        var manifestFile = root.resolve("manifest.json");
+        try {
+            manifestFile.toFile().setWritable(false);
+            root.toFile().setWritable(false); // Also make directory read-only for safety
+
+            assertThrows(java.io.IOException.class, () -> VectorRebuilder.rebuild(root, targetOptions));
+
+            // Verify original files are restored
+            assertTrue(Files.exists(vectorFile));
+            assertTrue(Files.exists(vectorMap));
+            assertEquals(originalVectorSize, Files.size(vectorFile));
+            assertEquals(originalMapSize, Files.size(vectorMap));
+            assertTrue(Arrays.equals(originalVectorBytes, Files.readAllBytes(vectorFile)));
+            assertTrue(Arrays.equals(originalMapBytes, Files.readAllBytes(vectorMap)));
+        } finally {
+            // Restore write permissions for JUnit cleanup
+            manifestFile.toFile().setWritable(true);
+            root.toFile().setWritable(true);
+        }
     }
 }
