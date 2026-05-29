@@ -212,4 +212,44 @@ class MonadaMemoryMigrationTest {
 
         assertNotNull(MonadaMemory.open(root, MonadaMemoryOptions.defaults()));
     }
+
+    @Test
+    void openRejectsCustomLexicalResourcesForLegacy02Store() throws Exception {
+        FileManifestStore manifestStore = new FileManifestStore(root);
+        manifestStore.save(new Manifest(
+                "0.2", 128, "vectors/segment-000001.f32", "atoms/segment-000001.log"));
+
+        var customPipeline = new LexicalEnrichmentPipeline(
+                Set.of("customstop"),
+                Map.of("databases", "database"),
+                Map.of("db", List.of("database")));
+        var customOptions = new MonadaMemoryOptions(
+                customPipeline,
+                true,
+                LexicalExpansionOptions.DEFAULT);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> MonadaMemory.open(root, customOptions));
+        assertTrue(ex.getMessage().contains("has custom lexical resources which cannot be proven compatible with legacy 0.2 store"));
+    }
+
+    @Test
+    void openRejectsCustomLexicalResourcesForLegacy01Store() throws Exception {
+        FileManifestStore manifestStore = new FileManifestStore(root);
+        manifestStore.save(new Manifest(
+                "0.1", 128, "vectors/segment-000001.f32", "atoms/segment-000001.log"));
+
+        var customPipeline = new LexicalEnrichmentPipeline(
+                Set.of("customstop"),
+                Map.of("databases", "database"),
+                Map.of("db", List.of("database")));
+        var customOptions = new MonadaMemoryOptions(
+                customPipeline,
+                true,
+                LexicalExpansionOptions.DEFAULT);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> MonadaMemory.open(root, customOptions));
+        assertTrue(ex.getMessage().contains("has custom lexical resources which cannot be proven compatible with legacy 0.1 store"));
+    }
 }

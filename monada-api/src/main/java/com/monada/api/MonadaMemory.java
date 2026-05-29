@@ -2,6 +2,7 @@ package com.monada.api;
 
 import com.monada.core.KnowledgeAtom;
 import com.monada.encoder.FrequencyEncoder;
+import com.monada.encoder.LexicalEnrichmentPipeline;
 import com.monada.encoder.LexicalExpansionOptions;
 import com.monada.encoder.SimpleFrequencyEncoder;
 import com.monada.encoder.TextNormalizer;
@@ -127,6 +128,15 @@ public class MonadaMemory {
                                 " is incompatible with legacy 0.2 store (expected LexicalEnrichmentPipeline).\n" +
                                 "Please rebuild vectors using VectorRebuilder.");
                     }
+                    // Legacy 0.2 stores do not persist their lexical configuration, so we cannot
+                    // prove that custom requested resources match the existing vectors. Only the
+                    // default resources are assumed compatible; reject anything else.
+                    String defaultFingerprint = new LexicalEnrichmentPipeline().configurationFingerprint();
+                    if (!options.textNormalizer().configurationFingerprint().equals(defaultFingerprint)) {
+                        throw new IllegalArgumentException(
+                                "Requested normalizer has custom lexical resources which cannot be proven compatible with legacy 0.2 store (resources are not persisted).\n" +
+                                "Please rebuild vectors using VectorRebuilder.");
+                    }
                     // Legacy 0.2 stores do not persist their expansion weights, so we cannot
                     // prove that custom requested weights match the existing vectors. Only the
                     // default weights are assumed compatible; reject anything else.
@@ -142,6 +152,15 @@ public class MonadaMemory {
                         throw new IllegalArgumentException(
                                 "Requested normalizer " + options.textNormalizer().getClass().getSimpleName() +
                                 " is incompatible with legacy 0.1 store (expected LexicalEnrichmentPipeline).\n" +
+                                "Please rebuild vectors using VectorRebuilder.");
+                    }
+                    // Legacy 0.1 stores do not persist their lexical configuration, so we cannot
+                    // prove that custom requested resources match the existing vectors. Only the
+                    // default resources are assumed compatible; reject anything else.
+                    String defaultFingerprint = new LexicalEnrichmentPipeline().configurationFingerprint();
+                    if (!options.textNormalizer().configurationFingerprint().equals(defaultFingerprint)) {
+                        throw new IllegalArgumentException(
+                                "Requested normalizer has custom lexical resources which cannot be proven compatible with legacy 0.1 store (resources are not persisted).\n" +
                                 "Please rebuild vectors using VectorRebuilder.");
                     }
                     actualExpansionOptions = new LexicalExpansionOptions(1.0, 1.0);
