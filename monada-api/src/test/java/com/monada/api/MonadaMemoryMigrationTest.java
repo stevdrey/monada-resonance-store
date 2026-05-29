@@ -1,5 +1,6 @@
 package com.monada.api;
 
+import com.monada.encoder.LexicalEnrichmentPipeline;
 import com.monada.encoder.LexicalExpansionOptions;
 import com.monada.encoder.NoOpTextNormalizer;
 import com.monada.storage.FileManifestStore;
@@ -147,10 +148,66 @@ class MonadaMemoryMigrationTest {
             assertEquals(originalMapSize, Files.size(vectorMap));
             assertTrue(Arrays.equals(originalVectorBytes, Files.readAllBytes(vectorFile)));
             assertTrue(Arrays.equals(originalMapBytes, Files.readAllBytes(vectorMap)));
+
+            // The manifest must remain intact and the store must stay openable.
+            assertTrue(Files.exists(manifestFile));
         } finally {
             // Restore write permissions for JUnit cleanup
             manifestFile.toFile().setWritable(true);
             root.toFile().setWritable(true);
         }
+
+        // Store still opens with its original (default) profile after the failed rebuild.
+        assertNotNull(MonadaMemory.open(root));
+    }
+
+    @Test
+    void openRejectsCustomLexicalResourcesAgainstDefaultStore() throws Exception {
+        MonadaMemory.open(root);
+
+        var customPipeline = new LexicalEnrichmentPipeline(
+                Set.of("customstop"),
+                Map.of("databases", "database"),
+                Map.of("db", List.of("database")));
+        var customOptions = new MonadaMemoryOptions(
+                customPipeline,
+                true,
+                LexicalExpansionOptions.DEFAULT);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> MonadaMemory.open(root, customOptions));
+        assertTrue(ex.getMessage().contains("Requested encoding profile does not match"));
+    }
+
+    @Test
+    void openAllowsIdenticalLexicalResources() throws Exception {
+        MonadaMemory.open(root);
+        // A fresh default pipeline has the same fingerprint as the one used to create the store.
+        assertNotNull(MonadaMemory.open(root, MonadaMemoryOptions.defaults()));
+    }
+
+    @Test
+    void openRejectsCustomExpansionOptionsForLegacy02Store() throws Exception {
+        FileManifestStore manifestStore = new FileManifestStore(root);
+        manifestStore.save(new Manifest(
+                "0.2", 128, "vectors/segment-000001.f32", "atoms/segment-000001.log"));
+
+        MonadaMemoryOptions customExpansion = new MonadaMemoryOptions(
+                new LexicalEnrichmentPipeline(),
+                true,
+                new LexicalExpansionOptions(1.0, 1.0));
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> MonadaMemory.open(root, customExpansion));
+        assertTrue(ex.getMessage().contains("cannot be proven compatible with legacy 0.2 store"));
+    }
+
+    @Test
+    void openAllowsDefaultExpansionOptionsForLegacy02Store() throws Exception {
+        FileManifestStore manifestStore = new FileManifestStore(root);
+        manifestStore.save(new Manifest(
+                "0.2", 128, "vectors/segment-000001.f32", "atoms/segment-000001.log"));
+
+        assertNotNull(MonadaMemory.open(root, MonadaMemoryOptions.defaults()));
     }
 }

@@ -89,7 +89,7 @@ public class MonadaMemory {
             "1.0",
             dimensions,
             options.textNormalizer().getClass().getSimpleName(),
-            "1.0",
+            options.textNormalizer().configurationFingerprint(),
             "WeightedTokens",
             origW,
             expW,
@@ -125,6 +125,15 @@ public class MonadaMemory {
                         throw new IllegalArgumentException(
                                 "Requested normalizer " + options.textNormalizer().getClass().getSimpleName() +
                                 " is incompatible with legacy 0.2 store (expected LexicalEnrichmentPipeline).\n" +
+                                "Please rebuild vectors using VectorRebuilder.");
+                    }
+                    // Legacy 0.2 stores do not persist their expansion weights, so we cannot
+                    // prove that custom requested weights match the existing vectors. Only the
+                    // default weights are assumed compatible; reject anything else.
+                    if (!options.expansionOptions().equals(LexicalExpansionOptions.DEFAULT)) {
+                        throw new IllegalArgumentException(
+                                "Requested expansion options " + options.expansionOptions() +
+                                " cannot be proven compatible with legacy 0.2 store (weights are not persisted).\n" +
                                 "Please rebuild vectors using VectorRebuilder.");
                     }
                     actualExpansionOptions = LexicalExpansionOptions.DEFAULT;
