@@ -1,9 +1,6 @@
 package com.monada.api;
 
-import com.monada.encoder.LexicalExpansionOptions;
 import com.monada.encoder.SimpleFrequencyEncoder;
-import com.monada.encoder.WeightedText;
-import com.monada.encoder.WeightedToken;
 import com.monada.storage.FileAtomStore;
 import com.monada.storage.FileFrequencyStore;
 import com.monada.storage.FileManifestStore;
@@ -12,7 +9,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.util.ArrayList;
 
 public final class VectorRebuilder {
 
@@ -37,25 +33,7 @@ public final class VectorRebuilder {
             var encoder = new SimpleFrequencyEncoder(dimensions);
 
             for (var atom : atoms) {
-                var tokens = new ArrayList<WeightedToken>();
-                var normalizedContent = targetOptions.textNormalizer().normalize(atom.content());
-                tokens.addAll(normalizedContent.toWeightedText(targetOptions.expansionOptions()).tokens());
-
-                if (!atom.aliases().isEmpty()) {
-                    var aliasOptions = new LexicalExpansionOptions(
-                            targetOptions.expansionOptions().expansionWeight(),
-                            Math.min(targetOptions.expansionOptions().expansionWeight(),
-                                    targetOptions.expansionOptions().expansionWeight() * targetOptions.expansionOptions().expansionWeight())
-                    );
-                    tokens.addAll(
-                            atom.aliases().stream()
-                                    .map(targetOptions.textNormalizer()::normalize)
-                                    .flatMap(normalized -> normalized.toWeightedText(aliasOptions).tokens().stream())
-                                    .toList()
-                    );
-                }
-
-                WeightedText weightedText = new WeightedText(tokens);
+                var weightedText = com.monada.encoder.WeightedAtomEncoder.toWeightedText(atom, targetOptions.textNormalizer(), targetOptions.expansionOptions());
                 tempFreqStore.save(atom.id(), encoder.encode(weightedText));
             }
 

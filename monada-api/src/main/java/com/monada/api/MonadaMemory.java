@@ -6,8 +6,8 @@ import com.monada.encoder.LexicalEnrichmentPipeline;
 import com.monada.encoder.LexicalExpansionOptions;
 import com.monada.encoder.SimpleFrequencyEncoder;
 import com.monada.encoder.TextNormalizer;
+import com.monada.encoder.WeightedAtomEncoder;
 import com.monada.encoder.WeightedText;
-import com.monada.encoder.WeightedToken;
 import com.monada.index.LinearScanResonanceIndex;
 import com.monada.index.ResonanceIndex;
 import com.monada.storage.AtomStore;
@@ -27,7 +27,6 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -224,25 +223,7 @@ public class MonadaMemory {
     }
 
     private WeightedText getWeightedTextForAtom(KnowledgeAtom atom) {
-        List<WeightedToken> tokens = new ArrayList<>();
-        
-        // Normalize core content and assign original/expansion weights
-        var normalizedContent = textNormalizer.normalize(atom.content());
-        tokens.addAll(normalizedContent.toWeightedText(expansionOptions).tokens());
-        
-        // Normalize each alias as secondary support text
-        if (!atom.aliases().isEmpty()) {
-            var aliasOptions = new LexicalExpansionOptions(
-                expansionOptions.expansionWeight(),
-                Math.min(expansionOptions.expansionWeight(), expansionOptions.expansionWeight() * expansionOptions.expansionWeight())
-            );
-            for (String alias : atom.aliases()) {
-                var normalizedAlias = textNormalizer.normalize(alias);
-                tokens.addAll(normalizedAlias.toWeightedText(aliasOptions).tokens());
-            }
-        }
-        
-        return new WeightedText(tokens);
+        return WeightedAtomEncoder.toWeightedText(atom, textNormalizer, expansionOptions);
     }
 
     /**

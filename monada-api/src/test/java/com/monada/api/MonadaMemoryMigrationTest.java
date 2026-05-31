@@ -252,4 +252,25 @@ class MonadaMemoryMigrationTest {
                 () -> MonadaMemory.open(root, customOptions));
         assertTrue(ex.getMessage().contains("has custom lexical resources which cannot be proven compatible with legacy 0.1 store"));
     }
+
+    @Test
+    void rebuildAndRememberProduceIdenticalVectors() throws Exception {
+        var options = new MonadaMemoryOptions(
+                new LexicalEnrichmentPipeline(),
+                true,
+                new LexicalExpansionOptions(1.0, 0.8)
+        );
+        var firstRoot = root.resolve("store_first");
+        var firstMemory = MonadaMemory.open(firstRoot, options);
+        var firstAtom = firstMemory.remember("closeness resonance", List.of("similarity memory"));
+
+        var firstFreqStore = new com.monada.storage.FileFrequencyStore(firstRoot, "vectors/segment-000001.f32", 128);
+        var firstVector = firstFreqStore.findByAtomId(firstAtom.id()).orElseThrow();
+
+        VectorRebuilder.rebuild(firstRoot, options);
+
+        var rebuiltVector = firstFreqStore.findByAtomId(firstAtom.id()).orElseThrow();
+
+        assertTrue(Arrays.equals(firstVector.values(), rebuiltVector.values()));
+    }
 }
