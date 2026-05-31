@@ -56,24 +56,27 @@ public final class RetrievalFailureClassifier {
             Map<Integer, Double> hitByK,
             Map<Integer, Double> recallByK
     ) {
-        double hit1 = hitByK.getOrDefault(1, 0.0);
-        double hit5 = hitByK.getOrDefault(5, hitByK.getOrDefault(3, 0.0));
-        double recall5 = recallByK.getOrDefault(5, recallByK.getOrDefault(3, 0.0));
+        int maxK = hitByK.keySet().stream().mapToInt(Integer::intValue).max().orElse(0);
+        double hitMaxK = maxK > 0 ? hitByK.getOrDefault(maxK, 0.0) : 0.0;
+        double recallMaxK = maxK > 0 ? recallByK.getOrDefault(maxK, 0.0) : 0.0;
+        // When key 1 is present, honour Hit@1 for perfectHit detection; otherwise fall
+        // back to hitMaxK so custom K sets (e.g. {2,4}) still classify correctly.
+        double effectiveHit1 = hitByK.containsKey(1) ? hitByK.get(1) : hitMaxK;
 
-        boolean perfectHit = hit1 >= 1.0 - 1e-12;
-        boolean perfectRecall = expected.size() <= 1 || recall5 >= 1.0 - 1e-12;
+        boolean perfectHit = effectiveHit1 >= 1.0 - 1e-12;
+        boolean perfectRecall = expected.size() <= 1 || recallMaxK >= 1.0 - 1e-12;
         if (perfectHit && perfectRecall) {
             return Optional.empty();
         }
 
-        if (hit5 < 1e-12) {
+        if (hitMaxK < 1e-12) {
             if (isPossibleAliasGap(queryText, expected)) {
                 return Optional.of(RetrievalFailureType.POSSIBLE_DATASET_ALIAS_GAP);
             }
             return Optional.of(RetrievalFailureType.MISSING_EXPECTED_ATOM);
         }
 
-        if (expected.size() > 1 && recall5 < 1.0 - 1e-12) {
+        if (expected.size() > 1 && recallMaxK < 1.0 - 1e-12) {
             return Optional.of(RetrievalFailureType.MULTI_RELEVANT_RECALL_GAP);
         }
 

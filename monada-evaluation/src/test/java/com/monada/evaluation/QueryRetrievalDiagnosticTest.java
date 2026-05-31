@@ -49,6 +49,20 @@ class QueryRetrievalDiagnosticTest {
         assertEquals(RetrievalFailureType.MISSING_EXPECTED_ATOM, diag.failureType().orElseThrow());
     }
 
+    @Test
+    void missingExpectedLabelsAreAlphabeticallySorted() {
+        // Three expected labels; none are returned — all three should appear in missingExpectedLabels
+        // in alphabetical order regardless of the Set iteration order used at the call site.
+        var eval = queryEval("similarity search",
+                Set.of("ka_zoo", "ka_alpha", "ka_middle"),
+                List.of("ka_cache", "ka_index"));
+        var diag = QueryRetrievalDiagnostic.compute(eval);
+
+        var missing = List.copyOf(diag.missingExpectedLabels());
+        assertEquals(List.of("ka_alpha", "ka_middle", "ka_zoo"), missing,
+                "missingExpectedLabels must be iterable in alphabetical order");
+    }
+
     private static QueryEvaluation queryEval(String text, Set<String> expected, List<String> returned) {
         return new QueryEvaluation(
                 text,

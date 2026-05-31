@@ -1,6 +1,7 @@
 package com.monada.evaluation;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -20,7 +21,8 @@ public record QueryRetrievalDiagnostic(
         expectedLabels = Set.copyOf(Objects.requireNonNull(expectedLabels, "expectedLabels"));
         returnedLabels = List.copyOf(Objects.requireNonNull(returnedLabels, "returnedLabels"));
         presentExpectedLabels = List.copyOf(Objects.requireNonNull(presentExpectedLabels, "presentExpectedLabels"));
-        missingExpectedLabels = Set.copyOf(Objects.requireNonNull(missingExpectedLabels, "missingExpectedLabels"));
+        missingExpectedLabels = Collections.unmodifiableSortedSet(
+                new TreeSet<>(Objects.requireNonNull(missingExpectedLabels, "missingExpectedLabels")));
         Objects.requireNonNull(failureType, "failureType");
         Objects.requireNonNull(note, "note");
     }
