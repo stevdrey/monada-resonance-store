@@ -2,6 +2,7 @@ package com.monada.evaluation;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -39,14 +40,25 @@ public final class RetrievalFailureClassifier {
      * all expected labels are recalled at the evaluated K.
      */
     public static Optional<RetrievalFailureType> classify(QueryEvaluation evaluation) {
-        var expected = evaluation.expectedLabels();
-        var returned = evaluation.returnedLabels();
-        var hitByK = evaluation.hitByK();
+        return classify(
+                evaluation.queryText(),
+                evaluation.expectedLabels(),
+                evaluation.returnedLabels(),
+                evaluation.hitByK(),
+                evaluation.recallByK()
+        );
+    }
 
-        // Perfect: Hit@1 is 1.0 and no multi-relevant recall gap.
+    public static Optional<RetrievalFailureType> classify(
+            String queryText,
+            Set<String> expected,
+            List<String> returned,
+            Map<Integer, Double> hitByK,
+            Map<Integer, Double> recallByK
+    ) {
         double hit1 = hitByK.getOrDefault(1, 0.0);
         double hit5 = hitByK.getOrDefault(5, hitByK.getOrDefault(3, 0.0));
-        double recall5 = evaluation.recallByK().getOrDefault(5, evaluation.recallByK().getOrDefault(3, 0.0));
+        double recall5 = recallByK.getOrDefault(5, recallByK.getOrDefault(3, 0.0));
 
         boolean perfectHit = hit1 >= 1.0 - 1e-12;
         boolean perfectRecall = expected.size() <= 1 || recall5 >= 1.0 - 1e-12;
@@ -54,25 +66,19 @@ public final class RetrievalFailureClassifier {
             return Optional.empty();
         }
 
-        // No expected atom in top-K at all.
         if (hit5 < 1e-12) {
-            // Heuristic: if the query tokens don't overlap with any expected label token,
-            // it is likely a dataset alias gap rather than an encoder limitation.
-            if (isPossibleAliasGap(evaluation.queryText(), expected)) {
+            if (isPossibleAliasGap(queryText, expected)) {
                 return Optional.of(RetrievalFailureType.POSSIBLE_DATASET_ALIAS_GAP);
             }
             return Optional.of(RetrievalFailureType.MISSING_EXPECTED_ATOM);
         }
 
-        // Multi-relevant gap: some expected atoms are missing from top-K.
         if (expected.size() > 1 && recall5 < 1.0 - 1e-12) {
             return Optional.of(RetrievalFailureType.MULTI_RELEVANT_RECALL_GAP);
         }
 
-        // At least one expected atom is in top-K; classify by rank.
         int firstExpectedRank = firstExpectedRank(expected, returned);
         if (firstExpectedRank == 1) {
-            // Present at rank 2 (0-based index 1): something else ranked higher.
             return Optional.of(RetrievalFailureType.CONFUSABLE_ATOM_RANKED_HIGHER);
         }
         if (firstExpectedRank >= 2) {
