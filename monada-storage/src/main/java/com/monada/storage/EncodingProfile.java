@@ -23,5 +23,15 @@ public record EncodingProfile(
         if (dimensions <= 0) {
             throw new IllegalArgumentException("dimensions must be greater than zero");
         }
+        validatePositiveFiniteWeight("originalWeight", originalWeight);
+        validatePositiveFiniteWeight("expansionWeight", expansionWeight);
+        validatePositiveFiniteWeight("aliasOriginalWeight", aliasOriginalWeight);
+        validatePositiveFiniteWeight("aliasExpansionWeight", aliasExpansionWeight);
+    }
+
+    private static void validatePositiveFiniteWeight(String field, double weight) {
+        if (!Double.isFinite(weight) || weight <= 0.0) {
+            throw new IllegalArgumentException(field + " must be finite and positive");
+        }
     }
 }
