@@ -121,6 +121,29 @@ class RetrievalFailureClassifierTest {
     }
 
     @Test
+    void confusableAtomWithCustomKSetClassifiedCorrectly() {
+        // EvaluationRunner configured with K={2,4}.
+        // returned[0] is a wrong atom, returned[1] is the expected atom.
+        // Hit@2 == 1.0 but the expected atom is NOT first → CONFUSABLE_ATOM_RANKED_HIGHER.
+        var hitByK = new TreeMap<Integer, Double>();
+        hitByK.put(2, 1.0);
+        hitByK.put(4, 1.0);
+        var recallByK = new TreeMap<Integer, Double>();
+        recallByK.put(2, 1.0);
+        recallByK.put(4, 1.0);
+
+        var result = RetrievalFailureClassifier.classify(
+                "cosine similarity",
+                Set.of("ka_cosine"),
+                List.of("ka_cache", "ka_cosine", "ka_index", "ka_tree"),
+                hitByK,
+                recallByK);
+
+        assertEquals(RetrievalFailureType.CONFUSABLE_ATOM_RANKED_HIGHER, result.orElseThrow(),
+                "Expected atom at rank 2 with custom K={2,4} must yield CONFUSABLE_ATOM_RANKED_HIGHER");
+    }
+
+    @Test
     void missingAtomWithCustomKSetClassifiesCorrectly() {
         // EvaluationRunner configured with K={2,4} — expected atom completely absent.
         var hitByK = new TreeMap<Integer, Double>();

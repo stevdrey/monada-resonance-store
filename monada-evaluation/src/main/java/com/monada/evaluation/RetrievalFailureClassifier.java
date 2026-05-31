@@ -59,9 +59,12 @@ public final class RetrievalFailureClassifier {
         int maxK = hitByK.keySet().stream().mapToInt(Integer::intValue).max().orElse(0);
         double hitMaxK = maxK > 0 ? hitByK.getOrDefault(maxK, 0.0) : 0.0;
         double recallMaxK = maxK > 0 ? recallByK.getOrDefault(maxK, 0.0) : 0.0;
-        // When key 1 is present, honour Hit@1 for perfectHit detection; otherwise fall
-        // back to hitMaxK so custom K sets (e.g. {2,4}) still classify correctly.
-        double effectiveHit1 = hitByK.containsKey(1) ? hitByK.get(1) : hitMaxK;
+        // When key 1 is present, honour Hit@1 for perfectHit detection; otherwise check
+        // directly whether the first returned atom is expected (exact rank-1 test) so that
+        // [wrong, expected, ...] with K={2,4} is not mistakenly treated as a rank-1 hit.
+        double effectiveHit1 = hitByK.containsKey(1)
+                ? hitByK.get(1)
+                : (!returned.isEmpty() && expected.contains(returned.get(0)) ? 1.0 : 0.0);
 
         boolean perfectHit = effectiveHit1 >= 1.0 - 1e-12;
         boolean perfectRecall = expected.size() <= 1 || recallMaxK >= 1.0 - 1e-12;
