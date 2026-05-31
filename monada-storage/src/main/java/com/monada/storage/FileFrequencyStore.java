@@ -34,12 +34,16 @@ public class FileFrequencyStore implements FrequencyStore {
         this(root, vectorSegment, null);
     }
 
+    public static Path resolveVectorMapPath(Path root) {
+        return root.resolve("indexes").resolve("vector-map.idx");
+    }
+
     public FileFrequencyStore(Path root, String vectorSegment, Integer fixedDimensions) throws IOException {
         if (fixedDimensions != null && fixedDimensions <= 0) {
             throw new IllegalArgumentException("fixedDimensions must be greater than zero");
         }
         this.vectorFile = root.resolve(vectorSegment);
-        this.vectorMap = root.resolve("indexes").resolve("vector-map.idx");
+        this.vectorMap = resolveVectorMapPath(root);
         this.fixedDimensions = fixedDimensions;
         Files.createDirectories(vectorFile.getParent());
         Files.createDirectories(vectorMap.getParent());

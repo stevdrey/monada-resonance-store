@@ -3,9 +3,12 @@ package com.monada.encoder;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -84,5 +87,40 @@ class LexicalEnrichmentPipelineTest {
         var ex = assertThrows(IllegalStateException.class, () -> new LexicalEnrichmentPipeline("missing-language"));
 
         assertTrue(ex.getMessage().contains("Missing lexical resource"));
+    }
+
+    @Test
+    void configurationFingerprintIsStableForSameResources() {
+        var first = new LexicalEnrichmentPipeline();
+        var second = new LexicalEnrichmentPipeline();
+
+        assertEquals(first.configurationFingerprint(), second.configurationFingerprint());
+        assertTrue(first.configurationFingerprint().startsWith("LexicalEnrichmentPipeline#"));
+    }
+
+    @Test
+    void configurationFingerprintDiffersForDifferentResources() {
+        var defaultPipeline = new LexicalEnrichmentPipeline();
+        var customPipeline = new LexicalEnrichmentPipeline(
+                Set.of("customstop"),
+                Map.of("databases", "database"),
+                Map.of("db", List.of("database")));
+
+        assertNotEquals(defaultPipeline.configurationFingerprint(),
+                customPipeline.configurationFingerprint());
+    }
+
+    @Test
+    void configurationFingerprintIsIndependentOfResourceInsertionOrder() {
+        var a = new LexicalEnrichmentPipeline(
+                Set.of("alpha", "beta"),
+                Map.of("cats", "cat", "dogs", "dog"),
+                Map.of("db", List.of("database"), "k8s", List.of("kubernetes")));
+        var b = new LexicalEnrichmentPipeline(
+                Set.of("beta", "alpha"),
+                Map.of("dogs", "dog", "cats", "cat"),
+                Map.of("k8s", List.of("kubernetes"), "db", List.of("database")));
+
+        assertEquals(a.configurationFingerprint(), b.configurationFingerprint());
     }
 }

@@ -4,7 +4,7 @@ import com.monada.storage.feedback.FeedbackStore;
 
 import java.util.Objects;
 
-public record Manifest(String version, int dimensions, String vectorSegment, String atomSegment, String feedbackSegment) {
+public record Manifest(String version, int dimensions, String vectorSegment, String atomSegment, String feedbackSegment, EncodingProfile encodingProfile) {
     public Manifest {
         Objects.requireNonNull(version, "version");
         Objects.requireNonNull(vectorSegment, "vectorSegment");
@@ -15,11 +15,11 @@ public record Manifest(String version, int dimensions, String vectorSegment, Str
         }
     }
 
-    /**
-     * Backward-compatible convenience constructor that applies the default
-     * feedback segment path. Prefer the canonical constructor in new code.
-     */
+    public Manifest(String version, int dimensions, String vectorSegment, String atomSegment, String feedbackSegment) {
+        this(version, dimensions, vectorSegment, atomSegment, feedbackSegment, null);
+    }
+
     public Manifest(String version, int dimensions, String vectorSegment, String atomSegment) {
-        this(version, dimensions, vectorSegment, atomSegment, FeedbackStore.DEFAULT_SEGMENT);
+        this(version, dimensions, vectorSegment, atomSegment, FeedbackStore.DEFAULT_SEGMENT, null);
     }
 }

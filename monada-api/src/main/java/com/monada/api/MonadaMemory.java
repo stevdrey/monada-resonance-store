@@ -2,14 +2,16 @@ package com.monada.api;
 
 import com.monada.core.KnowledgeAtom;
 import com.monada.encoder.FrequencyEncoder;
+import com.monada.encoder.LexicalEnrichmentPipeline;
 import com.monada.encoder.LexicalExpansionOptions;
 import com.monada.encoder.SimpleFrequencyEncoder;
 import com.monada.encoder.TextNormalizer;
+import com.monada.encoder.WeightedAtomEncoder;
 import com.monada.encoder.WeightedText;
-import com.monada.encoder.WeightedToken;
 import com.monada.index.LinearScanResonanceIndex;
 import com.monada.index.ResonanceIndex;
 import com.monada.storage.AtomStore;
+import com.monada.storage.EncodingProfile;
 import com.monada.storage.FileAtomStore;
 import com.monada.storage.FileFrequencyStore;
 import com.monada.storage.FileManifestStore;
@@ -25,7 +27,6 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -33,7 +34,7 @@ import java.util.Optional;
 
 public class MonadaMemory {
 
-    private static final String MANIFEST_VERSION = "0.2";
+    private static final String MANIFEST_VERSION = "0.3";
     private static final int DEFAULT_DIMENSIONS = 128;
     private static final String DEFAULT_VECTOR_SEGMENT = "vectors/segment-000001.f32";
     private static final String DEFAULT_ATOM_SEGMENT = "atoms/segment-000001.log";
@@ -77,6 +78,26 @@ public class MonadaMemory {
         return open(Path.of(path), options);
     }
 
+    public static EncodingProfile getExpectedProfile(int dimensions, MonadaMemoryOptions options) {
+        double origW = options.expansionOptions().originalWeight();
+        double expW = options.expansionOptions().expansionWeight();
+        double aliasOrigW = expW;
+        double aliasExpW = Math.min(expW, expW * expW);
+        
+        return new EncodingProfile(
+            "SimpleFrequencyEncoder",
+            "1.0",
+            dimensions,
+            options.textNormalizer().getClass().getSimpleName(),
+            options.textNormalizer().configurationFingerprint(),
+            "WeightedTokens",
+            origW,
+            expW,
+            aliasOrigW,
+            aliasExpW
+        );
+    }
+
     public static MonadaMemory open(Path path, MonadaMemoryOptions options) {
         Objects.requireNonNull(options, "options");
         try {
@@ -86,19 +107,72 @@ public class MonadaMemory {
             LexicalExpansionOptions actualExpansionOptions = options.expansionOptions();
             if (existing.isPresent()) {
                 manifest = existing.get();
-                if (!Objects.equals(manifest.version(), MANIFEST_VERSION)) {
-                    if (Objects.equals(manifest.version(), "0.1")) {
-                        actualExpansionOptions = new LexicalExpansionOptions(1.0, 1.0);
-                    } else {
-                        throw new IOException(
-                                "Unsupported manifest version '" + manifest.version()
-                                        + "'; expected '" + MANIFEST_VERSION + "' or '0.1'");
+                if (Objects.equals(manifest.version(), "0.3")) {
+                    EncodingProfile storedProfile = manifest.encodingProfile();
+                    if (storedProfile == null) {
+                        throw new IOException("Manifest version is 0.3 but encodingProfile is missing");
                     }
+                    EncodingProfile expectedProfile = getExpectedProfile(manifest.dimensions(), options);
+                    if (!Objects.equals(storedProfile, expectedProfile)) {
+                        throw new IllegalArgumentException(
+                                "Requested encoding profile does not match the persisted encoding profile in the store.\n" +
+                                "Stored: " + storedProfile + "\n" +
+                                "Expected: " + expectedProfile + "\n" +
+                                "Please rebuild vectors using VectorRebuilder to match the new profile.");
+                    }
+                } else if (Objects.equals(manifest.version(), "0.2")) {
+                    if (!options.textNormalizer().getClass().getSimpleName().equals("LexicalEnrichmentPipeline")) {
+                        throw new IllegalArgumentException(
+                                "Requested normalizer " + options.textNormalizer().getClass().getSimpleName() +
+                                " is incompatible with legacy 0.2 store (expected LexicalEnrichmentPipeline).\n" +
+                                "Please rebuild vectors using VectorRebuilder.");
+                    }
+                    // Legacy 0.2 stores do not persist their lexical configuration, so we cannot
+                    // prove that custom requested resources match the existing vectors. Only the
+                    // default resources are assumed compatible; reject anything else.
+                    String defaultFingerprint = new LexicalEnrichmentPipeline().configurationFingerprint();
+                    if (!options.textNormalizer().configurationFingerprint().equals(defaultFingerprint)) {
+                        throw new IllegalArgumentException(
+                                "Requested normalizer has custom lexical resources which cannot be proven compatible with legacy 0.2 store (resources are not persisted).\n" +
+                                "Please rebuild vectors using VectorRebuilder.");
+                    }
+                    // Legacy 0.2 stores do not persist their expansion weights, so we cannot
+                    // prove that custom requested weights match the existing vectors. Only the
+                    // default weights are assumed compatible; reject anything else.
+                    if (!options.expansionOptions().equals(LexicalExpansionOptions.DEFAULT)) {
+                        throw new IllegalArgumentException(
+                                "Requested expansion options " + options.expansionOptions() +
+                                " cannot be proven compatible with legacy 0.2 store (weights are not persisted).\n" +
+                                "Please rebuild vectors using VectorRebuilder.");
+                    }
+                    actualExpansionOptions = LexicalExpansionOptions.DEFAULT;
+                } else if (Objects.equals(manifest.version(), "0.1")) {
+                    if (!options.textNormalizer().getClass().getSimpleName().equals("LexicalEnrichmentPipeline")) {
+                        throw new IllegalArgumentException(
+                                "Requested normalizer " + options.textNormalizer().getClass().getSimpleName() +
+                                " is incompatible with legacy 0.1 store (expected LexicalEnrichmentPipeline).\n" +
+                                "Please rebuild vectors using VectorRebuilder.");
+                    }
+                    // Legacy 0.1 stores do not persist their lexical configuration, so we cannot
+                    // prove that custom requested resources match the existing vectors. Only the
+                    // default resources are assumed compatible; reject anything else.
+                    String defaultFingerprint = new LexicalEnrichmentPipeline().configurationFingerprint();
+                    if (!options.textNormalizer().configurationFingerprint().equals(defaultFingerprint)) {
+                        throw new IllegalArgumentException(
+                                "Requested normalizer has custom lexical resources which cannot be proven compatible with legacy 0.1 store (resources are not persisted).\n" +
+                                "Please rebuild vectors using VectorRebuilder.");
+                    }
+                    actualExpansionOptions = new LexicalExpansionOptions(1.0, 1.0);
+                } else {
+                    throw new IOException(
+                            "Unsupported manifest version '" + manifest.version()
+                                    + "'; expected '0.3', '0.2', or '0.1'");
                 }
             } else {
+                EncodingProfile profile = getExpectedProfile(DEFAULT_DIMENSIONS, options);
                 manifest = new Manifest(
-                        MANIFEST_VERSION, DEFAULT_DIMENSIONS, DEFAULT_VECTOR_SEGMENT, DEFAULT_ATOM_SEGMENT,
-                        FeedbackStore.DEFAULT_SEGMENT);
+                        "0.3", DEFAULT_DIMENSIONS, DEFAULT_VECTOR_SEGMENT, DEFAULT_ATOM_SEGMENT,
+                        FeedbackStore.DEFAULT_SEGMENT, profile);
                 manifestStore.save(manifest);
             }
 
@@ -149,25 +223,7 @@ public class MonadaMemory {
     }
 
     private WeightedText getWeightedTextForAtom(KnowledgeAtom atom) {
-        List<WeightedToken> tokens = new ArrayList<>();
-        
-        // Normalize core content and assign original/expansion weights
-        var normalizedContent = textNormalizer.normalize(atom.content());
-        tokens.addAll(normalizedContent.toWeightedText(expansionOptions).tokens());
-        
-        // Normalize each alias as secondary support text
-        if (!atom.aliases().isEmpty()) {
-            var aliasOptions = new LexicalExpansionOptions(
-                expansionOptions.expansionWeight(),
-                Math.min(expansionOptions.expansionWeight(), expansionOptions.expansionWeight() * expansionOptions.expansionWeight())
-            );
-            for (String alias : atom.aliases()) {
-                var normalizedAlias = textNormalizer.normalize(alias);
-                tokens.addAll(normalizedAlias.toWeightedText(aliasOptions).tokens());
-            }
-        }
-        
-        return new WeightedText(tokens);
+        return WeightedAtomEncoder.toWeightedText(atom, textNormalizer, expansionOptions);
     }
 
     /**

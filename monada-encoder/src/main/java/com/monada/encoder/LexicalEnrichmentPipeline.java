@@ -1,5 +1,8 @@
 package com.monada.encoder;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -9,6 +12,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 
 public final class LexicalEnrichmentPipeline implements QueryNormalizer {
 
@@ -39,6 +44,46 @@ public final class LexicalEnrichmentPipeline implements QueryNormalizer {
     public NormalizedQuery normalize(String query) {
         var normalized = normalizeText(query);
         return new NormalizedQuery(normalized.original(), normalized.normalized(), normalized.expansions());
+    }
+
+    /**
+     * Returns a deterministic fingerprint of this pipeline's lexical resources
+     * (stop words, plurals, and synonyms). The fingerprint is stable across JVM
+     * runs so that two pipelines configured with the same resources produce the
+     * same value, while any difference in configured resources yields a
+     * different value. The class name is prefixed for readability.
+     */
+    @Override
+    public String configurationFingerprint() {
+        StringBuilder canonical = new StringBuilder();
+        canonical.append("stopWords:");
+        for (String word : new TreeSet<>(stopWords)) {
+            canonical.append(word).append('\n');
+        }
+        canonical.append("plurals:");
+        for (var entry : new TreeMap<>(plurals).entrySet()) {
+            canonical.append(entry.getKey()).append('=').append(entry.getValue()).append('\n');
+        }
+        canonical.append("synonyms:");
+        for (var entry : new TreeMap<>(synonyms).entrySet()) {
+            canonical.append(entry.getKey()).append('=').append(String.join(",", entry.getValue())).append('\n');
+        }
+        return getClass().getSimpleName() + "#" + sha256Hex(canonical.toString());
+    }
+
+    private static String sha256Hex(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                hex.append(Character.forDigit((b >> 4) & 0xF, 16));
+                hex.append(Character.forDigit(b & 0xF, 16));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 algorithm not available", e);
+        }
     }
 
     public NormalizedText normalizeText(String text) {

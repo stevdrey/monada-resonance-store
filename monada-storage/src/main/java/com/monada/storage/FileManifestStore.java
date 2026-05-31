@@ -38,21 +38,31 @@ public class FileManifestStore implements ManifestStore {
     @Override
     public void save(Manifest manifest) throws IOException {
         ensureDirectories();
-        String json = """
-                {
-                  "version": "%s",
-                  "dimensions": %d,
-                  "vectorSegment": "%s",
-                  "atomSegment": "%s",
-                  "feedbackSegment": "%s"
-                }
-                """.formatted(
-                JsonStrings.escape(manifest.version()),
-                manifest.dimensions(),
-                JsonStrings.escape(manifest.vectorSegment()),
-                JsonStrings.escape(manifest.atomSegment()),
-                JsonStrings.escape(manifest.feedbackSegment()));
-        Files.writeString(root.resolve("manifest.json"), json, StandardCharsets.UTF_8);
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\n");
+        sb.append("  \"version\": \"").append(JsonStrings.escape(manifest.version())).append("\",\n");
+        sb.append("  \"dimensions\": ").append(manifest.dimensions()).append(",\n");
+        sb.append("  \"vectorSegment\": \"").append(JsonStrings.escape(manifest.vectorSegment())).append("\",\n");
+        sb.append("  \"atomSegment\": \"").append(JsonStrings.escape(manifest.atomSegment())).append("\",\n");
+        sb.append("  \"feedbackSegment\": \"").append(JsonStrings.escape(manifest.feedbackSegment())).append("\"");
+        
+        EncodingProfile profile = manifest.encodingProfile();
+        if (profile != null) {
+            sb.append(",\n");
+            sb.append("  \"encoder\": \"").append(JsonStrings.escape(profile.encoder())).append("\",\n");
+            sb.append("  \"encoderVersion\": \"").append(JsonStrings.escape(profile.encoderVersion())).append("\",\n");
+            sb.append("  \"normalizer\": \"").append(JsonStrings.escape(profile.normalizer())).append("\",\n");
+            sb.append("  \"normalizerVersion\": \"").append(JsonStrings.escape(profile.normalizerVersion())).append("\",\n");
+            sb.append("  \"weightingStrategy\": \"").append(JsonStrings.escape(profile.weightingStrategy())).append("\",\n");
+            sb.append("  \"originalWeight\": ").append(profile.originalWeight()).append(",\n");
+            sb.append("  \"expansionWeight\": ").append(profile.expansionWeight()).append(",\n");
+            sb.append("  \"aliasOriginalWeight\": ").append(profile.aliasOriginalWeight()).append(",\n");
+            sb.append("  \"aliasExpansionWeight\": ").append(profile.aliasExpansionWeight()).append("\n");
+        } else {
+            sb.append("\n");
+        }
+        sb.append("}\n");
+        Files.writeString(root.resolve("manifest.json"), sb.toString(), StandardCharsets.UTF_8);
     }
 
     private static Manifest parse(String json) {
@@ -61,11 +71,41 @@ public class FileManifestStore implements ManifestStore {
         String vectorSegment = fields.get("vectorSegment");
         String atomSegment = fields.get("atomSegment");
         String feedbackSegment = fields.getOrDefault("feedbackSegment", FeedbackStore.DEFAULT_SEGMENT);
-        String dimensions = fields.get("dimensions");
-        if (version == null || vectorSegment == null || atomSegment == null || dimensions == null) {
+        String dimensionsStr = fields.get("dimensions");
+        if (version == null || vectorSegment == null || atomSegment == null || dimensionsStr == null) {
             throw new IllegalStateException(
                     "Invalid manifest.json: missing one of version/dimensions/vectorSegment/atomSegment");
         }
-        return new Manifest(version, Integer.parseInt(dimensions), vectorSegment, atomSegment, feedbackSegment);
+        int dimensions = Integer.parseInt(dimensionsStr);
+        
+        EncodingProfile profile = null;
+        if (fields.containsKey("encoder")) {
+            String encoder = fields.get("encoder");
+            String encoderVersion = fields.get("encoderVersion");
+            String normalizer = fields.get("normalizer");
+            String normalizerVersion = fields.get("normalizerVersion");
+            String weightingStrategy = fields.get("weightingStrategy");
+            String origW = fields.get("originalWeight");
+            String expW = fields.get("expansionWeight");
+            String aliasOrigW = fields.get("aliasOriginalWeight");
+            String aliasExpW = fields.get("aliasExpansionWeight");
+            
+            if (encoder != null && encoderVersion != null && normalizer != null && normalizerVersion != null 
+                    && weightingStrategy != null && origW != null && expW != null && aliasOrigW != null && aliasExpW != null) {
+                profile = new EncodingProfile(
+                    encoder,
+                    encoderVersion,
+                    dimensions,
+                    normalizer,
+                    normalizerVersion,
+                    weightingStrategy,
+                    Double.parseDouble(origW),
+                    Double.parseDouble(expW),
+                    Double.parseDouble(aliasOrigW),
+                    Double.parseDouble(aliasExpW)
+                );
+            }
+        }
+        return new Manifest(version, dimensions, vectorSegment, atomSegment, feedbackSegment, profile);
     }
 }
