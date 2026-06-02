@@ -97,6 +97,22 @@ class EvaluationProfileRunnerTest {
     }
 
     @Test
+    void lexicalFeedbackKeyProfileRunsSuccessfullyAndReportsChange(@TempDir Path basePath) {
+        var profiles = List.of(
+                EvaluationProfile.LEXICAL_ENRICHED_WITH_FEEDBACK,
+                EvaluationProfile.LEXICAL_ENRICHED_WITH_LEXICAL_FEEDBACK_KEY
+        );
+        var comparison = new EvaluationProfileRunner()
+                .run(DefaultDatabasesDataset.get(), profiles, basePath);
+
+        assertEquals(2, comparison.profiles().size());
+        assertNotNull(comparison.reportByProfile().get(
+                EvaluationProfile.LEXICAL_ENRICHED_WITH_LEXICAL_FEEDBACK_KEY));
+        assertNotNull(comparison.aggregateChangeByProfile().get(
+                EvaluationProfile.LEXICAL_ENRICHED_WITH_LEXICAL_FEEDBACK_KEY));
+    }
+
+    @Test
     void lexicalProfileMeetsOrExceedsRawOnDefaultDataset(@TempDir Path basePath) {
         var profiles = List.of(EvaluationProfile.RAW, EvaluationProfile.LEXICAL_ENRICHED);
         var comparison = new EvaluationProfileRunner()

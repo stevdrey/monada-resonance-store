@@ -77,6 +77,28 @@ class FeedbackAwareResonanceIndexTest {
     }
 
     @Test
+    void feedbackOnlyAppliesToMatchingQueryKey() throws IOException {
+        var base = List.of(result("a", 0.50), result("b", 0.40));
+        var events = List.of(event("first phrasing", "shared-key", "b", FeedbackSignal.POSITIVE, 0.5));
+        var index = new FeedbackAwareResonanceIndex(
+                new FakeDelegate(base), new FakeFeedbackStore(events), "second phrasing", "different-key");
+
+        var out = index.search(DUMMY, 2, 0.0);
+        assertEquals(List.of("a", "b"), ids(out));
+    }
+
+    @Test
+    void matchingQueryKeySharesFeedbackAcrossDifferentQueryTexts() throws IOException {
+        var base = List.of(result("a", 0.50), result("b", 0.40));
+        var events = List.of(event("first phrasing", "shared-key", "b", FeedbackSignal.POSITIVE, 0.5));
+        var index = new FeedbackAwareResonanceIndex(
+                new FakeDelegate(base), new FakeFeedbackStore(events), "second phrasing", "shared-key");
+
+        var out = index.search(DUMMY, 2, 0.0);
+        assertEquals(List.of("b", "a"), ids(out));
+    }
+
+    @Test
     void positivePoolExpansionCanSurfaceAtomBelowThreshold() throws IOException {
         // Delegate returns 3 candidates with scores below 0.5; feedback pushes "c" above.
         var base = List.of(result("a", 0.45), result("b", 0.40), result("c", 0.30));
@@ -112,6 +134,10 @@ class FeedbackAwareResonanceIndexTest {
 
     private static FeedbackEvent event(String query, String atomId, FeedbackSignal signal, double delta) {
         return new FeedbackEvent(query, atomId, signal, delta, Instant.EPOCH);
+    }
+
+    private static FeedbackEvent event(String query, String queryKey, String atomId, FeedbackSignal signal, double delta) {
+        return new FeedbackEvent(query, queryKey, atomId, signal, delta, Instant.EPOCH);
     }
 
     private static List<String> ids(List<ResonanceResult> results) {
@@ -167,6 +193,11 @@ class FeedbackAwareResonanceIndexTest {
         @Override
         public List<FeedbackEvent> findByQuery(String query) {
             return events.stream().filter(e -> e.query().equals(query)).toList();
+        }
+
+        @Override
+        public List<FeedbackEvent> findByQueryKey(String queryKey) {
+            return events.stream().filter(e -> e.queryKey().equals(queryKey)).toList();
         }
     }
 }

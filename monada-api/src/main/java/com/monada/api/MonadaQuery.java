@@ -22,6 +22,7 @@ public class MonadaQuery {
     private final FeedbackStore feedbackStore;
     private final boolean feedbackAwareRanking;
     private final LexicalExpansionOptions expansionOptions;
+    private final FeedbackQueryKeyStrategy feedbackQueryKeyStrategy;
     private int topK = 10;
     private double threshold = 0.0;
 
@@ -33,6 +34,13 @@ public class MonadaQuery {
     MonadaQuery(String query, FrequencyEncoder encoder, TextNormalizer textNormalizer,
                 ResonanceIndex resonanceIndex, FeedbackStore feedbackStore, boolean feedbackAwareRanking,
                 LexicalExpansionOptions expansionOptions) {
+        this(query, encoder, textNormalizer, resonanceIndex, feedbackStore, feedbackAwareRanking,
+                expansionOptions, new ExactQueryKeyStrategy());
+    }
+
+    MonadaQuery(String query, FrequencyEncoder encoder, TextNormalizer textNormalizer,
+                ResonanceIndex resonanceIndex, FeedbackStore feedbackStore, boolean feedbackAwareRanking,
+                LexicalExpansionOptions expansionOptions, FeedbackQueryKeyStrategy feedbackQueryKeyStrategy) {
         this.query = Objects.requireNonNull(query, "query");
         this.encoder = Objects.requireNonNull(encoder, "encoder");
         this.textNormalizer = Objects.requireNonNull(textNormalizer, "textNormalizer");
@@ -40,6 +48,7 @@ public class MonadaQuery {
         this.feedbackStore = Objects.requireNonNull(feedbackStore, "feedbackStore");
         this.feedbackAwareRanking = feedbackAwareRanking;
         this.expansionOptions = Objects.requireNonNull(expansionOptions, "expansionOptions");
+        this.feedbackQueryKeyStrategy = Objects.requireNonNull(feedbackQueryKeyStrategy, "feedbackQueryKeyStrategy");
     }
 
     public MonadaQuery topK(int topK) {
@@ -58,7 +67,8 @@ public class MonadaQuery {
     public MonadaRecall execute() {
         try {
             ResonanceIndex index = feedbackAwareRanking
-                    ? new FeedbackAwareResonanceIndex(resonanceIndex, feedbackStore, query)
+                    ? new FeedbackAwareResonanceIndex(
+                    resonanceIndex, feedbackStore, query, feedbackQueryKeyFor(query))
                     : resonanceIndex;
             var normalizedText = textNormalizer.normalize(query);
             if (normalizedText.enrichedText().isBlank()) {
@@ -69,5 +79,13 @@ public class MonadaQuery {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    private String feedbackQueryKeyFor(String query) {
+        var key = Objects.requireNonNull(feedbackQueryKeyStrategy.keyFor(query), "feedback query key");
+        if (key.isBlank()) {
+            return query;
+        }
+        return key;
     }
 }

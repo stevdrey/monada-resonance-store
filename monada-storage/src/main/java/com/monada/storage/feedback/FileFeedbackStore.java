@@ -8,7 +8,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -55,9 +54,10 @@ public class FileFeedbackStore implements FeedbackStore {
     public void append(FeedbackEvent event) throws IOException {
         Objects.requireNonNull(event, "event");
         String line = """
-                {"query":"%s","atomId":"%s","signal":"%s","delta":%s,"createdAt":"%s"}
+                {"query":"%s","queryKey":"%s","atomId":"%s","signal":"%s","delta":%s,"createdAt":"%s"}
                 """.formatted(
                 JsonStrings.escape(event.query()),
+                JsonStrings.escape(event.queryKey()),
                 JsonStrings.escape(event.atomId()),
                 event.signal().name(),
                 formatDelta(event.delta()),
@@ -68,32 +68,40 @@ public class FileFeedbackStore implements FeedbackStore {
 
     @Override
     public List<FeedbackEvent> findAll() throws IOException {
-        var events = new ArrayList<FeedbackEvent>();
         try (var lines = Files.lines(logFile, StandardCharsets.UTF_8)) {
-            lines.filter(line -> !line.isBlank())
+            return lines.filter(line -> !line.isBlank())
                     .map(FileFeedbackStore::parse)
-                    .forEach(events::add);
+                    .toList();
         }
-        return List.copyOf(events);
     }
 
     @Override
     public List<FeedbackEvent> findByQuery(String query) throws IOException {
         Objects.requireNonNull(query, "query");
-        var filtered = new ArrayList<FeedbackEvent>();
         try (var lines = Files.lines(logFile, StandardCharsets.UTF_8)) {
-            lines.filter(line -> !line.isBlank())
+            return lines.filter(line -> !line.isBlank())
                     .map(FileFeedbackStore::parse)
                     .filter(event -> event.query().equals(query))
-                    .forEach(filtered::add);
+                    .toList();
         }
-        return List.copyOf(filtered);
+    }
+
+    @Override
+    public List<FeedbackEvent> findByQueryKey(String queryKey) throws IOException {
+        Objects.requireNonNull(queryKey, "queryKey");
+        try (var lines = Files.lines(logFile, StandardCharsets.UTF_8)) {
+            return lines.filter(line -> !line.isBlank())
+                    .map(FileFeedbackStore::parse)
+                    .filter(event -> event.queryKey().equals(queryKey))
+                    .toList();
+        }
     }
 
     private static FeedbackEvent parse(String line) {
         try {
             var fields = JsonStrings.parseFlat(line, "feedback log");
             String query = fields.get("query");
+            String queryKey = fields.getOrDefault("queryKey", query);
             String atomId = fields.get("atomId");
             String signal = fields.get("signal");
             String delta = fields.get("delta");
@@ -103,6 +111,7 @@ public class FileFeedbackStore implements FeedbackStore {
             }
             return new FeedbackEvent(
                     query,
+                    queryKey,
                     atomId,
                     FeedbackSignal.valueOf(signal),
                     Double.parseDouble(delta),

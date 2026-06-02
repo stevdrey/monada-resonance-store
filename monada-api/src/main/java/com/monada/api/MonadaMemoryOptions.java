@@ -21,15 +21,24 @@ import java.util.Objects;
 public record MonadaMemoryOptions(
         TextNormalizer textNormalizer,
         boolean feedbackAwareRanking,
-        LexicalExpansionOptions expansionOptions
+        LexicalExpansionOptions expansionOptions,
+        FeedbackQueryKeyStrategy feedbackQueryKeyStrategy
 ) {
     public MonadaMemoryOptions(TextNormalizer textNormalizer, boolean feedbackAwareRanking) {
-        this(textNormalizer, feedbackAwareRanking, LexicalExpansionOptions.DEFAULT);
+        this(textNormalizer, feedbackAwareRanking, LexicalExpansionOptions.DEFAULT, new ExactQueryKeyStrategy());
+    }
+
+    public MonadaMemoryOptions(
+            TextNormalizer textNormalizer,
+            boolean feedbackAwareRanking,
+            LexicalExpansionOptions expansionOptions) {
+        this(textNormalizer, feedbackAwareRanking, expansionOptions, new ExactQueryKeyStrategy());
     }
 
     public MonadaMemoryOptions {
         Objects.requireNonNull(textNormalizer, "textNormalizer");
         Objects.requireNonNull(expansionOptions, "expansionOptions");
+        Objects.requireNonNull(feedbackQueryKeyStrategy, "feedbackQueryKeyStrategy");
     }
 
     /**
@@ -37,6 +46,18 @@ public record MonadaMemoryOptions(
      * normalizer with feedback-aware ranking enabled.
      */
     public static MonadaMemoryOptions defaults() {
-        return new MonadaMemoryOptions(new LexicalEnrichmentPipeline(), true, LexicalExpansionOptions.DEFAULT);
+        return new MonadaMemoryOptions(
+                new LexicalEnrichmentPipeline(),
+                true,
+                LexicalExpansionOptions.DEFAULT,
+                new ExactQueryKeyStrategy());
+    }
+
+    public MonadaMemoryOptions withFeedbackQueryKeyStrategy(FeedbackQueryKeyStrategy feedbackQueryKeyStrategy) {
+        return new MonadaMemoryOptions(
+                textNormalizer,
+                feedbackAwareRanking,
+                expansionOptions,
+                feedbackQueryKeyStrategy);
     }
 }
