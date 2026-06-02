@@ -50,6 +50,13 @@ public record EvaluationReport(
             appendMetricMap(sb, "Recall", qr.recallByK());
             appendMetricMap(sb, "Hit", qr.hitByK());
             appendScalar(sb, "Reciprocal Rank", qr.reciprocalRank());
+
+            QueryRetrievalDiagnostic diagnostic = QueryRetrievalDiagnostic.compute(qr);
+            sb.append("Present expected: ").append(diagnostic.presentExpectedLabels()).append('\n');
+            sb.append("Missing expected: ").append(diagnostic.missingExpectedLabels()).append('\n');
+            sb.append("First expected rank: ").append(diagnostic.firstExpectedRank()).append('\n');
+            sb.append("Failure: ").append(diagnostic.failureType().map(Enum::name).orElse("None")).append('\n');
+            sb.append("Note: ").append(diagnostic.note()).append('\n');
             sb.append('\n');
         }
 
