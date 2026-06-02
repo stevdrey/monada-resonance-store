@@ -73,7 +73,7 @@ public record QueryRetrievalDiagnostic(
             Set<String> missingExpected
     ) {
         if (failureType.isEmpty()) {
-            return "Perfect retrieval.";
+            return "All expected labels were found within the evaluated top-K.";
         }
         return switch (failureType.get()) {
             case POSSIBLE_DATASET_ALIAS_GAP ->

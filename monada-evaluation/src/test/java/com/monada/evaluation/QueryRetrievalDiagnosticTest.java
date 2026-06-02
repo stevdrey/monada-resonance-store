@@ -23,7 +23,7 @@ class QueryRetrievalDiagnosticTest {
         assertEquals(Set.of(), diag.missingExpectedLabels());
         assertEquals(1, diag.firstExpectedRank());
         assertTrue(diag.failureType().isEmpty());
-        assertEquals("Perfect retrieval.", diag.note());
+        assertEquals("All expected labels were found within the evaluated top-K.", diag.note());
     }
 
     @Test
