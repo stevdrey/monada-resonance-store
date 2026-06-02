@@ -9,6 +9,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -207,7 +209,7 @@ class MonadaMemoryIntegrationTest {
         memory.remember("A temporary lookup store keeps values briefly for later retrieval.");
         var replication = memory.remember("Replication copies data across distributed nodes for availability.");
 
-        memory.feedback("fast cache", redis.id(), FeedbackSignal.POSITIVE, 1.0);
+        memory.feedback("temporary lookup", redis.id(), FeedbackSignal.POSITIVE, 1.0);
 
         var relatedRecall = memory.resonate("temporary lookup store")
                 .topK(2)
@@ -222,6 +224,21 @@ class MonadaMemoryIntegrationTest {
                 .execute();
         assertEquals(replication.id(), unrelatedRecall.results().getFirst().atom().id(),
                 "cache feedback must not affect unrelated distributed-system queries");
+    }
+
+    @Test
+    void lexicalFeedbackQueryKeyUsesFullExpansionSignature() {
+        var normalizer = new LexicalEnrichmentPipeline(
+                Set.of(),
+                Map.of(),
+                Map.of(
+                        "alpha", List.of("a z"),
+                        "beta", List.of("b z")
+                ));
+        var strategy = new LexicallyEnrichedQueryKeyStrategy(normalizer);
+
+        assertFalse(strategy.keyFor("alpha").equals(strategy.keyFor("beta")),
+                "different expansion signatures sharing the same last term must not collapse to one key");
     }
 
     @Test

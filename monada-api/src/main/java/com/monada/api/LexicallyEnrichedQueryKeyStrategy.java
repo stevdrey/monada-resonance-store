@@ -22,7 +22,7 @@ public final class LexicallyEnrichedQueryKeyStrategy implements FeedbackQueryKey
         var normalized = textNormalizer.normalize(query);
         var expansionTerms = terms(String.join(" ", normalized.expansions()));
         if (!expansionTerms.isEmpty()) {
-            return "lexical-expansion:" + expansionTerms.last();
+            return "lexical-expansion:" + String.join(" ", expansionTerms);
         }
 
         var enriched = normalized.enrichedText();
