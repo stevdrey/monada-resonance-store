@@ -37,7 +37,8 @@ public final class ProfileComparisonMain {
                     EvaluationProfile.RAW,
                     EvaluationProfile.LEXICAL_ENRICHED_FULL_EXPANSION_WEIGHT,
                     EvaluationProfile.LEXICAL_ENRICHED,
-                    EvaluationProfile.LEXICAL_ENRICHED_WITH_FEEDBACK
+                    EvaluationProfile.LEXICAL_ENRICHED_WITH_FEEDBACK,
+                    EvaluationProfile.LEXICAL_ENRICHED_WITH_LEXICAL_FEEDBACK_KEY
             );
             var comparison = new EvaluationProfileRunner()
                     .run(ExpandedTechnologyDataset.get(), profiles, basedir);
