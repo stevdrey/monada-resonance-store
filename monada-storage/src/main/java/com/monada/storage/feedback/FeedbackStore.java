@@ -11,4 +11,6 @@ public interface FeedbackStore {
     List<FeedbackEvent> findAll() throws IOException;
 
     List<FeedbackEvent> findByQuery(String query) throws IOException;
+
+    List<FeedbackEvent> findByQueryKey(String queryKey) throws IOException;
 }

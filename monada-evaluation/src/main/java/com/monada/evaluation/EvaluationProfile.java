@@ -1,5 +1,8 @@
 package com.monada.evaluation;
 
+import com.monada.api.ExactQueryKeyStrategy;
+import com.monada.api.FeedbackQueryKeyStrategy;
+import com.monada.api.LexicallyEnrichedQueryKeyStrategy;
 import com.monada.api.MonadaMemoryOptions;
 import com.monada.encoder.LexicalEnrichmentPipeline;
 import com.monada.encoder.LexicalExpansionOptions;
@@ -26,11 +29,20 @@ public record EvaluationProfile(
         String name,
         TextNormalizer textNormalizer,
         boolean feedbackAware,
-        LexicalExpansionOptions expansionOptions
+        LexicalExpansionOptions expansionOptions,
+        FeedbackQueryKeyStrategy feedbackQueryKeyStrategy
 ) {
 
     public EvaluationProfile(String name, TextNormalizer textNormalizer, boolean feedbackAware) {
-        this(name, textNormalizer, feedbackAware, LexicalExpansionOptions.DEFAULT);
+        this(name, textNormalizer, feedbackAware, LexicalExpansionOptions.DEFAULT, new ExactQueryKeyStrategy());
+    }
+
+    public EvaluationProfile(
+            String name,
+            TextNormalizer textNormalizer,
+            boolean feedbackAware,
+            LexicalExpansionOptions expansionOptions) {
+        this(name, textNormalizer, feedbackAware, expansionOptions, new ExactQueryKeyStrategy());
     }
 
     /** Raw profile: no lexical enrichment, no feedback-aware ranking. */
@@ -50,6 +62,10 @@ public record EvaluationProfile(
      */
     public static final EvaluationProfile LEXICAL_ENRICHED_WITH_FEEDBACK =
             new EvaluationProfile("LEXICAL_ENRICHED_WITH_FEEDBACK", new LexicalEnrichmentPipeline(), true);
+
+    /** Lexical enrichment with feedback shared by deterministic lexical query keys. */
+    public static final EvaluationProfile LEXICAL_ENRICHED_WITH_LEXICAL_FEEDBACK_KEY =
+            lexicalFeedbackKeyProfile();
 
     /**
      * Lexical enrichment utilizing unscaled/full-weight expansion terms (both original
@@ -72,10 +88,25 @@ public record EvaluationProfile(
         }
         Objects.requireNonNull(textNormalizer, "textNormalizer");
         Objects.requireNonNull(expansionOptions, "expansionOptions");
+        Objects.requireNonNull(feedbackQueryKeyStrategy, "feedbackQueryKeyStrategy");
     }
 
     /** Returns the {@link MonadaMemoryOptions} that correspond to this profile. */
     public MonadaMemoryOptions toMemoryOptions() {
-        return new MonadaMemoryOptions(textNormalizer, feedbackAware, expansionOptions);
+        return new MonadaMemoryOptions(
+                textNormalizer,
+                feedbackAware,
+                expansionOptions,
+                feedbackQueryKeyStrategy);
+    }
+
+    private static EvaluationProfile lexicalFeedbackKeyProfile() {
+        var normalizer = new LexicalEnrichmentPipeline();
+        return new EvaluationProfile(
+                "LEXICAL_ENRICHED_WITH_LEXICAL_FEEDBACK_KEY",
+                normalizer,
+                true,
+                LexicalExpansionOptions.DEFAULT,
+                new LexicallyEnrichedQueryKeyStrategy(normalizer));
     }
 }

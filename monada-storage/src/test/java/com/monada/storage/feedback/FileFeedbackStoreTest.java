@@ -22,7 +22,7 @@ class FileFeedbackStoreTest {
     @Test
     void appendAndFindAllRoundTrip() throws IOException {
         var store = new FileFeedbackStore(root);
-        var e1 = new FeedbackEvent("q1", "ka_a", FeedbackSignal.POSITIVE, 0.05,
+        var e1 = new FeedbackEvent("q1", "key:q1", "ka_a", FeedbackSignal.POSITIVE, 0.05,
                 Instant.parse("2026-05-01T00:00:00Z"));
         var e2 = new FeedbackEvent("q1", "ka_b", FeedbackSignal.NEGATIVE, -0.1,
                 Instant.parse("2026-05-01T00:00:01Z"));
@@ -33,6 +33,34 @@ class FileFeedbackStoreTest {
         assertEquals(List.of(e1, e2), all);
         assertTrue(Files.isRegularFile(root.resolve(FeedbackStore.DEFAULT_SEGMENT)));
         assertEquals(2, Files.readAllLines(root.resolve(FeedbackStore.DEFAULT_SEGMENT), StandardCharsets.UTF_8).size());
+    }
+
+    @Test
+    void findByQueryKeyFiltersEvents() throws IOException {
+        var store = new FileFeedbackStore(root);
+        var a = new FeedbackEvent("alpha", "shared", "ka_1", FeedbackSignal.POSITIVE, 0.05, Instant.EPOCH);
+        var b = new FeedbackEvent("beta", "other", "ka_2", FeedbackSignal.NEGATIVE, -0.05, Instant.EPOCH);
+        var c = new FeedbackEvent("gamma", "shared", "ka_3", FeedbackSignal.POSITIVE, 0.05, Instant.EPOCH);
+        store.append(a);
+        store.append(b);
+        store.append(c);
+
+        assertEquals(List.of(a, c), store.findByQueryKey("shared"));
+        assertEquals(List.of(b), store.findByQueryKey("other"));
+        assertEquals(List.of(), store.findByQueryKey("missing"));
+    }
+
+    @Test
+    void legacyEventsWithoutQueryKeyUseQueryAsKey() throws IOException {
+        var store = new FileFeedbackStore(root);
+        Path logFile = root.resolve(FeedbackStore.DEFAULT_SEGMENT);
+        String legacy = "{\"query\":\"legacy q\",\"atomId\":\"ka_legacy\",\"signal\":\"POSITIVE\",\"delta\":0.05,\"createdAt\":\"2026-05-01T00:00:00Z\"}";
+        Files.writeString(logFile, legacy + System.lineSeparator(), StandardCharsets.UTF_8);
+
+        var expected = new FeedbackEvent("legacy q", "legacy q", "ka_legacy", FeedbackSignal.POSITIVE, 0.05,
+                Instant.parse("2026-05-01T00:00:00Z"));
+        assertEquals(List.of(expected), store.findAll());
+        assertEquals(List.of(expected), store.findByQueryKey("legacy q"));
     }
 
     @Test
@@ -104,6 +132,10 @@ class FileFeedbackStoreTest {
     void rejectsInvalidEventFields() {
         assertThrows(NullPointerException.class,
                 () -> new FeedbackEvent(null, "a", FeedbackSignal.POSITIVE, 0.05, Instant.EPOCH));
+        assertThrows(NullPointerException.class,
+                () -> new FeedbackEvent("q", null, "a", FeedbackSignal.POSITIVE, 0.05, Instant.EPOCH));
+        assertThrows(IllegalArgumentException.class,
+                () -> new FeedbackEvent("q", "", "a", FeedbackSignal.POSITIVE, 0.05, Instant.EPOCH));
         assertThrows(IllegalArgumentException.class,
                 () -> new FeedbackEvent("q", "", FeedbackSignal.POSITIVE, 0.05, Instant.EPOCH));
         assertThrows(IllegalArgumentException.class,

@@ -9,6 +9,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -178,6 +180,65 @@ class MonadaMemoryIntegrationTest {
                 .threshold(0.0)
                 .execute();
         assertEquals(atom.id(), recall.results().getFirst().atom().id());
+    }
+
+    @Test
+    void defaultFeedbackQueryKeyKeepsExactQueryBehavior() {
+        var memory = MonadaMemory.open(memoryDirectory);
+        var redis = memory.remember("Redis is an in-memory data structure store used as a cache.");
+        var temporaryLookup = memory.remember("A temporary lookup store keeps values briefly for later retrieval.");
+
+        memory.feedback("fast cache", redis.id(), FeedbackSignal.POSITIVE, 1.0);
+
+        var recall = memory.resonate("temporary lookup store")
+                .topK(2)
+                .threshold(0.0)
+                .execute();
+
+        assertEquals(temporaryLookup.id(), recall.results().getFirst().atom().id(),
+                "default exact feedback must not affect a differently phrased query");
+    }
+
+    @Test
+    void lexicalFeedbackQueryKeySharesFeedbackAcrossRelatedQueryForms() {
+        var normalizer = new LexicalEnrichmentPipeline();
+        var options = MonadaMemoryOptions.defaults()
+                .withFeedbackQueryKeyStrategy(new LexicallyEnrichedQueryKeyStrategy(normalizer));
+        var memory = MonadaMemory.open(memoryDirectory, options);
+        var redis = memory.remember("Redis is an in-memory data structure store used as a cache.");
+        memory.remember("A temporary lookup store keeps values briefly for later retrieval.");
+        var replication = memory.remember("Replication copies data across distributed nodes for availability.");
+
+        memory.feedback("temporary lookup", redis.id(), FeedbackSignal.POSITIVE, 1.0);
+
+        var relatedRecall = memory.resonate("temporary lookup store")
+                .topK(2)
+                .threshold(0.0)
+                .execute();
+        assertEquals(redis.id(), relatedRecall.results().getFirst().atom().id(),
+                "lexical feedback key must share cache-related feedback across query forms");
+
+        var unrelatedRecall = memory.resonate("distributed replication consistency")
+                .topK(1)
+                .threshold(0.0)
+                .execute();
+        assertEquals(replication.id(), unrelatedRecall.results().getFirst().atom().id(),
+                "cache feedback must not affect unrelated distributed-system queries");
+    }
+
+    @Test
+    void lexicalFeedbackQueryKeyUsesFullExpansionSignature() {
+        var normalizer = new LexicalEnrichmentPipeline(
+                Set.of(),
+                Map.of(),
+                Map.of(
+                        "alpha", List.of("a z"),
+                        "beta", List.of("b z")
+                ));
+        var strategy = new LexicallyEnrichedQueryKeyStrategy(normalizer);
+
+        assertFalse(strategy.keyFor("alpha").equals(strategy.keyFor("beta")),
+                "different expansion signatures sharing the same last term must not collapse to one key");
     }
 
     @Test

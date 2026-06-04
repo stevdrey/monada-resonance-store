@@ -51,10 +51,12 @@ public class MonadaMemory {
     private final KnownAtomIdCache knownAtomIds;
     private final boolean feedbackAwareRanking;
     private final LexicalExpansionOptions expansionOptions;
+    private final FeedbackQueryKeyStrategy feedbackQueryKeyStrategy;
 
     private MonadaMemory(FrequencyEncoder encoder, TextNormalizer textNormalizer, AtomStore atomStore, FrequencyStore frequencyStore,
                          ResonanceIndex resonanceIndex, FeedbackStore feedbackStore, KnownAtomIdCache knownAtomIds,
-                         boolean feedbackAwareRanking, LexicalExpansionOptions expansionOptions) {
+                         boolean feedbackAwareRanking, LexicalExpansionOptions expansionOptions,
+                         FeedbackQueryKeyStrategy feedbackQueryKeyStrategy) {
         this.encoder = encoder;
         this.textNormalizer = textNormalizer;
         this.atomStore = atomStore;
@@ -64,6 +66,7 @@ public class MonadaMemory {
         this.knownAtomIds = knownAtomIds;
         this.feedbackAwareRanking = feedbackAwareRanking;
         this.expansionOptions = Objects.requireNonNull(expansionOptions, "expansionOptions");
+        this.feedbackQueryKeyStrategy = Objects.requireNonNull(feedbackQueryKeyStrategy, "feedbackQueryKeyStrategy");
     }
 
     public static MonadaMemory open(String path) {
@@ -184,7 +187,7 @@ public class MonadaMemory {
             ResonanceIndex resonanceIndex = new LinearScanResonanceIndex(atomStore, frequencyStore);
             return new MonadaMemory(encoder, options.textNormalizer(), atomStore, frequencyStore, resonanceIndex,
                     feedbackStore, new KnownAtomIdCache(DEFAULT_KNOWN_ATOM_ID_CACHE_SIZE),
-                    options.feedbackAwareRanking(), actualExpansionOptions);
+                    options.feedbackAwareRanking(), actualExpansionOptions, options.feedbackQueryKeyStrategy());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -253,7 +256,8 @@ public class MonadaMemory {
     }
 
     public MonadaQuery resonate(String query) {
-        return new MonadaQuery(query, encoder, textNormalizer, resonanceIndex, feedbackStore, feedbackAwareRanking, expansionOptions);
+        return new MonadaQuery(query, encoder, textNormalizer, resonanceIndex, feedbackStore, feedbackAwareRanking,
+                expansionOptions, feedbackQueryKeyStrategy);
     }
 
     /**
@@ -283,10 +287,18 @@ public class MonadaMemory {
                 throw new IllegalArgumentException("Unknown atomId: " + atomId);
             }
             knownAtomIds.remember(atomId);
-            feedbackStore.append(new FeedbackEvent(query, atomId, signal, delta, Instant.now()));
+            feedbackStore.append(new FeedbackEvent(query, feedbackQueryKeyFor(query), atomId, signal, delta, Instant.now()));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    private String feedbackQueryKeyFor(String query) {
+        var key = Objects.requireNonNull(feedbackQueryKeyStrategy.keyFor(query), "feedback query key");
+        if (key.isBlank()) {
+            return query;
+        }
+        return key;
     }
 
 }

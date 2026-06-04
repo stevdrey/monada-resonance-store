@@ -16,8 +16,8 @@ import java.util.Objects;
 /**
  * Decorates a base {@link ResonanceIndex} with query-scoped feedback adjustments.
  *
- * <p>For a single query, all feedback events whose {@code query} field matches
- * exactly are aggregated into a per-atom delta sum. The adjusted score for a
+ * <p>For a single query key, all feedback events whose {@code queryKey} field
+ * matches are aggregated into a per-atom delta sum. The adjusted score for a
  * result is {@code base + delta}. Results are re-sorted by
  * {@code adjusted score DESC, atom id ASC} to preserve deterministic ordering.
  *
@@ -32,12 +32,17 @@ public final class FeedbackAwareResonanceIndex implements ResonanceIndex {
 
     private final ResonanceIndex delegate;
     private final FeedbackStore feedbackStore;
-    private final String query;
+    private final String queryKey;
 
     public FeedbackAwareResonanceIndex(ResonanceIndex delegate, FeedbackStore feedbackStore, String query) {
+        this(delegate, feedbackStore, query, query);
+    }
+
+    public FeedbackAwareResonanceIndex(ResonanceIndex delegate, FeedbackStore feedbackStore, String query, String queryKey) {
         this.delegate = Objects.requireNonNull(delegate, "delegate");
         this.feedbackStore = Objects.requireNonNull(feedbackStore, "feedbackStore");
-        this.query = Objects.requireNonNull(query, "query");
+        Objects.requireNonNull(query, "query");
+        this.queryKey = Objects.requireNonNull(queryKey, "queryKey");
     }
 
     @Override
@@ -91,7 +96,7 @@ public final class FeedbackAwareResonanceIndex implements ResonanceIndex {
     }
 
     private Map<String, Double> buildAdjustments() throws IOException {
-        List<FeedbackEvent> events = feedbackStore.findByQuery(query);
+        List<FeedbackEvent> events = feedbackStore.findByQueryKey(queryKey);
         if (events.isEmpty()) {
             return Map.of();
         }

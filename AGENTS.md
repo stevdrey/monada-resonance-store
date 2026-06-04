@@ -206,6 +206,9 @@ index. Keep these invariants when evolving it:
 - Ordering remains `adjusted DESC, atom id ASC` to preserve determinism.
 - Feedback events are persisted append-only in `feedback/feedback-000001.log`
   as one JSON object per line; the log must stay inspectable.
+- Feedback events may include a derived `queryKey`. Default behavior uses the
+  exact query text as the key; non-exact strategies must be explicitly enabled
+  through `MonadaMemoryOptions` and remain deterministic.
 - The protected baseline in `EvaluationBaselineRegressionTest` and the
   feedback-aware assertions in `FeedbackAwareEvaluationTest` must not be weakened
   without an intentional baseline update and a rationale in the same commit.
@@ -222,6 +225,9 @@ Key invariants:
   using `EvaluationComparator`.
 - Three standard profiles are provided as constants on `EvaluationProfile`:
   `RAW`, `LEXICAL_ENRICHED`, and `LEXICAL_ENRICHED_WITH_FEEDBACK`.
+- `LEXICAL_ENRICHED_WITH_LEXICAL_FEEDBACK_KEY` is exploratory and uses
+  deterministic lexical feedback query keys to show whether feedback
+  generalization improves, maintains, or degrades ranking.
 - `RAW` uses `NoOpTextNormalizer` (no stop-word removal, no synonyms, no plurals)
   and disables feedback-aware ranking. It represents the encoder's raw capability.
 - `LEXICAL_ENRICHED_WITH_FEEDBACK` seeds one deterministic positive feedback event
