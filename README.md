@@ -408,9 +408,15 @@ Maps vector positions to atom IDs:
 Append-only feedback events:
 
 ```json
-{"query":"graph document database","atomId":"ka_001","feedback":"POSITIVE","delta":0.05}
-{"query":"graph document database","atomId":"ka_003","feedback":"NEGATIVE","delta":-0.10}
+{"query":"graph document database","queryKey":"graph document database","atomId":"ka_001","signal":"POSITIVE","delta":0.05,"createdAt":"2026-06-04T00:00:00Z"}
+{"query":"graph document database","queryKey":"graph document database","atomId":"ka_003","signal":"NEGATIVE","delta":-0.1,"createdAt":"2026-06-04T00:00:01Z"}
 ```
+
+`query` stores the original user query. `queryKey` stores the derived lookup key
+used by feedback-aware ranking. With the default exact strategy both values are
+the same, but opt-in query-key strategies may persist normalized or lexically
+enriched keys. Legacy feedback events without `queryKey` remain readable and are
+interpreted as if `queryKey` were equal to `query`.
 
 ## 8. Initial Java API Design
 
@@ -555,8 +561,10 @@ Run expanded dataset tests:
 
 Before the query reaches `SimpleFrequencyEncoder`, Monada applies a deterministic
 lexical preprocessing step. The original query text remains visible in evaluation
-reports and remains the identity used by feedback-aware ranking; only the encoded
-query text is normalized/enriched.
+reports. By default it is also the identity used by feedback-aware ranking, while
+opt-in feedback query-key strategies may derive a normalized or lexically
+enriched key. The encoded query text is normalized/enriched independently from
+the original text shown in reports.
 
 The default English lexical resources live under:
 
@@ -587,9 +595,11 @@ The following limitations are expected with the current `SimpleFrequencyEncoder`
 - **Semantically related terms without token overlap** are not handled well; for
   example, "splitting data across multiple machines" may not strongly activate
   `ka_sharding` because the atom description uses different vocabulary.
-- **Feedback is exact-query scoped** and does not generalize across paraphrases; a
-  feedback event recorded for "fast cache" has no effect on a query phrased as
-  "temporary lookup store".
+- **Feedback generalization is opt-in and lexical-resource dependent**. By
+  default, feedback remains exact-query scoped. Normalized or lexical query-key
+  strategies can share feedback across related phrasings, but broad lexical
+  resources may cause accidental feedback sharing if they are not carefully
+  maintained.
 - **Confusable queries** with many nearby atoms may rank non-preferred atoms higher
   than expected because the encoder treats all overlapping tokens equally.
 
@@ -598,37 +608,144 @@ ranking improvements.
 
 ## 10.3 Feedback-Aware Ranking
 
-Monada Resonance Store supports a first iteration of **feedback-aware ranking**. Clients can record positive or negative feedback against an atom id for a specific query; future queries that match that exact text re-rank the base resonance results using the aggregated feedback delta.
+Monada Resonance Store supports **feedback-aware ranking** as an explicit
+decorator around the base resonance index. Clients can record positive or
+negative feedback against an atom id for a query. Future resonance calls re-rank
+the base resonance results by applying the aggregated feedback delta for events
+that match the active feedback query key and atom id.
+
+Default behavior is conservative and backward compatible:
+
+- `MonadaMemory.open(path)` uses `MonadaMemoryOptions.defaults()`.
+- `MonadaMemoryOptions.defaults()` uses `ExactQueryKeyStrategy`.
+- Exact query text is used as the feedback key.
+- Feedback only affects the same query text unless another strategy is
+  explicitly configured.
 
 ```java
-memory.feedback("sql relational transactions database",
-                atom.id(),
+var memory = MonadaMemory.open(path);
+
+memory.feedback("fast cache",
+                redis.id(),
                 FeedbackSignal.POSITIVE); // default delta = +0.05
 
-memory.feedback("sql relational transactions database",
-                unrelated.id(),
-                FeedbackSignal.NEGATIVE, -0.2); // explicit delta
+var recall = memory.resonate("temporary lookup store")
+        .topK(5)
+        .execute();
 ```
+
+Under the default exact strategy, the feedback recorded for `"fast cache"` does
+not affect the later `"temporary lookup store"` query. This is intentional: exact
+matching is the safest default for predictable, auditable ranking.
+
+Callers can opt into broader feedback matching by configuring a
+`FeedbackQueryKeyStrategy` through `MonadaMemoryOptions`:
+
+```java
+var normalizer = new LexicalEnrichmentPipeline();
+
+var options = MonadaMemoryOptions.defaults()
+        .withFeedbackQueryKeyStrategy(
+                new LexicallyEnrichedQueryKeyStrategy(normalizer)
+        );
+
+var memory = MonadaMemory.open(path, options);
+
+memory.feedback("temporary lookup",
+                redis.id(),
+                FeedbackSignal.POSITIVE);
+
+var recall = memory.resonate("temporary lookup store")
+        .topK(5)
+        .execute();
+```
+
+With the lexical strategy, related phrasings can share feedback when the
+deterministic lexical resources derive the same feedback key. This behavior is
+opt-in and should remain explicit, deterministic, and auditable.
 
 The ranking formula applied by `FeedbackAwareResonanceIndex` is:
 
 ```text
-adjustedScore(atom, query) = baseScore(atom, query) + Σ delta(event)
-    over all events where event.query.equals(query) and event.atomId.equals(atom.id)
+adjustedScore(atom, query) = baseScore(atom, query) + sum(delta(event))
+    over all events where event.queryKey.equals(activeQueryKey)
+    and event.atomId.equals(atom.id)
 ```
+
+`activeQueryKey` is produced by the configured `FeedbackQueryKeyStrategy` for the
+current query.
 
 Key properties:
 
 - **Deterministic ordering**: results are sorted by `adjustedScore DESC`, then by `atomId ASC`.
-- **Exact query matching (v1)**: only events with a string-equal `query` field influence ranking.
 - **Threshold-safe promotion**: positive feedback can surface an atom that would otherwise sit just below the caller threshold, because the decorator pulls an expanded candidate pool from the base index and then applies the caller threshold to the adjusted score.
-- **Auditable**: every event is appended to `feedback/feedback-000001.log` as one JSON object per line, including the `createdAt` timestamp.
+- **Auditable**: every event is appended to `feedback/feedback-000001.log` as one JSON object per line, including `query`, `queryKey`, `signal`, `delta`, and `createdAt`.
+- **Backward compatible**: legacy feedback events without `queryKey` remain readable and are interpreted using the original `query` as the key.
+
+Available query-key strategies:
+
+| Strategy | Key shape | Best use | Trade-off |
+|----------|-----------|----------|-----------|
+| `ExactQueryKeyStrategy` | Original query text | Safest default and conservative feedback behavior | Does not share feedback across paraphrases |
+| `NormalizedQueryKeyStrategy` | `normalized:` plus normalized query text, falling back to the original query if normalization is blank | Small textual differences should share feedback | Depends on the configured normalizer and can merge queries that normalize alike |
+| `LexicallyEnrichedQueryKeyStrategy` | `lexical-expansion:` or `lexical:` plus sorted deterministic terms, falling back to the original query if enrichment is blank | Controlled paraphrase sharing through lexical resources | Broader lexical resources can accidentally share feedback across queries that should remain distinct |
+
+To record an explicit negative delta:
+
+```java
+memory.feedback("sql relational transactions database",
+                unrelated.id(),
+                FeedbackSignal.NEGATIVE,
+                -0.2);
+```
+
+Feedback log entries include the derived `queryKey`:
+
+```json
+{
+  "query": "temporary lookup",
+  "queryKey": "lexical-expansion:cache caching redis",
+  "atomId": "ka_redis",
+  "signal": "POSITIVE",
+  "delta": 0.05,
+  "createdAt": "2026-06-04T00:00:00Z"
+}
+```
+
+The default exact-query strategy would persist `"queryKey": "temporary lookup"`
+for the same event.
 
 To run the feedback-aware regression test, which asserts that feedback never degrades the protected baseline metrics (`Hit@1`, `Recall@3`, `Recall@5`, `MRR`):
 
 ```bash
 ./gradlew :monada-evaluation:test --tests com.monada.evaluation.FeedbackAwareEvaluationTest
 ```
+
+### A/B profile comparison
+
+The evaluation harness can compare multiple retrieval profiles against the
+expanded dataset:
+
+```bash
+./gradlew :monada-evaluation:runProfileComparison -q
+```
+
+The first profile is the baseline for the rendered comparison. Profiles commonly
+shown in the comparison include:
+
+- `RAW` - no lexical enrichment and no feedback-aware ranking.
+- `LEXICAL_ENRICHED` - lexical enrichment without feedback-aware ranking.
+- `LEXICAL_ENRICHED_WITH_FEEDBACK` - lexical enrichment with exact feedback keys
+  and deterministic seeded feedback.
+- `LEXICAL_ENRICHED_WITH_LEXICAL_FEEDBACK_KEY` - lexical enrichment with a
+  deterministic lexical feedback query key.
+
+`LEXICAL_ENRICHED_WITH_LEXICAL_FEEDBACK_KEY` is exploratory. Interpret it against
+both `RAW` and exact feedback behavior to understand whether lexical feedback-key
+generalization improves, maintains, or degrades ranking. The rendered
+`runProfileComparison` metrics are not protected regression assertions; targeted
+tests such as `EvaluationProfileRunnerTest` cover cross-phrasing feedback
+transfer more directly.
 
 ### Validating ranking changes: did feedback help, hurt, or stay the same?
 
