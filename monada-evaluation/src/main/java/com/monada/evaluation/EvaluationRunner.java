@@ -56,6 +56,10 @@ public final class EvaluationRunner {
      * given {@link MonadaMemoryOptions}. This overload is required by the
      * profile-aware A/B harness to guarantee that both atom encoding and
      * query execution use the same configured options end-to-end.
+     *
+     * <p>Query-key diagnostics are captured automatically from {@code options}
+     * so that callers using a custom {@code feedbackQueryKeyStrategy} see the
+     * diagnostics block in the rendered {@link EvaluationReport}.
      */
     public EvaluationReport run(EvaluationDataset dataset, Path memoryPath, MonadaMemoryOptions options) {
         Objects.requireNonNull(dataset, "dataset");
@@ -64,7 +68,8 @@ public final class EvaluationRunner {
 
         var memory = MonadaMemory.open(memoryPath, options);
         var seeding = seedAtoms(dataset, memory);
-        return evaluate(dataset, memory, seeding.idToLabel());
+        return evaluate(dataset, memory, seeding.idToLabel(),
+                options.feedbackQueryKeyStrategy(), options.feedbackAwareRanking());
     }
 
     /**
@@ -167,15 +172,22 @@ public final class EvaluationRunner {
             reciprocalRankSum += rr;
 
             // Capture query-key diagnostic if strategy is provided.
+            // The reported key mirrors MonadaMemory/MonadaQuery: if the strategy
+            // returns blank we fall back to the raw query text so the diagnostic
+            // reflects the key that will actually be used for feedback lookups.
             // feedbackAware is set here so the flag is correct even before
             // EvaluationProfileRunner.enhanceWithSeedQueryKeys attaches the seed key.
             QueryKeyDiagnostic diagnostic = null;
             if (queryKeyStrategy != null) {
-                var queryKey = queryKeyStrategy.keyFor(query.text());
-                var strategyName = queryKeyStrategy.getClass().getSimpleName();
+                var rawKey = queryKeyStrategy.keyFor(query.text());
+                var effectiveKey = (rawKey == null || rawKey.isBlank()) ? query.text() : rawKey;
+                var simpleName = queryKeyStrategy.getClass().getSimpleName();
+                var strategyName = (simpleName == null || simpleName.isBlank())
+                        ? queryKeyStrategy.getClass().getName()
+                        : simpleName;
                 diagnostic = feedbackAware
-                        ? new QueryKeyDiagnostic(queryKey, strategyName, true, null)
-                        : QueryKeyDiagnostic.withoutFeedback(queryKey, strategyName);
+                        ? new QueryKeyDiagnostic(effectiveKey, strategyName, true, null)
+                        : QueryKeyDiagnostic.withoutFeedback(effectiveKey, strategyName);
             }
 
             queryResults.add(new QueryEvaluation(

@@ -165,4 +165,97 @@ class QueryKeyDiagnosticRenderingTest {
         assertTrue(rendered.contains("Feedback Key Match: false"),
                 "Comparison should indicate key mismatch when seed differs from evaluation key");
     }
+
+    // ---- P2: blank key from strategy falls back to raw query text ----
+
+    @Test
+    void evaluationReportShowsFallbackQueryKeyWhenStrategyReturnsBlank() {
+        // Simulate a strategy that returns blank → effective key must be the raw query text
+        var diagnostic = QueryKeyDiagnostic.withoutFeedback(
+                "cache redis", "BlankKeyStrategy");  // effective key after fallback
+        var queryEval = new QueryEvaluation(
+                "cache redis",
+                Set.of("ka_redis"),
+                List.of("ka_redis"),
+                Map.of(1, 1.0),
+                Map.of(1, 1.0),
+                Map.of(1, 1.0),
+                1.0,
+                diagnostic);
+
+        var report = new EvaluationReport(
+                List.of(queryEval),
+                Map.of(1, 1.0),
+                Map.of(1, 1.0),
+                Map.of(1, 1.0),
+                1.0);
+
+        var rendered = report.render();
+
+        assertTrue(rendered.contains("Query Key: cache redis"),
+                "Fallback key should equal the raw query text when strategy returns blank");
+    }
+
+    // ---- P3: anonymous strategy name falls back to full class name ----
+
+    @Test
+    void evaluationReportShowsFullClassNameForAnonymousStrategy() {
+        // Anonymous lambda / anonymous class → getSimpleName() returns ""
+        var diagnostic = QueryKeyDiagnostic.withoutFeedback(
+                "cache redis",
+                // Simulate the resolved name that EvaluationRunner would produce
+                "com.monada.evaluation.QueryKeyDiagnosticRenderingTest$$Lambda");
+        var queryEval = new QueryEvaluation(
+                "cache redis",
+                Set.of("ka_redis"),
+                List.of("ka_redis"),
+                Map.of(1, 1.0),
+                Map.of(1, 1.0),
+                Map.of(1, 1.0),
+                1.0,
+                diagnostic);
+
+        var report = new EvaluationReport(
+                List.of(queryEval),
+                Map.of(1, 1.0),
+                Map.of(1, 1.0),
+                Map.of(1, 1.0),
+                1.0);
+
+        var rendered = report.render();
+
+        assertTrue(rendered.contains("Query Key Strategy: com.monada.evaluation"),
+                "Report should contain a non-empty strategy identifier even for anonymous classes");
+    }
+
+    // ---- P3: feedbackKeyMatch must not show true when feedbackAware is false ----
+
+    @Test
+    void evaluationReportDoesNotShowFeedbackKeyMatchTrueWhenNotFeedbackAware() {
+        // Construct an inconsistent diagnostic via the public record constructor
+        var diagnostic = new QueryKeyDiagnostic("exact:query", "ExactQueryKeyStrategy", false, "exact:query");
+        var queryEval = new QueryEvaluation(
+                "query",
+                Set.of("ka_atom"),
+                List.of("ka_atom"),
+                Map.of(1, 1.0),
+                Map.of(1, 1.0),
+                Map.of(1, 1.0),
+                1.0,
+                diagnostic);
+
+        var report = new EvaluationReport(
+                List.of(queryEval),
+                Map.of(1, 1.0),
+                Map.of(1, 1.0),
+                Map.of(1, 1.0),
+                1.0);
+
+        var rendered = report.render();
+
+        assertTrue(rendered.contains("Feedback Aware: false"));
+        // The seed-key block is still rendered (hasSeedQueryKey is true), but match must be false
+        assertTrue(rendered.contains("Feedback Key Match: false"),
+                "Feedback Key Match must be false when feedbackAware is false");
+    }
 }

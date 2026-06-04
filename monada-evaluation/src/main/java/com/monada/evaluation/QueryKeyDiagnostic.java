@@ -48,11 +48,13 @@ public record QueryKeyDiagnostic(
     }
 
     /**
-     * Returns true if the seed query key matches the evaluation query key.
-     * Always returns false for non-feedback-aware profiles (when seedQueryKey is null).
+     * Returns true if and only if feedback-aware ranking was enabled AND the seed
+     * query key matches the evaluation query key.  Always returns false when
+     * {@code feedbackAware} is false, even if a non-null seed key was somehow
+     * supplied via the public record constructor.
      */
     public boolean feedbackKeyMatch() {
-        return seedQueryKey != null && seedQueryKey.equals(queryKey);
+        return feedbackAware && seedQueryKey != null && seedQueryKey.equals(queryKey);
     }
 
     /**

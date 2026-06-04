@@ -161,8 +161,10 @@ public final class EvaluationProfileRunner {
                 if (atomId != null) {
                     memory.feedback(query.text(), atomId, FeedbackSignal.POSITIVE);
                 }
-                // queryKeyStrategy is always non-null (validated by MonadaMemoryOptions/EvaluationProfile)
-                seedQueryKeys.put(query.text(), queryKeyStrategy.keyFor(query.text()));
+                // Mirror the MonadaMemory/MonadaQuery fallback: blank key → use raw query text.
+                var rawSeedKey = queryKeyStrategy.keyFor(query.text());
+                var effectiveSeedKey = (rawSeedKey == null || rawSeedKey.isBlank()) ? query.text() : rawSeedKey;
+                seedQueryKeys.put(query.text(), effectiveSeedKey);
             }
         }
 
