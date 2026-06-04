@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -81,9 +82,10 @@ class QueryKeyDiagnosticRenderingTest {
     }
 
     @Test
-    void profileComparisonRendersQueryKeyDiagnostics() {
-        var exactDiagnostic = QueryKeyDiagnostic.withoutFeedback(
-                "exact:temporary lookup store", "ExactQueryKeyStrategy");
+    void profileComparisonRendersQueryKeyDiagnosticsOnlyForFeedbackAwareProfiles() {
+        // RAW is not feedback-aware → EvaluationRunner will not invoke keyFor() and
+        // will not produce a diagnostic.  Only the LEXICAL_FEEDBACK_KEY profile (which
+        // is feedback-aware) produces a diagnostic block in the comparison output.
         var lexicalDiagnostic = QueryKeyDiagnostic.withFeedback(
                 "lexical-expansion:cache redis lookup store temporary",
                 "LexicallyEnrichedQueryKeyStrategy",
@@ -92,6 +94,7 @@ class QueryKeyDiagnosticRenderingTest {
         var rawProfile = EvaluationProfile.RAW;
         var lexicalProfile = EvaluationProfile.LEXICAL_ENRICHED_WITH_LEXICAL_FEEDBACK_KEY;
 
+        // RAW has no diagnostic entry in the map (null not present)
         var queryResult = new QueryProfileResult(
                 "temporary lookup store",
                 Set.of("ka_redis"),
@@ -100,9 +103,8 @@ class QueryKeyDiagnosticRenderingTest {
                 Map.of(rawProfile, RankingChange.MAINTAINED,
                         lexicalProfile, RankingChange.IMPROVED),
                 null,
-                Map.of(rawProfile, exactDiagnostic, lexicalProfile, lexicalDiagnostic));
+                Map.of(lexicalProfile, lexicalDiagnostic));
 
-        // Create minimal reports for each profile (required by EvaluationProfileComparison validation)
         var rawReport = new EvaluationReport(List.of(), Map.of(), Map.of(), Map.of(), 0.0);
         var lexicalReport = new EvaluationReport(List.of(), Map.of(), Map.of(), Map.of(), 0.0);
 
@@ -114,25 +116,23 @@ class QueryKeyDiagnosticRenderingTest {
 
         var rendered = comparison.render();
 
-        // Verify RAW profile diagnostics
-        assertTrue(rendered.contains("[RAW] Feedback Aware: false"),
-                "Comparison should show RAW is not feedback-aware");
-        assertTrue(rendered.contains("[RAW] Query Key Strategy: ExactQueryKeyStrategy"),
-                "Comparison should show RAW uses exact strategy");
-        assertTrue(rendered.contains("[RAW] Evaluation Query Key: exact:temporary lookup store"),
-                "Comparison should show RAW query key");
+        // RAW produces no diagnostic block at all
+        assertFalse(rendered.contains("[RAW] Feedback Aware:"),
+                "RAW profile must not render a feedback-key diagnostic block");
+        assertFalse(rendered.contains("[RAW] Query Key Strategy:"),
+                "RAW profile must not invoke keyFor() and must not render a strategy line");
 
-        // Verify LEXICAL profile diagnostics
+        // LEXICAL_FEEDBACK_KEY profile renders its full diagnostic
         assertTrue(rendered.contains("[LEXICAL_ENRICHED_WITH_LEXICAL_FEEDBACK_KEY] Feedback Aware: true"),
-                "Comparison should show LEXICAL is feedback-aware");
+                "Feedback-aware profile should render Feedback Aware: true");
         assertTrue(rendered.contains("[LEXICAL_ENRICHED_WITH_LEXICAL_FEEDBACK_KEY] Query Key Strategy: LexicallyEnrichedQueryKeyStrategy"),
-                "Comparison should show LEXICAL uses lexical strategy");
+                "Feedback-aware profile should render its strategy name");
         assertTrue(rendered.contains("[LEXICAL_ENRICHED_WITH_LEXICAL_FEEDBACK_KEY] Evaluation Query Key: lexical-expansion:"),
-                "Comparison should show LEXICAL query key");
+                "Feedback-aware profile should render its evaluation query key");
         assertTrue(rendered.contains("[LEXICAL_ENRICHED_WITH_LEXICAL_FEEDBACK_KEY] Feedback Seed Key:"),
-                "Comparison should show LEXICAL seed key");
+                "Feedback-aware profile should render its seed key");
         assertTrue(rendered.contains("[LEXICAL_ENRICHED_WITH_LEXICAL_FEEDBACK_KEY] Feedback Key Match:"),
-                "Comparison should show LEXICAL key match status");
+                "Feedback-aware profile should render the key match result");
     }
 
     @Test

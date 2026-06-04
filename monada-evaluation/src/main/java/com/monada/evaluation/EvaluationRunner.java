@@ -171,23 +171,20 @@ public final class EvaluationRunner {
             double rr = ReciprocalRank.compute(query.expectedLabels(), rankedLabels);
             reciprocalRankSum += rr;
 
-            // Capture query-key diagnostic if strategy is provided.
-            // The reported key mirrors MonadaMemory/MonadaQuery: if the strategy
-            // returns blank we fall back to the raw query text so the diagnostic
-            // reflects the key that will actually be used for feedback lookups.
-            // feedbackAware is set here so the flag is correct even before
-            // EvaluationProfileRunner.enhanceWithSeedQueryKeys attaches the seed key.
+            // Capture query-key diagnostic only when feedback-aware ranking is enabled
+            // AND a strategy is configured. When feedbackAware is false the production
+            // query path never invokes the strategy, so we must not call keyFor() here
+            // either — a custom strategy may only be valid in feedback experiments and
+            // could fail or cause side effects if invoked for a non-feedback profile.
             QueryKeyDiagnostic diagnostic = null;
-            if (queryKeyStrategy != null) {
+            if (feedbackAware && queryKeyStrategy != null) {
                 var rawKey = queryKeyStrategy.keyFor(query.text());
                 var effectiveKey = (rawKey == null || rawKey.isBlank()) ? query.text() : rawKey;
                 var simpleName = queryKeyStrategy.getClass().getSimpleName();
                 var strategyName = (simpleName == null || simpleName.isBlank())
                         ? queryKeyStrategy.getClass().getName()
                         : simpleName;
-                diagnostic = feedbackAware
-                        ? new QueryKeyDiagnostic(effectiveKey, strategyName, true, null)
-                        : QueryKeyDiagnostic.withoutFeedback(effectiveKey, strategyName);
+                diagnostic = new QueryKeyDiagnostic(effectiveKey, strategyName, true, null);
             }
 
             queryResults.add(new QueryEvaluation(
