@@ -15,7 +15,8 @@ public record QueryEvaluation(
         Map<Integer, Double> precisionByK,
         Map<Integer, Double> recallByK,
         Map<Integer, Double> hitByK,
-        double reciprocalRank
+        double reciprocalRank,
+        QueryKeyDiagnostic queryKeyDiagnostic
 ) {
     public QueryEvaluation {
         Objects.requireNonNull(queryText, "queryText");
@@ -25,5 +26,22 @@ public record QueryEvaluation(
         recallByK = sortedCopy(recallByK, "recallByK");
         hitByK = sortedCopy(hitByK, "hitByK");
         reciprocalRank = validateUnitInterval(reciprocalRank, "reciprocalRank");
+        // queryKeyDiagnostic can be null when not captured
+    }
+
+    /**
+     * Backwards-compatible constructor without query key diagnostic.
+     * Creates a QueryEvaluation with empty diagnostic.
+     */
+    public QueryEvaluation(
+            String queryText,
+            Set<String> expectedLabels,
+            List<String> returnedLabels,
+            Map<Integer, Double> precisionByK,
+            Map<Integer, Double> recallByK,
+            Map<Integer, Double> hitByK,
+            double reciprocalRank) {
+        this(queryText, expectedLabels, returnedLabels, precisionByK, recallByK, hitByK,
+                reciprocalRank, null);
     }
 }

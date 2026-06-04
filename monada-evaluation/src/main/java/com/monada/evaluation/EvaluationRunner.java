@@ -1,5 +1,6 @@
 package com.monada.evaluation;
 
+import com.monada.api.FeedbackQueryKeyStrategy;
 import com.monada.api.MonadaMemory;
 import com.monada.api.MonadaMemoryOptions;
 
@@ -107,6 +108,23 @@ public final class EvaluationRunner {
      * reopening memory with default options.
      */
     EvaluationReport evaluate(EvaluationDataset dataset, MonadaMemory memory, Map<String, String> idToLabel) {
+        return evaluate(dataset, memory, idToLabel, null, false);
+    }
+
+    /**
+     * Runs every query in {@code dataset} against an already-seeded
+     * {@code memory} and aggregates metrics, capturing query-key diagnostics
+     * for each query using the provided strategy.
+     *
+     * @param queryKeyStrategy  the strategy to derive query keys; if null, no diagnostics are captured
+     * @param feedbackAware     whether feedback-aware ranking is enabled
+     */
+    EvaluationReport evaluate(
+            EvaluationDataset dataset,
+            MonadaMemory memory,
+            Map<String, String> idToLabel,
+            FeedbackQueryKeyStrategy queryKeyStrategy,
+            boolean feedbackAware) {
         var maxK = ks.stream().mapToInt(Integer::intValue).max().orElse(1);
 
         var queryResults = new ArrayList<QueryEvaluation>(dataset.queries().size());
@@ -148,6 +166,14 @@ public final class EvaluationRunner {
             double rr = ReciprocalRank.compute(query.expectedLabels(), rankedLabels);
             reciprocalRankSum += rr;
 
+            // Capture query-key diagnostic if strategy is provided
+            QueryKeyDiagnostic diagnostic = null;
+            if (queryKeyStrategy != null) {
+                var queryKey = queryKeyStrategy.keyFor(query.text());
+                var strategyName = queryKeyStrategy.getClass().getSimpleName();
+                diagnostic = QueryKeyDiagnostic.withoutFeedback(queryKey, strategyName);
+            }
+
             queryResults.add(new QueryEvaluation(
                     query.text(),
                     query.expectedLabels(),
@@ -155,7 +181,8 @@ public final class EvaluationRunner {
                     precisionByK,
                     recallByK,
                     hitByK,
-                    rr));
+                    rr,
+                    diagnostic));
         }
 
         var n = dataset.queries().size();

@@ -83,14 +83,33 @@ public record EvaluationProfileComparison(
                 sb.append(String.format(Locale.ROOT, "  [%s] Top %d: %s%n",
                         profile.name(), displayK,
                         displayK == 0 ? "(none)" : String.join(", ", labels.subList(0, displayK))));
+
+                // Query Key Diagnostic per profile
+                var diagnostic = queryResult.queryKeyDiagnosticByProfile().get(profile);
+                if (diagnostic != null) {
+                    sb.append(String.format(Locale.ROOT, "  [%s] Feedback Aware: %s%n",
+                            profile.name(), diagnostic.feedbackAware()));
+                    sb.append(String.format(Locale.ROOT, "  [%s] Query Key Strategy: %s%n",
+                            profile.name(), diagnostic.strategyName()));
+                    sb.append(String.format(Locale.ROOT, "  [%s] Evaluation Query Key: %s%n",
+                            profile.name(), diagnostic.queryKey()));
+                    if (diagnostic.hasSeedQueryKey()) {
+                        sb.append(String.format(Locale.ROOT, "  [%s] Feedback Seed Key: %s%n",
+                                profile.name(), diagnostic.seedQueryKey()));
+                        sb.append(String.format(Locale.ROOT, "  [%s] Feedback Key Match: %s%n",
+                                profile.name(), diagnostic.feedbackKeyMatch()));
+                    }
+                }
+
                 if (profile != baseProfile) {
                     var change = queryResult.changeByProfile().getOrDefault(profile, RankingChange.MAINTAINED);
                     sb.append(String.format(Locale.ROOT, "  [%s vs %s] Change: %s%n",
                             profile.name(), baseProfile.name(), change));
                 }
             }
-            queryResult.failureType().ifPresent(f ->
-                    sb.append("  Failure: ").append(f).append('\n'));
+            if (queryResult.hasFailure()) {
+                sb.append("  Failure: ").append(queryResult.failureType()).append('\n');
+            }
             sb.append('\n');
         }
 

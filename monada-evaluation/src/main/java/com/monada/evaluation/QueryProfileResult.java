@@ -1,9 +1,9 @@
 package com.monada.evaluation;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -11,15 +11,16 @@ import java.util.Set;
  *
  * <p>Holds the expected labels, the ranked labels returned per profile, the
  * {@link RankingChange} classification of each profile versus the first (base)
- * profile, and an optional {@link RetrievalFailureType} for any profile whose
- * query was not perfect (i.e. the best-performing profile still missed a result).
+ * profile, an optional {@link RetrievalFailureType} for any profile whose
+ * query was not perfect, and per-profile {@link QueryKeyDiagnostic} information.
  */
 public record QueryProfileResult(
         String queryText,
         Set<String> expectedLabels,
         Map<EvaluationProfile, List<String>> returnedLabelsByProfile,
         Map<EvaluationProfile, RankingChange> changeByProfile,
-        Optional<RetrievalFailureType> failureType
+        RetrievalFailureType failureType,
+        Map<EvaluationProfile, QueryKeyDiagnostic> queryKeyDiagnosticByProfile
 ) {
     public QueryProfileResult {
         Objects.requireNonNull(queryText, "queryText");
@@ -29,6 +30,27 @@ public record QueryProfileResult(
         expectedLabels = Set.copyOf(Objects.requireNonNull(expectedLabels, "expectedLabels"));
         returnedLabelsByProfile = Map.copyOf(Objects.requireNonNull(returnedLabelsByProfile, "returnedLabelsByProfile"));
         changeByProfile = Map.copyOf(Objects.requireNonNull(changeByProfile, "changeByProfile"));
-        Objects.requireNonNull(failureType, "failureType");
+        // failureType can be null when there is no failure
+        queryKeyDiagnosticByProfile = Map.copyOf(Objects.requireNonNull(queryKeyDiagnosticByProfile, "queryKeyDiagnosticByProfile"));
+    }
+
+    /**
+     * Backwards-compatible constructor without query key diagnostics.
+     */
+    public QueryProfileResult(
+            String queryText,
+            Set<String> expectedLabels,
+            Map<EvaluationProfile, List<String>> returnedLabelsByProfile,
+            Map<EvaluationProfile, RankingChange> changeByProfile,
+            RetrievalFailureType failureType) {
+        this(queryText, expectedLabels, returnedLabelsByProfile, changeByProfile,
+                failureType, new HashMap<>());
+    }
+
+    /**
+     * Returns true if this query result has a failure type.
+     */
+    public boolean hasFailure() {
+        return failureType != null;
     }
 }
