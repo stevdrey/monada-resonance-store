@@ -40,6 +40,14 @@ public record EvaluationProfileComparison(
                 throw new IllegalArgumentException("missing report for profile: " + profile.name());
             }
         }
+        // Every non-base profile must have an aggregate change entry so render() is consistent.
+        for (int i = 1; i < profiles.size(); i++) {
+            EvaluationProfile profile = profiles.get(i);
+            if (!aggregateChangeByProfile.containsKey(profile)) {
+                throw new IllegalArgumentException(
+                        "missing aggregateChangeByProfile entry for non-base profile: " + profile.name());
+            }
+        }
     }
 
     /**

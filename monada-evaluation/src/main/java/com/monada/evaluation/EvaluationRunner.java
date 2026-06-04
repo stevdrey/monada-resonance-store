@@ -166,12 +166,16 @@ public final class EvaluationRunner {
             double rr = ReciprocalRank.compute(query.expectedLabels(), rankedLabels);
             reciprocalRankSum += rr;
 
-            // Capture query-key diagnostic if strategy is provided
+            // Capture query-key diagnostic if strategy is provided.
+            // feedbackAware is set here so the flag is correct even before
+            // EvaluationProfileRunner.enhanceWithSeedQueryKeys attaches the seed key.
             QueryKeyDiagnostic diagnostic = null;
             if (queryKeyStrategy != null) {
                 var queryKey = queryKeyStrategy.keyFor(query.text());
                 var strategyName = queryKeyStrategy.getClass().getSimpleName();
-                diagnostic = QueryKeyDiagnostic.withoutFeedback(queryKey, strategyName);
+                diagnostic = feedbackAware
+                        ? new QueryKeyDiagnostic(queryKey, strategyName, true, null)
+                        : QueryKeyDiagnostic.withoutFeedback(queryKey, strategyName);
             }
 
             queryResults.add(new QueryEvaluation(

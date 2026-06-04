@@ -16,7 +16,7 @@ class QueryKeyDiagnosticRenderingTest {
     @Test
     void evaluationReportRendersQueryKeyDiagnostic() {
         var diagnostic = QueryKeyDiagnostic.withoutFeedback(
-                "exact:test query", "ExactQueryKeyStrategy");
+                "test query", "ExactQueryKeyStrategy");
         var queryEval = new QueryEvaluation(
                 "test query",
                 Set.of("atom1"),
@@ -36,7 +36,7 @@ class QueryKeyDiagnosticRenderingTest {
 
         var rendered = report.render();
 
-        assertTrue(rendered.contains("Query Key: exact:test query"),
+        assertTrue(rendered.contains("Query Key: test query"),
                 "Report should contain query key");
         assertTrue(rendered.contains("Query Key Strategy: ExactQueryKeyStrategy"),
                 "Report should contain query key strategy");

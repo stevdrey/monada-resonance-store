@@ -161,10 +161,8 @@ public final class EvaluationProfileRunner {
                 if (atomId != null) {
                     memory.feedback(query.text(), atomId, FeedbackSignal.POSITIVE);
                 }
-                // Capture seed query key
-                if (queryKeyStrategy != null) {
-                    seedQueryKeys.put(query.text(), queryKeyStrategy.keyFor(query.text()));
-                }
+                // queryKeyStrategy is always non-null (validated by MonadaMemoryOptions/EvaluationProfile)
+                seedQueryKeys.put(query.text(), queryKeyStrategy.keyFor(query.text()));
             }
         }
 
@@ -174,16 +172,23 @@ public final class EvaluationProfileRunner {
                 queryKeyStrategy, profile.feedbackAware());
 
         // Enhance query evaluations with complete diagnostics including seed keys
-        return enhanceWithSeedQueryKeys(report, seedQueryKeys, profile.feedbackAware());
+        return enhanceWithSeedQueryKeys(report, seedQueryKeys, profile.feedbackAware(),
+                queryKeyStrategy.getClass().getSimpleName());
     }
 
     /**
      * Enhances query evaluations with complete query-key diagnostics including seed keys.
+     *
+     * <p>For feedback-aware profiles, the existing diagnostic (if any) is upgraded to
+     * include the seed key. If no existing diagnostic is present but a seed key was
+     * captured, a minimal feedback-aware diagnostic is synthesized using
+     * {@code strategyName} so the seed key is never silently lost.
      */
     private EvaluationReport enhanceWithSeedQueryKeys(
             EvaluationReport report,
             Map<String, String> seedQueryKeys,
-            boolean feedbackAware) {
+            boolean feedbackAware,
+            String strategyName) {
         if (seedQueryKeys.isEmpty()) {
             return report;
         }
@@ -192,10 +197,10 @@ public final class EvaluationProfileRunner {
         for (var qe : report.queryResults()) {
             QueryKeyDiagnostic enhancedDiag = null;
 
+            var seedKey = feedbackAware ? seedQueryKeys.get(qe.queryText()) : null;
             var existingDiag = qe.queryKeyDiagnostic();
             if (existingDiag != null) {
-                var seedKey = seedQueryKeys.get(qe.queryText());
-                if (seedKey != null && feedbackAware) {
+                if (seedKey != null) {
                     enhancedDiag = QueryKeyDiagnostic.withFeedback(
                             existingDiag.queryKey(),
                             existingDiag.strategyName(),
@@ -203,6 +208,10 @@ public final class EvaluationProfileRunner {
                 } else {
                     enhancedDiag = existingDiag;
                 }
+            } else if (seedKey != null) {
+                // No existing diagnostic but feedback was seeded: synthesize one so the
+                // seed key is not silently lost for this query.
+                enhancedDiag = QueryKeyDiagnostic.withFeedback(seedKey, strategyName, seedKey);
             }
 
             if (enhancedDiag != null) {
