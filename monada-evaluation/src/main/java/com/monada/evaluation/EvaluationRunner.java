@@ -173,9 +173,16 @@ public final class EvaluationRunner {
 
             // Capture a query-key diagnostic whenever a deterministic strategy is available,
             // regardless of whether feedback-aware ranking is enabled.  This gives the report
-            // visibility into how query keys are derived for all profiles, including RAW and
-            // LEXICAL_ENRICHED.  The seed key and key-match fields are only populated later
-            // (by EvaluationProfileRunner.enhanceWithSeedQueryKeys) for feedback-aware profiles.
+            // visibility into how query keys are derived for all profiles.
+            //
+            // When feedbackAware=true, the diagnostic is created with withFeedback(), using
+            // effectiveKey as both the evaluation key and the seed key.  This mirrors the real
+            // MonadaMemory/MonadaQuery behavior: the same strategy-derived key is used for
+            // both feedback lookup and query evaluation on the direct run(...) path.
+            //
+            // EvaluationProfileRunner overrides this by calling enhanceWithSeedQueryKeys()
+            // after the explicit seeding phase, replacing the seed key with the one actually
+            // used during feedback.feedback() calls for profile-level comparisons.
             QueryKeyDiagnostic diagnostic = null;
             if (queryKeyStrategy != null) {
                 var rawKey = queryKeyStrategy.keyFor(query.text());
@@ -184,9 +191,9 @@ public final class EvaluationRunner {
                 var strategyName = (simpleName == null || simpleName.isBlank())
                         ? queryKeyStrategy.getClass().getName()
                         : simpleName;
-                // Seed key is not available here; EvaluationProfileRunner will upgrade the
-                // diagnostic to withFeedback(...) after seeding for feedback-aware profiles.
-                diagnostic = QueryKeyDiagnostic.withoutFeedback(effectiveKey, strategyName);
+                diagnostic = feedbackAware
+                        ? QueryKeyDiagnostic.withFeedback(effectiveKey, strategyName, effectiveKey)
+                        : QueryKeyDiagnostic.withoutFeedback(effectiveKey, strategyName);
             }
 
             queryResults.add(new QueryEvaluation(
