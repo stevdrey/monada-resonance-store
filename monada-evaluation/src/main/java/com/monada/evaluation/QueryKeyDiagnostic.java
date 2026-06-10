@@ -10,12 +10,25 @@ import java.util.Objects;
  * ranking was enabled, and optionally the seed query key used when feedback
  * was seeded before evaluation.
  *
+ * <p>Three valid states exist:
+ * <ul>
+ *   <li><b>Non-feedback-aware</b>: {@code feedbackAware=false}, {@code seedQueryKey=null}.
+ *       Use {@link #withoutFeedback}.</li>
+ *   <li><b>Feedback-aware with explicit seeding</b>: {@code feedbackAware=true},
+ *       {@code seedQueryKey} non-null and non-blank.  Use {@link #withFeedback}.</li>
+ *   <li><b>Feedback-aware ranking only</b>: {@code feedbackAware=true},
+ *       {@code seedQueryKey=null}. Applies when feedback-aware ranking is active but
+ *       this runner did not seed feedback explicitly (e.g. a direct
+ *       {@code EvaluationRunner.run(...)} call). Use {@link #feedbackAwareNoSeed}.</li>
+ * </ul>
+ *
  * <p>This is diagnostic-only and does not affect ranking behavior.
  *
  * @param queryKey           the effective feedback query key (e.g., "exact:query text")
  * @param strategyName       the simple name of the FeedbackQueryKeyStrategy class
  * @param feedbackAware      whether feedback-aware ranking was enabled
- * @param seedQueryKey       the query key used to seed feedback (null if not feedback-aware)
+ * @param seedQueryKey       the query key used to seed feedback; null when no explicit
+ *                           seeding was performed by this runner
  */
 public record QueryKeyDiagnostic(
         String queryKey,
@@ -32,8 +45,10 @@ public record QueryKeyDiagnostic(
         if (strategyName.isBlank()) {
             throw new IllegalArgumentException("strategyName must not be blank");
         }
-        if (feedbackAware && (seedQueryKey == null || seedQueryKey.isBlank())) {
-            throw new IllegalArgumentException("seedQueryKey must be present when feedbackAware is true");
+        // seedQueryKey may be null when feedbackAware=true but no explicit seeding was performed.
+        // When present it must not be blank.
+        if (seedQueryKey != null && seedQueryKey.isBlank()) {
+            throw new IllegalArgumentException("seedQueryKey must not be blank when present");
         }
         if (!feedbackAware && seedQueryKey != null) {
             throw new IllegalArgumentException("seedQueryKey must be null when feedbackAware is false");
@@ -48,14 +63,32 @@ public record QueryKeyDiagnostic(
     }
 
     /**
-     * Creates a diagnostic for feedback-aware evaluation with seed key.
+     * Creates a diagnostic for feedback-aware evaluation where this runner also seeded
+     * explicit feedback events. Both the evaluation key and the seed key are reported,
+     * and {@link #feedbackKeyMatch()} reflects whether they agree.
      */
     public static QueryKeyDiagnostic withFeedback(
             String queryKey,
             String strategyName,
             String seedQueryKey) {
-        Objects.requireNonNull(seedQueryKey, "seedQueryKey must not be null for feedback-aware diagnostics");
+        Objects.requireNonNull(seedQueryKey, "seedQueryKey must not be null for feedback-with-seed diagnostics");
+        if (seedQueryKey.isBlank()) {
+            throw new IllegalArgumentException("seedQueryKey must not be blank");
+        }
         return new QueryKeyDiagnostic(queryKey, strategyName, true, seedQueryKey);
+    }
+
+    /**
+     * Creates a diagnostic for a run where feedback-aware ranking is active but this
+     * runner did not seed explicit feedback events (e.g. a direct
+     * {@code EvaluationRunner.run(...)} call using default or custom options).
+     *
+     * <p>The rendered report will show {@code Feedback Aware: true} and the evaluation
+     * query key, but will omit the seed-key and key-match lines because no seeding
+     * was performed by this runner.
+     */
+    public static QueryKeyDiagnostic feedbackAwareNoSeed(String queryKey, String strategyName) {
+        return new QueryKeyDiagnostic(queryKey, strategyName, true, null);
     }
 
     /**

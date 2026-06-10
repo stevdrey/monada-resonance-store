@@ -78,11 +78,34 @@ class QueryKeyDiagnosticTest {
     }
 
     @Test
-    void constructorRejectsFeedbackAwareWithoutSeedKey() {
-        assertThrows(IllegalArgumentException.class, () ->
-                new QueryKeyDiagnostic("key", "Strategy", true, null));
+    void constructorAllowsFeedbackAwareWithNullSeedKey() {
+        // feedbackAware=true with seedQueryKey=null is valid: represents feedback-aware
+        // ranking without explicit seeding in this runner (feedbackAwareNoSeed path).
+        var diagnostic = new QueryKeyDiagnostic("key", "Strategy", true, null);
+        assertTrue(diagnostic.feedbackAware());
+        assertNull(diagnostic.seedQueryKey());
+        assertFalse(diagnostic.hasSeedQueryKey());
+        assertFalse(diagnostic.feedbackKeyMatch());
+    }
+
+    @Test
+    void constructorRejectsFeedbackAwareWithBlankSeedKey() {
+        // A blank (non-null) seed key is never valid
         assertThrows(IllegalArgumentException.class, () ->
                 new QueryKeyDiagnostic("key", "Strategy", true, ""));
+        assertThrows(IllegalArgumentException.class, () ->
+                new QueryKeyDiagnostic("key", "Strategy", true, "   "));
+    }
+
+    @Test
+    void feedbackAwareNoSeedCreatesDiagnosticWithNullSeedKey() {
+        var diagnostic = QueryKeyDiagnostic.feedbackAwareNoSeed("query text", "ExactQueryKeyStrategy");
+
+        assertTrue(diagnostic.feedbackAware());
+        assertEquals("query text", diagnostic.queryKey());
+        assertNull(diagnostic.seedQueryKey());
+        assertFalse(diagnostic.hasSeedQueryKey());
+        assertFalse(diagnostic.feedbackKeyMatch());
     }
 
     @Test

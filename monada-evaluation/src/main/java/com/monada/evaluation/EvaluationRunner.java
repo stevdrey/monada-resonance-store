@@ -175,14 +175,14 @@ public final class EvaluationRunner {
             // regardless of whether feedback-aware ranking is enabled.  This gives the report
             // visibility into how query keys are derived for all profiles.
             //
-            // When feedbackAware=true, the diagnostic is created with withFeedback(), using
-            // effectiveKey as both the evaluation key and the seed key.  This mirrors the real
-            // MonadaMemory/MonadaQuery behavior: the same strategy-derived key is used for
-            // both feedback lookup and query evaluation on the direct run(...) path.
+            // When feedbackAware=true this runner does NOT seed explicit feedback events, so
+            // we use feedbackAwareNoSeed() to show "Feedback Aware: true" and the evaluation
+            // key without a seed-key or key-match line — avoiding the misleading impression
+            // that feedback was seeded here.
             //
             // EvaluationProfileRunner overrides this by calling enhanceWithSeedQueryKeys()
-            // after the explicit seeding phase, replacing the seed key with the one actually
-            // used during feedback.feedback() calls for profile-level comparisons.
+            // after its explicit seeding phase, upgrading the diagnostic to withFeedback()
+            // with the actual seed key used in memory.feedback() calls.
             QueryKeyDiagnostic diagnostic = null;
             if (queryKeyStrategy != null) {
                 var rawKey = queryKeyStrategy.keyFor(query.text());
@@ -192,7 +192,7 @@ public final class EvaluationRunner {
                         ? queryKeyStrategy.getClass().getName()
                         : simpleName;
                 diagnostic = feedbackAware
-                        ? QueryKeyDiagnostic.withFeedback(effectiveKey, strategyName, effectiveKey)
+                        ? QueryKeyDiagnostic.feedbackAwareNoSeed(effectiveKey, strategyName)
                         : QueryKeyDiagnostic.withoutFeedback(effectiveKey, strategyName);
             }
 
@@ -216,7 +216,7 @@ public final class EvaluationRunner {
         return new EvaluationReport(queryResults, averagePrecision, averageRecall, averageHit, mrr);
     }
 
-    private static Map<Integer, Double> average(Map<Integer, Double> sums, int n) {
+    private Map<Integer, Double> average(Map<Integer, Double> sums, int n) {
         var averages = new TreeMap<Integer, Double>();
         for (var e : sums.entrySet()) {
             averages.put(e.getKey(), n == 0 ? 0.0 : e.getValue() / n);

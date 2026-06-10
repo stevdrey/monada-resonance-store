@@ -4,6 +4,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -45,6 +46,20 @@ public record QueryProfileResult(
             RetrievalFailureType failureType) {
         this(queryText, expectedLabels, returnedLabelsByProfile, changeByProfile,
                 failureType, new HashMap<>());
+    }
+
+    /**
+     * Backwards-compatible constructor that accepts {@code Optional<RetrievalFailureType>}
+     * as used in earlier versions of the evaluation harness.
+     */
+    public QueryProfileResult(
+            String queryText,
+            Set<String> expectedLabels,
+            Map<EvaluationProfile, List<String>> returnedLabelsByProfile,
+            Map<EvaluationProfile, RankingChange> changeByProfile,
+            Optional<RetrievalFailureType> failureType) {
+        this(queryText, expectedLabels, returnedLabelsByProfile, changeByProfile,
+                failureType.orElse(null), new HashMap<>());
     }
 
     /**
