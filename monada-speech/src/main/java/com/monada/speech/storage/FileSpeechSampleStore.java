@@ -178,7 +178,9 @@ public class FileSpeechSampleStore implements SpeechSampleStore {
                 sb.append(c);
             }
         }
-        result.add(sb.toString());
+        if (!sb.isEmpty()) {
+            result.add(sb.toString());
+        }
         return List.copyOf(result);
     }
 
@@ -288,12 +290,11 @@ public class FileSpeechSampleStore implements SpeechSampleStore {
                 depth++;
                 sb.append(c);
             } else if (c == '}' && !inString) {
-                if (depth == 0) {
-                    sb.append(c);
-                    return sb.toString();
-                }
                 depth--;
                 sb.append(c);
+                if (depth == 0) {
+                    return sb.toString();
+                }
             } else {
                 sb.append(c);
             }

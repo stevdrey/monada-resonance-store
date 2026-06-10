@@ -200,6 +200,55 @@ class FileSpeechSampleStoreTest {
         assertEquals(now, found.createdAt());
     }
 
+    @Test
+    void preservesAudioMetadataFieldsAfterRoundTrip() throws IOException {
+        var store = new FileSpeechSampleStore(tempDir);
+        var sample = new SpeechSample(
+                "sample1",
+                "speaker1",
+                SpeechDatasetSource.TORGO,
+                Path.of("/audio/sample1.wav"),
+                "test transcript",
+                List.of("alias"),
+                SpeechCondition.CONTROL,
+                SpeechTaskType.WORD,
+                "en",
+                new AudioMetadata(44100, 2, 3750, "deadbeef"),
+                Instant.parse("2024-01-01T00:00:00Z")
+        );
+
+        store.save(sample);
+
+        var found = store.findById("sample1").orElseThrow();
+        assertEquals(44100, found.audioMetadata().sampleRate());
+        assertEquals(2, found.audioMetadata().channels());
+        assertEquals(3750L, found.audioMetadata().durationMs());
+        assertEquals("deadbeef", found.audioMetadata().sha256());
+    }
+
+    @Test
+    void parsesAliasesWithSpecialCharacters() throws IOException {
+        var store = new FileSpeechSampleStore(tempDir);
+        var sample = new SpeechSample(
+                "sample1",
+                "speaker1",
+                SpeechDatasetSource.TORGO,
+                Path.of("/audio/sample1.wav"),
+                "hello world",
+                List.of("alias with spaces", "alias\"quoted", "alias\\backslash"),
+                SpeechCondition.CONTROL,
+                SpeechTaskType.WORD,
+                "en",
+                new AudioMetadata(16000, 1, 1000, "hash1"),
+                Instant.parse("2024-01-01T00:00:00Z")
+        );
+
+        store.save(sample);
+
+        var found = store.findById("sample1").orElseThrow();
+        assertEquals(List.of("alias with spaces", "alias\"quoted", "alias\\backslash"), found.aliases());
+    }
+
     private SpeechSample createSample(String id, String speakerId) {
         return createSample(id, speakerId, "hello world");
     }

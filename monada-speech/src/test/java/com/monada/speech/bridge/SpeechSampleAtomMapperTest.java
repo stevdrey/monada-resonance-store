@@ -21,47 +21,41 @@ class SpeechSampleAtomMapperTest {
 
     @Test
     void mapsTranscriptToAtomTypeText() {
-        var mapper = new SpeechSampleAtomMapper();
         var sample = createSample("sample1", "hello world", List.of("greeting"));
-
-        var atom = mapper.toTranscriptAtom(sample);
+        var atom = SpeechSampleAtomMapper.toTranscriptAtom(sample);
 
         assertEquals(AtomType.TEXT, atom.type());
     }
 
     @Test
     void preservesSampleId() {
-        var mapper = new SpeechSampleAtomMapper();
         var sample = createSample("sample123", "hello", List.of("alias"));
 
-        var atom = mapper.toTranscriptAtom(sample);
+        var atom = SpeechSampleAtomMapper.toTranscriptAtom(sample);
 
         assertEquals("sample123", atom.id());
     }
 
     @Test
     void mapsTranscriptToContent() {
-        var mapper = new SpeechSampleAtomMapper();
         var sample = createSample("sample1", "this is the transcript", List.of("text"));
 
-        var atom = mapper.toTranscriptAtom(sample);
+        var atom = SpeechSampleAtomMapper.toTranscriptAtom(sample);
 
         assertEquals("this is the transcript", atom.content());
     }
 
     @Test
     void preservesAliases() {
-        var mapper = new SpeechSampleAtomMapper();
         var sample = createSample("sample1", "hello world", List.of("greeting", "salutation", "hello"));
 
-        var atom = mapper.toTranscriptAtom(sample);
+        var atom = SpeechSampleAtomMapper.toTranscriptAtom(sample);
 
         assertEquals(List.of("greeting", "salutation", "hello"), atom.aliases());
     }
 
     @Test
     void preservesCreatedAt() {
-        var mapper = new SpeechSampleAtomMapper();
         var now = Instant.now();
         var sample = new SpeechSample(
                 "sample1",
@@ -77,17 +71,16 @@ class SpeechSampleAtomMapperTest {
                 now
         );
 
-        var atom = mapper.toTranscriptAtom(sample);
+        var atom = SpeechSampleAtomMapper.toTranscriptAtom(sample);
 
         assertEquals(now, atom.createdAt());
     }
 
     @Test
     void emitsEmptyMetadata() {
-        var mapper = new SpeechSampleAtomMapper();
         var sample = createSample("sample1", "hello", List.of("alias"));
 
-        var atom = mapper.toTranscriptAtom(sample);
+        var atom = SpeechSampleAtomMapper.toTranscriptAtom(sample);
 
         assertTrue(atom.metadata().isEmpty());
         assertEquals(Map.of(), atom.metadata());
@@ -95,17 +88,15 @@ class SpeechSampleAtomMapperTest {
 
     @Test
     void usesDefaultWeight() {
-        var mapper = new SpeechSampleAtomMapper();
         var sample = createSample("sample1", "hello", List.of("alias"));
 
-        var atom = mapper.toTranscriptAtom(sample);
+        var atom = SpeechSampleAtomMapper.toTranscriptAtom(sample);
 
         assertEquals(1.0, atom.weight());
     }
 
     @Test
     void doesNotIncludeAudioMetadataInAtom() {
-        var mapper = new SpeechSampleAtomMapper();
         var sample = new SpeechSample(
                 "sample1",
                 "speaker1",
@@ -120,7 +111,7 @@ class SpeechSampleAtomMapperTest {
                 Instant.now()
         );
 
-        var atom = mapper.toTranscriptAtom(sample);
+        var atom = SpeechSampleAtomMapper.toTranscriptAtom(sample);
 
         // Audio-specific metadata should NOT be in the atom
         assertTrue(atom.metadata().isEmpty());
@@ -130,12 +121,11 @@ class SpeechSampleAtomMapperTest {
 
     @Test
     void multipleSamplesMapIndependently() {
-        var mapper = new SpeechSampleAtomMapper();
         var sample1 = createSample("sample1", "first transcript", List.of("first"));
         var sample2 = createSample("sample2", "second transcript", List.of("second"));
 
-        var atom1 = mapper.toTranscriptAtom(sample1);
-        var atom2 = mapper.toTranscriptAtom(sample2);
+        var atom1 = SpeechSampleAtomMapper.toTranscriptAtom(sample1);
+        var atom2 = SpeechSampleAtomMapper.toTranscriptAtom(sample2);
 
         assertEquals("sample1", atom1.id());
         assertEquals("first transcript", atom1.content());

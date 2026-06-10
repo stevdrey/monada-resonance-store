@@ -26,7 +26,7 @@ public final class SpeechSampleAtomMapper {
      * @param sample the speech sample to convert
      * @return a KnowledgeAtom containing the transcript, empty metadata
      */
-    public KnowledgeAtom toTranscriptAtom(SpeechSample sample) {
+    public static KnowledgeAtom toTranscriptAtom(SpeechSample sample) {
         return new KnowledgeAtom(
                 sample.id(),
                 AtomType.TEXT,
