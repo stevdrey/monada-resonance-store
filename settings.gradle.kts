@@ -21,5 +21,6 @@ include(
     "monada-index",
     "monada-learning",
     "monada-api",
-    "monada-evaluation"
+    "monada-evaluation",
+    "monada-speech"
 )
