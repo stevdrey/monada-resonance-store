@@ -2,6 +2,7 @@ package com.monada.speech.storage;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -156,5 +157,45 @@ class FileSpeechFeatureStoreTest {
 
         assertEquals("sample1", stored.sampleId());
         assertEquals(vector, stored.vector());
+    }
+
+    @Test
+    void rejectsNullSampleIdOnSave() throws IOException {
+        var store = new FileSpeechFeatureStore(tempDir);
+        var vector = new FrequencyVector(new float[]{0.1f});
+        assertThrows(NullPointerException.class, () -> store.save(null, vector));
+    }
+
+    @Test
+    void rejectsBlankSampleIdOnSave() throws IOException {
+        var store = new FileSpeechFeatureStore(tempDir);
+        var vector = new FrequencyVector(new float[]{0.1f});
+        assertThrows(IllegalArgumentException.class, () -> store.save("  ", vector));
+    }
+
+    @Test
+    void rejectsSampleIdWithTabOnSave() throws IOException {
+        var store = new FileSpeechFeatureStore(tempDir);
+        var vector = new FrequencyVector(new float[]{0.1f});
+        assertThrows(IllegalArgumentException.class, () -> store.save("sample\t1", vector));
+    }
+
+    @Test
+    void rejectsSampleIdWithNewlineOnSave() throws IOException {
+        var store = new FileSpeechFeatureStore(tempDir);
+        var vector = new FrequencyVector(new float[]{0.1f});
+        assertThrows(IllegalArgumentException.class, () -> store.save("sample\n1", vector));
+    }
+
+    @Test
+    void rejectsNullSampleIdOnFind() throws IOException {
+        var store = new FileSpeechFeatureStore(tempDir);
+        assertThrows(NullPointerException.class, () -> store.findBySampleId(null));
+    }
+
+    @Test
+    void rejectsBlankSampleIdOnFind() throws IOException {
+        var store = new FileSpeechFeatureStore(tempDir);
+        assertThrows(IllegalArgumentException.class, () -> store.findBySampleId(""));
     }
 }

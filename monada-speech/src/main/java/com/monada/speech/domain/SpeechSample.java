@@ -34,9 +34,6 @@ public record SpeechSample(
             throw new IllegalArgumentException("transcript must not be blank");
         }
         Objects.requireNonNull(aliases, "aliases");
-        if (aliases.isEmpty()) {
-            throw new IllegalArgumentException("aliases must not be empty");
-        }
         aliases = List.copyOf(aliases);
         for (String alias : aliases) {
             Objects.requireNonNull(alias, "alias");

@@ -120,6 +120,28 @@ class SpeechSampleAtomMapperTest {
     }
 
     @Test
+    void mapsEmptyAliasesToAtom() {
+        var sample = new SpeechSample(
+                "sample1",
+                "speaker1",
+                SpeechDatasetSource.TORGO,
+                Path.of("/audio/sample1.wav"),
+                "hello world",
+                List.of(),
+                SpeechCondition.CONTROL,
+                SpeechTaskType.WORD,
+                "en",
+                new AudioMetadata(16000, 1, 1000, "hash"),
+                Instant.now()
+        );
+
+        var atom = SpeechSampleAtomMapper.toTranscriptAtom(sample);
+
+        assertTrue(atom.aliases().isEmpty());
+        assertEquals("hello world", atom.content());
+    }
+
+    @Test
     void multipleSamplesMapIndependently() {
         var sample1 = createSample("sample1", "first transcript", List.of("first"));
         var sample2 = createSample("sample2", "second transcript", List.of("second"));

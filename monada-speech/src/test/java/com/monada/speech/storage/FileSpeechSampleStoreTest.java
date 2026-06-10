@@ -201,6 +201,29 @@ class FileSpeechSampleStoreTest {
     }
 
     @Test
+    void savesAndReloadsSampleWithEmptyAliases() throws IOException {
+        var store = new FileSpeechSampleStore(tempDir);
+        var sample = new SpeechSample(
+                "sample1",
+                "speaker1",
+                SpeechDatasetSource.TORGO,
+                Path.of("/audio/sample1.wav"),
+                "hello world",
+                List.of(),
+                SpeechCondition.CONTROL,
+                SpeechTaskType.WORD,
+                "en",
+                new AudioMetadata(16000, 1, 1000, "hash1"),
+                Instant.parse("2024-01-01T00:00:00Z")
+        );
+
+        store.save(sample);
+
+        var found = store.findById("sample1").orElseThrow();
+        assertTrue(found.aliases().isEmpty());
+    }
+
+    @Test
     void preservesAudioMetadataFieldsAfterRoundTrip() throws IOException {
         var store = new FileSpeechSampleStore(tempDir);
         var sample = new SpeechSample(

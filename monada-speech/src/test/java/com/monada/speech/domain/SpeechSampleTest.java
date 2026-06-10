@@ -72,23 +72,21 @@ class SpeechSampleTest {
     }
 
     @Test
-    void rejectsEmptyAliases() {
-        var ex = assertThrows(IllegalArgumentException.class, () ->
-                new SpeechSample(
-                        "sample1",
-                        "speaker1",
-                        SpeechDatasetSource.TORGO,
-                        Path.of("/audio.wav"),
-                        "hello",
-                        List.of(),
-                        SpeechCondition.CONTROL,
-                        SpeechTaskType.WORD,
-                        "en",
-                        new AudioMetadata(16000, 1, 1000, "abc123"),
-                        Instant.now()
-                )
+    void allowsEmptyAliases() {
+        var sample = new SpeechSample(
+                "sample1",
+                "speaker1",
+                SpeechDatasetSource.TORGO,
+                Path.of("/audio.wav"),
+                "hello",
+                List.of(),
+                SpeechCondition.CONTROL,
+                SpeechTaskType.WORD,
+                "en",
+                new AudioMetadata(16000, 1, 1000, "abc123"),
+                Instant.now()
         );
-        assertTrue(ex.getMessage().contains("empty"));
+        assertTrue(sample.aliases().isEmpty());
     }
 
     @Test

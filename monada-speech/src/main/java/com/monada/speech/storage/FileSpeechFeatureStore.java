@@ -13,6 +13,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 public class FileSpeechFeatureStore implements SpeechFeatureStore {
@@ -43,6 +44,7 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
 
     @Override
     public void save(String sampleId, FrequencyVector vector) throws IOException {
+        validateSampleId(sampleId);
         float[] values = vector.values();
         long offset = Files.size(vectorFile);
         try (var output = new DataOutputStream(Files.newOutputStream(vectorFile, StandardOpenOption.APPEND))) {
@@ -56,6 +58,7 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
 
     @Override
     public Optional<FrequencyVector> findBySampleId(String sampleId) throws IOException {
+        validateSampleId(sampleId);
         var offset = findOffset(sampleId);
         if (offset == null) {
             return Optional.empty();
@@ -146,6 +149,16 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
             throw new IOException(
                     "Offset (" + offset + ") is beyond end of feature segment (" + fileSize
                             + " bytes) for sampleId=" + sampleId);
+        }
+    }
+
+    private static void validateSampleId(String sampleId) {
+        Objects.requireNonNull(sampleId, "sampleId");
+        if (sampleId.isBlank()) {
+            throw new IllegalArgumentException("sampleId must not be blank");
+        }
+        if (sampleId.contains("\t") || sampleId.contains("\n") || sampleId.contains("\r")) {
+            throw new IllegalArgumentException("sampleId must not contain tab or line breaks");
         }
     }
 
