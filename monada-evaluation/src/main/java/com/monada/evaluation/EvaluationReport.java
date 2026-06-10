@@ -57,6 +57,19 @@ public record EvaluationReport(
             sb.append("First expected rank: ").append(diagnostic.firstExpectedRank()).append('\n');
             sb.append("Failure: ").append(diagnostic.failureType().map(Enum::name).orElse("None")).append('\n');
             sb.append("Note: ").append(diagnostic.note()).append('\n');
+
+            // Query Key Diagnostic
+            if (qr.queryKeyDiagnostic() != null) {
+                var qkd = qr.queryKeyDiagnostic();
+                sb.append("Query Key: ").append(qkd.queryKey()).append('\n');
+                sb.append("Query Key Strategy: ").append(qkd.strategyName()).append('\n');
+                sb.append("Feedback Aware: ").append(qkd.feedbackAware()).append('\n');
+                if (qkd.hasSeedQueryKey()) {
+                    sb.append("Feedback Seed Key: ").append(qkd.seedQueryKey()).append('\n');
+                    sb.append("Feedback Key Match: ").append(qkd.feedbackKeyMatch()).append('\n');
+                }
+            }
+
             sb.append('\n');
         }
 

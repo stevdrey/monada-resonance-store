@@ -1,5 +1,6 @@
 package com.monada.evaluation;
 
+import com.monada.api.FeedbackQueryKeyStrategy;
 import com.monada.api.MonadaMemory;
 import com.monada.api.MonadaMemoryOptions;
 
@@ -55,6 +56,10 @@ public final class EvaluationRunner {
      * given {@link MonadaMemoryOptions}. This overload is required by the
      * profile-aware A/B harness to guarantee that both atom encoding and
      * query execution use the same configured options end-to-end.
+     *
+     * <p>Query-key diagnostics are captured automatically from {@code options}
+     * so that callers using a custom {@code feedbackQueryKeyStrategy} see the
+     * diagnostics block in the rendered {@link EvaluationReport}.
      */
     public EvaluationReport run(EvaluationDataset dataset, Path memoryPath, MonadaMemoryOptions options) {
         Objects.requireNonNull(dataset, "dataset");
@@ -63,7 +68,8 @@ public final class EvaluationRunner {
 
         var memory = MonadaMemory.open(memoryPath, options);
         var seeding = seedAtoms(dataset, memory);
-        return evaluate(dataset, memory, seeding.idToLabel());
+        return evaluate(dataset, memory, seeding.idToLabel(),
+                options.feedbackQueryKeyStrategy(), options.feedbackAwareRanking());
     }
 
     /**
@@ -107,6 +113,23 @@ public final class EvaluationRunner {
      * reopening memory with default options.
      */
     EvaluationReport evaluate(EvaluationDataset dataset, MonadaMemory memory, Map<String, String> idToLabel) {
+        return evaluate(dataset, memory, idToLabel, null, false);
+    }
+
+    /**
+     * Runs every query in {@code dataset} against an already-seeded
+     * {@code memory} and aggregates metrics, capturing query-key diagnostics
+     * for each query using the provided strategy.
+     *
+     * @param queryKeyStrategy  the strategy to derive query keys; if null, no diagnostics are captured
+     * @param feedbackAware     whether feedback-aware ranking is enabled
+     */
+    EvaluationReport evaluate(
+            EvaluationDataset dataset,
+            MonadaMemory memory,
+            Map<String, String> idToLabel,
+            FeedbackQueryKeyStrategy queryKeyStrategy,
+            boolean feedbackAware) {
         var maxK = ks.stream().mapToInt(Integer::intValue).max().orElse(1);
 
         var queryResults = new ArrayList<QueryEvaluation>(dataset.queries().size());
@@ -148,6 +171,31 @@ public final class EvaluationRunner {
             double rr = ReciprocalRank.compute(query.expectedLabels(), rankedLabels);
             reciprocalRankSum += rr;
 
+            // Capture a query-key diagnostic whenever a deterministic strategy is available,
+            // regardless of whether feedback-aware ranking is enabled.  This gives the report
+            // visibility into how query keys are derived for all profiles.
+            //
+            // When feedbackAware=true this runner does NOT seed explicit feedback events, so
+            // we use feedbackAwareNoSeed() to show "Feedback Aware: true" and the evaluation
+            // key without a seed-key or key-match line — avoiding the misleading impression
+            // that feedback was seeded here.
+            //
+            // EvaluationProfileRunner overrides this by calling enhanceWithSeedQueryKeys()
+            // after its explicit seeding phase, upgrading the diagnostic to withFeedback()
+            // with the actual seed key used in memory.feedback() calls.
+            QueryKeyDiagnostic diagnostic = null;
+            if (queryKeyStrategy != null) {
+                var rawKey = queryKeyStrategy.keyFor(query.text());
+                var effectiveKey = (rawKey == null || rawKey.isBlank()) ? query.text() : rawKey;
+                var simpleName = queryKeyStrategy.getClass().getSimpleName();
+                var strategyName = (simpleName == null || simpleName.isBlank())
+                        ? queryKeyStrategy.getClass().getName()
+                        : simpleName;
+                diagnostic = feedbackAware
+                        ? QueryKeyDiagnostic.feedbackAwareNoSeed(effectiveKey, strategyName)
+                        : QueryKeyDiagnostic.withoutFeedback(effectiveKey, strategyName);
+            }
+
             queryResults.add(new QueryEvaluation(
                     query.text(),
                     query.expectedLabels(),
@@ -155,7 +203,8 @@ public final class EvaluationRunner {
                     precisionByK,
                     recallByK,
                     hitByK,
-                    rr));
+                    rr,
+                    diagnostic));
         }
 
         var n = dataset.queries().size();
@@ -167,7 +216,7 @@ public final class EvaluationRunner {
         return new EvaluationReport(queryResults, averagePrecision, averageRecall, averageHit, mrr);
     }
 
-    private static Map<Integer, Double> average(Map<Integer, Double> sums, int n) {
+    private Map<Integer, Double> average(Map<Integer, Double> sums, int n) {
         var averages = new TreeMap<Integer, Double>();
         for (var e : sums.entrySet()) {
             averages.put(e.getKey(), n == 0 ? 0.0 : e.getValue() / n);

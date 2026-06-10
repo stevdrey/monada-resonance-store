@@ -8,9 +8,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -89,10 +91,16 @@ public final class EvaluationProfileRunner {
             var query = dataset.queries().get(qi);
             var returnedByProfile = new LinkedHashMap<EvaluationProfile, List<String>>();
             var changeByProfile = new LinkedHashMap<EvaluationProfile, RankingChange>();
+            var diagnosticByProfile = new LinkedHashMap<EvaluationProfile, QueryKeyDiagnostic>();
 
             for (var profile : profiles) {
                 var report = reportByProfile.get(profile);
                 returnedByProfile.put(profile, report.queryResults().get(qi).returnedLabels());
+                // Extract query key diagnostic from query result if present
+                var diagnostic = report.queryResults().get(qi).queryKeyDiagnostic();
+                if (diagnostic != null) {
+                    diagnosticByProfile.put(profile, diagnostic);
+                }
             }
 
             // Classify change vs. base (base profile gets MAINTAINED by definition).
@@ -106,14 +114,16 @@ public final class EvaluationProfileRunner {
 
             // Classify failure using the last profile in the list (which is the base profile when only one is provided).
             var lastProfileQE = reportByProfile.get(profiles.get(profiles.size() - 1)).queryResults().get(qi);
-            var failureType = RetrievalFailureClassifier.classify(lastProfileQE);
+            var failureTypeOpt = RetrievalFailureClassifier.classify(lastProfileQE);
+            var failureType = failureTypeOpt.orElse(null);
 
             perQuery.add(new QueryProfileResult(
                     query.text(),
                     query.expectedLabels(),
                     returnedByProfile,
                     changeByProfile,
-                    failureType));
+                    failureType,
+                    diagnosticByProfile));
         }
 
         // Build aggregate change map.
@@ -131,10 +141,14 @@ public final class EvaluationProfileRunner {
     private EvaluationReport runProfile(EvaluationDataset dataset, EvaluationProfile profile, Path profileDir) {
         var options = profile.toMemoryOptions();
         var memory = MonadaMemory.open(profileDir, options);
+        var queryKeyStrategy = options.feedbackQueryKeyStrategy();
 
         // Seed atoms exactly once with the profile's options and obtain both
         // atomId->label and label->atomId mappings required for ranking and feedback.
         var seeding = evaluationRunner.seedAtoms(dataset, memory);
+
+        // Track seed query keys for feedback-aware profiles
+        Map<String, String> seedQueryKeys = new HashMap<>();
 
         // Seed deterministic positive feedback for feedback-aware profiles.
         if (profile.feedbackAware()) {
@@ -147,10 +161,82 @@ public final class EvaluationProfileRunner {
                 if (atomId != null) {
                     memory.feedback(query.text(), atomId, FeedbackSignal.POSITIVE);
                 }
+                // Mirror the MonadaMemory/MonadaQuery fallback: blank key → use raw query text.
+                var rawSeedKey = queryKeyStrategy.keyFor(query.text());
+                var effectiveSeedKey = (rawSeedKey == null || rawSeedKey.isBlank()) ? query.text() : rawSeedKey;
+                seedQueryKeys.put(query.text(), effectiveSeedKey);
             }
         }
 
-        return evaluationRunner.evaluate(dataset, memory, seeding.idToLabel());
+        // Evaluate with query-key diagnostics
+        var report = evaluationRunner.evaluate(
+                dataset, memory, seeding.idToLabel(),
+                queryKeyStrategy, profile.feedbackAware());
+
+        // Enhance query evaluations with complete diagnostics including seed keys
+        return enhanceWithSeedQueryKeys(report, seedQueryKeys, profile.feedbackAware(),
+                queryKeyStrategy.getClass().getSimpleName());
+    }
+
+    /**
+     * Enhances query evaluations with complete query-key diagnostics including seed keys.
+     *
+     * <p>For feedback-aware profiles, the existing diagnostic (if any) is upgraded to
+     * include the seed key. If no existing diagnostic is present but a seed key was
+     * captured, a minimal feedback-aware diagnostic is synthesized using
+     * {@code strategyName} so the seed key is never silently lost.
+     */
+    private EvaluationReport enhanceWithSeedQueryKeys(
+            EvaluationReport report,
+            Map<String, String> seedQueryKeys,
+            boolean feedbackAware,
+            String strategyName) {
+        if (seedQueryKeys.isEmpty()) {
+            return report;
+        }
+
+        var enhancedResults = new ArrayList<QueryEvaluation>(report.queryResults().size());
+        for (var qe : report.queryResults()) {
+            QueryKeyDiagnostic enhancedDiag = null;
+
+            var seedKey = feedbackAware ? seedQueryKeys.get(qe.queryText()) : null;
+            var existingDiag = qe.queryKeyDiagnostic();
+            if (existingDiag != null) {
+                if (seedKey != null) {
+                    enhancedDiag = QueryKeyDiagnostic.withFeedback(
+                            existingDiag.queryKey(),
+                            existingDiag.strategyName(),
+                            seedKey);
+                } else {
+                    enhancedDiag = existingDiag;
+                }
+            } else if (seedKey != null) {
+                // No existing diagnostic but feedback was seeded: synthesize one so the
+                // seed key is not silently lost for this query.
+                enhancedDiag = QueryKeyDiagnostic.withFeedback(seedKey, strategyName, seedKey);
+            }
+
+            if (enhancedDiag != null) {
+                enhancedResults.add(new QueryEvaluation(
+                        qe.queryText(),
+                        qe.expectedLabels(),
+                        qe.returnedLabels(),
+                        qe.precisionByK(),
+                        qe.recallByK(),
+                        qe.hitByK(),
+                        qe.reciprocalRank(),
+                        enhancedDiag));
+            } else {
+                enhancedResults.add(qe);
+            }
+        }
+
+        return new EvaluationReport(
+                enhancedResults,
+                report.averagePrecisionByK(),
+                report.averageRecallByK(),
+                report.averageHitByK(),
+                report.meanReciprocalRank());
     }
 
     /**
