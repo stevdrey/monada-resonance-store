@@ -171,20 +171,22 @@ public final class EvaluationRunner {
             double rr = ReciprocalRank.compute(query.expectedLabels(), rankedLabels);
             reciprocalRankSum += rr;
 
-            // Capture query-key diagnostic only when feedback-aware ranking is enabled
-            // AND a strategy is configured. When feedbackAware is false the production
-            // query path never invokes the strategy, so we must not call keyFor() here
-            // either — a custom strategy may only be valid in feedback experiments and
-            // could fail or cause side effects if invoked for a non-feedback profile.
+            // Capture a query-key diagnostic whenever a deterministic strategy is available,
+            // regardless of whether feedback-aware ranking is enabled.  This gives the report
+            // visibility into how query keys are derived for all profiles, including RAW and
+            // LEXICAL_ENRICHED.  The seed key and key-match fields are only populated later
+            // (by EvaluationProfileRunner.enhanceWithSeedQueryKeys) for feedback-aware profiles.
             QueryKeyDiagnostic diagnostic = null;
-            if (feedbackAware && queryKeyStrategy != null) {
+            if (queryKeyStrategy != null) {
                 var rawKey = queryKeyStrategy.keyFor(query.text());
                 var effectiveKey = (rawKey == null || rawKey.isBlank()) ? query.text() : rawKey;
                 var simpleName = queryKeyStrategy.getClass().getSimpleName();
                 var strategyName = (simpleName == null || simpleName.isBlank())
                         ? queryKeyStrategy.getClass().getName()
                         : simpleName;
-                diagnostic = new QueryKeyDiagnostic(effectiveKey, strategyName, true, null);
+                // Seed key is not available here; EvaluationProfileRunner will upgrade the
+                // diagnostic to withFeedback(...) after seeding for feedback-aware profiles.
+                diagnostic = QueryKeyDiagnostic.withoutFeedback(effectiveKey, strategyName);
             }
 
             queryResults.add(new QueryEvaluation(

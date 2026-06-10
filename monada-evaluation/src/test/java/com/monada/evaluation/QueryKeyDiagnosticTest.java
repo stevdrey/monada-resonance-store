@@ -71,11 +71,30 @@ class QueryKeyDiagnosticTest {
                 new QueryKeyDiagnostic(null, "Strategy", true, "seed"));
         assertThrows(NullPointerException.class, () ->
                 new QueryKeyDiagnostic("key", null, true, "seed"));
+        assertThrows(IllegalArgumentException.class, () ->
+                new QueryKeyDiagnostic("", "Strategy", false, null));
+        assertThrows(IllegalArgumentException.class, () ->
+                new QueryKeyDiagnostic("key", "  ", false, null));
     }
 
     @Test
-    void constructorAllowsNullSeedKey() {
-        // Null seedKey is allowed (for non-feedback-aware)
+    void constructorRejectsFeedbackAwareWithoutSeedKey() {
+        assertThrows(IllegalArgumentException.class, () ->
+                new QueryKeyDiagnostic("key", "Strategy", true, null));
+        assertThrows(IllegalArgumentException.class, () ->
+                new QueryKeyDiagnostic("key", "Strategy", true, ""));
+    }
+
+    @Test
+    void constructorRejectsNonFeedbackAwareWithSeedKey() {
+        // A non-feedback-aware diagnostic must not carry a seed key
+        assertThrows(IllegalArgumentException.class, () ->
+                new QueryKeyDiagnostic("key", "Strategy", false, "some-seed-key"));
+    }
+
+    @Test
+    void constructorAllowsNullSeedKeyForNonFeedbackAware() {
+        // Null seedKey is correct for non-feedback-aware
         var diagnostic = new QueryKeyDiagnostic("key", "Strategy", false, null);
         assertFalse(diagnostic.hasSeedQueryKey());
         assertNull(diagnostic.seedQueryKey());
@@ -84,22 +103,18 @@ class QueryKeyDiagnosticTest {
     // ---- P3: feedbackKeyMatch must be gated on feedbackAware ----
 
     @Test
-    void feedbackKeyMatchReturnsFalseWhenFeedbackAwareFalseEvenIfSeedKeyMatches() {
-        // Public constructor allows feedbackAware=false with a non-null matching seed key.
-        // feedbackKeyMatch() must still return false — the flag, not the key equality, drives the result.
-        var diagnostic = new QueryKeyDiagnostic("exact:query", "ExactQueryKeyStrategy", false, "exact:query");
-
-        assertFalse(diagnostic.feedbackAware());
-        assertTrue(diagnostic.hasSeedQueryKey());
-        assertFalse(diagnostic.feedbackKeyMatch(),
-                "feedbackKeyMatch must be false when feedbackAware is false, regardless of key equality");
-    }
-
-    @Test
     void feedbackKeyMatchReturnsTrueOnlyWhenFeedbackAwareAndKeysMatch() {
         var diagnostic = new QueryKeyDiagnostic("exact:query", "ExactQueryKeyStrategy", true, "exact:query");
 
         assertTrue(diagnostic.feedbackAware());
         assertTrue(diagnostic.feedbackKeyMatch());
+    }
+
+    @Test
+    void feedbackKeyMatchReturnsFalseWhenSeedKeyDiffersEvenIfFeedbackAware() {
+        var diagnostic = new QueryKeyDiagnostic("exact:query", "ExactQueryKeyStrategy", true, "other-seed");
+
+        assertTrue(diagnostic.feedbackAware());
+        assertFalse(diagnostic.feedbackKeyMatch());
     }
 }

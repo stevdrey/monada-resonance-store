@@ -82,10 +82,11 @@ class QueryKeyDiagnosticRenderingTest {
     }
 
     @Test
-    void profileComparisonRendersQueryKeyDiagnosticsOnlyForFeedbackAwareProfiles() {
-        // RAW is not feedback-aware → EvaluationRunner will not invoke keyFor() and
-        // will not produce a diagnostic.  Only the LEXICAL_FEEDBACK_KEY profile (which
-        // is feedback-aware) produces a diagnostic block in the comparison output.
+    void profileComparisonRendersQueryKeyDiagnosticsForAllProfiles() {
+        // Issue #36 expects the comparison report to show diagnostics for every profile,
+        // including non-feedback-aware ones (RAW, LEXICAL_ENRICHED, etc.).
+        var rawDiagnostic = QueryKeyDiagnostic.withoutFeedback(
+                "temporary lookup store", "ExactQueryKeyStrategy");
         var lexicalDiagnostic = QueryKeyDiagnostic.withFeedback(
                 "lexical-expansion:cache redis lookup store temporary",
                 "LexicallyEnrichedQueryKeyStrategy",
@@ -94,7 +95,6 @@ class QueryKeyDiagnosticRenderingTest {
         var rawProfile = EvaluationProfile.RAW;
         var lexicalProfile = EvaluationProfile.LEXICAL_ENRICHED_WITH_LEXICAL_FEEDBACK_KEY;
 
-        // RAW has no diagnostic entry in the map (null not present)
         var queryResult = new QueryProfileResult(
                 "temporary lookup store",
                 Set.of("ka_redis"),
@@ -103,7 +103,8 @@ class QueryKeyDiagnosticRenderingTest {
                 Map.of(rawProfile, RankingChange.MAINTAINED,
                         lexicalProfile, RankingChange.IMPROVED),
                 null,
-                Map.of(lexicalProfile, lexicalDiagnostic));
+                Map.of(rawProfile, rawDiagnostic,
+                        lexicalProfile, lexicalDiagnostic));
 
         var rawReport = new EvaluationReport(List.of(), Map.of(), Map.of(), Map.of(), 0.0);
         var lexicalReport = new EvaluationReport(List.of(), Map.of(), Map.of(), Map.of(), 0.0);
@@ -116,13 +117,19 @@ class QueryKeyDiagnosticRenderingTest {
 
         var rendered = comparison.render();
 
-        // RAW produces no diagnostic block at all
-        assertFalse(rendered.contains("[RAW] Feedback Aware:"),
-                "RAW profile must not render a feedback-key diagnostic block");
-        assertFalse(rendered.contains("[RAW] Query Key Strategy:"),
-                "RAW profile must not invoke keyFor() and must not render a strategy line");
+        // RAW profile renders its non-feedback diagnostic (no seed key, no key-match)
+        assertTrue(rendered.contains("[RAW] Feedback Aware: false"),
+                "RAW profile must render Feedback Aware: false");
+        assertTrue(rendered.contains("[RAW] Query Key Strategy: ExactQueryKeyStrategy"),
+                "RAW profile must render its strategy name");
+        assertTrue(rendered.contains("[RAW] Evaluation Query Key: temporary lookup store"),
+                "RAW profile must render its evaluation query key");
+        assertFalse(rendered.contains("[RAW] Feedback Seed Key:"),
+                "RAW profile must not render a seed key line");
+        assertFalse(rendered.contains("[RAW] Feedback Key Match:"),
+                "RAW profile must not render a key-match line");
 
-        // LEXICAL_FEEDBACK_KEY profile renders its full diagnostic
+        // LEXICAL_FEEDBACK_KEY profile renders its full diagnostic including seed and match
         assertTrue(rendered.contains("[LEXICAL_ENRICHED_WITH_LEXICAL_FEEDBACK_KEY] Feedback Aware: true"),
                 "Feedback-aware profile should render Feedback Aware: true");
         assertTrue(rendered.contains("[LEXICAL_ENRICHED_WITH_LEXICAL_FEEDBACK_KEY] Query Key Strategy: LexicallyEnrichedQueryKeyStrategy"),
@@ -231,9 +238,9 @@ class QueryKeyDiagnosticRenderingTest {
     // ---- P3: feedbackKeyMatch must not show true when feedbackAware is false ----
 
     @Test
-    void evaluationReportDoesNotShowFeedbackKeyMatchTrueWhenNotFeedbackAware() {
-        // Construct an inconsistent diagnostic via the public record constructor
-        var diagnostic = new QueryKeyDiagnostic("exact:query", "ExactQueryKeyStrategy", false, "exact:query");
+    void evaluationReportDoesNotShowFeedbackKeyMatchWhenNotFeedbackAware() {
+        // Non-feedback-aware diagnostic: no seed key, no key-match line in the report
+        var diagnostic = QueryKeyDiagnostic.withoutFeedback("exact:query", "ExactQueryKeyStrategy");
         var queryEval = new QueryEvaluation(
                 "query",
                 Set.of("ka_atom"),
@@ -253,9 +260,11 @@ class QueryKeyDiagnosticRenderingTest {
 
         var rendered = report.render();
 
-        assertTrue(rendered.contains("Feedback Aware: false"));
-        // The seed-key block is still rendered (hasSeedQueryKey is true), but match must be false
-        assertTrue(rendered.contains("Feedback Key Match: false"),
-                "Feedback Key Match must be false when feedbackAware is false");
+        assertTrue(rendered.contains("Feedback Aware: false"),
+                "Report should indicate feedback is not aware");
+        assertFalse(rendered.contains("Feedback Seed Key:"),
+                "Non-feedback-aware report must not render a seed key line");
+        assertFalse(rendered.contains("Feedback Key Match:"),
+                "Non-feedback-aware report must not render a key-match line");
     }
 }

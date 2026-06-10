@@ -198,4 +198,105 @@ class EvaluationProfileRunnerTest {
         assertThrows(IllegalArgumentException.class, () ->
                 new EvaluationProfileRunner().run(DefaultDatabasesDataset.get(), List.of(), basePath));
     }
+
+    // ---- Query-key diagnostic production from real runner execution ----
+
+    @Test
+    void rawProfileProducesNonFeedbackAwareDiagnosticsFromRealExecution(@TempDir Path basePath) {
+        var profiles = List.of(EvaluationProfile.RAW);
+        var dataset = DefaultDatabasesDataset.get();
+
+        var comparison = new EvaluationProfileRunner()
+                .run(dataset, profiles, basePath);
+
+        // Every query result must carry a diagnostic for RAW (strategy is ExactQueryKeyStrategy)
+        for (var qpr : comparison.perQuery()) {
+            var diagnostic = qpr.queryKeyDiagnosticByProfile().get(EvaluationProfile.RAW);
+            assertNotNull(diagnostic,
+                    "RAW profile must produce a diagnostic for query: " + qpr.queryText());
+            assertFalse(diagnostic.feedbackAware(),
+                    "RAW diagnostic must have feedbackAware=false");
+            assertFalse(diagnostic.hasSeedQueryKey(),
+                    "RAW diagnostic must not carry a seed key");
+            assertEquals("ExactQueryKeyStrategy", diagnostic.strategyName(),
+                    "RAW profile uses ExactQueryKeyStrategy by default");
+            // ExactQueryKeyStrategy returns the query text as-is
+            assertEquals(qpr.queryText(), diagnostic.queryKey(),
+                    "ExactQueryKeyStrategy must produce the query text as the evaluation key");
+        }
+    }
+
+    @Test
+    void feedbackAwareProfileProducesDiagnosticsWithSeedKeyFromRealExecution(@TempDir Path basePath) {
+        var profiles = List.of(EvaluationProfile.LEXICAL_ENRICHED_WITH_FEEDBACK);
+        var dataset = DefaultDatabasesDataset.get();
+
+        var comparison = new EvaluationProfileRunner()
+                .run(dataset, profiles, basePath);
+
+        // Every query result must carry a feedback-aware diagnostic
+        for (var qpr : comparison.perQuery()) {
+            var diagnostic = qpr.queryKeyDiagnosticByProfile().get(EvaluationProfile.LEXICAL_ENRICHED_WITH_FEEDBACK);
+            assertNotNull(diagnostic,
+                    "Feedback-aware profile must produce a diagnostic for query: " + qpr.queryText());
+            assertTrue(diagnostic.feedbackAware(),
+                    "Feedback-aware diagnostic must have feedbackAware=true");
+            assertTrue(diagnostic.hasSeedQueryKey(),
+                    "Feedback-aware diagnostic must carry a seed key");
+            // ExactQueryKeyStrategy: evaluation key == query text, seed key == query text → match=true
+            assertTrue(diagnostic.feedbackKeyMatch(),
+                    "ExactQueryKeyStrategy: evaluation and seed keys must match for: " + qpr.queryText());
+        }
+    }
+
+    @Test
+    void lexicalFeedbackKeyProfileProducesDiagnosticsWithLexicalKeysFromRealExecution(@TempDir Path basePath) {
+        var profiles = List.of(EvaluationProfile.LEXICAL_ENRICHED_WITH_LEXICAL_FEEDBACK_KEY);
+        var dataset = DefaultDatabasesDataset.get();
+
+        var comparison = new EvaluationProfileRunner()
+                .run(dataset, profiles, basePath);
+
+        // Every query result must carry a feedback-aware diagnostic with lexical strategy name
+        for (var qpr : comparison.perQuery()) {
+            var diagnostic = qpr.queryKeyDiagnosticByProfile().get(EvaluationProfile.LEXICAL_ENRICHED_WITH_LEXICAL_FEEDBACK_KEY);
+            assertNotNull(diagnostic,
+                    "Lexical feedback-key profile must produce a diagnostic for query: " + qpr.queryText());
+            assertTrue(diagnostic.feedbackAware(),
+                    "Lexical feedback-key diagnostic must have feedbackAware=true");
+            assertEquals("LexicallyEnrichedQueryKeyStrategy", diagnostic.strategyName(),
+                    "Profile must report the lexical strategy name");
+            assertTrue(diagnostic.hasSeedQueryKey(),
+                    "Lexical feedback-key diagnostic must carry a seed key");
+            // For the lexical strategy, evaluation key and seed key are derived from the same
+            // query text using the same strategy, so they must match
+            assertTrue(diagnostic.feedbackKeyMatch(),
+                    "Lexical strategy: evaluation and seed keys must match for: " + qpr.queryText());
+        }
+    }
+
+    @Test
+    void twoProfilesProduceDifferentEvaluationQueryKeysForDifferentQueryTexts(@TempDir Path basePath) {
+        // Verifies that different query texts produce different evaluation query keys (exact strategy)
+        var profiles = List.of(EvaluationProfile.RAW);
+        var dataset = DefaultDatabasesDataset.get();
+        var queries = dataset.queries();
+
+        // Need at least 2 queries to assert difference
+        assertTrue(queries.size() >= 2, "Dataset must have at least 2 queries for this test");
+
+        var comparison = new EvaluationProfileRunner()
+                .run(dataset, profiles, basePath);
+
+        var keys = comparison.perQuery().stream()
+                .map(qpr -> qpr.queryKeyDiagnosticByProfile().get(EvaluationProfile.RAW))
+                .filter(d -> d != null)
+                .map(d -> d.queryKey())
+                .toList();
+
+        // All keys must be distinct (exact strategy → key == query text)
+        var distinctKeys = keys.stream().distinct().toList();
+        assertEquals(keys.size(), distinctKeys.size(),
+                "ExactQueryKeyStrategy must produce a unique key per distinct query text");
+    }
 }

@@ -26,7 +26,18 @@ public record QueryKeyDiagnostic(
     public QueryKeyDiagnostic {
         Objects.requireNonNull(queryKey, "queryKey");
         Objects.requireNonNull(strategyName, "strategyName");
-        // seedQueryKey can be null for non-feedback-aware profiles
+        if (queryKey.isBlank()) {
+            throw new IllegalArgumentException("queryKey must not be blank");
+        }
+        if (strategyName.isBlank()) {
+            throw new IllegalArgumentException("strategyName must not be blank");
+        }
+        if (feedbackAware && (seedQueryKey == null || seedQueryKey.isBlank())) {
+            throw new IllegalArgumentException("seedQueryKey must be present when feedbackAware is true");
+        }
+        if (!feedbackAware && seedQueryKey != null) {
+            throw new IllegalArgumentException("seedQueryKey must be null when feedbackAware is false");
+        }
     }
 
     /**
