@@ -217,6 +217,93 @@ class BasicAcousticFeatureEncoderTest {
         assertNormalized(vector.values());
     }
 
+    @Test
+    void rejectsAudioShorterThanEightSamples() throws IOException {
+        var encoder = new BasicAcousticFeatureEncoder(32);
+        Path wavFile = tempDir.resolve("tiny.wav");
+        Files.write(wavFile, WavTestFixtures.generateTinySineWave(4));
+
+        var ex = assertThrows(IOException.class, () -> encoder.encode(wavFile));
+        assertTrue(ex.getMessage().contains("too short"));
+    }
+
+    @Test
+    void rejectsNegativeDataChunkSize() throws IOException {
+        var encoder = new BasicAcousticFeatureEncoder(32);
+        Path wavFile = tempDir.resolve("negative-size.wav");
+        byte[] wavData = WavTestFixtures.generateSineWave(16000, 100, 1, 16, 440.0f);
+        Files.write(wavFile, WavTestFixtures.withDataChunkSize(wavData, -1));
+
+        var ex = assertThrows(IOException.class, () -> encoder.encode(wavFile));
+        assertTrue(ex.getMessage().contains("negative"));
+    }
+
+    @Test
+    void rejectsOverflowingDataChunkSize() throws IOException {
+        var encoder = new BasicAcousticFeatureEncoder(32);
+        Path wavFile = tempDir.resolve("overflow-size.wav");
+        byte[] wavData = WavTestFixtures.generateSineWave(16000, 100, 1, 16, 440.0f);
+        Files.write(wavFile, WavTestFixtures.withDataChunkSize(wavData, Integer.MAX_VALUE));
+
+        var ex = assertThrows(IOException.class, () -> encoder.encode(wavFile));
+        assertTrue(ex.getMessage().contains("truncated"));
+    }
+
+    @Test
+    void findsDataChunkAfterListChunkContainingDataBytes() throws IOException {
+        var encoder = new BasicAcousticFeatureEncoder(32);
+        Path wavFile = tempDir.resolve("list-chunk.wav");
+        Files.write(wavFile, WavTestFixtures.generateSineWaveWithListChunk());
+
+        var vector = encoder.encode(wavFile);
+
+        assertEquals(32, vector.dimensions());
+        assertNormalized(vector.values());
+    }
+
+    @Test
+    void rejectsZeroChannels() throws IOException {
+        var encoder = new BasicAcousticFeatureEncoder(32);
+        Path wavFile = tempDir.resolve("zero-channels.wav");
+        byte[] wavData = WavTestFixtures.generateSineWave(16000, 100, 1, 16, 440.0f);
+        Files.write(wavFile, WavTestFixtures.withChannels(wavData, 0));
+
+        var ex = assertThrows(IOException.class, () -> encoder.encode(wavFile));
+        assertTrue(ex.getMessage().contains("channel count"));
+    }
+
+    @Test
+    void rejectsMoreThanTwoChannels() throws IOException {
+        var encoder = new BasicAcousticFeatureEncoder(32);
+        Path wavFile = tempDir.resolve("quad-channels.wav");
+        byte[] wavData = WavTestFixtures.generateSineWave(16000, 100, 1, 16, 440.0f);
+        Files.write(wavFile, WavTestFixtures.withChannels(wavData, 4));
+
+        var ex = assertThrows(IOException.class, () -> encoder.encode(wavFile));
+        assertTrue(ex.getMessage().contains("channel count"));
+    }
+
+    @Test
+    void rejectsZeroSampleRate() throws IOException {
+        var encoder = new BasicAcousticFeatureEncoder(32);
+        Path wavFile = tempDir.resolve("zero-rate.wav");
+        byte[] wavData = WavTestFixtures.generateSineWave(16000, 100, 1, 16, 440.0f);
+        Files.write(wavFile, WavTestFixtures.withSampleRate(wavData, 0));
+
+        var ex = assertThrows(IOException.class, () -> encoder.encode(wavFile));
+        assertTrue(ex.getMessage().contains("sample rate"));
+    }
+
+    @Test
+    void truncatedFmtChunkThrowsIOException() throws IOException {
+        var encoder = new BasicAcousticFeatureEncoder(32);
+        Path wavFile = tempDir.resolve("truncated-fmt.wav");
+        Files.write(wavFile, WavTestFixtures.generateTruncatedFmtChunk());
+
+        var ex = assertThrows(IOException.class, () -> encoder.encode(wavFile));
+        assertTrue(ex.getMessage().contains("fmt chunk truncated"));
+    }
+
     private static void assertNormalized(float[] values) {
         double magnitude = 0.0;
         for (float v : values) {

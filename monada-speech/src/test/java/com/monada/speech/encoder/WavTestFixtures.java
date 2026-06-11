@@ -105,6 +105,103 @@ final class WavTestFixtures {
         return baos.toByteArray();
     }
 
+    /**
+     * Generates a mono 16-bit sine WAV containing exactly {@code numSamples} samples.
+     */
+    static byte[] generateTinySineWave(int numSamples) throws IOException {
+        int sampleRate = 16000;
+        byte[] pcmData = new byte[numSamples * 2];
+        ByteBuffer buffer = ByteBuffer.wrap(pcmData).order(ByteOrder.LITTLE_ENDIAN);
+        for (int i = 0; i < numSamples; i++) {
+            double t = i / (double) sampleRate;
+            double sample = Math.sin(2 * Math.PI * 440.0 * t);
+            buffer.putShort((short) (sample * 32767));
+        }
+        return buildWavHeader(sampleRate, 1, 16, pcmData.length, pcmData);
+    }
+
+    /**
+     * Patches the channel count (offset 22) of a canonical 44-byte-header WAV.
+     */
+    static byte[] withChannels(byte[] wav, int channels) {
+        byte[] patched = wav.clone();
+        ByteBuffer.wrap(patched).order(ByteOrder.LITTLE_ENDIAN).putShort(22, (short) channels);
+        return patched;
+    }
+
+    /**
+     * Patches the sample rate (offset 24) of a canonical 44-byte-header WAV.
+     */
+    static byte[] withSampleRate(byte[] wav, int sampleRate) {
+        byte[] patched = wav.clone();
+        ByteBuffer.wrap(patched).order(ByteOrder.LITTLE_ENDIAN).putInt(24, sampleRate);
+        return patched;
+    }
+
+    /**
+     * Patches the data chunk size (offset 40) of a canonical 44-byte-header WAV.
+     */
+    static byte[] withDataChunkSize(byte[] wav, int dataChunkSize) {
+        byte[] patched = wav.clone();
+        ByteBuffer.wrap(patched).order(ByteOrder.LITTLE_ENDIAN).putInt(40, dataChunkSize);
+        return patched;
+    }
+
+    /**
+     * Generates a valid WAV that contains a LIST chunk between the fmt and data
+     * chunks whose payload includes the byte sequences "data" and "fmt ".
+     */
+    static byte[] generateSineWaveWithListChunk() throws IOException {
+        byte[] canonical = generateSineWave(16000, 100, 1, 16, 440.0f);
+        byte[] pcmData = new byte[canonical.length - 44];
+        System.arraycopy(canonical, 44, pcmData, 0, pcmData.length);
+
+        byte[] listPayload = "INFOdata fmt embedded text!!".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        baos.write("RIFF".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        writeIntLE(baos, 36 + 8 + listPayload.length + pcmData.length);
+        baos.write("WAVE".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+
+        // fmt chunk copied verbatim from the canonical file (offsets 12..35)
+        baos.write(canonical, 12, 24);
+
+        // LIST chunk with misleading payload
+        baos.write("LIST".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        writeIntLE(baos, listPayload.length);
+        baos.write(listPayload);
+
+        // data chunk
+        baos.write("data".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        writeIntLE(baos, pcmData.length);
+        baos.write(pcmData);
+
+        return baos.toByteArray();
+    }
+
+    /**
+     * Generates a file (>= 44 bytes) whose fmt chunk starts near the end so its
+     * 16 declared payload bytes extend past the end of the file.
+     */
+    static byte[] generateTruncatedFmtChunk() throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        baos.write("RIFF".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        writeIntLE(baos, 44);
+        baos.write("WAVE".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+
+        // Filler chunk pushing the fmt chunk towards the end of the file
+        baos.write("JUNK".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        writeIntLE(baos, 20);
+        baos.write(new byte[20]);
+
+        // fmt chunk declaring 16 bytes but only 4 are present
+        baos.write("fmt ".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        writeIntLE(baos, 16);
+        baos.write(new byte[4]);
+
+        return baos.toByteArray();
+    }
+
     static byte[] truncateWavAfterHeader(int bytesToKeep) {
         // Generate a valid header but with truncated data
         try {
