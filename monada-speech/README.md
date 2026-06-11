@@ -43,10 +43,30 @@ KnowledgeAtom atom = mapper.toTranscriptAtom(sample);
 A `FrequencyVector` representing the speech/audio resonance signature, linked to the sample via sampleId. This enables future acoustic similarity search without modifying the text-based resonance index.
 
 ```java
+var encoder = new BasicAcousticFeatureEncoder(32);
 var featureStore = new FileSpeechFeatureStore(rootPath);
-FrequencyVector acousticVector = ...; // from future encoder
+FrequencyVector acousticVector = encoder.encode(sample.audioPath());
 featureStore.save(sample.id(), acousticVector);
 ```
+
+## Acoustic Feature Encoder
+
+`AcousticFeatureEncoder` is the contract for converting an audio file into a
+`FrequencyVector`. `BasicAcousticFeatureEncoder` is the first deterministic
+implementation:
+
+- **Input**: WAV container, PCM encoding, mono or stereo, 8-bit or 16-bit
+  little-endian samples. Stereo input is downmixed to mono by averaging
+  channels. Unsupported formats fail with clear `IOException`s.
+- **Features**: duration, average absolute amplitude, RMS energy,
+  zero-crossing rate, peak amplitude, silence ratio, and an 8-window energy
+  distribution.
+- **Output**: features are projected into a configurable fixed-size vector and
+  L2-normalized, mirroring `SimpleFrequencyEncoder` behavior.
+- **Determinism**: the same audio file always produces the same vector. No
+  randomness, no external ML dependencies.
+- **Silent audio**: rejected explicitly with an `IOException` (zero RMS
+  energy), never an ambiguous zero vector.
 
 ## Storage Layout
 
@@ -64,8 +84,8 @@ featureStore.save(sample.id(), acousticVector);
 ## Dependencies
 
 - `monada-core` - FrequencyVector, KnowledgeAtom, AtomType
-- `monada-storage` - Storage patterns and utilities
-- `monada-encoder` - (future) Acoustic feature encoding
+- `monada-storage` - Storage patterns and utilities (tests only)
+- `monada-encoder` - Text encoding reference (tests only)
 
 ## Out of Scope (Phase L)
 
@@ -80,7 +100,6 @@ This phase intentionally does NOT implement:
 ## Future Work
 
 - TORGO dataset importer
-- Basic acoustic feature encoder (MFCC, filterbank)
 - Speech sample retrieval by acoustic resonance
 - Speech-specific evaluation metrics
 - Integration with monada-api for speech queries
