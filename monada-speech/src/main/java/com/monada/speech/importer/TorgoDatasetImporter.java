@@ -107,7 +107,14 @@ public final class TorgoDatasetImporter {
             }
 
             // Infer path-based fields
-            String speakerId = TorgoPathInference.speakerId(datasetRoot, wavPath);
+            Optional<String> speakerIdOpt = TorgoPathInference.speakerId(datasetRoot, wavPath);
+            if (speakerIdOpt.isEmpty()) {
+                warnings.add(new TorgoDatasetImportWarning(wavPath,
+                        "cannot infer speaker id (file at dataset root)"));
+                skipped++;
+                continue;
+            }
+            String speakerId = speakerIdOpt.get();
             SpeechCondition condition = TorgoPathInference.condition(speakerId);
             SpeechTaskType taskType = TorgoPathInference.taskType(datasetRoot, wavPath);
 

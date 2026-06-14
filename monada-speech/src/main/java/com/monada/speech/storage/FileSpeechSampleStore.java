@@ -18,6 +18,15 @@ import com.monada.speech.domain.SpeechDatasetSource;
 import com.monada.speech.domain.SpeechSample;
 import com.monada.speech.domain.SpeechTaskType;
 
+/**
+ * File-based implementation of {@link SpeechSampleStore} using append-only JSONL.
+ *
+ * <p><strong>Concurrency note:</strong> While each append operation is atomic at the OS level,
+ * concurrent writes from multiple processes may result in interleaved or partial lines if
+ * the operation is interrupted. Malformed entries are rejected on read with a clear
+ * {@link IllegalStateException}. Duplicate IDs are handled via last-wins semantics in
+ * {@link #findAll()}.
+ */
 public class FileSpeechSampleStore implements SpeechSampleStore {
 
     private static final String DEFAULT_SEGMENT = "samples/speech-samples-000001.jsonl";

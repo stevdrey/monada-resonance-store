@@ -123,7 +123,7 @@ final class WavMetadataReader {
         int bytesPerSample = bitsPerSample / 8;
         int bytesPerFrame = channels * bytesPerSample;
         long totalFrames = bytesPerFrame > 0 ? dataChunkSize / bytesPerFrame : 0;
-        long durationMs = sampleRate > 0 ? (totalFrames * 1000L) / sampleRate : 0L;
+        long durationMs = sampleRate > 0 ? Math.round(totalFrames * 1000.0 / sampleRate) : 0L;
 
         String sha256 = sha256Hex(data);
 

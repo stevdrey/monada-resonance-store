@@ -37,6 +37,8 @@ final class TorgoTranscriptResolver {
         if (content.isBlank()) {
             return Optional.empty();
         }
+        // Normalize internal whitespace for consistent downstream encoding
+        content = content.replaceAll("\\s+", " ");
         return Optional.of(content);
     }
 

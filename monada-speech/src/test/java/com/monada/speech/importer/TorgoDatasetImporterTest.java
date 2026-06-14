@@ -208,9 +208,8 @@ class TorgoDatasetImporterTest {
         var sample = store.findAll().get(0);
         assertEquals(sampleRate, sample.audioMetadata().sampleRate());
         assertEquals(channels, sample.audioMetadata().channels());
-        // duration should be close to 1000ms (may differ slightly due to integer arithmetic)
-        assertTrue(sample.audioMetadata().durationMs() > 900 && sample.audioMetadata().durationMs() <= 1000,
-                "Expected durationMs near 1000 but was " + sample.audioMetadata().durationMs());
+        // duration should be exactly 1000ms (Math.round for precise calculation)
+        assertEquals(1000L, sample.audioMetadata().durationMs());
 
         // Verify SHA-256 matches independently computed value
         MessageDigest digest = assertDoesNotThrow(() -> MessageDigest.getInstance("SHA-256"));
@@ -334,22 +333,21 @@ class TorgoDatasetImporterTest {
     }
 
     @Test
-    void inRunDuplicateIdIsSkippedAndReported() throws IOException {
-        // Verify the importer's own in-run duplicate detection.
-        // We use deriveId to confirm the expected id, then create a scenario where
-        // the same id would appear twice by manually verifying the logic.
+    void deriveIdProducesExpectedFormat() throws IOException {
+        // Verify the deterministic ID format derived from dataset-root-relative path.
+        // This tests the deriveId logic directly, confirming IDs are stable and correctly formatted.
         Path dataset = tempDir.resolve("torgo");
         Path dir = dataset.resolve("M01/Session1/words");
         Files.createDirectories(dir);
         byte[] wav = makeSineWav(16000, 200, 1, 16);
 
-        // Create first file
         writeWav(dir, "alpha.wav", wav);
         writeTxt(dir, "alpha", "alpha word");
 
-        // Confirm expected id for alpha
+        // Confirm expected id format: torgo_ prefix with path components joined by underscores
         String expectedId = TorgoDatasetImporter.deriveId(dataset, dir.resolve("alpha.wav"));
         assertTrue(expectedId.startsWith("torgo_"), "id should start with torgo_ but was: " + expectedId);
+        assertEquals("torgo_m01_session1_words_alpha", expectedId);
 
         SpeechSampleStore store = store(tempDir.resolve("storeD"));
         TorgoDatasetImportReport report = new TorgoDatasetImporter().importFrom(dataset, store);

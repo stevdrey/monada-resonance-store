@@ -4,6 +4,7 @@ import com.monada.speech.domain.SpeechCondition;
 import com.monada.speech.domain.SpeechTaskType;
 
 import java.nio.file.Path;
+import java.util.Optional;
 
 /**
  * Infers TORGO-specific metadata from path segments, using directory naming
@@ -42,19 +43,19 @@ final class TorgoPathInference {
 
     /**
      * Extracts the speaker ID from the first path component under
-     * {@code datasetRoot}. Returns {@code "unknown"} if the relative path has
-     * no components.
+     * {@code datasetRoot}. Returns empty if the relative path has no components
+     * (WAV file directly under dataset root).
      *
      * @param datasetRoot root directory of the dataset
      * @param wavPath     absolute path to the WAV file
-     * @return speaker id string
+     * @return speaker id string, or empty if cannot be determined
      */
-    static String speakerId(Path datasetRoot, Path wavPath) {
+    static Optional<String> speakerId(Path datasetRoot, Path wavPath) {
         Path relative = datasetRoot.relativize(wavPath);
-        if (relative.getNameCount() < 1) {
-            return "unknown";
+        if (relative.getNameCount() < 2) {
+            return Optional.empty();
         }
-        return relative.getName(0).toString();
+        return Optional.of(relative.getName(0).toString());
     }
 
     /**
