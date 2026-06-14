@@ -295,6 +295,19 @@ class BasicAcousticFeatureEncoderTest {
     }
 
     @Test
+    void windowedEnergyCoversAllSamplesWhenCountIsNotMultipleOfNumWindows() throws IOException {
+        var encoder = new BasicAcousticFeatureEncoder(32);
+        // 15 samples: windowSize = ceil(15/8) = 2; all 15 samples covered across 8 windows
+        Path wavFile = tempDir.resolve("non-multiple.wav");
+        Files.write(wavFile, WavTestFixtures.generateTinySineWave(15));
+
+        var vector = encoder.encode(wavFile);
+
+        assertEquals(32, vector.dimensions());
+        assertNormalized(vector.values());
+    }
+
+    @Test
     void rejectsFmtChunkWithInvalidDeclaredSize() throws IOException {
         var encoder = new BasicAcousticFeatureEncoder(32);
         Path wavFile = tempDir.resolve("small-fmt.wav");

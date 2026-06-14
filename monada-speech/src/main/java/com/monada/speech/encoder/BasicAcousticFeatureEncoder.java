@@ -231,9 +231,11 @@ public final class BasicAcousticFeatureEncoder implements AcousticFeatureEncoder
             }
         }
 
-        // Windowed energy distribution (divide into windows)
+        // Windowed energy distribution (divide into windows).
+        // Ceiling division ensures every sample belongs to exactly one window,
+        // even when sampleCount is not a multiple of NUM_WINDOWS.
         float[] windowEnergies = new float[NUM_WINDOWS];
-        int windowSize = Math.max(1, sampleCount / NUM_WINDOWS);
+        int windowSize = (sampleCount + NUM_WINDOWS - 1) / NUM_WINDOWS;
 
         for (int w = 0; w < NUM_WINDOWS; w++) {
             int start = w * windowSize;
