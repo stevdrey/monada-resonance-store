@@ -106,6 +106,59 @@ final class WavTestFixtures {
     }
 
     /**
+     * Patches the fmt chunk size field (offset 16) of a canonical 44-byte-header WAV.
+     */
+    static byte[] withFmtChunkSize(byte[] wav, int declaredSize) {
+        byte[] patched = wav.clone();
+        ByteBuffer.wrap(patched).order(ByteOrder.LITTLE_ENDIAN).putInt(16, declaredSize);
+        return patched;
+    }
+
+    /**
+     * Appends one extra byte to the PCM data section and updates the data chunk size field,
+     * producing a data payload that is not a multiple of the PCM frame size (1 byte partial frame).
+     */
+    static byte[] withExtraDataByte(byte[] wav) {
+        byte[] extended = new byte[wav.length + 1];
+        System.arraycopy(wav, 0, extended, 0, wav.length);
+        int originalDataSize = ByteBuffer.wrap(wav).order(ByteOrder.LITTLE_ENDIAN).getInt(40);
+        ByteBuffer.wrap(extended).order(ByteOrder.LITTLE_ENDIAN).putInt(40, originalDataSize + 1);
+        return extended;
+    }
+
+    /**
+     * Builds a WAVE file where the {@code data} chunk appears before the {@code fmt} chunk,
+     * violating the required ordering.
+     */
+    static byte[] generateWavWithDataBeforeFmt() throws IOException {
+        byte[] canonical = generateSineWave(16000, 100, 1, 16, 440.0f);
+        byte[] pcmData = new byte[canonical.length - 44];
+        System.arraycopy(canonical, 44, pcmData, 0, pcmData.length);
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        baos.write("RIFF".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        writeIntLE(baos, 4 + 8 + pcmData.length + 8 + 16 + 4); // total WAVE body size
+        baos.write("WAVE".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+
+        // data chunk first (wrong order)
+        baos.write("data".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        writeIntLE(baos, pcmData.length);
+        baos.write(pcmData);
+
+        // fmt chunk after data (wrong order)
+        baos.write("fmt ".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        writeIntLE(baos, 16);
+        writeShortLE(baos, (short) 1);       // PCM
+        writeShortLE(baos, (short) 1);       // mono
+        writeIntLE(baos, 16000);             // sample rate
+        writeIntLE(baos, 32000);             // byte rate
+        writeShortLE(baos, (short) 2);       // block align
+        writeShortLE(baos, (short) 16);      // bits per sample
+
+        return baos.toByteArray();
+    }
+
+    /**
      * Generates a mono 16-bit sine WAV containing exactly {@code numSamples} samples.
      */
     static byte[] generateTinySineWave(int numSamples) throws IOException {

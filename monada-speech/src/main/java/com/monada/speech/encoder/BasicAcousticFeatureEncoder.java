@@ -79,6 +79,12 @@ public final class BasicAcousticFeatureEncoder implements AcousticFeatureEncoder
             throw new IOException("Missing fmt chunk in WAV file");
         }
 
+        int fmtChunkSize = readIntLE(data, fmtOffset - 4);
+        if (fmtChunkSize < FMT_CHUNK_MIN_SIZE) {
+            throw new IOException("fmt chunk declares " + fmtChunkSize +
+                    " bytes, minimum required for PCM is " + FMT_CHUNK_MIN_SIZE);
+        }
+
         if (fmtOffset + FMT_CHUNK_MIN_SIZE > data.length) {
             throw new IOException("fmt chunk truncated: needs " + FMT_CHUNK_MIN_SIZE +
                     " bytes at offset " + fmtOffset + " but file has " + data.length);
@@ -109,10 +115,11 @@ public final class BasicAcousticFeatureEncoder implements AcousticFeatureEncoder
             throw new IOException("Unsupported bits per sample (only 8 or 16): " + bitsPerSample);
         }
 
-        // data chunk
-        int dataOffset = findChunk(data, 12, "data");
+        // data chunk — search only after fmt to enforce fmt-before-data ordering
+        int dataSearchStart = fmtOffset + fmtChunkSize + (fmtChunkSize % 2);
+        int dataOffset = findChunk(data, dataSearchStart, "data");
         if (dataOffset < 0) {
-            throw new IOException("Missing data chunk in WAV file");
+            throw new IOException("Missing data chunk in WAV file (must appear after fmt chunk)");
         }
 
         int dataChunkSize = readIntLE(data, dataOffset - 4);
@@ -157,12 +164,13 @@ public final class BasicAcousticFeatureEncoder implements AcousticFeatureEncoder
     }
 
     private float[] extractFeatures(byte[] data, int offset, int length, WavHeader header) throws IOException {
-        int sampleCount;
-        if (header.bitsPerSample == 8) {
-            sampleCount = length / header.channels;
-        } else {
-            sampleCount = length / (2 * header.channels);
+        int frameSize = (header.bitsPerSample / 8) * header.channels;
+        if (length % frameSize != 0) {
+            throw new IOException("WAV data chunk contains a partial PCM frame: " + length +
+                    " bytes is not a multiple of frame size " + frameSize);
         }
+
+        int sampleCount = length / frameSize;
 
         if (sampleCount < NUM_WINDOWS) {
             throw new IOException("WAV file too short: " + sampleCount + " samples, minimum " +

@@ -295,6 +295,38 @@ class BasicAcousticFeatureEncoderTest {
     }
 
     @Test
+    void rejectsFmtChunkWithInvalidDeclaredSize() throws IOException {
+        var encoder = new BasicAcousticFeatureEncoder(32);
+        Path wavFile = tempDir.resolve("small-fmt.wav");
+        byte[] wavData = WavTestFixtures.generateSineWave(16000, 100, 1, 16, 440.0f);
+        Files.write(wavFile, WavTestFixtures.withFmtChunkSize(wavData, 8));
+
+        var ex = assertThrows(IOException.class, () -> encoder.encode(wavFile));
+        assertTrue(ex.getMessage().contains("fmt chunk declares"));
+    }
+
+    @Test
+    void rejectsPartialPcmFrames() throws IOException {
+        var encoder = new BasicAcousticFeatureEncoder(32);
+        Path wavFile = tempDir.resolve("partial-frame.wav");
+        byte[] wavData = WavTestFixtures.generateSineWave(16000, 100, 1, 16, 440.0f);
+        Files.write(wavFile, WavTestFixtures.withExtraDataByte(wavData));
+
+        var ex = assertThrows(IOException.class, () -> encoder.encode(wavFile));
+        assertTrue(ex.getMessage().contains("partial PCM frame"));
+    }
+
+    @Test
+    void rejectsDataChunkBeforeFmtChunk() throws IOException {
+        var encoder = new BasicAcousticFeatureEncoder(32);
+        Path wavFile = tempDir.resolve("data-before-fmt.wav");
+        Files.write(wavFile, WavTestFixtures.generateWavWithDataBeforeFmt());
+
+        var ex = assertThrows(IOException.class, () -> encoder.encode(wavFile));
+        assertTrue(ex.getMessage().contains("Missing data chunk") || ex.getMessage().contains("after fmt"));
+    }
+
+    @Test
     void truncatedFmtChunkThrowsIOException() throws IOException {
         var encoder = new BasicAcousticFeatureEncoder(32);
         Path wavFile = tempDir.resolve("truncated-fmt.wav");
