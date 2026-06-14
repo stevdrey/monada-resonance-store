@@ -115,14 +115,16 @@ public final class BasicAcousticFeatureEncoder implements AcousticFeatureEncoder
             throw new IOException("Unsupported bits per sample (only 8 or 16): " + bitsPerSample);
         }
 
-        // data chunk — search only after fmt to enforce fmt-before-data ordering
-        int dataSearchStart = fmtOffset + fmtChunkSize + (fmtChunkSize % 2);
-        int dataOffset = findChunk(data, dataSearchStart, "data");
+        // data chunk — search only after fmt to enforce fmt-before-data ordering.
+        // Use long arithmetic to avoid int overflow when fmtChunkSize is very large.
+        var dataSearchStartL = (long) fmtOffset + fmtChunkSize + (fmtChunkSize % 2);
+        var dataSearchStart = dataSearchStartL >= data.length ? data.length : (int) dataSearchStartL;
+        var dataOffset = findChunk(data, dataSearchStart, "data");
         if (dataOffset < 0) {
             throw new IOException("Missing data chunk in WAV file (must appear after fmt chunk)");
         }
 
-        int dataChunkSize = readIntLE(data, dataOffset - 4);
+        var dataChunkSize = readIntLE(data, dataOffset - 4);
         if (dataChunkSize < 0) {
             throw new IOException("Invalid data chunk size (negative): " + dataChunkSize);
         }
@@ -244,7 +246,11 @@ public final class BasicAcousticFeatureEncoder implements AcousticFeatureEncoder
             for (int i = start; i < end; i++) {
                 windowSumSquares += samples[i] * samples[i];
             }
-            windowEnergies[w] = (float) Math.sqrt(windowSumSquares / (end - start));
+            if (start >= end) {
+                windowEnergies[w] = 0.0f;
+            } else {
+                windowEnergies[w] = (float) Math.sqrt(windowSumSquares / (end - start));
+            }
         }
 
         // Assemble features

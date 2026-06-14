@@ -2,6 +2,7 @@ package com.monada.speech.encoder;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -305,6 +306,34 @@ class BasicAcousticFeatureEncoderTest {
 
         assertEquals(32, vector.dimensions());
         assertNormalized(vector.values());
+    }
+
+    @Test
+    void rejectsOverflowingFmtChunkSize() throws IOException {
+        var encoder = new BasicAcousticFeatureEncoder(32);
+        Path wavFile = tempDir.resolve("overflow-fmt-size.wav");
+        byte[] wavData = WavTestFixtures.generateSineWave(16000, 100, 1, 16, 440.0f);
+        Files.write(wavFile, WavTestFixtures.withFmtChunkSize(wavData, Integer.MAX_VALUE));
+
+        var ex = assertThrows(IOException.class, () -> encoder.encode(wavFile));
+        assertTrue(ex.getMessage().contains("Missing data chunk") || ex.getMessage().contains("fmt chunk declares"),
+                "Expected clear IOException, got: " + ex.getMessage());
+    }
+
+    @Test
+    void windowedEnergyHandlesEmptyTrailingWindows() throws IOException {
+        var encoder = new BasicAcousticFeatureEncoder(32);
+        // 9 samples: windowSize = ceil(9/8) = 2; windows 5-7 start beyond sampleCount => would be empty
+        Path wavFile = tempDir.resolve("nine-samples.wav");
+        Files.write(wavFile, WavTestFixtures.generateTinySineWave(9));
+
+        var vector = encoder.encode(wavFile);
+
+        assertEquals(32, vector.dimensions());
+        assertNormalized(vector.values());
+        for (float v : vector.values()) {
+            assertFalse(Float.isNaN(v), "Vector must not contain NaN values");
+        }
     }
 
     @Test
