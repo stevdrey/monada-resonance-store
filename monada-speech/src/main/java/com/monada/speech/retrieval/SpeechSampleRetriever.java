@@ -12,8 +12,11 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 /**
  * Service for retrieving speech samples by acoustic similarity to a query audio file.
@@ -62,6 +65,10 @@ public final class SpeechSampleRetriever {
         // Encode query audio
         FrequencyVector queryVector = encoder.encode(queryAudio);
 
+        // Load all samples into a map for O(1) lookups (avoids N+1 file reads)
+        Map<String, SpeechSample> samplesById = sampleStore.findAll().stream()
+                .collect(Collectors.toMap(SpeechSample::id, Function.identity()));
+
         // Load all stored feature vectors
         List<StoredSpeechFeatureVector> storedVectors = featureStore.findAll();
         List<CandidateScore> candidates = new ArrayList<>();
@@ -72,7 +79,7 @@ public final class SpeechSampleRetriever {
             FrequencyVector candidateVector = storedVector.vector();
 
             // Resolve sample
-            SpeechSample sample = sampleStore.findById(sampleId).orElse(null);
+            SpeechSample sample = samplesById.get(sampleId);
             if (sample == null) {
                 logger.warning("Skipping orphan feature vector for sample: " + sampleId);
                 continue;
@@ -90,8 +97,8 @@ public final class SpeechSampleRetriever {
                 continue;
             }
 
-            // Compute cosine similarity
-            double score = cosineSimilarity(queryVector, candidateVector);
+            // Compute cosine similarity (vectors are L2-normalized, so dot product = cosine)
+            double score = queryVector.dotProduct(candidateVector);
             candidates.add(new CandidateScore(sample, score));
         }
 
@@ -131,26 +138,6 @@ public final class SpeechSampleRetriever {
             return false;
         }
         return true;
-    }
-
-    /**
-     * Computes cosine similarity between two frequency vectors.
-     *
-     * @param a first vector
-     * @param b second vector
-     * @return cosine similarity in range [-1.0, 1.0]
-     */
-    private double cosineSimilarity(FrequencyVector a, FrequencyVector b) {
-        float[] aValues = a.values();
-        float[] bValues = b.values();
-        
-        double dotProduct = 0.0;
-        for (int i = 0; i < aValues.length; i++) {
-            dotProduct += aValues[i] * bValues[i];
-        }
-        
-        // Since vectors are L2-normalized, cosine similarity is just the dot product
-        return dotProduct;
     }
 
     /**
