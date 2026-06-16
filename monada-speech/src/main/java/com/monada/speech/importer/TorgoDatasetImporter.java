@@ -41,6 +41,11 @@ import java.util.Optional;
  *
  * <p>No real TORGO dataset download is required; any WAV + sibling {@code .txt}
  * layout matching the conventions is accepted.
+ *
+ * <p><strong>Layout assumption:</strong> this implementation supports a
+ * conservative normalized layout
+ * ({@code <speakerId>/<session>/<taskType>/<file>.wav}). Not every possible
+ * real TORGO directory variant is handled — future phases may extend coverage.
  */
 public final class TorgoDatasetImporter {
 

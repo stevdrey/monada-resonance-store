@@ -88,8 +88,8 @@ final class WavMetadataReader {
                     throw new IOException("Unsupported bits-per-sample " + bitsPerSample +
                             " (only 8 or 16 supported): " + wavPath);
                 }
-                // skip any extra fmt bytes
-                int extra = chunkSize - 16;
+                // skip any extra fmt bytes (word-aligned)
+                int extra = paddedChunkSize(chunkSize) - 16;
                 if (extra > 0) {
                     buf.position(buf.position() + extra);
                 }
@@ -99,11 +99,12 @@ final class WavMetadataReader {
                 foundData = true;
                 break;
             } else {
-                // skip unknown chunk
-                if (buf.remaining() < chunkSize) {
+                // skip unknown chunk (RIFF chunks are word-aligned)
+                int skip = paddedChunkSize(chunkSize);
+                if (buf.remaining() < skip) {
                     throw new IOException("WAV file truncated at chunk '" + chunkId + "': " + wavPath);
                 }
-                buf.position(buf.position() + chunkSize);
+                buf.position(buf.position() + skip);
             }
         }
 
@@ -112,6 +113,9 @@ final class WavMetadataReader {
         }
         if (!foundData) {
             throw new IOException("Missing data chunk in WAV file: " + wavPath);
+        }
+        if (buf.remaining() < dataChunkSize) {
+            throw new IOException("WAV file truncated at data chunk: " + wavPath);
         }
         if (sampleRate <= 0) {
             throw new IOException("Invalid sample rate " + sampleRate + " in WAV file: " + wavPath);
@@ -139,6 +143,10 @@ final class WavMetadataReader {
             throw new IOException("Expected '" + expected + "' but found '" + actual +
                     "' in WAV file: " + path);
         }
+    }
+
+    private static int paddedChunkSize(int chunkSize) {
+        return chunkSize + (chunkSize % 2);
     }
 
     private static String sha256Hex(byte[] data) throws IOException {

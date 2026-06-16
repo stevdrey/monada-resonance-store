@@ -121,6 +121,11 @@ Key properties:
 - **Skip on missing/blank transcript**: reported as a `TorgoDatasetImportWarning`.
 - **No real dataset required**: tests use programmatic WAV fixtures.
 
+> **Note:** This phase supports a conservative TORGO-style normalized layout
+> (`<speakerId>/<session>/<taskType>/<file>.wav`). Not every possible real TORGO
+> directory variant is handled yet — future phases may extend the importer to
+> cover additional layouts.
+
 ## Out of Scope (Phase L)
 
 This phase intentionally does NOT implement:

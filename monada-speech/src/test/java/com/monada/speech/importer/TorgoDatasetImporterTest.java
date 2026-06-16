@@ -358,6 +358,31 @@ class TorgoDatasetImporterTest {
     }
 
     @Test
+    void inRunDuplicateIdSkipsAndReportsWarning() throws IOException {
+        // Two WAV files whose stems differ only by case both derive to the same
+        // lowercased id (torgo_m01_session1_words_hello), triggering the importer's
+        // in-run duplicate detection via seenIds.
+        Path dataset = tempDir.resolve("torgo");
+        Path dir = dataset.resolve("M01/Session1/words");
+        Files.createDirectories(dir);
+        byte[] wav = makeSineWav(16000, 200, 1, 16);
+
+        writeWav(dir, "Hello.wav", wav);
+        writeTxt(dir, "Hello", "hello word upper");
+        writeWav(dir, "hello.wav", wav);
+        writeTxt(dir, "hello", "hello word lower");
+
+        SpeechSampleStore store = store(tempDir.resolve("storeF"));
+        TorgoDatasetImportReport report = new TorgoDatasetImporter().importFrom(dataset, store);
+
+        assertEquals(2, report.discoveredAudioFiles());
+        assertEquals(1, report.importedSamples());
+        assertEquals(1, report.skippedSamples());
+        assertEquals(1, report.warnings().size());
+        assertTrue(report.warnings().get(0).reason().contains("duplicate sample id"));
+    }
+
+    @Test
     void reportCountsMatchActualImportedAndSkipped() throws IOException {
         Path dataset = tempDir.resolve("torgo");
         Path dir = dataset.resolve("M01/Session1/words");
