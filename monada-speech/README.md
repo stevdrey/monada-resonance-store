@@ -135,8 +135,75 @@ This phase intentionally does NOT implement:
 - Public MonadaMemory API for speech
 - Speech-specific ranking or feedback
 
+## Speech Retrieval
+
+`SpeechSampleRetriever` enables acoustic similarity search over stored speech samples:
+
+```java
+// Create retriever with encoder
+AcousticFeatureEncoder encoder = new BasicAcousticFeatureEncoder(128);
+SpeechSampleRetriever retriever = new SpeechSampleRetriever(encoder);
+
+// Configure search options
+SpeechRetrievalOptions options = new SpeechRetrievalOptions(
+    5,                    // topK
+    SpeechDatasetSource.TORGO,  // optional dataset filter
+    SpeechCondition.DYSARTHRIC, // optional condition filter
+    null,                 // optional task type filter
+    null,                 // optional speaker filter
+    null                  // optional language filter
+);
+
+// Search for similar samples
+List<SpeechRetrievalResult> results = retriever.search(
+    queryAudioPath,
+    sampleStore,
+    featureStore,
+    options
+);
+
+// Inspect ranked results
+for (SpeechRetrievalResult result : results) {
+    System.out.println("Rank " + result.rank() + ": " + 
+        result.sample().transcript() + " (score: " + result.score() + ")");
+}
+```
+
+### Complete Workflow Example
+
+```java
+// 1. Import speech samples
+var importer = new TorgoDatasetImporter();
+TorgoDatasetImportReport report = importer.importFrom(datasetPath, sampleStore);
+
+// 2. Encode and persist acoustic vectors
+AcousticFeatureEncoder encoder = new BasicAcousticFeatureEncoder(64);
+for (SpeechSample sample : sampleStore.findAll()) {
+    FrequencyVector vector = encoder.encode(sample.audioPath());
+    featureStore.save(sample.id(), vector);
+}
+
+// 3. Query by acoustic similarity
+Path queryWav = Path.of("/path/to/query.wav");
+SpeechRetrievalOptions options = new SpeechRetrievalOptions(3, null, null, null, null, null);
+List<SpeechRetrievalResult> results = retriever.search(queryWav, sampleStore, featureStore, options);
+
+// 4. Process results
+SpeechSample bestMatch = results.get(0).sample();
+double similarityScore = results.get(0).score();
+```
+
+### Retrieval Characteristics
+
+- **Acoustic similarity**: Uses cosine similarity between L2-normalized feature vectors
+- **Deterministic ranking**: Results sorted by score DESC, with tie-breaking by sample ID ASC
+- **Metadata filtering**: Optional filters for dataset source, condition, task type, speaker, language
+- **Graceful handling**: Skips orphan vectors and dimension mismatches with warnings
+- **Linear scan**: Suitable for MVP scale, matches existing `LinearScanResonanceIndex` pattern
+
 ## Future Work
 
-- Speech sample retrieval by acoustic resonance
 - Speech-specific evaluation metrics
 - Integration with monada-api for speech queries
+- Advanced acoustic features (MFCC, spectral analysis)
+- Hybrid transcript + acoustic ranking
