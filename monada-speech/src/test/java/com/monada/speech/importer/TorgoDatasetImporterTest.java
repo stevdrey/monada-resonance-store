@@ -296,19 +296,10 @@ class TorgoDatasetImporterTest {
     }
 
     @Test
-    void duplicateSampleIdIsSkippedAndReported() throws IOException {
-        // Two WAV files at different paths that produce the same derived ID cannot
-        // happen naturally (IDs are based on relative path). Instead, we simulate
-        // an effective duplicate by importing the same dataset twice into the same
-        // importer run — which is not possible via the API. So we test at the
-        // TorgoDatasetImporter level by verifying the in-run duplicate detection:
-        // create two directories that coincidentally produce the same logical id.
-        // The easiest way: use the static deriveId with a mock to confirm the skip.
-        //
-        // Practical approach: verify that importing the same dataset to the same
-        // store twice results in idempotent sample count in the store (last-wins
-        // semantics from FileSpeechSampleStore), and that the second import's
-        // report shows 1 imported (no in-run duplicate since each run starts fresh).
+    void reimportingSameDatasetKeepsOneLogicalSampleInFileStore() throws IOException {
+        // Importing the same dataset twice into the same store does not create
+        // duplicates — FileSpeechSampleStore last-wins semantics produce one
+        // logical sample.
 
         Path dataset = tempDir.resolve("torgo");
         Path dir = dataset.resolve("M01/Session1/words");
