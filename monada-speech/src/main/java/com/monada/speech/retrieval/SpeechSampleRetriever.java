@@ -97,8 +97,8 @@ public final class SpeechSampleRetriever {
                 continue;
             }
 
-            // Compute cosine similarity (vectors are L2-normalized, so dot product = cosine)
-            double score = queryVector.dotProduct(candidateVector);
+            // Compute cosine similarity
+            double score = cosineSimilarity(queryVector, candidateVector);
             candidates.add(new CandidateScore(sample, score));
         }
 
@@ -138,6 +138,38 @@ public final class SpeechSampleRetriever {
             return false;
         }
         return true;
+    }
+
+    /**
+     * Computes cosine similarity between two frequency vectors.
+     *
+     * <p>This method computes true cosine similarity with magnitude normalization,
+     * making it robust against any valid {@link FrequencyVector} regardless of
+     * whether it is L2-normalized.
+     *
+     * @param a first vector
+     * @param b second vector
+     * @return cosine similarity in range [-1.0, 1.0], or 0.0 if either vector has zero magnitude
+     */
+    private double cosineSimilarity(FrequencyVector a, FrequencyVector b) {
+        float[] aValues = a.values();
+        float[] bValues = b.values();
+
+        double dot = 0.0;
+        double normA = 0.0;
+        double normB = 0.0;
+
+        for (int i = 0; i < aValues.length; i++) {
+            dot += aValues[i] * bValues[i];
+            normA += aValues[i] * aValues[i];
+            normB += bValues[i] * bValues[i];
+        }
+
+        if (normA == 0.0 || normB == 0.0) {
+            return 0.0;
+        }
+
+        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
     /**

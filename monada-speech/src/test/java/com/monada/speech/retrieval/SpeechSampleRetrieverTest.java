@@ -324,6 +324,100 @@ class SpeechSampleRetrieverTest {
         assertTrue(results.get(0).score() > results.get(1).score());
     }
 
+    @Test
+    void nonNormalizedVectorsProduceCorrectCosineSimilarity() throws IOException {
+        Path queryFile = createTestWav("query", 440.0f);
+        SpeechSampleStore sampleStore = createStore();
+        SpeechFeatureStore featureStore = createFeatureStore();
+
+        // Store a sample with a manually-constructed non-normalized vector
+        SpeechSample sample = createSample("scaled", "M01");
+        sampleStore.save(sample);
+
+        // Encode query to get the query vector dimensions, then store a scaled version
+        FrequencyVector queryVector = encoder.encode(queryFile);
+        float[] scaledValues = new float[queryVector.dimensions()];
+        float[] originalValues = queryVector.values();
+        for (int i = 0; i < scaledValues.length; i++) {
+            scaledValues[i] = originalValues[i] * 10.0f; // Same direction, 10x magnitude
+        }
+        featureStore.save(sample.id(), new FrequencyVector(scaledValues));
+
+        SpeechRetrievalOptions options = new SpeechRetrievalOptions(5, null, null, null, null, null);
+        List<SpeechRetrievalResult> results = retriever.search(queryFile, sampleStore, featureStore, options);
+
+        assertEquals(1, results.size());
+        // Cosine similarity of parallel vectors should be 1.0 regardless of magnitude
+        assertEquals(1.0, results.get(0).score(), 1e-6);
+    }
+
+    @Test
+    void dimensionMismatchCandidateIsSkipped() throws IOException {
+        Path queryFile = createTestWav("query", 440.0f);
+        SpeechSampleStore sampleStore = createStore();
+        SpeechFeatureStore featureStore = createFeatureStore();
+
+        // Store a valid sample with matching dimensions
+        SpeechSample validSample = createSample("valid", "M01");
+        Path validWav = createTestWav("valid", 440.0f);
+        FrequencyVector validVector = encoder.encode(validWav);
+        sampleStore.save(validSample);
+        featureStore.save(validSample.id(), validVector);
+
+        // Store a sample with mismatched dimensions (encoder produces 64-dim, store a 32-dim vector)
+        SpeechSample mismatchSample = createSample("mismatch", "M02");
+        sampleStore.save(mismatchSample);
+        featureStore.save(mismatchSample.id(), new FrequencyVector(new float[]{0.5f, 0.5f}));
+
+        SpeechRetrievalOptions options = new SpeechRetrievalOptions(5, null, null, null, null, null);
+        List<SpeechRetrievalResult> results = retriever.search(queryFile, sampleStore, featureStore, options);
+
+        // Only the valid sample should appear; mismatched one is skipped
+        assertEquals(1, results.size());
+        assertEquals(validSample.id(), results.get(0).sample().id());
+    }
+
+    @Test
+    void invalidQueryAudioPropagatesIOException() throws IOException {
+        SpeechSampleStore sampleStore = createStore();
+        SpeechFeatureStore featureStore = createFeatureStore();
+        SpeechRetrievalOptions options = new SpeechRetrievalOptions(5, null, null, null, null, null);
+
+        // Create a non-WAV file (plain text content)
+        Path invalidFile = tempDir.resolve("not_a_wav.txt");
+        Files.writeString(invalidFile, "this is not a valid WAV file");
+
+        assertThrows(IOException.class, () -> retriever.search(invalidFile, sampleStore, featureStore, options));
+    }
+
+    @Test
+    void filteringByDatasetSourceWorks() throws IOException {
+        Path queryFile = createTestWav("query", 440.0f);
+        SpeechSampleStore sampleStore = createStore();
+        SpeechFeatureStore featureStore = createFeatureStore();
+
+        // Create TORGO sample
+        SpeechSample torgoSample = createSampleWithDatasetSource("torgo_sample", "M01", SpeechDatasetSource.TORGO);
+        Path torgoWav = createTestWav("torgo_sample", 440.0f);
+        FrequencyVector torgoVector = encoder.encode(torgoWav);
+        sampleStore.save(torgoSample);
+        featureStore.save(torgoSample.id(), torgoVector);
+
+        // Create UA_SPEECH sample
+        SpeechSample uaSample = createSampleWithDatasetSource("ua_sample", "M02", SpeechDatasetSource.UA_SPEECH);
+        Path uaWav = createTestWav("ua_sample", 440.0f);
+        FrequencyVector uaVector = encoder.encode(uaWav);
+        sampleStore.save(uaSample);
+        featureStore.save(uaSample.id(), uaVector);
+
+        // Filter for TORGO only
+        SpeechRetrievalOptions options = new SpeechRetrievalOptions(5, SpeechDatasetSource.TORGO, null, null, null, null);
+        List<SpeechRetrievalResult> results = retriever.search(queryFile, sampleStore, featureStore, options);
+
+        assertEquals(1, results.size());
+        assertEquals(torgoSample.id(), results.get(0).sample().id());
+    }
+
     // Helper methods
 
     private Path createTestWav(String name, float frequency) throws IOException {
@@ -479,6 +573,22 @@ class SpeechSampleRetrieverTest {
                 SpeechCondition.UNKNOWN,
                 SpeechTaskType.UNKNOWN,
                 language,
+                new AudioMetadata(16000, 1, 500, "dummy_hash"),
+                Instant.now()
+        );
+    }
+
+    private SpeechSample createSampleWithDatasetSource(String id, String speakerId, SpeechDatasetSource datasetSource) {
+        return new SpeechSample(
+                id,
+                speakerId,
+                datasetSource,
+                tempDir.resolve(id + ".wav"),
+                "test transcript",
+                List.of(),
+                SpeechCondition.UNKNOWN,
+                SpeechTaskType.UNKNOWN,
+                "en-US",
                 new AudioMetadata(16000, 1, 500, "dummy_hash"),
                 Instant.now()
         );
