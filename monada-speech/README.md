@@ -87,19 +87,56 @@ implementation:
 - `monada-storage` - Storage patterns and utilities (tests only)
 - `monada-encoder` - Text encoding reference (tests only)
 
+## TORGO Dataset Importer
+
+`TorgoDatasetImporter` scans a local TORGO-style directory tree and persists
+valid `SpeechSample` records using `SpeechSampleStore`.
+
+```java
+var importer = new TorgoDatasetImporter();
+TorgoDatasetImportReport report = importer.importFrom(
+        Path.of("/data/torgo"), sampleStore);
+System.out.println("imported: " + report.importedSamples());
+System.out.println("skipped:  " + report.skippedSamples());
+report.warnings().forEach(w -> System.out.println(w.path() + ": " + w.reason()));
+```
+
+Expected local layout (TORGO naming conventions):
+
+```
+<datasetRoot>/
+  <speakerId>/         e.g. M01, FC1
+    <session>/         e.g. Session1
+      <taskType>/      e.g. words, sentences, commands
+        <stem>.wav
+        <stem>.txt     companion transcript file
+```
+
+Key properties:
+
+- **Deterministic order**: WAV files are sorted lexicographically before import.
+- **Stable IDs**: derived from the dataset-root-relative path; repeatable across runs.
+- **Condition inference**: `FC*`/`MC*` → `CONTROL`; `F##`/`M##` → `DYSARTHRIC`.
+- **Task type inference**: directory name `words` → `WORD`, `sentences` → `SENTENCE`, etc.
+- **Skip on missing/blank transcript**: reported as a `TorgoDatasetImportWarning`.
+- **No real dataset required**: tests use programmatic WAV fixtures.
+
+> **Note:** This phase supports a conservative TORGO-style normalized layout
+> (`<speakerId>/<session>/<taskType>/<file>.wav`). Not every possible real TORGO
+> directory variant is handled yet — future phases may extend the importer to
+> cover additional layouts.
+
 ## Out of Scope (Phase L)
 
 This phase intentionally does NOT implement:
 
 - ASR/Whisper/CTC/MFCC/DTW pipelines
-- TORGO dataset importer (coming in future phase)
 - Changes to KnowledgeAtom, AtomType, or FileAtomStore
 - Public MonadaMemory API for speech
 - Speech-specific ranking or feedback
 
 ## Future Work
 
-- TORGO dataset importer
 - Speech sample retrieval by acoustic resonance
 - Speech-specific evaluation metrics
 - Integration with monada-api for speech queries
