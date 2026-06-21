@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -96,19 +97,20 @@ public final class SpeechRetrievalEvaluator {
                 if (relevantIds.contains(topK.get(i).sample().id())) {
                     relevantRetrievedCount++;
                     if (firstRelevantRank == 0) {
-                        firstRelevantRank = topK.get(i).rank();
+                        firstRelevantRank = i + 1;
                     }
                 }
             }
 
             double reciprocalRank = firstRelevantRank == 0 ? 0.0 : 1.0 / firstRelevantRank;
+            Set<String> retrievedIdSet = new HashSet<>(retrievedIds);
             List<String> missedRelevantIds = relevantIds.stream()
-                    .filter(id -> !retrievedIds.contains(id))
+                    .filter(id -> !retrievedIdSet.contains(id))
                     .sorted()
                     .toList();
 
             boolean hit = relevantRetrievedCount > 0;
-            double precision = (double) relevantRetrievedCount / k;
+            double precision = topK.isEmpty() ? 0.0 : (double) relevantRetrievedCount / topK.size();
             double recall = (double) relevantRetrievedCount / relevantIds.size();
 
             String topResultSampleId = topK.isEmpty() ? null : topK.get(0).sample().id();

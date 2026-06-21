@@ -488,8 +488,100 @@ class SpeechRetrievalEvaluatorTest {
         assertEquals(List.of("s1", "s2", "s3"), result.retrievedSampleIds());
         assertEquals(0.5, result.reciprocalRank(), 1e-9);
         assertEquals(1, result.relevantRetrievedCount());
-        assertEquals(1.0 / 5, result.precisionAtK(), 1e-9);
+        assertEquals(1.0 / 3, result.precisionAtK(), 1e-9);
         assertEquals(1.0, result.recallAtK(), 1e-9);
+    }
+
+    @Test
+    void precisionIsOneWhenSingleSampleRetrievedAndKExceedsCorpusSize() throws IOException {
+        Path queryAudio = tempDir.resolve("query.wav");
+        Files.createFile(queryAudio);
+
+        var sampleStore = new InMemorySampleStore();
+        var featureStore = new InMemoryFeatureStore();
+        sampleStore.save(sample("s1", "M01", tempDir.resolve("s1.wav"), SpeechCondition.DYSARTHRIC, SpeechTaskType.WORD));
+        featureStore.save("s1", vector(1.0f, 0.0f, 0.0f, 0.0f));
+
+        // k=5 but only 1 sample exists — retrieved.size()=1 < k=5
+        var query = new SpeechEvaluationQuery(
+                "q1", queryAudio, Set.of("s1"),
+                new SpeechRetrievalOptions(5, null, null, null, null, null));
+        var options = new SpeechEvaluationOptions(5, true);
+
+        var report = evaluator.evaluate(List.of(query), retriever, sampleStore, featureStore, options);
+
+        var result = report.queryResults().get(0);
+        assertEquals(1, result.retrievedCount());
+        assertEquals(1, result.relevantRetrievedCount());
+        assertEquals(1.0, result.precisionAtK(), 1e-9,
+                "precision must be 1.0 when the only available sample is relevant, even if k > corpus size");
+        assertEquals(1.0, result.recallAtK(), 1e-9);
+        assertEquals(1.0, report.precisionAtK(), 1e-9);
+    }
+
+    @Test
+    void reciprocalRankUsesPositionInEvaluatorSliceNotRetrieverRank() throws IOException {
+        Path queryAudio = tempDir.resolve("query.wav");
+        Files.createFile(queryAudio);
+
+        var sampleStore = new InMemorySampleStore();
+        var featureStore = new InMemoryFeatureStore();
+        sampleStore.save(sample("s1", "M01", tempDir.resolve("s1.wav"), SpeechCondition.DYSARTHRIC, SpeechTaskType.WORD));
+        sampleStore.save(sample("s2", "M02", tempDir.resolve("s2.wav"), SpeechCondition.CONTROL, SpeechTaskType.SENTENCE));
+        // Query vector [1,0,0,0]: s1 scores 1.0 (rank 1), s2 scores 0.707 (rank 2)
+        featureStore.save("s1", vector(1.0f, 0.0f, 0.0f, 0.0f));
+        featureStore.save("s2", vector(0.5f, 0.5f, 0.0f, 0.0f));
+
+        // retriever topK=10 (bigger than corpus), evaluator k=2, relevant=s2
+        var query = new SpeechEvaluationQuery(
+                "q1", queryAudio, Set.of("s2"),
+                new SpeechRetrievalOptions(10, null, null, null, null, null));
+        var options = new SpeechEvaluationOptions(2, true);
+
+        var report = evaluator.evaluate(List.of(query), retriever, sampleStore, featureStore, options);
+
+        var result = report.queryResults().get(0);
+        assertEquals(List.of("s1", "s2"), result.retrievedSampleIds());
+        // s2 is at position 2 in the evaluator slice → RR must be 0.5
+        assertEquals(0.5, result.reciprocalRank(), 1e-9,
+                "RR must reflect position within the evaluator slice, not the retriever's rank field");
+        assertEquals(0.5, report.meanReciprocalRank(), 1e-9);
+    }
+
+    @Test
+    void missedRelevantIdsAreComputedCorrectlyWithManyRetrievedIds() throws IOException {
+        Path queryAudio = tempDir.resolve("query.wav");
+        Files.createFile(queryAudio);
+
+        var sampleStore = new InMemorySampleStore();
+        var featureStore = new InMemoryFeatureStore();
+        // s1..s4 are in both stores; s5 is in sampleStore only (no feature vector)
+        for (int i = 1; i <= 5; i++) {
+            sampleStore.save(sample("s" + i, "M0" + i, tempDir.resolve("s" + i + ".wav"),
+                    SpeechCondition.DYSARTHRIC, SpeechTaskType.WORD));
+        }
+        featureStore.save("s1", vector(1.0f, 0.0f, 0.0f, 0.0f));
+        featureStore.save("s2", vector(0.0f, 1.0f, 0.0f, 0.0f));
+        featureStore.save("s3", vector(0.0f, 0.0f, 1.0f, 0.0f));
+        featureStore.save("s4", vector(0.0f, 0.0f, 0.0f, 1.0f));
+        // s5 intentionally has no feature vector so it is never a retrieval candidate
+
+        // relevant includes s3 (retrieved at rank 3) and s5 (never retrieved)
+        var query = new SpeechEvaluationQuery(
+                "q1", queryAudio, Set.of("s3", "s5"),
+                new SpeechRetrievalOptions(5, null, null, null, null, null));
+        var options = new SpeechEvaluationOptions(5, true);
+
+        var report = evaluator.evaluate(List.of(query), retriever, sampleStore, featureStore, options);
+
+        var result = report.queryResults().get(0);
+        // s3 is retrieved, s5 has no feature vector so it is never in retrievedIds
+        assertTrue(result.missedRelevantSampleIds().contains("s5"),
+                "s5 has no feature vector so must appear in missedRelevantSampleIds");
+        assertFalse(result.missedRelevantSampleIds().contains("s3"),
+                "s3 was retrieved so must not appear in missedRelevantSampleIds");
+        assertEquals(result.missedRelevantSampleIds(), result.missedRelevantSampleIds().stream().sorted().toList(),
+                "missedRelevantSampleIds must be sorted");
     }
 
     // Helpers
