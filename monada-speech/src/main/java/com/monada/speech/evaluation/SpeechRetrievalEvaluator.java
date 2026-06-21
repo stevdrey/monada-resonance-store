@@ -26,6 +26,12 @@ import java.util.stream.Collectors;
  *
  * <p>The evaluator delegates actual retrieval to {@link SpeechSampleRetriever} and only
  * computes metrics, producing deterministic aggregate and per-query reports.
+ *
+ * <p><b>Performance note (MVP):</b> {@link SpeechSampleRetriever#search} reloads all samples
+ * and feature vectors from the backing stores on every query call, resulting in
+ * O(#queries &times; #samples) disk reads with file-backed stores. This is acceptable for
+ * small evaluation sets but should be addressed (e.g. by pre-loading stores once) before
+ * using this evaluator with large corpora.
  */
 public final class SpeechRetrievalEvaluator {
 
@@ -92,13 +98,19 @@ public final class SpeechRetrievalEvaluator {
             Set<String> relevantIds = query.relevantSampleIds();
 
             int relevantRetrievedCount = 0;
-            int firstRelevantRank = 0;
             for (int i = 0; i < topK.size(); i++) {
                 if (relevantIds.contains(topK.get(i).sample().id())) {
                     relevantRetrievedCount++;
-                    if (firstRelevantRank == 0) {
-                        firstRelevantRank = i + 1;
-                    }
+                }
+            }
+
+            // MRR is computed over the full retrieved list so that a relevant result
+            // just beyond the evaluation k is still counted (RR > 0).
+            int firstRelevantRank = 0;
+            for (int i = 0; i < retrieved.size(); i++) {
+                if (relevantIds.contains(retrieved.get(i).sample().id())) {
+                    firstRelevantRank = i + 1;
+                    break;
                 }
             }
 

@@ -30,13 +30,13 @@ public record SpeechEvaluationQuery(
         if (relevantSampleIds.isEmpty()) {
             throw new IllegalArgumentException("relevantSampleIds must not be empty for query: " + queryId);
         }
-        relevantSampleIds = Set.copyOf(relevantSampleIds);
         for (String id : relevantSampleIds) {
             Objects.requireNonNull(id, "relevantSampleIds must not contain null");
             if (id.isBlank()) {
                 throw new IllegalArgumentException("relevantSampleIds must not contain blank values for query: " + queryId);
             }
         }
+        relevantSampleIds = Set.copyOf(relevantSampleIds);
         Objects.requireNonNull(retrievalOptions, "retrievalOptions");
     }
 }

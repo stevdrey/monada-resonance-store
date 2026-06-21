@@ -493,6 +493,43 @@ class SpeechRetrievalEvaluatorTest {
     }
 
     @Test
+    void reciprocalRankIsNonZeroWhenRelevantResultIsBeyondEvaluatorK() throws IOException {
+        Path queryAudio = tempDir.resolve("query.wav");
+        Files.createFile(queryAudio);
+
+        var sampleStore = new InMemorySampleStore();
+        var featureStore = new InMemoryFeatureStore();
+        // Query vector [1,0,0,0].
+        // s1=[1,0,0,0] cosine=1.0 (rank 1), s2=[0.5,0.5,0,0] cosine≈0.707 (rank 2),
+        // s3=[0,1,0,0] cosine=0.0 (rank 3, tie broken by id "s3" > "s2")
+        sampleStore.save(sample("s1", "M01", tempDir.resolve("s1.wav"), SpeechCondition.DYSARTHRIC, SpeechTaskType.WORD));
+        sampleStore.save(sample("s2", "M02", tempDir.resolve("s2.wav"), SpeechCondition.CONTROL, SpeechTaskType.SENTENCE));
+        sampleStore.save(sample("s3", "M03", tempDir.resolve("s3.wav"), SpeechCondition.DYSARTHRIC, SpeechTaskType.WORD));
+        featureStore.save("s1", vector(1.0f, 0.0f, 0.0f, 0.0f));
+        featureStore.save("s2", vector(0.5f, 0.5f, 0.0f, 0.0f));
+        featureStore.save("s3", vector(0.0f, 1.0f, 0.0f, 0.0f));
+
+        // evaluator k=1, retriever topK=5 (returns all 3), only s3 is relevant (rank 3 in full list)
+        var query = new SpeechEvaluationQuery(
+                "q1", queryAudio, Set.of("s3"),
+                new SpeechRetrievalOptions(5, null, null, null, null, null));
+        var options = new SpeechEvaluationOptions(1, true);
+
+        var report = evaluator.evaluate(List.of(query), retriever, sampleStore, featureStore, options);
+
+        var result = report.queryResults().get(0);
+        assertEquals(1, result.retrievedCount());
+        assertEquals(0, result.relevantRetrievedCount(), "s3 is not in top-1 so not counted in @k metrics");
+        assertFalse(result.hitAtK(), "hit@k must be false since relevant is not in top-1");
+        assertEquals(0.0, result.precisionAtK(), 1e-9);
+        assertEquals(0.0, result.recallAtK(), 1e-9);
+        // MRR scans the full retrieved list: [s1, s2, s3] → s3 is at position 3 → RR = 1/3
+        assertEquals(1.0 / 3, result.reciprocalRank(), 1e-9,
+                "MRR must use the first relevant rank in the full retrieved list, not just top-k");
+        assertEquals(1.0 / 3, report.meanReciprocalRank(), 1e-9);
+    }
+
+    @Test
     void precisionIsOneWhenSingleSampleRetrievedAndKExceedsCorpusSize() throws IOException {
         Path queryAudio = tempDir.resolve("query.wav");
         Files.createFile(queryAudio);
