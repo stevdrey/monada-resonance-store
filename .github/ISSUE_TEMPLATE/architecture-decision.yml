@@ -1,5 +1,5 @@
 name: Architecture Decision
-about: Record a durable architecture decision
+description: Record a durable architecture decision
 title: "ADR — "
 labels: ["architecture"]
 body:
