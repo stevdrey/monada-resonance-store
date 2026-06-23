@@ -29,7 +29,7 @@ Use `docs/specs/pr-review-checklist.md` when reviewing PRs.
 - `docs/adr/*.md` records architecture decisions.
 - `docs/specs/*.md` contains task and review templates.
 
-The previous root-level `skills/` directory has been replaced. Keep `.agents/skills/` and `.windsurf/skills/` in sync when changing a project skill.
+The previous root-level `skills/` directory has been replaced. When updating a project skill, edit the canonical `.agents/skills/` copy and then mirror the same change under `.windsurf/skills/`.
 
 ## Module Boundaries
 
