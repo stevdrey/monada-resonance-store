@@ -15,7 +15,8 @@ Monada Resonance Store is not a relational database clone, document database clo
 | [`docs/glossary.md`](docs/glossary.md) | Shared project vocabulary. |
 | [`docs/adr/`](docs/adr/) | Architecture Decision Records. |
 | [`docs/specs/`](docs/specs/) | Spec Context template and PR review checklist. |
-| [`.agents/skills/`](.agents/skills/) | Devin-compatible Agent Skills. |
+| [`.agents/skills/`](.agents/skills/) | Canonical Devin-compatible Agent Skills. |
+| [`.windsurf/skills/`](.windsurf/skills/) | Mirror of project skills for Devin Desktop / Windsurf discovery. |
 | [`.windsurf/rules/`](.windsurf/rules/) | Local IDE/Cascade-compatible project rules. |
 
 ## Core Flow
@@ -64,4 +65,4 @@ The main domain record is `KnowledgeAtom`. Text content is encoded into `Frequen
 
 Read [`AGENTS.md`](AGENTS.md) before making changes. New tasks should use the Spec Context format in [`docs/specs/spec-context-template.md`](docs/specs/spec-context-template.md), and PR reviews should use [`docs/specs/pr-review-checklist.md`](docs/specs/pr-review-checklist.md).
 
-Devin-compatible skills live in `.agents/skills/<skill-name>/SKILL.md`. The previous root-level `skills/` directory has been replaced so Devin can discover the skills automatically.
+Canonical Devin-compatible skills live in `.agents/skills/<skill-name>/SKILL.md`. The same skills are mirrored under `.windsurf/skills/<skill-name>/SKILL.md` so Devin Desktop and Windsurf-derived local scanning can discover them when `.windsurf/rules` is already active. When updating a skill, edit the canonical `.agents/skills/` copy first and then mirror the same change into `.windsurf/skills/`.
