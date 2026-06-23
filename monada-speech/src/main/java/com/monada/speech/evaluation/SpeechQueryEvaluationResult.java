@@ -74,5 +74,13 @@ public record SpeechQueryEvaluationResult(
         if (retrievedCount == 0 && topResultScore != 0.0) {
             throw new IllegalArgumentException("topResultScore must be 0.0 when retrievedCount is 0");
         }
+        if (retrievedCount > 0 && topResultSampleId == null) {
+            throw new IllegalArgumentException("topResultSampleId must not be null when retrievedCount > 0");
+        }
+        if (retrievedCount > 0 && !topResultSampleId.equals(retrievedSampleIds.get(0))) {
+            throw new IllegalArgumentException(
+                    "topResultSampleId must equal retrievedSampleIds.get(0): "
+                    + topResultSampleId + " != " + retrievedSampleIds.get(0));
+        }
     }
 }

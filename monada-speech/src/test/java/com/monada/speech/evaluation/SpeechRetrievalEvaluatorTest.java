@@ -579,9 +579,9 @@ class SpeechRetrievalEvaluatorTest {
 
         var result = report.queryResults().get(0);
         assertEquals(List.of("s1", "s2"), result.retrievedSampleIds());
-        // s2 is at position 2 in the evaluator slice → RR must be 0.5
+        // s2 is at position 2 in the full retrieved list → RR must be 0.5
         assertEquals(0.5, result.reciprocalRank(), 1e-9,
-                "RR must reflect position within the evaluator slice, not the retriever's rank field");
+                "RR must reflect position in the full retrieved list, not limited to the evaluator top-k slice");
         assertEquals(0.5, report.meanReciprocalRank(), 1e-9);
     }
 
@@ -712,6 +712,42 @@ class SpeechRetrievalEvaluatorTest {
                         null,
                         0.9),
                 "topResultScore non-zero with retrievedCount=0 must throw IllegalArgumentException");
+    }
+
+    @Test
+    void rejectsNullTopResultSampleIdWhenRetrievedCountIsPositive() {
+        assertThrows(IllegalArgumentException.class, () ->
+                new SpeechQueryEvaluationResult(
+                        "q1",
+                        1,
+                        0,
+                        false,
+                        0.0,
+                        0.0,
+                        0.0,
+                        List.of("s1"),
+                        List.of(),
+                        null,
+                        0.9),
+                "topResultSampleId=null with retrievedCount=1 must throw IllegalArgumentException");
+    }
+
+    @Test
+    void rejectsMismatchedTopResultSampleIdAndFirstRetrievedId() {
+        assertThrows(IllegalArgumentException.class, () ->
+                new SpeechQueryEvaluationResult(
+                        "q1",
+                        2,
+                        0,
+                        false,
+                        0.0,
+                        0.0,
+                        0.0,
+                        List.of("s1", "s2"),
+                        List.of(),
+                        "s2",
+                        0.9),
+                "topResultSampleId=s2 but retrievedSampleIds.get(0)=s1 must throw IllegalArgumentException");
     }
 
     // Helpers

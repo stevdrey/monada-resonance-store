@@ -19,6 +19,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -257,7 +258,7 @@ class SpeechRetrievalEvaluatorIntegrationTest {
     }
 
     private static void writeAscii(ByteArrayOutputStream out, String s) {
-        for (byte b : s.getBytes()) {
+        for (byte b : s.getBytes(StandardCharsets.US_ASCII)) {
             out.write(b);
         }
     }
