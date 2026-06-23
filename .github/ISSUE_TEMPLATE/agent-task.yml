@@ -1,5 +1,5 @@
 name: Agent Task
-about: Implementation task with Spec Context for coding agents
+description: Implementation task with Spec Context for coding agents
 title: "Phase X — "
 labels: ["agent-task"]
 body:
