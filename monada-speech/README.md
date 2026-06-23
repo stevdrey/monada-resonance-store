@@ -201,9 +201,76 @@ double similarityScore = results.get(0).score();
 - **Graceful handling**: Skips orphan vectors and dimension mismatches with warnings
 - **Linear scan**: Suitable for MVP scale, matches existing `LinearScanResonanceIndex` pattern
 
+## Speech Evaluation
+
+`SpeechRetrievalEvaluator` measures whether `SpeechSampleRetriever` rankings are useful
+for speech-specific scenarios. It evaluates ranked results against explicit relevant
+sample IDs and produces deterministic aggregate and per-query metrics.
+
+```java
+// 1. Create or load speech samples
+SpeechSampleStore sampleStore = new FileSpeechSampleStore(rootPath);
+SpeechFeatureStore featureStore = new FileSpeechFeatureStore(rootPath);
+
+// 2. Encode and persist acoustic vectors
+AcousticFeatureEncoder encoder = new BasicAcousticFeatureEncoder(64);
+for (SpeechSample sample : sampleStore.findAll()) {
+    FrequencyVector vector = encoder.encode(sample.audioPath());
+    featureStore.save(sample.id(), vector);
+}
+
+// 3. Run evaluation
+SpeechSampleRetriever retriever = new SpeechSampleRetriever(encoder);
+SpeechRetrievalEvaluator evaluator = new SpeechRetrievalEvaluator();
+
+var query = new SpeechEvaluationQuery(
+    "q1",
+    Path.of("/path/to/query.wav"),
+    Set.of("expected_sample_1", "expected_sample_2"),
+    new SpeechRetrievalOptions(5, null, null, null, null, null)
+);
+
+var options = new SpeechEvaluationOptions(5, true);
+SpeechEvaluationReport report = evaluator.evaluate(
+    List.of(query), retriever, sampleStore, featureStore, options);
+
+// 4. Inspect aggregate metrics
+System.out.println("Precision@5: " + report.precisionAtK());
+System.out.println("Recall@5: " + report.recallAtK());
+System.out.println("Hit rate@5: " + report.hitRateAtK());
+System.out.println("MRR: " + report.meanReciprocalRank());
+
+// 5. Inspect per-query diagnostics
+for (SpeechQueryEvaluationResult result : report.queryResults()) {
+    System.out.println("Query " + result.queryId() + " -> " + result.retrievedSampleIds());
+    System.out.println("  missed: " + result.missedRelevantSampleIds());
+}
+
+// 6. Inspect grouped metrics
+for (Map.Entry<SpeechCondition, SpeechEvaluationMetrics> entry : report.metricsByCondition().entrySet()) {
+    System.out.println(entry.getKey() + " MRR: " + entry.getValue().mrr());
+}
+```
+
+> **Constraint:** each query's `SpeechRetrievalOptions.topK()` must be ≥ `SpeechEvaluationOptions.k()`;
+> the evaluator throws `IllegalArgumentException` otherwise.
+
+### Metrics
+
+- **Precision@k**: `relevant retrieved in top-k / k`
+- **Recall@k**: `relevant retrieved in top-k / total relevant`
+- **Hit rate@k**: `1.0` if at least one relevant sample appears in top-k, otherwise `0.0`
+- **MRR**: mean reciprocal rank of the first relevant result
+
+### Report properties
+
+- Query results preserve input query order.
+- Retrieved sample IDs preserve the ranked order from `SpeechSampleRetriever`.
+- Missed relevant sample IDs are sorted deterministically.
+- Grouped metrics by `SpeechCondition` and `SpeechTaskType` are included when query metadata can be resolved.
+
 ## Future Work
 
-- Speech-specific evaluation metrics
 - Integration with monada-api for speech queries
 - Advanced acoustic features (MFCC, spectral analysis)
 - Hybrid transcript + acoustic ranking
