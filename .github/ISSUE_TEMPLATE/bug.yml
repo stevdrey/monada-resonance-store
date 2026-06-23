@@ -1,5 +1,5 @@
 name: Defect
-about: Report a regression
+description: Report a regression
 title: "Defect — "
 labels: ["bug"]
 body:
