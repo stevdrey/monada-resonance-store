@@ -1,0 +1,81 @@
+name: Agent Task
+about: Implementation task with Spec Context for coding agents
+title: "Phase X — "
+labels: ["agent-task"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for scoped implementation tasks. Keep the goal, non-goals, and verification commands explicit.
+  - type: textarea
+    id: background
+    attributes:
+      label: Background
+      description: Why this task exists and how it fits the project.
+    validations:
+      required: true
+  - type: textarea
+    id: current-state
+    attributes:
+      label: Current State
+      description: What already exists in main.
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: Concrete outcome expected from this task.
+    validations:
+      required: true
+  - type: textarea
+    id: non-goals
+    attributes:
+      label: Non-Goals
+      description: What must stay out of scope.
+    validations:
+      required: true
+  - type: checkboxes
+    id: modules
+    attributes:
+      label: Affected Modules
+      options:
+        - label: monada-core
+        - label: monada-encoder
+        - label: monada-storage
+        - label: monada-index
+        - label: monada-learning
+        - label: monada-api
+        - label: monada-evaluation
+        - label: monada-speech
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Implementation Boundaries
+      description: Allowed design space and constraints.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: Checklist of required outcomes.
+      value: |
+        - [ ] 
+        - [ ] 
+        - [ ] 
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification Commands
+      value: |
+        ./gradlew test
+    validations:
+      required: true
+  - type: textarea
+    id: docs
+    attributes:
+      label: Documentation Updates
+      description: README, docs, ADR, skill, rule, or module README changes expected.
