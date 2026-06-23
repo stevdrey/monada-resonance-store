@@ -293,7 +293,7 @@ class SpeechRetrievalEvaluatorIntegrationTest {
                 taskType,
                 "en-US",
                 new AudioMetadata(SAMPLE_RATE, 1, DURATION_MS, "dummy_hash"),
-                Instant.now()
+                Instant.EPOCH
         );
     }
 }
