@@ -1,0 +1,116 @@
+# Architecture
+
+## Overview
+
+Monada Resonance Store is a Gradle multi-module Java 26 project. The architecture separates domain primitives, encoding, storage, ranking, learning/feedback, API orchestration, evaluation, and speech-specific experiments.
+
+## Module Responsibilities
+
+| Module | Responsibility |
+| --- | --- |
+| `monada-core` | Domain primitives such as `KnowledgeAtom`, `FrequencyVector`, result models, atom types, and feedback signals. |
+| `monada-encoder` | Deterministic text-to-vector encoding, lexical resources, aliases, stop words, plural handling, and technical synonyms. |
+| `monada-storage` | Local persistence: manifests, atom logs, vector files, index files, and feedback logs. |
+| `monada-index` | Similarity search, deterministic ranking, and index implementations such as linear scan. |
+| `monada-learning` | Feedback aggregation, query-key strategies, and ranking reinforcement support. |
+| `monada-api` | Public developer API and options, including `MonadaMemory`. |
+| `monada-evaluation` | Datasets, metrics, reports, A/B comparison, diagnostics, and regression tests. |
+| `monada-speech` | Speech sample metadata, TORGO-style import, acoustic features, feature storage, and acoustic retrieval. |
+
+## Text Recall Flow
+
+```text
+input text
+  -> lexical preprocessing
+  -> FrequencyEncoder
+  -> FrequencyVector
+  -> persisted vector
+  -> ResonanceIndex
+  -> ranked recall results
+```
+
+The original content remains the source returned to callers. Encoded or enriched text is an index representation, not the canonical user-facing value.
+
+## Feedback-Aware Ranking Flow
+
+```text
+query
+  -> base resonance ranking
+  -> derive feedback query key
+  -> aggregate matching feedback events
+  -> adjusted score
+  -> deterministic ordering
+```
+
+Default feedback behavior should remain conservative. Broader query-key strategies can exist, but they must be explicit, deterministic, and diagnosable.
+
+## Storage Layout
+
+```text
+monada-memory/
+├── manifest.json
+├── atoms/
+│   └── segment-000001.log
+├── vectors/
+│   └── segment-000001.f32
+├── indexes/
+│   ├── atom-offsets.idx
+│   └── vector-map.idx
+└── feedback/
+    └── feedback-000001.log
+```
+
+Storage must stay readable enough for debugging. Format changes should be paired with manifest metadata, compatibility tests, and clear failure behavior for incompatible stores.
+
+## Speech Extension
+
+Speech is modeled as a separate extension layer:
+
+```text
+SpeechSample metadata
+  -> optional transcript KnowledgeAtom
+  -> BasicAcousticFeatureEncoder
+  -> speech feature vector
+  -> SpeechSampleRetriever
+```
+
+Speech storage uses a separate layout:
+
+```text
+.monada-speech/
+├── manifest.json
+├── samples/
+│   └── speech-samples-000001.jsonl
+├── features/
+│   └── speech-features-000001.f32
+└── indexes/
+    └── speech-feature-map.idx
+```
+
+Speech work should preserve separation between transcript recall and acoustic recall. Hybrid ranking can be introduced later through explicit evaluation and options.
+
+## Dependency Direction
+
+Preferred dependency direction:
+
+```text
+monada-api
+  -> monada-learning
+  -> monada-index
+  -> monada-storage
+  -> monada-encoder
+  -> monada-core
+```
+
+`monada-evaluation` may depend on production modules for testing and reporting. `monada-speech` may depend on `monada-core` and selected storage patterns, but speech-specific concepts should not leak back into core APIs without explicit scope.
+
+## Compatibility Boundary
+
+Any change that affects persisted vectors must answer:
+
+- Which encoder/options created the stored vector?
+- Are stored vectors comparable with newly encoded queries?
+- Does the manifest identify the format and semantic version?
+- Should the store be reused, rebuilt, or rejected?
+
+Silent semantic drift is treated as an architecture bug.
