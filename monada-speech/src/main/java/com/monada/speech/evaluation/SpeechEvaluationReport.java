@@ -51,7 +51,11 @@ public record SpeechEvaluationReport(
         Objects.requireNonNull(metricsByCondition, "metricsByCondition");
         Objects.requireNonNull(metricsByTaskType, "metricsByTaskType");
         queryResults = List.copyOf(queryResults);
-        metricsByCondition = Collections.unmodifiableMap(new EnumMap<>(metricsByCondition));
-        metricsByTaskType = Collections.unmodifiableMap(new EnumMap<>(metricsByTaskType));
+        metricsByCondition = metricsByCondition.isEmpty()
+                ? Map.of()
+                : Collections.unmodifiableMap(new EnumMap<>(metricsByCondition));
+        metricsByTaskType = metricsByTaskType.isEmpty()
+                ? Map.of()
+                : Collections.unmodifiableMap(new EnumMap<>(metricsByTaskType));
     }
 }
