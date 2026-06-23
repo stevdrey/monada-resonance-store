@@ -13,7 +13,7 @@ import java.util.Objects;
  * @param precisionAtK        precision at k
  * @param recallAtK           recall at k
  * @param reciprocalRank      reciprocal rank of the first relevant result, or 0.0 if none
- * @param retrievedSampleIds  ranked list of sample IDs returned by the retriever
+ * @param retrievedSampleIds  ranked list of sample IDs within the evaluation top-k slice (not the full retriever output)
  * @param missedRelevantSampleIds relevant sample IDs that did not appear in the top-k, sorted
  * @param topResultSampleId   sample ID of the highest-ranked result, or null if no results
  * @param topResultScore      score of the highest-ranked result, or 0.0 if no results
@@ -58,5 +58,10 @@ public record SpeechQueryEvaluationResult(
         }
         retrievedSampleIds = List.copyOf(retrievedSampleIds);
         missedRelevantSampleIds = List.copyOf(missedRelevantSampleIds);
+        if (retrievedSampleIds.size() != retrievedCount) {
+            throw new IllegalArgumentException(
+                    "retrievedSampleIds.size() must equal retrievedCount: "
+                    + retrievedSampleIds.size() + " != " + retrievedCount);
+        }
     }
 }

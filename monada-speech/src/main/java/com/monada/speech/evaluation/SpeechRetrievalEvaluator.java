@@ -72,7 +72,7 @@ public final class SpeechRetrievalEvaluator {
         List<SpeechSample> allSamples = sampleStore.findAll();
         Map<Path, SpeechSample> samplesByPath = allSamples.stream()
                 .collect(Collectors.toMap(
-                        SpeechSample::audioPath,
+                        s -> s.audioPath().toAbsolutePath().normalize(),
                         Function.identity(),
                         (existing, replacement) -> replacement,
                         LinkedHashMap::new
@@ -84,6 +84,11 @@ public final class SpeechRetrievalEvaluator {
 
         for (SpeechEvaluationQuery query : queries) {
             validateQuery(query);
+            if (query.retrievalOptions().topK() < k) {
+                throw new IllegalArgumentException(
+                        "retrievalOptions.topK() (" + query.retrievalOptions().topK()
+                        + ") must be >= evaluation k (" + k + ") for query: " + query.queryId());
+            }
             List<SpeechRetrievalResult> retrieved = retriever.search(
                     query.queryAudio(),
                     sampleStore,
@@ -122,7 +127,7 @@ public final class SpeechRetrievalEvaluator {
                     .toList();
 
             boolean hit = relevantRetrievedCount > 0;
-            double precision = topK.isEmpty() ? 0.0 : (double) relevantRetrievedCount / topK.size();
+            double precision = (double) relevantRetrievedCount / k;
             double recall = (double) relevantRetrievedCount / relevantIds.size();
 
             String topResultSampleId = topK.isEmpty() ? null : topK.get(0).sample().id();
@@ -143,7 +148,7 @@ public final class SpeechRetrievalEvaluator {
             );
 
             queryResults.add(queryResult);
-            SpeechSample querySample = samplesByPath.get(query.queryAudio());
+            SpeechSample querySample = samplesByPath.get(query.queryAudio().toAbsolutePath().normalize());
             SpeechCondition condition = querySample != null ? querySample.condition() : SpeechCondition.UNKNOWN;
             SpeechTaskType taskType = querySample != null ? querySample.taskType() : SpeechTaskType.UNKNOWN;
             resultsByCondition.computeIfAbsent(condition, c -> new ArrayList<>()).add(queryResult);

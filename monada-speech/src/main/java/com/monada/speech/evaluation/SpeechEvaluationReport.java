@@ -3,6 +3,8 @@ package com.monada.speech.evaluation;
 import com.monada.speech.domain.SpeechCondition;
 import com.monada.speech.domain.SpeechTaskType;
 
+import java.util.Collections;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -49,7 +51,7 @@ public record SpeechEvaluationReport(
         Objects.requireNonNull(metricsByCondition, "metricsByCondition");
         Objects.requireNonNull(metricsByTaskType, "metricsByTaskType");
         queryResults = List.copyOf(queryResults);
-        metricsByCondition = Map.copyOf(metricsByCondition);
-        metricsByTaskType = Map.copyOf(metricsByTaskType);
+        metricsByCondition = Collections.unmodifiableMap(new EnumMap<>(metricsByCondition));
+        metricsByTaskType = Collections.unmodifiableMap(new EnumMap<>(metricsByTaskType));
     }
 }

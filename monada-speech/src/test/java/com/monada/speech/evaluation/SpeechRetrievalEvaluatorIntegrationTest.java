@@ -131,7 +131,7 @@ class SpeechRetrievalEvaluatorIntegrationTest {
         var result = report.queryResults().get(0);
         assertEquals(2, result.retrievedCount());
         assertEquals(2, result.relevantRetrievedCount());
-        assertEquals(1.0, result.precisionAtK(), 1e-9);
+        assertEquals(2.0 / 5, result.precisionAtK(), 1e-9);
         assertEquals(1.0, result.recallAtK(), 1e-9);
         assertTrue(result.hitAtK());
         assertEquals(1.0, result.reciprocalRank(), 1e-9);

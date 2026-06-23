@@ -488,7 +488,7 @@ class SpeechRetrievalEvaluatorTest {
         assertEquals(List.of("s1", "s2", "s3"), result.retrievedSampleIds());
         assertEquals(0.5, result.reciprocalRank(), 1e-9);
         assertEquals(1, result.relevantRetrievedCount());
-        assertEquals(1.0 / 3, result.precisionAtK(), 1e-9);
+        assertEquals(1.0 / 5, result.precisionAtK(), 1e-9);
         assertEquals(1.0, result.recallAtK(), 1e-9);
     }
 
@@ -530,7 +530,7 @@ class SpeechRetrievalEvaluatorTest {
     }
 
     @Test
-    void precisionIsOneWhenSingleSampleRetrievedAndKExceedsCorpusSize() throws IOException {
+    void precisionUsesFixedKDenominatorEvenWhenCorpusSmallerThanK() throws IOException {
         Path queryAudio = tempDir.resolve("query.wav");
         Files.createFile(queryAudio);
 
@@ -550,10 +550,10 @@ class SpeechRetrievalEvaluatorTest {
         var result = report.queryResults().get(0);
         assertEquals(1, result.retrievedCount());
         assertEquals(1, result.relevantRetrievedCount());
-        assertEquals(1.0, result.precisionAtK(), 1e-9,
-                "precision must be 1.0 when the only available sample is relevant, even if k > corpus size");
+        assertEquals(1.0 / 5, result.precisionAtK(), 1e-9,
+                "precision must use k=5 as denominator even if only 1 sample was returned");
         assertEquals(1.0, result.recallAtK(), 1e-9);
-        assertEquals(1.0, report.precisionAtK(), 1e-9);
+        assertEquals(1.0 / 5, report.precisionAtK(), 1e-9);
     }
 
     @Test
@@ -619,6 +619,45 @@ class SpeechRetrievalEvaluatorTest {
                 "s3 was retrieved so must not appear in missedRelevantSampleIds");
         assertEquals(result.missedRelevantSampleIds(), result.missedRelevantSampleIds().stream().sorted().toList(),
                 "missedRelevantSampleIds must be sorted");
+    }
+
+    @Test
+    void rejectsQueryWhereRetrievalTopKIsLessThanEvaluationK() throws IOException {
+        Path queryAudio = tempDir.resolve("query.wav");
+        Files.createFile(queryAudio);
+
+        var sampleStore = new InMemorySampleStore();
+        var featureStore = new InMemoryFeatureStore();
+        sampleStore.save(sample("s1", "M01", tempDir.resolve("s1.wav"), SpeechCondition.DYSARTHRIC, SpeechTaskType.WORD));
+        featureStore.save("s1", vector(1.0f, 0.0f, 0.0f, 0.0f));
+
+        // retrievalOptions.topK()=2 < evaluator k=5
+        var query = new SpeechEvaluationQuery(
+                "q1", queryAudio, Set.of("s1"),
+                new SpeechRetrievalOptions(2, null, null, null, null, null));
+        var options = new SpeechEvaluationOptions(5, true);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> evaluator.evaluate(List.of(query), retriever, sampleStore, featureStore, options),
+                "retrievalOptions.topK() < evaluation k must throw IllegalArgumentException");
+    }
+
+    @Test
+    void rejectsInconsistentRetrievedCountAndSampleIds() {
+        assertThrows(IllegalArgumentException.class, () ->
+                new SpeechQueryEvaluationResult(
+                        "q1",
+                        3,
+                        0,
+                        false,
+                        0.0,
+                        0.0,
+                        0.0,
+                        List.of("s1", "s2"),
+                        List.of(),
+                        null,
+                        0.0),
+                "retrievedCount=3 but only 2 IDs must throw IllegalArgumentException");
     }
 
     // Helpers
