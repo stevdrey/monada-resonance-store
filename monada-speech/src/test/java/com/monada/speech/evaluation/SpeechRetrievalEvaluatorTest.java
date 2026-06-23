@@ -715,6 +715,21 @@ class SpeechRetrievalEvaluatorTest {
     }
 
     @Test
+    void rejectsQueryResultsSizeNotMatchingQueryCount() {
+        var result = new SpeechQueryEvaluationResult(
+                "q1", 1, 1, true, 1.0, 1.0, 1.0,
+                List.of("s1"), List.of(), "s1", 0.9);
+        assertThrows(IllegalArgumentException.class, () ->
+                new SpeechEvaluationReport(
+                        3,
+                        1.0, 1.0, 1.0, 1.0,
+                        List.of(result),
+                        Map.of(),
+                        Map.of()),
+                "queryResults.size()=1 but queryCount=3 must throw IllegalArgumentException");
+    }
+
+    @Test
     void rejectsNullTopResultSampleIdWhenRetrievedCountIsPositive() {
         assertThrows(IllegalArgumentException.class, () ->
                 new SpeechQueryEvaluationResult(

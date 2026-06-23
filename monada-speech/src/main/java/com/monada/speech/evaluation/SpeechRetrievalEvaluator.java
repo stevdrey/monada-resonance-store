@@ -11,6 +11,7 @@ import com.monada.speech.storage.SpeechSampleStore;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -44,7 +45,8 @@ public final class SpeechRetrievalEvaluator {
      * @param featureStore source of acoustic feature vectors
      * @param options      evaluation options
      * @return a deterministic evaluation report
-     * @throws IOException    if a query audio file cannot be encoded
+     * @throws IOException    if reading from sampleStore, featureStore, or retriever fails,
+     *                        or if a query audio file cannot be encoded
      * @throws NullPointerException if a required parameter is null
      * @throws IllegalArgumentException if query list is empty, a query is invalid, k is non-positive,
      *                                  or any query's {@code retrievalOptions.topK()} is less than k
@@ -72,6 +74,7 @@ public final class SpeechRetrievalEvaluator {
 
         List<SpeechSample> allSamples = sampleStore.findAll();
         Map<Path, SpeechSample> samplesByPath = allSamples.stream()
+                .sorted(Comparator.comparing(SpeechSample::id))
                 .collect(Collectors.toMap(
                         s -> s.audioPath().toAbsolutePath().normalize(),
                         Function.identity(),
