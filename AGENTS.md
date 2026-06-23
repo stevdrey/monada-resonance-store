@@ -23,12 +23,13 @@ Use `docs/specs/pr-review-checklist.md` when reviewing PRs.
 ## Devin Context Layout
 
 - `AGENTS.md` is the root agent guide.
-- `.agents/skills/<skill-name>/SKILL.md` contains Devin-compatible skills.
+- `.agents/skills/<skill-name>/SKILL.md` contains the canonical Devin-compatible skills.
+- `.windsurf/skills/<skill-name>/SKILL.md` mirrors the same skills for Devin Desktop and Windsurf-derived local scanning.
 - `.windsurf/rules/*.md` contains local IDE/Cascade-compatible rules.
 - `docs/adr/*.md` records architecture decisions.
 - `docs/specs/*.md` contains task and review templates.
 
-The previous root-level `skills/` directory has been replaced by `.agents/skills/`.
+The previous root-level `skills/` directory has been replaced. Keep `.agents/skills/` and `.windsurf/skills/` in sync when changing a project skill.
 
 ## Module Boundaries
 
