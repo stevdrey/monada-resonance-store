@@ -12,7 +12,9 @@ import java.util.Objects;
  * @param hitAtK              true if at least one relevant sample appears in the top-k
  * @param precisionAtK        precision at k
  * @param recallAtK           recall at k
- * @param reciprocalRank      reciprocal rank of the first relevant result, or 0.0 if none
+ * @param reciprocalRank      reciprocal rank of the first relevant result in the full retrieved list
+ *                            (not limited by evaluation k), or 0.0 if none found; may be non-zero
+ *                            even when {@code hitAtK} is false
  * @param retrievedSampleIds  ranked list of sample IDs within the evaluation top-k slice (not the full retriever output)
  * @param missedRelevantSampleIds relevant sample IDs that did not appear in the top-k, sorted
  * @param topResultSampleId   sample ID of the highest-ranked result, or null if no results
@@ -62,6 +64,15 @@ public record SpeechQueryEvaluationResult(
             throw new IllegalArgumentException(
                     "retrievedSampleIds.size() must equal retrievedCount: "
                     + retrievedSampleIds.size() + " != " + retrievedCount);
+        }
+        if (hitAtK && relevantRetrievedCount == 0) {
+            throw new IllegalArgumentException("hitAtK cannot be true when relevantRetrievedCount is 0");
+        }
+        if (retrievedCount == 0 && topResultSampleId != null) {
+            throw new IllegalArgumentException("topResultSampleId must be null when retrievedCount is 0");
+        }
+        if (retrievedCount == 0 && topResultScore != 0.0) {
+            throw new IllegalArgumentException("topResultScore must be 0.0 when retrievedCount is 0");
         }
     }
 }

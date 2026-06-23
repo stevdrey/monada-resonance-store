@@ -38,10 +38,9 @@ class SpeechRetrievalEvaluatorIntegrationTest {
 
     @Test
     void integrationWithAcousticEncoderAndFileStores() throws IOException {
-        Path sampleRoot = tempDir.resolve("samples");
-        Path featureRoot = tempDir.resolve("features");
-        SpeechSampleStore sampleStore = new FileSpeechSampleStore(sampleRoot);
-        SpeechFeatureStore featureStore = new FileSpeechFeatureStore(featureRoot);
+        Path storeRoot = tempDir.resolve("store1");
+        SpeechSampleStore sampleStore = new FileSpeechSampleStore(storeRoot);
+        SpeechFeatureStore featureStore = new FileSpeechFeatureStore(storeRoot);
         var encoder = new BasicAcousticFeatureEncoder(DIMENSIONS);
         var retriever = new SpeechSampleRetriever(encoder);
         var evaluator = new SpeechRetrievalEvaluator();
@@ -92,10 +91,9 @@ class SpeechRetrievalEvaluatorIntegrationTest {
 
     @Test
     void integrationWithConditionFilterAndGroupedMetrics() throws IOException {
-        Path sampleRoot = tempDir.resolve("samples");
-        Path featureRoot = tempDir.resolve("features");
-        SpeechSampleStore sampleStore = new FileSpeechSampleStore(sampleRoot);
-        SpeechFeatureStore featureStore = new FileSpeechFeatureStore(featureRoot);
+        Path storeRoot = tempDir.resolve("store2");
+        SpeechSampleStore sampleStore = new FileSpeechSampleStore(storeRoot);
+        SpeechFeatureStore featureStore = new FileSpeechFeatureStore(storeRoot);
         var encoder = new BasicAcousticFeatureEncoder(DIMENSIONS);
         var retriever = new SpeechSampleRetriever(encoder);
         var evaluator = new SpeechRetrievalEvaluator();
@@ -153,10 +151,9 @@ class SpeechRetrievalEvaluatorIntegrationTest {
 
     @Test
     void integrationNoRelevantRetrievedProducesZeroHit() throws IOException {
-        Path sampleRoot = tempDir.resolve("samples");
-        Path featureRoot = tempDir.resolve("features");
-        SpeechSampleStore sampleStore = new FileSpeechSampleStore(sampleRoot);
-        SpeechFeatureStore featureStore = new FileSpeechFeatureStore(featureRoot);
+        Path storeRoot = tempDir.resolve("store3");
+        SpeechSampleStore sampleStore = new FileSpeechSampleStore(storeRoot);
+        SpeechFeatureStore featureStore = new FileSpeechFeatureStore(storeRoot);
         var encoder = new BasicAcousticFeatureEncoder(DIMENSIONS);
         var retriever = new SpeechSampleRetriever(encoder);
         var evaluator = new SpeechRetrievalEvaluator();

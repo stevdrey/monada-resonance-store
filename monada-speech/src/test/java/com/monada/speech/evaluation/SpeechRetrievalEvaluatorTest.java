@@ -557,7 +557,7 @@ class SpeechRetrievalEvaluatorTest {
     }
 
     @Test
-    void reciprocalRankUsesPositionInEvaluatorSliceNotRetrieverRank() throws IOException {
+    void reciprocalRankUsesPositionInFullRetrievedListNotRetrieverRank() throws IOException {
         Path queryAudio = tempDir.resolve("query.wav");
         Files.createFile(queryAudio);
 
@@ -658,6 +658,60 @@ class SpeechRetrievalEvaluatorTest {
                         null,
                         0.0),
                 "retrievedCount=3 but only 2 IDs must throw IllegalArgumentException");
+    }
+
+    @Test
+    void rejectsHitAtKTrueWhenRelevantRetrievedCountIsZero() {
+        assertThrows(IllegalArgumentException.class, () ->
+                new SpeechQueryEvaluationResult(
+                        "q1",
+                        1,
+                        0,
+                        true,
+                        0.0,
+                        0.0,
+                        0.0,
+                        List.of("s1"),
+                        List.of(),
+                        "s1",
+                        0.9),
+                "hitAtK=true with relevantRetrievedCount=0 must throw IllegalArgumentException");
+    }
+
+    @Test
+    void rejectsNonNullTopResultSampleIdWhenRetrievedCountIsZero() {
+        assertThrows(IllegalArgumentException.class, () ->
+                new SpeechQueryEvaluationResult(
+                        "q1",
+                        0,
+                        0,
+                        false,
+                        0.0,
+                        0.0,
+                        0.0,
+                        List.of(),
+                        List.of(),
+                        "s1",
+                        0.0),
+                "topResultSampleId non-null with retrievedCount=0 must throw IllegalArgumentException");
+    }
+
+    @Test
+    void rejectsNonZeroTopResultScoreWhenRetrievedCountIsZero() {
+        assertThrows(IllegalArgumentException.class, () ->
+                new SpeechQueryEvaluationResult(
+                        "q1",
+                        0,
+                        0,
+                        false,
+                        0.0,
+                        0.0,
+                        0.0,
+                        List.of(),
+                        List.of(),
+                        null,
+                        0.9),
+                "topResultScore non-zero with retrievedCount=0 must throw IllegalArgumentException");
     }
 
     // Helpers
