@@ -774,7 +774,7 @@ class SpeechRetrievalEvaluatorTest {
                 taskType,
                 "en-US",
                 new AudioMetadata(16000, 1, 500, "dummy_hash"),
-                Instant.now()
+                Instant.EPOCH
         );
     }
 
