@@ -44,10 +44,10 @@ Define the allowed design space, compatibility expectations, and constraints.
 
 ## Verification Commands
 
-```bash
+~~~bash
 ./gradlew test
 ./gradlew :monada-evaluation:test
-```
+~~~
 
 Add module-specific commands as needed.
 
