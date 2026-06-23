@@ -46,7 +46,8 @@ public final class SpeechRetrievalEvaluator {
      * @return a deterministic evaluation report
      * @throws IOException    if a query audio file cannot be encoded
      * @throws NullPointerException if a required parameter is null
-     * @throws IllegalArgumentException if query list is empty, a query is invalid, or k is invalid
+     * @throws IllegalArgumentException if query list is empty, a query is invalid, k is non-positive,
+     *                                  or any query's {@code retrievalOptions.topK()} is less than k
      */
     public SpeechEvaluationReport evaluate(
             List<SpeechEvaluationQuery> queries,
@@ -74,7 +75,7 @@ public final class SpeechRetrievalEvaluator {
                 .collect(Collectors.toMap(
                         s -> s.audioPath().toAbsolutePath().normalize(),
                         Function.identity(),
-                        (existing, replacement) -> replacement,
+                        (existing, replacement) -> existing,
                         LinkedHashMap::new
                 ));
 

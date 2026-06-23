@@ -252,6 +252,9 @@ for (Map.Entry<SpeechCondition, SpeechEvaluationMetrics> entry : report.metricsB
 }
 ```
 
+> **Constraint:** each query's `SpeechRetrievalOptions.topK()` must be ≥ `SpeechEvaluationOptions.k()`;
+> the evaluator throws `IllegalArgumentException` otherwise.
+
 ### Metrics
 
 - **Precision@k**: `relevant retrieved in top-k / k`
