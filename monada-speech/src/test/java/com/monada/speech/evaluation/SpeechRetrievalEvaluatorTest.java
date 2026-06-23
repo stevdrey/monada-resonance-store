@@ -501,7 +501,7 @@ class SpeechRetrievalEvaluatorTest {
         var featureStore = new InMemoryFeatureStore();
         // Query vector [1,0,0,0].
         // s1=[1,0,0,0] cosine=1.0 (rank 1), s2=[0.5,0.5,0,0] cosine≈0.707 (rank 2),
-        // s3=[0,1,0,0] cosine=0.0 (rank 3, tie broken by id "s3" > "s2")
+        // s3=[0,1,0,0] cosine=0.0 (rank 3); scores are distinct so no tie-break is needed
         sampleStore.save(sample("s1", "M01", tempDir.resolve("s1.wav"), SpeechCondition.DYSARTHRIC, SpeechTaskType.WORD));
         sampleStore.save(sample("s2", "M02", tempDir.resolve("s2.wav"), SpeechCondition.CONTROL, SpeechTaskType.SENTENCE));
         sampleStore.save(sample("s3", "M03", tempDir.resolve("s3.wav"), SpeechCondition.DYSARTHRIC, SpeechTaskType.WORD));
