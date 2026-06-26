@@ -40,6 +40,23 @@ Non-goals:
 - external model providers;
 - changing the default text memory API.
 
+### Phase Q — Real-world text recall corpus and query set
+
+Purpose: create a realistic text evaluation corpus from the project's own documentation and agent-style queries.
+
+Expected scope:
+
+- project-memory atoms derived from README, architecture, roadmap, ADRs, specs, and glossary;
+- direct, multi-relevant, paraphrase, confusable, and follow-up-task queries;
+- a dedicated evaluation entry point and Gradle task;
+- a baseline report showing current recall gaps without protecting metric values.
+
+Non-goals:
+
+- scraping external services or GitHub;
+- adding private data or LLM-generated relevance judgments;
+- changing retrieval defaults or encoder behavior.
+
 ### Candidate — Hybrid transcript + acoustic diagnostics
 
 Compare transcript-only and acoustic-only retrieval profiles before creating any default hybrid ranking behavior.

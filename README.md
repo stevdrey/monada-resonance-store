@@ -48,7 +48,17 @@ The main domain record is `KnowledgeAtom`. Text content is encoded into `Frequen
 ./gradlew :monada-evaluation:run -q
 ./gradlew :monada-evaluation:runExpanded -q
 ./gradlew :monada-evaluation:runProfileComparison -q
+./gradlew :monada-evaluation:runLatency -q
+./gradlew :monada-evaluation:runProjectMemory -q
 ./gradlew :monada-speech:test
+```
+
+## Latency Profiling
+
+The `runLatency` task reports recall latency and scan diagnostics for the `ExpandedTechnologyDataset`. It records corpus size, query count, topK, scanned candidates, returned candidates, and best-effort elapsed time per query. Use this baseline to determine whether a bounded top-K or scan optimization is justified; do not optimize the scan path until the diagnostics expose a measurable bottleneck.
+
+```bash
+./gradlew :monada-evaluation:runLatency -q
 ```
 
 ## Design Invariants
