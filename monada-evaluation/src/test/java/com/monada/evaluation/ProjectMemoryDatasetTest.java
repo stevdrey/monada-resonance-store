@@ -78,13 +78,13 @@ class ProjectMemoryDatasetTest {
                 .anyMatch(q -> q.expectedLabels().size() > 1);
         assertTrue(hasMultiRelevant, "dataset must include at least one multi-relevant query");
 
-        assertQueryExists(dataset, "which module owns deterministic text encoding and lexical enrichment");
-        assertQueryExists(dataset, "modules involved in the text recall pipeline from query to ranked results");
-        assertQueryExists(dataset, "how does resonance ranking incorporate historical user signals");
-        assertQueryExists(dataset, "difference between monada-index and monada-learning responsibilities");
-        assertQueryExists(dataset, "what phase added speech-specific evaluation metrics");
-        assertQueryExists(dataset, "what is Monada Resonance Store explicitly not designed to replace");
-        assertQueryExists(dataset, "what information must a new issue include before implementation");
+        assertQueryExistsForAtom(dataset, "ka_module_encoder");
+        assertQueryExistsForAtom(dataset, "ka_text_recall_flow");
+        assertQueryExistsForAtom(dataset, "ka_feedback_aware_ranking_flow");
+        assertQueryExistsForAtom(dataset, "ka_module_learning");
+        assertQueryExistsForAtom(dataset, "ka_roadmap_phase_p");
+        assertQueryExistsForAtom(dataset, "ka_project_non_goals");
+        assertQueryExistsForAtom(dataset, "ka_agent_spec_context");
     }
 
     @Test
@@ -101,6 +101,8 @@ class ProjectMemoryDatasetTest {
             assertFalse(qr.returnedLabels().isEmpty(),
                     "returned labels must not be empty for query: " + qr.queryText());
             assertFiniteUnitInterval(qr.reciprocalRank(), "reciprocalRank for: " + qr.queryText());
+            assertTrue(qr.reciprocalRank() > 0.0,
+                    "query must retrieve at least one expected label within top-K: " + qr.queryText());
 
             for (var entry : qr.precisionByK().entrySet()) {
                 assertFiniteUnitInterval(entry.getValue(),
@@ -146,10 +148,10 @@ class ProjectMemoryDatasetTest {
                 "speech evaluation phase", "Phase P");
     }
 
-    private static void assertQueryExists(EvaluationDataset dataset, String text) {
+    private static void assertQueryExistsForAtom(EvaluationDataset dataset, String label) {
         var exists = dataset.queries().stream()
-                .anyMatch(q -> q.text().equals(text));
-        assertTrue(exists, "dataset must include query: " + text);
+                .anyMatch(q -> q.expectedLabels().contains(label));
+        assertTrue(exists, "dataset must include a query that expects atom: " + label);
     }
 
     private static void assertAliasesContain(EvaluationDataset dataset, String label, String... aliases) {
