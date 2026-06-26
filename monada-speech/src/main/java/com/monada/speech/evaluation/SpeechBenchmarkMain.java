@@ -14,6 +14,7 @@ import com.monada.speech.storage.SpeechSampleStore;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -88,8 +89,16 @@ public final class SpeechBenchmarkMain {
             return;
         }
 
-        Path corpusDir = Path.of(corpusDirValue);
-        Path manifest = Path.of(queriesValue);
+        Path corpusDir;
+        Path manifest;
+        try {
+            corpusDir = parseConfigPath("corpus dir", corpusDirValue);
+            manifest = parseConfigPath("query manifest", queriesValue);
+        } catch (IllegalArgumentException e) {
+            System.err.println("invalid benchmark configuration: " + e.getMessage());
+            System.exit(2);
+            return;
+        }
         if (!Files.isDirectory(corpusDir)) {
             System.err.println("corpus dir does not exist or is not a directory: " + corpusDir);
             System.exit(2);
@@ -167,7 +176,13 @@ public final class SpeechBenchmarkMain {
             if (queryWavField.isEmpty()) {
                 throw new IOException("manifest line " + lineNo + " has a blank queryWavPath: " + line);
             }
-            Path queryWav = resolveAudio(corpusDir, queryWavField);
+            Path queryWav;
+            try {
+                queryWav = resolveAudio(corpusDir, queryWavField);
+            } catch (InvalidPathException e) {
+                throw new IOException("manifest line " + lineNo
+                        + " has an invalid queryWavPath: " + queryWavField, e);
+            }
             Set<String> relevant = parseRelevant(fields[2]);
             if (relevant.isEmpty()) {
                 throw new IOException("manifest line " + lineNo + " has no relevant sample IDs: " + line);
@@ -183,6 +198,14 @@ public final class SpeechBenchmarkMain {
                     new SpeechRetrievalOptions(k, null, null, null, null, null)));
         }
         return queries;
+    }
+
+    static Path parseConfigPath(String label, String value) {
+        try {
+            return Path.of(value);
+        } catch (InvalidPathException e) {
+            throw new IllegalArgumentException(label + " is not a valid path: " + value, e);
+        }
     }
 
     private static Set<String> parseRelevant(String field) {

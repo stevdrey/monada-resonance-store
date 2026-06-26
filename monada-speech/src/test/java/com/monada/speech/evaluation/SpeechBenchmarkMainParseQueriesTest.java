@@ -49,6 +49,31 @@ class SpeechBenchmarkMainParseQueriesTest {
     }
 
     @Test
+    void rejectsInvalidQueryWavPathWithLineNumber() throws IOException {
+        Path manifest = manifest("q1\tbad\u0000path.wav\ts1\n");
+        IOException ex = assertThrows(IOException.class,
+                () -> SpeechBenchmarkMain.parseQueries(manifest, tempDir, 2));
+        assertTrue(ex.getMessage().contains("line 1"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("queryWavPath"), ex.getMessage());
+    }
+
+    @Test
+    void rejectsInvalidCorpusConfigPath() {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> SpeechBenchmarkMain.parseConfigPath("corpus dir", "bad\u0000path"));
+        assertTrue(ex.getMessage().contains("corpus dir"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("valid path"), ex.getMessage());
+    }
+
+    @Test
+    void rejectsInvalidQueryManifestConfigPath() {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> SpeechBenchmarkMain.parseConfigPath("query manifest", "bad\u0000path"));
+        assertTrue(ex.getMessage().contains("query manifest"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("valid path"), ex.getMessage());
+    }
+
+    @Test
     void rejectsLineWithExtraFields() throws IOException {
         Path manifest = manifest("q1\tq1.wav\ts1\textra\n");
         IOException ex = assertThrows(IOException.class,
