@@ -4,6 +4,7 @@ import com.monada.api.FeedbackQueryKeyStrategy;
 import com.monada.api.MonadaMemory;
 import com.monada.api.MonadaMemoryOptions;
 import com.monada.encoder.LexicalEnrichmentPipeline;
+import com.monada.encoder.TextNormalizer;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -90,13 +91,14 @@ public final class LatencyEvaluationRunner {
         var memory = MonadaMemory.open(memoryPath, options);
         var seeding = evaluationRunner.seedAtoms(dataset, memory);
         return evaluateWithLatency(dataset, memory, seeding.idToLabel(),
-                options.feedbackQueryKeyStrategy(), options.feedbackAwareRanking());
+                options.textNormalizer(), options.feedbackQueryKeyStrategy(), options.feedbackAwareRanking());
     }
 
     private LatencyEvaluationReport evaluateWithLatency(
             EvaluationDataset dataset,
             MonadaMemory memory,
             Map<String, String> idToLabel,
+            TextNormalizer textNormalizer,
             FeedbackQueryKeyStrategy queryKeyStrategy,
             boolean feedbackAware) {
         var maxK = ks.stream().mapToInt(Integer::intValue).max().orElse(1);
@@ -167,16 +169,16 @@ public final class LatencyEvaluationRunner {
                     rr,
                     diagnostic));
 
-            var isBlank = query.text().isBlank();
+            var isBlankAfterNormalization = textNormalizer.normalize(query.text()).enrichedText().isBlank();
             queryMetrics.add(new QueryLatencyMetrics(
                     query.text(),
                     maxK,
                     EVALUATION_THRESHOLD,
                     corpusSize,
-                    isBlank ? 0 : corpusSize,
+                    isBlankAfterNormalization ? 0 : corpusSize,
                     recall.results().size(),
                     elapsed,
-                    isBlank));
+                    isBlankAfterNormalization));
         }
 
         var n = dataset.queries().size();

@@ -53,8 +53,8 @@ public record LatencyEvaluationReport(
             sb.append(String.format(Locale.ROOT, "  scanned: %d%n", m.scannedCandidates()));
             sb.append(String.format(Locale.ROOT, "  returned: %d%n", m.returnedCandidates()));
             sb.append(String.format(Locale.ROOT, "  elapsed: %d ns%n", m.elapsedNanos()));
-            if (m.blankQuery()) {
-                sb.append("  blank query: true (no resonance search executed)\n");
+            if (m.blankAfterNormalization()) {
+                sb.append("  blank after normalization: true (no resonance search executed)\n");
             }
             sb.append('\n');
         }

@@ -8,6 +8,11 @@ import java.util.Objects;
  * <p>All metrics are structural except {@code elapsedNanos}, which is a
  * best-effort wall-clock measurement. Tests should assert the structural
  * fields and the presence of timing, never strict wall-clock thresholds.
+ *
+ * <p>{@code blankAfterNormalization} mirrors the short-circuit in
+ * {@code MonadaQuery.execute()}: it is true when the normalized/enriched query
+ * text is blank, which can happen even for non-blank raw input such as
+ * stopword-only or punctuation-only queries.
  */
 public record QueryLatencyMetrics(
         String queryText,
@@ -17,7 +22,7 @@ public record QueryLatencyMetrics(
         int scannedCandidates,
         int returnedCandidates,
         long elapsedNanos,
-        boolean blankQuery
+        boolean blankAfterNormalization
 ) {
     public QueryLatencyMetrics {
         Objects.requireNonNull(queryText, "queryText");
