@@ -8,6 +8,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -34,7 +35,7 @@ class LatencyEvaluationRunnerTest {
                 "latency metrics must contain one entry per query");
 
         var corpusSize = dataset.atoms().size();
-        var maxK = List.of(1, 3, 5).stream().mapToInt(Integer::intValue).max().orElseThrow();
+        var maxK = EvaluationRunner.DEFAULT_KS.stream().mapToInt(Integer::intValue).max().orElseThrow();
         var summary = report.summary();
 
         assertEquals(dataset.queries().size(), summary.queryCount());
@@ -129,6 +130,22 @@ class LatencyEvaluationRunnerTest {
         assertThrows(IllegalArgumentException.class,
                 () -> new LatencyEvaluationRunner().run(dataset, tempDir, feedbackAwareOptions),
                 "feedbackAwareRanking=true must be rejected because the runner never seeds feedback events");
+    }
+
+    @Test
+    void stopwordOnlyQueryShortCircuitsWithZeroScanned(@TempDir Path tempDir) {
+        var dataset = DefaultDatabasesDataset.get();
+        var stopwordOnlyDataset = new EvaluationDataset(
+                dataset.atoms(),
+                List.of(new EvaluationQuery("the and or", Set.of("ka_orientdb"))));
+        var report = new LatencyEvaluationRunner().run(stopwordOnlyDataset, tempDir);
+
+        assertEquals(1, report.queryMetrics().size());
+        var m = report.queryMetrics().get(0);
+        assertTrue(m.blankAfterNormalization(),
+                "stopword-only query must be blank after normalization");
+        assertEquals(0, m.scannedCandidates(),
+                "stopword-only query must short-circuit with zero scanned candidates");
     }
 
     @Test
