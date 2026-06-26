@@ -53,13 +53,16 @@ public record LatencySummary(
     }
 
     /**
-     * Computes a summary from per-query metrics. Assumes all queries share the
-     * same corpus size and maxK, which is true for a single evaluation run.
+     * Computes a summary from per-query metrics.
+     *
+     * @param queryMetrics per-query latency records for the run
+     * @param maxK         the maximum K used across all queries (same value as in each metric)
+     * @param corpusSize   the number of atoms in the corpus (passed explicitly to avoid silent
+     *                     first-entry extraction when future callers mix metrics from different runs)
      */
-    public static LatencySummary from(List<QueryLatencyMetrics> queryMetrics, int maxK) {
+    public static LatencySummary from(List<QueryLatencyMetrics> queryMetrics, int maxK, int corpusSize) {
         Objects.requireNonNull(queryMetrics, "queryMetrics");
         int queryCount = queryMetrics.size();
-        int corpusSize = queryMetrics.isEmpty() ? 0 : queryMetrics.get(0).corpusSize();
         long totalElapsed = 0;
         long minElapsed = Long.MAX_VALUE;
         long maxElapsed = 0;

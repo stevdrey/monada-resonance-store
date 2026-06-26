@@ -18,6 +18,11 @@ public record LatencyEvaluationReport(
         Objects.requireNonNull(evaluationReport, "evaluationReport");
         queryMetrics = List.copyOf(Objects.requireNonNull(queryMetrics, "queryMetrics"));
         Objects.requireNonNull(summary, "summary");
+        if (queryMetrics.size() != evaluationReport.queryResults().size()) {
+            throw new IllegalArgumentException(
+                    "queryMetrics.size() must equal evaluationReport.queryResults().size(): "
+                    + queryMetrics.size() + " != " + evaluationReport.queryResults().size());
+        }
     }
 
     public String render() {

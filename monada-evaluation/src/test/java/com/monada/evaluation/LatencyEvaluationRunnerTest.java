@@ -1,5 +1,6 @@
 package com.monada.evaluation;
 
+import com.monada.api.MonadaMemoryOptions;
 import com.monada.evaluation.datasets.DefaultDatabasesDataset;
 import com.monada.evaluation.datasets.ExpandedTechnologyDataset;
 import org.junit.jupiter.api.Test;
@@ -119,6 +120,15 @@ class LatencyEvaluationRunnerTest {
         for (var m : report.queryMetrics()) {
             assertEquals(4, m.topK());
         }
+    }
+
+    @Test
+    void rejectsFeedbackAwareOptions(@TempDir Path tempDir) {
+        var dataset = DefaultDatabasesDataset.get();
+        var feedbackAwareOptions = MonadaMemoryOptions.defaults();
+        assertThrows(IllegalArgumentException.class,
+                () -> new LatencyEvaluationRunner().run(dataset, tempDir, feedbackAwareOptions),
+                "feedbackAwareRanking=true must be rejected because the runner never seeds feedback events");
     }
 
     @Test

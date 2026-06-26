@@ -5,7 +5,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -65,6 +68,21 @@ class LatencyReportRenderingTest {
                 "per-query entry must show elapsed time");
         assertTrue(rendered.contains(" ns"),
                 "elapsed time must be formatted in nanoseconds");
+    }
+
+    @Test
+    void rejectsMismatchedQueryMetricsAndEvaluationReportSizes() {
+        var emptyReport = new EvaluationReport(
+                List.of(),
+                Map.of(),
+                Map.of(),
+                Map.of(),
+                0.0);
+        var oneMetric = new QueryLatencyMetrics("query", 1, Double.NEGATIVE_INFINITY, 5, 5, 1, 100L, false);
+        var summary = LatencySummary.from(List.of(oneMetric), 1, 5);
+        assertThrows(IllegalArgumentException.class,
+                () -> new LatencyEvaluationReport(emptyReport, List.of(oneMetric), summary),
+                "queryMetrics.size()=1 != evaluationReport.queryResults().size()=0 must throw");
     }
 
     @Test

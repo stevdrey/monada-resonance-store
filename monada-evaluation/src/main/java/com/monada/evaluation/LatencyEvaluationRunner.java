@@ -3,6 +3,7 @@ package com.monada.evaluation;
 import com.monada.api.FeedbackQueryKeyStrategy;
 import com.monada.api.MonadaMemory;
 import com.monada.api.MonadaMemoryOptions;
+import com.monada.encoder.LexicalEnrichmentPipeline;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -60,17 +61,31 @@ public final class LatencyEvaluationRunner {
     }
 
     public LatencyEvaluationReport run(EvaluationDataset dataset, Path memoryPath) {
-        return run(dataset, memoryPath, MonadaMemoryOptions.defaults());
+        return run(dataset, memoryPath, new MonadaMemoryOptions(new LexicalEnrichmentPipeline(), false));
     }
 
     /**
      * Evaluates {@code dataset} with the given options and captures latency/scan
      * diagnostics for every query.
+     *
+     * <p>Feedback-aware options are rejected: this runner does not seed feedback events,
+     * so running with {@code feedbackAwareRanking=true} would measure non-feedback latency
+     * while reporting feedback-aware ranking — a misleading combination. Use
+     * {@link EvaluationProfileRunner} when feedback seeding is required.
+     *
+     * @throws IllegalArgumentException if {@code options.feedbackAwareRanking()} is {@code true}
      */
     public LatencyEvaluationReport run(EvaluationDataset dataset, Path memoryPath, MonadaMemoryOptions options) {
         Objects.requireNonNull(dataset, "dataset");
         Objects.requireNonNull(memoryPath, "memoryPath");
         Objects.requireNonNull(options, "options");
+        if (options.feedbackAwareRanking()) {
+            throw new IllegalArgumentException(
+                    "LatencyEvaluationRunner does not seed feedback events. "
+                    + "Running with feedbackAwareRanking=true would measure non-feedback latency "
+                    + "under feedback-aware ranking, producing misleading diagnostics. "
+                    + "Use EvaluationProfileRunner for feedback-aware profiles.");
+        }
 
         var memory = MonadaMemory.open(memoryPath, options);
         var seeding = evaluationRunner.seedAtoms(dataset, memory);
@@ -152,15 +167,16 @@ public final class LatencyEvaluationRunner {
                     rr,
                     diagnostic));
 
+            var isBlank = query.text().isBlank();
             queryMetrics.add(new QueryLatencyMetrics(
                     query.text(),
                     maxK,
                     EVALUATION_THRESHOLD,
                     corpusSize,
-                    corpusSize,
+                    isBlank ? 0 : corpusSize,
                     recall.results().size(),
                     elapsed,
-                    query.text().isBlank()));
+                    isBlank));
         }
 
         var n = dataset.queries().size();
@@ -171,7 +187,7 @@ public final class LatencyEvaluationRunner {
 
         var evaluationReport = new EvaluationReport(
                 queryEvaluations, averagePrecision, averageRecall, averageHit, mrr);
-        var summary = LatencySummary.from(queryMetrics, maxK);
+        var summary = LatencySummary.from(queryMetrics, maxK, corpusSize);
 
         return new LatencyEvaluationReport(evaluationReport, queryMetrics, summary);
     }
