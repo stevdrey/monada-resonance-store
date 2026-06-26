@@ -69,6 +69,22 @@ class SpeechBenchmarkBaselineTest {
     }
 
     @Test
+    void rejectsExploratoryReport() {
+        var exploratory = new SpeechBenchmarkReport(
+                SpeechBenchmarkMode.EXPLORATORY, "local-run", 3, 2,
+                report(2, 0.5, 1.0, 1.0, 1.0));
+        assertThrows(IllegalArgumentException.class, () -> baseline().compare(exploratory));
+    }
+
+    @Test
+    void acceptsProtectedReport() {
+        var protectedReport = new SpeechBenchmarkReport(
+                SpeechBenchmarkMode.PROTECTED, "generated", 3, 2,
+                report(2, 0.5, 1.0, 1.0, 1.0));
+        assertTrue(baseline().compare(protectedReport).passed());
+    }
+
+    @Test
     void failsOnKMismatch() {
         var comparison = baseline().compare(report(2, 0.5, 1.0, 1.0, 1.0), 3, 5);
         assertFalse(comparison.passed());

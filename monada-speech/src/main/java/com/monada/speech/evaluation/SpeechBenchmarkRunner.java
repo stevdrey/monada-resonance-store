@@ -61,7 +61,8 @@ public final class SpeechBenchmarkRunner {
         Objects.requireNonNull(sampleStore, "sampleStore");
         Objects.requireNonNull(featureStore, "featureStore");
         Objects.requireNonNull(options, "options");
-        if (label == null || label.isBlank()) {
+        Objects.requireNonNull(label, "label");
+        if (label.isBlank()) {
             throw new IllegalArgumentException("label must be non-blank");
         }
         if (queries.isEmpty()) {

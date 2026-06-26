@@ -3,6 +3,7 @@ package com.monada.speech.evaluation;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 
 /**
  * Protected expected metrics for a deterministic generated-fixture speech benchmark.
@@ -54,10 +55,20 @@ public record SpeechBenchmarkBaseline(
     /**
      * Compares a benchmark report against this baseline, including the run's actual k.
      *
+     * <p>This baseline is the PROTECTED-mode regression policy, so an exploratory report
+     * is rejected to prevent accidentally gating on non-deterministic real-data runs.
+     *
      * @param report the labeled report produced by a protected benchmark run
      * @return a comparison describing whether every field matched within tolerance
+     * @throws NullPointerException     if {@code report} is null
+     * @throws IllegalArgumentException if {@code report} is not a {@link SpeechBenchmarkMode#PROTECTED} report
      */
     public SpeechBenchmarkComparison compare(SpeechBenchmarkReport report) {
+        Objects.requireNonNull(report, "report");
+        if (report.mode() != SpeechBenchmarkMode.PROTECTED) {
+            throw new IllegalArgumentException(
+                    "baseline comparison requires a PROTECTED report but was " + report.mode());
+        }
         return compare(report.evaluationReport(), report.corpusSize(), report.k());
     }
 
