@@ -79,8 +79,10 @@ public record SpeechBenchmarkBaseline(
      * @param actualCorpusSize number of stored samples scanned during the run
      * @param actualK          the evaluation k the run was measured at
      * @return a comparison describing whether every field matched within tolerance
+     * @throws NullPointerException if {@code report} is null
      */
     public SpeechBenchmarkComparison compare(SpeechEvaluationReport report, int actualCorpusSize, int actualK) {
+        Objects.requireNonNull(report, "report");
         List<String> mismatches = new ArrayList<>();
         checkExact("corpusSize", expectedCorpusSize, actualCorpusSize, mismatches);
         checkExact("k", k, actualK, mismatches);

@@ -93,6 +93,11 @@ class SpeechBenchmarkBaselineTest {
     }
 
     @Test
+    void rejectsNullReportInLowLevelCompare() {
+        assertThrows(NullPointerException.class, () -> baseline().compare(null, 3, 2));
+    }
+
+    @Test
     void rejectsNegativeTolerance() {
         assertThrows(IllegalArgumentException.class,
                 () -> new SpeechBenchmarkBaseline(3, 2, 2, 0.5, 1.0, 1.0, 1.0, -1e-9));

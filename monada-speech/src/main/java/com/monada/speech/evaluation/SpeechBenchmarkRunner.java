@@ -18,6 +18,14 @@ import java.util.Objects;
  *
  * <p>Callers populate the stores beforehand: generated WAV fixtures for the protected
  * mode (in tests) or an imported local corpus for the exploratory mode.
+ *
+ * <p><b>Performance note (MVP):</b> {@link #run} reads the sample store once via
+ * {@code findAll()} to record the corpus size and the evaluator reads it again
+ * internally, so the store is scanned twice per run. This shares the same file-backed
+ * I/O limitation already documented on {@link SpeechRetrievalEvaluator} (which reloads
+ * all samples per query) and is acceptable for the small protected fixture set. Both
+ * should be addressed together by pre-loading the store once before exploratory runs
+ * over large corpora.
  */
 public final class SpeechBenchmarkRunner {
 

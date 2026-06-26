@@ -71,8 +71,22 @@ public final class SpeechBenchmarkMain {
             return;
         }
 
-        int k = intConfig("monada.speech.benchmark.k", "MONADA_SPEECH_BENCHMARK_K", DEFAULT_K);
-        int dimensions = intConfig("monada.speech.benchmark.dims", "MONADA_SPEECH_BENCHMARK_DIMS", DEFAULT_DIMENSIONS);
+        int k;
+        int dimensions;
+        try {
+            k = intConfig("monada.speech.benchmark.k", "MONADA_SPEECH_BENCHMARK_K", DEFAULT_K);
+            dimensions = intConfig("monada.speech.benchmark.dims", "MONADA_SPEECH_BENCHMARK_DIMS", DEFAULT_DIMENSIONS);
+            if (k <= 0) {
+                throw new IllegalArgumentException("k must be positive: " + k);
+            }
+            if (dimensions <= 0) {
+                throw new IllegalArgumentException("dimensions must be positive: " + dimensions);
+            }
+        } catch (IllegalArgumentException e) {
+            System.err.println("invalid benchmark configuration: " + e.getMessage());
+            System.exit(2);
+            return;
+        }
 
         Path corpusDir = Path.of(corpusDirValue);
         Path manifest = Path.of(queriesValue);
@@ -90,7 +104,15 @@ public final class SpeechBenchmarkMain {
         Path storeRoot = Files.createTempDirectory("monada-speech-benchmark-");
         SpeechSampleStore sampleStore = new FileSpeechSampleStore(storeRoot);
         SpeechFeatureStore featureStore = new FileSpeechFeatureStore(storeRoot);
-        var encoder = new BasicAcousticFeatureEncoder(dimensions);
+
+        BasicAcousticFeatureEncoder encoder;
+        try {
+            encoder = new BasicAcousticFeatureEncoder(dimensions);
+        } catch (IllegalArgumentException e) {
+            System.err.println("invalid encoder dimensions: " + e.getMessage());
+            System.exit(2);
+            return;
+        }
 
         TorgoDatasetImportReport importReport = new TorgoDatasetImporter().importFrom(corpusDir, sampleStore);
         for (SpeechSample sample : sampleStore.findAll()) {
@@ -148,6 +170,10 @@ public final class SpeechBenchmarkMain {
             Set<String> relevant = parseRelevant(fields[2]);
             if (relevant.isEmpty()) {
                 throw new IOException("manifest line " + lineNo + " has no relevant sample IDs: " + line);
+            }
+            if (!Files.isRegularFile(queryWav)) {
+                throw new IOException("manifest line " + lineNo
+                        + " references a query WAV that does not exist: " + queryWav);
             }
             queries.add(new SpeechEvaluationQuery(
                     queryId,
