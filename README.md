@@ -49,6 +49,7 @@ The main domain record is `KnowledgeAtom`. Text content is encoded into `Frequen
 ./gradlew :monada-evaluation:runExpanded -q
 ./gradlew :monada-evaluation:runProfileComparison -q
 ./gradlew :monada-evaluation:runLatency -q
+./gradlew :monada-evaluation:runProjectMemory -q
 ./gradlew :monada-speech:test
 ```
 

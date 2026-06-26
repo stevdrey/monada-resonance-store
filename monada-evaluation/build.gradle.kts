@@ -33,3 +33,10 @@ tasks.register<JavaExec>("runLatency") {
     mainClass.set("com.monada.evaluation.LatencyProfileMain")
     classpath = sourceSets["main"].runtimeClasspath
 }
+
+tasks.register<JavaExec>("runProjectMemory") {
+    description = "Run the project-memory evaluation dataset built from the repository's own documentation (exploratory)"
+    group = "application"
+    mainClass.set("com.monada.evaluation.ProjectMemoryMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
