@@ -101,6 +101,13 @@ public final class SpeechBenchmarkMain {
             return;
         }
 
+        List<SpeechEvaluationQuery> queries = parseQueries(manifest, corpusDir, k);
+        if (queries.isEmpty()) {
+            System.err.println("no queries parsed from manifest: " + manifest);
+            System.exit(2);
+            return;
+        }
+
         Path storeRoot = Files.createTempDirectory("monada-speech-benchmark-");
         SpeechSampleStore sampleStore = new FileSpeechSampleStore(storeRoot);
         SpeechFeatureStore featureStore = new FileSpeechFeatureStore(storeRoot);
@@ -117,13 +124,6 @@ public final class SpeechBenchmarkMain {
         TorgoDatasetImportReport importReport = new TorgoDatasetImporter().importFrom(corpusDir, sampleStore);
         for (SpeechSample sample : sampleStore.findAll()) {
             featureStore.save(sample.id(), encoder.encode(sample.audioPath()));
-        }
-
-        List<SpeechEvaluationQuery> queries = parseQueries(manifest, corpusDir, k);
-        if (queries.isEmpty()) {
-            System.err.println("no queries parsed from manifest: " + manifest);
-            System.exit(2);
-            return;
         }
 
         var retriever = new SpeechSampleRetriever(encoder);
@@ -149,8 +149,9 @@ public final class SpeechBenchmarkMain {
         List<SpeechEvaluationQuery> queries = new ArrayList<>();
         List<String> lines = Files.readAllLines(manifest, StandardCharsets.UTF_8);
         for (int lineNo = 1; lineNo <= lines.size(); lineNo++) {
-            String line = lines.get(lineNo - 1).strip();
-            if (line.isEmpty() || line.startsWith("#")) {
+            String line = lines.get(lineNo - 1);
+            String trimmedLine = line.strip();
+            if (trimmedLine.isEmpty() || trimmedLine.startsWith("#")) {
                 continue;
             }
             String[] fields = line.split("\t", -1);

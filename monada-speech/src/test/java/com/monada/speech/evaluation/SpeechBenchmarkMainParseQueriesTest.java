@@ -58,6 +58,15 @@ class SpeechBenchmarkMainParseQueriesTest {
     }
 
     @Test
+    void rejectsLineWithExtraTrailingField() throws IOException {
+        Path manifest = manifest("q1\tq1.wav\ts1\t\n");
+        IOException ex = assertThrows(IOException.class,
+                () -> SpeechBenchmarkMain.parseQueries(manifest, tempDir, 2));
+        assertTrue(ex.getMessage().contains("line 1"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("exactly 3"), ex.getMessage());
+    }
+
+    @Test
     void rejectsLineWithTooFewFields() throws IOException {
         Path manifest = manifest("q1\tq1.wav\n");
         IOException ex = assertThrows(IOException.class,
@@ -76,6 +85,16 @@ class SpeechBenchmarkMainParseQueriesTest {
     }
 
     @Test
+    void rejectsLeadingTabAsBlankQueryId() throws IOException {
+        touchAudio("q1.wav");
+        Path manifest = manifest("\tq1.wav\ts1\n");
+        IOException ex = assertThrows(IOException.class,
+                () -> SpeechBenchmarkMain.parseQueries(manifest, tempDir, 2));
+        assertTrue(ex.getMessage().contains("line 1"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("queryId"), ex.getMessage());
+    }
+
+    @Test
     void rejectsBlankQueryWavPath() throws IOException {
         Path manifest = manifest("q1\t\ts1\n");
         IOException ex = assertThrows(IOException.class,
@@ -88,6 +107,16 @@ class SpeechBenchmarkMainParseQueriesTest {
         Path manifest = manifest("q1\tq1.wav\t , \n");
         IOException ex = assertThrows(IOException.class,
                 () -> SpeechBenchmarkMain.parseQueries(manifest, tempDir, 2));
+        assertTrue(ex.getMessage().contains("relevant"), ex.getMessage());
+    }
+
+    @Test
+    void rejectsTrailingTabAsEmptyRelevantIds() throws IOException {
+        touchAudio("q1.wav");
+        Path manifest = manifest("q1\tq1.wav\t\n");
+        IOException ex = assertThrows(IOException.class,
+                () -> SpeechBenchmarkMain.parseQueries(manifest, tempDir, 2));
+        assertTrue(ex.getMessage().contains("line 1"), ex.getMessage());
         assertTrue(ex.getMessage().contains("relevant"), ex.getMessage());
     }
 }
