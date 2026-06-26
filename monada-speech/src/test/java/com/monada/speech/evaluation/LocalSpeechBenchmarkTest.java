@@ -14,6 +14,7 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -21,7 +22,9 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Exploratory local-corpus smoke test.
@@ -33,7 +36,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * benchmark with each sample used as a self-query (relevant = itself), asserting the
  * pipeline runs end-to-end on real audio.
  */
-@EnabledIfEnvironmentVariable(named = "MONADA_SPEECH_BENCHMARK_DIR", matches = ".+")
 class LocalSpeechBenchmarkTest {
 
     private static final int DIMENSIONS = 64;
@@ -43,8 +45,9 @@ class LocalSpeechBenchmarkTest {
     Path tempDir;
 
     @Test
+    @EnabledIfEnvironmentVariable(named = "MONADA_SPEECH_BENCHMARK_DIR", matches = ".+")
     void runsExploratoryBenchmarkOnLocalCorpus() throws IOException {
-        Path corpusDir = Path.of(System.getenv("MONADA_SPEECH_BENCHMARK_DIR"));
+        Path corpusDir = configuredCorpusDir(System.getenv("MONADA_SPEECH_BENCHMARK_DIR"));
         SpeechSampleStore sampleStore = new FileSpeechSampleStore(tempDir);
         SpeechFeatureStore featureStore = new FileSpeechFeatureStore(tempDir);
         var encoder = new BasicAcousticFeatureEncoder(DIMENSIONS);
@@ -81,5 +84,20 @@ class LocalSpeechBenchmarkTest {
         assertTrue(rendered.contains("Mode: EXPLORATORY"), rendered);
         // Each sample retrieves itself at rank 1, so hit rate must be perfect.
         assertEquals(1.0, report.evaluationReport().hitRateAtK(), 1e-9);
+    }
+
+    @Test
+    void rejectsInvalidConfiguredCorpusPath() {
+        AssertionError error = assertThrows(AssertionError.class, () -> configuredCorpusDir("bad\u0000path"));
+        assertTrue(error.getMessage().contains("MONADA_SPEECH_BENCHMARK_DIR"), error.getMessage());
+        assertTrue(error.getMessage().contains("valid path"), error.getMessage());
+    }
+
+    private static Path configuredCorpusDir(String value) {
+        try {
+            return Path.of(value);
+        } catch (InvalidPathException e) {
+            return fail("MONADA_SPEECH_BENCHMARK_DIR is not a valid path: " + value, e);
+        }
     }
 }
