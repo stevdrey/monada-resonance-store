@@ -89,6 +89,8 @@ Speech storage uses a separate layout:
 
 Speech work should preserve separation between transcript recall and acoustic recall. Hybrid ranking can be introduced later through explicit evaluation and options.
 
+Speech retrieval quality is guarded by a two-mode benchmark in `com.monada.speech.evaluation`. The `PROTECTED` mode runs over deterministic generated WAV fixtures and pins a baseline that is enforced in CI, mirroring the text `monada-evaluation` regression policy. The `EXPLORATORY` mode runs the same pipeline over a local real corpus that stays outside git and is never enforced in CI; it is reached only through an explicit Gradle entrypoint or an environment-gated test. Reports label their mode prominently so protected and exploratory output are never confused.
+
 ## Dependency Direction
 
 Preferred dependency direction:
