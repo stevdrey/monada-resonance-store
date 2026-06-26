@@ -52,15 +52,27 @@ public record SpeechBenchmarkBaseline(
     }
 
     /**
-     * Compares an actual report against this baseline.
+     * Compares a benchmark report against this baseline, including the run's actual k.
      *
-     * @param report      the report produced by a protected benchmark run
-     * @param actualCorpusSize number of stored samples scanned during the run
+     * @param report the labeled report produced by a protected benchmark run
      * @return a comparison describing whether every field matched within tolerance
      */
-    public SpeechBenchmarkComparison compare(SpeechEvaluationReport report, int actualCorpusSize) {
+    public SpeechBenchmarkComparison compare(SpeechBenchmarkReport report) {
+        return compare(report.evaluationReport(), report.corpusSize(), report.k());
+    }
+
+    /**
+     * Compares an actual evaluation report against this baseline.
+     *
+     * @param report           the evaluation report produced by a protected benchmark run
+     * @param actualCorpusSize number of stored samples scanned during the run
+     * @param actualK          the evaluation k the run was measured at
+     * @return a comparison describing whether every field matched within tolerance
+     */
+    public SpeechBenchmarkComparison compare(SpeechEvaluationReport report, int actualCorpusSize, int actualK) {
         List<String> mismatches = new ArrayList<>();
         checkExact("corpusSize", expectedCorpusSize, actualCorpusSize, mismatches);
+        checkExact("k", k, actualK, mismatches);
         checkExact("queryCount", expectedQueryCount, report.queryCount(), mismatches);
         checkMetric("precisionAtK", expectedPrecisionAtK, report.precisionAtK(), mismatches);
         checkMetric("recallAtK", expectedRecallAtK, report.recallAtK(), mismatches);
@@ -76,11 +88,12 @@ public record SpeechBenchmarkBaseline(
     }
 
     private void checkMetric(String name, double expected, double actual, List<String> mismatches) {
-        if (Math.abs(expected - actual) > tolerance) {
+        double delta = Math.abs(expected - actual);
+        if (delta > tolerance) {
             mismatches.add(String.format(
                     Locale.ROOT,
-                    "%s: expected %.6f (+/-%.6f) but was %.6f",
-                    name, expected, tolerance, actual));
+                    "%s: expected %.6f but was %.6f (delta %.3e exceeds tolerance %.3e)",
+                    name, expected, actual, delta, tolerance));
         }
     }
 

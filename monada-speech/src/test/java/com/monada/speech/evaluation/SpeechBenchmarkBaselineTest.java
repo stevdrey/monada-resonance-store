@@ -24,7 +24,7 @@ class SpeechBenchmarkBaselineTest {
 
     @Test
     void passesWhenAllMetricsMatchWithinTolerance() {
-        var comparison = baseline().compare(report(2, 0.5, 1.0, 1.0, 1.0), 3);
+        var comparison = baseline().compare(report(2, 0.5, 1.0, 1.0, 1.0), 3, 2);
         assertTrue(comparison.passed());
         assertTrue(comparison.mismatches().isEmpty());
     }
@@ -32,13 +32,13 @@ class SpeechBenchmarkBaselineTest {
     @Test
     void passesWhenMetricsDifferBelowTolerance() {
         var loose = new SpeechBenchmarkBaseline(3, 2, 2, 0.5, 1.0, 1.0, 1.0, 1e-3);
-        var comparison = loose.compare(report(2, 0.5004, 0.9997, 1.0, 1.0), 3);
+        var comparison = loose.compare(report(2, 0.5004, 0.9997, 1.0, 1.0), 3, 2);
         assertTrue(comparison.passed(), comparison.mismatches().toString());
     }
 
     @Test
     void failsOnMetricMismatchAndListsIt() {
-        var comparison = baseline().compare(report(2, 0.25, 1.0, 1.0, 1.0), 3);
+        var comparison = baseline().compare(report(2, 0.25, 1.0, 1.0, 1.0), 3, 2);
         assertFalse(comparison.passed());
         assertEquals(1, comparison.mismatches().size());
         assertTrue(comparison.mismatches().get(0).contains("precisionAtK"),
@@ -47,7 +47,7 @@ class SpeechBenchmarkBaselineTest {
 
     @Test
     void failsOnCorpusSizeMismatch() {
-        var comparison = baseline().compare(report(2, 0.5, 1.0, 1.0, 1.0), 99);
+        var comparison = baseline().compare(report(2, 0.5, 1.0, 1.0, 1.0), 99, 2);
         assertFalse(comparison.passed());
         assertTrue(comparison.mismatches().get(0).contains("corpusSize"),
                 comparison.mismatches().toString());
@@ -55,7 +55,7 @@ class SpeechBenchmarkBaselineTest {
 
     @Test
     void failsOnQueryCountMismatch() {
-        var comparison = baseline().compare(report(5, 0.5, 1.0, 1.0, 1.0), 3);
+        var comparison = baseline().compare(report(5, 0.5, 1.0, 1.0, 1.0), 3, 2);
         assertFalse(comparison.passed());
         assertTrue(comparison.mismatches().stream().anyMatch(m -> m.contains("queryCount")),
                 comparison.mismatches().toString());
@@ -63,9 +63,17 @@ class SpeechBenchmarkBaselineTest {
 
     @Test
     void collectsMultipleMismatches() {
-        var comparison = baseline().compare(report(2, 0.1, 0.2, 0.3, 0.4), 3);
+        var comparison = baseline().compare(report(2, 0.1, 0.2, 0.3, 0.4), 3, 2);
         assertFalse(comparison.passed());
         assertEquals(4, comparison.mismatches().size(), comparison.mismatches().toString());
+    }
+
+    @Test
+    void failsOnKMismatch() {
+        var comparison = baseline().compare(report(2, 0.5, 1.0, 1.0, 1.0), 3, 5);
+        assertFalse(comparison.passed());
+        assertTrue(comparison.mismatches().stream().anyMatch(m -> m.contains("k")),
+                comparison.mismatches().toString());
     }
 
     @Test

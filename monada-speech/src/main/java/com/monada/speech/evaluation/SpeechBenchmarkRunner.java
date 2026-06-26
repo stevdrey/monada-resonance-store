@@ -42,8 +42,9 @@ public final class SpeechBenchmarkRunner {
      * @param featureStore source of acoustic feature vectors
      * @param options      evaluation options
      * @return a {@link SpeechBenchmarkReport} wrapping the deterministic evaluation report
-     * @throws IOException          if the underlying evaluation fails to read stores or encode audio
-     * @throws NullPointerException if a required parameter is null
+     * @throws IOException              if the underlying evaluation fails to read stores or encode audio
+     * @throws NullPointerException     if a required parameter is null
+     * @throws IllegalArgumentException if {@code label} is blank or {@code queries} is empty
      */
     public SpeechBenchmarkReport run(
             SpeechBenchmarkMode mode,
@@ -55,8 +56,17 @@ public final class SpeechBenchmarkRunner {
             SpeechEvaluationOptions options
     ) throws IOException {
         Objects.requireNonNull(mode, "mode");
+        Objects.requireNonNull(queries, "queries");
+        Objects.requireNonNull(retriever, "retriever");
         Objects.requireNonNull(sampleStore, "sampleStore");
+        Objects.requireNonNull(featureStore, "featureStore");
         Objects.requireNonNull(options, "options");
+        if (label == null || label.isBlank()) {
+            throw new IllegalArgumentException("label must be non-blank");
+        }
+        if (queries.isEmpty()) {
+            throw new IllegalArgumentException("queries must be non-empty");
+        }
 
         int corpusSize = sampleStore.findAll().size();
         SpeechEvaluationReport report = evaluator.evaluate(queries, retriever, sampleStore, featureStore, options);

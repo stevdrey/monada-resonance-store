@@ -114,7 +114,7 @@ class GeneratedSpeechBenchmarkIntegrationTest {
                 EXPECTED_CORPUS_SIZE, EXPECTED_QUERY_COUNT, K,
                 EXPECTED_PRECISION_AT_K, EXPECTED_RECALL_AT_K, EXPECTED_HIT_RATE_AT_K, EXPECTED_MRR,
                 TOLERANCE);
-        var comparison = baseline.compare(report.evaluationReport(), report.corpusSize());
+        var comparison = baseline.compare(report);
         assertTrue(comparison.passed(),
                 "protected baseline mismatch: " + comparison.mismatches());
 
