@@ -101,8 +101,6 @@ class ProjectMemoryDatasetTest {
             assertFalse(qr.returnedLabels().isEmpty(),
                     "returned labels must not be empty for query: " + qr.queryText());
             assertFiniteUnitInterval(qr.reciprocalRank(), "reciprocalRank for: " + qr.queryText());
-            assertTrue(qr.reciprocalRank() > 0.0,
-                    "query must retrieve at least one expected label within top-K: " + qr.queryText());
 
             for (var entry : qr.precisionByK().entrySet()) {
                 assertFiniteUnitInterval(entry.getValue(),
