@@ -122,7 +122,7 @@ public final class SpeechBenchmarkMain {
                 + " (discovered " + importReport.discoveredAudioFiles() + ", skipped " + importReport.skippedSamples() + ")");
     }
 
-    private static List<SpeechEvaluationQuery> parseQueries(Path manifest, Path corpusDir, int k)
+    static List<SpeechEvaluationQuery> parseQueries(Path manifest, Path corpusDir, int k)
             throws IOException {
         List<SpeechEvaluationQuery> queries = new ArrayList<>();
         List<String> lines = Files.readAllLines(manifest, StandardCharsets.UTF_8);
@@ -131,14 +131,24 @@ public final class SpeechBenchmarkMain {
             if (line.isEmpty() || line.startsWith("#")) {
                 continue;
             }
-            String[] fields = line.split("\t");
-            if (fields.length < 3) {
+            String[] fields = line.split("\t", -1);
+            if (fields.length != 3) {
                 throw new IOException("manifest line " + lineNo
-                        + " must have 3 tab-separated fields (queryId, queryWavPath, relevantIds): " + line);
+                        + " must have exactly 3 tab-separated fields (queryId, queryWavPath, relevantIds): " + line);
             }
             String queryId = fields[0].strip();
-            Path queryWav = resolveAudio(corpusDir, fields[1].strip());
+            if (queryId.isEmpty()) {
+                throw new IOException("manifest line " + lineNo + " has a blank queryId: " + line);
+            }
+            String queryWavField = fields[1].strip();
+            if (queryWavField.isEmpty()) {
+                throw new IOException("manifest line " + lineNo + " has a blank queryWavPath: " + line);
+            }
+            Path queryWav = resolveAudio(corpusDir, queryWavField);
             Set<String> relevant = parseRelevant(fields[2]);
+            if (relevant.isEmpty()) {
+                throw new IOException("manifest line " + lineNo + " has no relevant sample IDs: " + line);
+            }
             queries.add(new SpeechEvaluationQuery(
                     queryId,
                     queryWav,
