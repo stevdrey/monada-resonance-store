@@ -148,9 +148,11 @@ public final class ProjectMemoryDataset {
                 new DatasetAtom("ka_evaluation_commands",
                         "Useful evaluation commands include ./gradlew test, ./gradlew :monada-evaluation:test, " +
                                 "./gradlew :monada-evaluation:run -q, ./gradlew :monada-evaluation:runExpanded -q, " +
-                                "./gradlew :monada-evaluation:runProfileComparison -q, and " +
-                                "./gradlew :monada-evaluation:runLatency -q.",
-                        List.of("evaluation command list", "latency profiling command"))
+                                "./gradlew :monada-evaluation:runProfileComparison -q, " +
+                                "./gradlew :monada-evaluation:runLatency -q, and " +
+                                "./gradlew :monada-evaluation:runProjectMemory -q.",
+                        List.of("evaluation command list", "latency profiling command",
+                                "project memory evaluation command"))
         );
 
         var queries = List.of(
