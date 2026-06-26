@@ -26,3 +26,10 @@ tasks.register<JavaExec>("runProfileComparison") {
     mainClass.set("com.monada.evaluation.ProfileComparisonMain")
     classpath = sourceSets["main"].runtimeClasspath
 }
+
+tasks.register<JavaExec>("runLatency") {
+    description = "Run recall latency and scan diagnostics over the expanded dataset"
+    group = "application"
+    mainClass.set("com.monada.evaluation.LatencyProfileMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
