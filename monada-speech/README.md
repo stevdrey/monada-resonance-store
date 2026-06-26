@@ -269,6 +269,77 @@ for (Map.Entry<SpeechCondition, SpeechEvaluationMetrics> entry : report.metricsB
 - Missed relevant sample IDs are sorted deterministically.
 - Grouped metrics by `SpeechCondition` and `SpeechTaskType` are included when query metadata can be resolved.
 
+## Protected Speech Benchmark
+
+The benchmark layer wraps `SpeechRetrievalEvaluator` in a two-mode workflow so that
+retrieval-quality regressions are caught in CI without ever requiring a licensed dataset.
+
+### Two modes
+
+| Mode | Corpus | Enforced in CI? | Entrypoint |
+| --- | --- | --- | --- |
+| `PROTECTED` | deterministic generated sine-WAV fixtures | **yes** — pinned baseline gate | `GeneratedSpeechBenchmarkIntegrationTest` |
+| `EXPLORATORY` | local real corpus (TORGO-style), stays outside git | **no** | `./gradlew :monada-speech:runSpeechBenchmark` |
+
+`SpeechBenchmarkReport.render()` labels the mode and policy prominently and is fully
+deterministic (no timestamps), so its output can be saved and diffed across runs.
+
+### Threshold policy
+
+The protected baseline pins the structural shape (corpus size, query count, `k`) and each
+aggregate metric (Precision@k, Recall@k, Hit rate@k, MRR) inside
+`GeneratedSpeechBenchmarkIntegrationTest`, compared via `SpeechBenchmarkBaseline` with a
+tight tolerance (`1e-9`). This mirrors `EvaluationBaselineRegressionTest`: structural shape
+must match exactly, metrics within tolerance. If a legitimate change alters a pinned value,
+update the constants in that test **in the same commit** with a rationale.
+
+### Running the protected mode
+
+```bash
+./gradlew :monada-speech:test          # includes the protected generated-fixture gate
+```
+
+### Running the exploratory mode (local real data)
+
+The exploratory entrypoint imports a local TORGO-style corpus, encodes features, evaluates a
+query manifest, and prints a mode-labeled report. It performs no downloads — the corpus must
+already exist on disk and is never committed.
+
+```bash
+./gradlew :monada-speech:runSpeechBenchmark \
+  -Dmonada.speech.benchmark.dir=/path/to/corpus \
+  -Dmonada.speech.benchmark.queries=/path/to/queries.tsv
+```
+
+Configuration (system property first, then environment variable):
+
+| Setting | System property | Environment variable | Default |
+| --- | --- | --- | --- |
+| corpus dir (required) | `monada.speech.benchmark.dir` | `MONADA_SPEECH_BENCHMARK_DIR` | — |
+| query manifest (required) | `monada.speech.benchmark.queries` | `MONADA_SPEECH_BENCHMARK_QUERIES` | — |
+| evaluation `k` | `monada.speech.benchmark.k` | `MONADA_SPEECH_BENCHMARK_K` | `5` |
+| encoder dimensions | `monada.speech.benchmark.dims` | `MONADA_SPEECH_BENCHMARK_DIMS` | `64` |
+
+Query manifest format (UTF-8; blank lines and `#` comments ignored). Each query is three
+tab-separated fields — `queryId`, `queryWavPath` (absolute or relative to the corpus dir),
+and a comma-separated list of relevant sample IDs (the stable IDs produced by
+`TorgoDatasetImporter`, e.g. `torgo_m01_session1_words_hello`):
+
+```
+q_hello	M01/Session1/words/hello.wav	torgo_m01_session1_words_hello
+```
+
+`LocalSpeechBenchmarkTest` exercises the same exploratory path but is gated by
+`@EnabledIfEnvironmentVariable(MONADA_SPEECH_BENCHMARK_DIR)` and is **skipped** when no local
+corpus is configured — so CI failures come only from the protected generated-fixture
+baseline, never from an absent real dataset.
+
+### Follow-up guidance
+
+When a real-data exploratory run reveals a recall gap, do not loosen the protected baseline.
+Instead capture the exploratory report, reproduce the regression in a generated fixture if
+possible, and open a focused change to the encoder/ranking with updated baseline rationale.
+
 ## Future Work
 
 - Integration with monada-api for speech queries

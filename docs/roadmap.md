@@ -16,6 +16,9 @@ The project follows a measurement-first path: improve retrieval quality only aft
 - A/B profile comparison.
 - Evaluation diagnostics.
 - Speech sample storage, TORGO-style import, acoustic feature encoding, and acoustic retrieval.
+- Speech retrieval evaluation metrics (Precision@k, Recall@k, Hit rate@k, MRR).
+- Protected speech benchmark: a CI-enforced generated-fixture baseline plus a non-enforced
+  exploratory local real-data mode, with mode-labeled deterministic reports.
 
 ## Near-Term Direction
 
