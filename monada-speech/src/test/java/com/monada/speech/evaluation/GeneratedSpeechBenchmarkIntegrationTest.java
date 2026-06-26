@@ -25,6 +25,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -51,6 +52,7 @@ class GeneratedSpeechBenchmarkIntegrationTest {
     private static final int DURATION_MS = 500;
     private static final int DIMENSIONS = 64;
     private static final int K = 2;
+    private static final int BITS_PER_SAMPLE = 16;
 
     // Protected baseline for the generated three-sample corpus and two queries below.
     // Each query reuses a stored sample's audio, so its same-frequency sample ranks first
@@ -152,25 +154,25 @@ class GeneratedSpeechBenchmarkIntegrationTest {
                 new SpeechRetrievalOptions(K, null, null, null, null, null));
 
         var report = new SpeechBenchmarkRunner().run(
-                SpeechBenchmarkMode.PROTECTED, "determinism-check",
+                SpeechBenchmarkMode.PROTECTED, storeRoot.getFileName().toString(),
                 List.of(queryA), retriever, sampleStore, featureStore,
                 new SpeechEvaluationOptions(K, true));
         // Strip the label line, which intentionally encodes the per-run store name.
         return report.render().lines()
                 .filter(line -> !line.startsWith("Label:"))
-                .reduce("", (a, b) -> a + b + "\n");
+                .collect(Collectors.joining("\n", "", "\n"));
     }
 
     // Helpers (sine-WAV synthesis mirrors SpeechRetrievalEvaluatorIntegrationTest)
 
     private Path createSineWav(String name, float frequency) throws IOException {
         Path wavFile = tempDir.resolve(name + ".wav");
-        Files.write(wavFile, generateSineWave(SAMPLE_RATE, DURATION_MS, 1, 16, frequency));
+        Files.write(wavFile, generateSineWave(SAMPLE_RATE, DURATION_MS, 1, frequency));
         return wavFile;
     }
 
     private static byte[] generateSineWave(
-            int sampleRate, int durationMs, int channels, int bitsPerSample, float frequencyHz) {
+            int sampleRate, int durationMs, int channels, float frequencyHz) {
         int numSamples = (int) ((sampleRate * durationMs) / 1000.0);
         byte[] pcmData = new byte[numSamples * channels * 2];
         ByteBuffer buffer = ByteBuffer.wrap(pcmData).order(ByteOrder.LITTLE_ENDIAN);
@@ -182,7 +184,7 @@ class GeneratedSpeechBenchmarkIntegrationTest {
                 buffer.putShort(value);
             }
         }
-        return buildWavHeader(sampleRate, channels, bitsPerSample, pcmData.length, pcmData);
+        return buildWavHeader(sampleRate, channels, BITS_PER_SAMPLE, pcmData.length, pcmData);
     }
 
     private static byte[] buildWavHeader(
