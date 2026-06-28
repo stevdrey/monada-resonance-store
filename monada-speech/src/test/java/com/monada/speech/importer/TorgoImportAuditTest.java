@@ -158,8 +158,10 @@ class TorgoImportAuditTest {
         writeTxt(dir, "x", "text");
 
         SpeechSampleStore store = store(tempDir.resolve("storeX"));
-        new TorgoDatasetImporter().auditFrom(dataset, null);
+        TorgoImportAuditReport report = new TorgoDatasetImporter().auditFrom(dataset, null);
 
+        assertTrue(report.dryRun(), "report must indicate dry-run");
+        assertEquals(0, report.importedSamples(), "dry-run must not report any imported samples");
         assertTrue(store.findAll().isEmpty(), "dry-run must not write to any store");
     }
 
@@ -469,5 +471,25 @@ class TorgoImportAuditTest {
         assertDoesNotThrow(() -> new TorgoImportAuditReport(
                 5, 0, 5, true,
                 Map.of(), Map.of(), Map.of(), Map.of(), Map.of()));
+    }
+
+    @Test
+    void preservesInsertionOrderInGroupedMaps() {
+        var bySpeaker = new java.util.LinkedHashMap<String, Integer>();
+        bySpeaker.put("M02", 1);
+        bySpeaker.put("M01", 1);
+        bySpeaker.put("FC1", 1);
+
+        var byCondition = new java.util.EnumMap<SpeechCondition, Integer>(SpeechCondition.class);
+        byCondition.put(SpeechCondition.CONTROL, 1);
+        byCondition.put(SpeechCondition.DYSARTHRIC, 2);
+
+        var report = new TorgoImportAuditReport(
+                3, 3, 0, false,
+                bySpeaker, byCondition, Map.of(), Map.of(), Map.of());
+
+        assertEquals(List.of("M02", "M01", "FC1"), List.copyOf(report.bySpeaker().keySet()));
+        assertEquals(List.of(SpeechCondition.CONTROL, SpeechCondition.DYSARTHRIC),
+                List.copyOf(report.byCondition().keySet()));
     }
 }

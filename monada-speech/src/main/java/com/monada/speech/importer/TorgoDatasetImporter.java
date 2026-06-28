@@ -17,7 +17,9 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Imports TORGO-style speech samples from a local directory tree into a
@@ -66,6 +68,7 @@ public final class TorgoDatasetImporter {
      */
     public TorgoDatasetImportReport importFrom(Path datasetRoot, SpeechSampleStore sampleStore)
             throws IOException {
+        Objects.requireNonNull(sampleStore, "sampleStore");
         ScanResult result = scan(datasetRoot, sampleStore);
         return new TorgoDatasetImportReport(
                 result.auditReport().discoveredAudioFiles(),
@@ -119,7 +122,7 @@ public final class TorgoDatasetImporter {
         Map<SpeechCondition, Integer> byCondition = new EnumMap<>(SpeechCondition.class);
         Map<SpeechTaskType, Integer> byTaskType = new EnumMap<>(SpeechTaskType.class);
         Map<String, Integer> byLanguage = new LinkedHashMap<>();
-        Map<WarningCategory, List<Path>> warningPaths = new EnumMap<>(WarningCategory.class);
+        WarningAccumulator warningAccumulator = new WarningAccumulator();
         List<TorgoDatasetImportWarning> warnings = new ArrayList<>();
 
         List<Path> wavFiles;
@@ -139,7 +142,7 @@ public final class TorgoDatasetImporter {
             try {
                 transcript = TorgoTranscriptResolver.resolve(wavPath);
             } catch (IOException e) {
-                recordWarning(warningPaths, WarningCategory.UNREADABLE_TRANSCRIPT, wavPath);
+                warningAccumulator.record(WarningCategory.UNREADABLE_TRANSCRIPT, wavPath);
                 warnings.add(new TorgoDatasetImportWarning(wavPath, WarningCategory.UNREADABLE_TRANSCRIPT.displayName()));
                 skipped++;
                 continue;
@@ -150,7 +153,7 @@ public final class TorgoDatasetImporter {
                 WarningCategory cat = companionExists
                         ? WarningCategory.BLANK_TRANSCRIPT
                         : WarningCategory.MISSING_TRANSCRIPT;
-                recordWarning(warningPaths, cat, wavPath);
+                warningAccumulator.record(cat, wavPath);
                 warnings.add(new TorgoDatasetImportWarning(wavPath, cat.displayName()));
                 skipped++;
                 continue;
@@ -161,7 +164,7 @@ public final class TorgoDatasetImporter {
             try {
                 audioMetadata = WavMetadataReader.read(wavPath);
             } catch (IOException e) {
-                recordWarning(warningPaths, WarningCategory.UNREADABLE_AUDIO, wavPath);
+                warningAccumulator.record(WarningCategory.UNREADABLE_AUDIO, wavPath);
                 warnings.add(new TorgoDatasetImportWarning(wavPath, WarningCategory.UNREADABLE_AUDIO.displayName()));
                 skipped++;
                 continue;
@@ -170,7 +173,7 @@ public final class TorgoDatasetImporter {
             // Infer path-based fields
             Optional<String> speakerIdOpt = TorgoPathInference.speakerId(datasetRoot, wavPath);
             if (speakerIdOpt.isEmpty()) {
-                recordWarning(warningPaths, WarningCategory.UNSUPPORTED_LAYOUT, wavPath);
+                warningAccumulator.record(WarningCategory.UNSUPPORTED_LAYOUT, wavPath);
                 warnings.add(new TorgoDatasetImportWarning(wavPath, WarningCategory.UNSUPPORTED_LAYOUT.displayName()));
                 skipped++;
                 continue;
@@ -185,7 +188,7 @@ public final class TorgoDatasetImporter {
 
             // Duplicate detection
             if (seenIds.contains(sampleId)) {
-                recordWarning(warningPaths, WarningCategory.DUPLICATE_ID, wavPath);
+                warningAccumulator.record(WarningCategory.DUPLICATE_ID, wavPath);
                 warnings.add(new TorgoDatasetImportWarning(wavPath, WarningCategory.DUPLICATE_ID.displayName()));
                 skipped++;
                 continue;
@@ -218,12 +221,10 @@ public final class TorgoDatasetImporter {
         }
 
         Map<WarningCategory, TorgoAuditWarningGroup> warningGroups = new EnumMap<>(WarningCategory.class);
-        for (Map.Entry<WarningCategory, List<Path>> entry : warningPaths.entrySet()) {
-            List<Path> paths = entry.getValue();
-            int count = paths.size();
-            List<Path> examples = paths.subList(0, Math.min(count, TorgoAuditWarningGroup.MAX_EXAMPLES));
-            warningGroups.put(entry.getKey(),
-                    new TorgoAuditWarningGroup(entry.getKey(), count, examples));
+        for (WarningCategory category : warningAccumulator.categories()) {
+            int count = warningAccumulator.count(category);
+            warningGroups.put(category,
+                    new TorgoAuditWarningGroup(category, count, warningAccumulator.examples(category)));
         }
 
         TorgoImportAuditReport auditReport = new TorgoImportAuditReport(
@@ -261,8 +262,32 @@ public final class TorgoDatasetImporter {
         return "torgo_" + joined.toLowerCase();
     }
 
-    private static void recordWarning(Map<WarningCategory, List<Path>> warningPaths,
-                                      WarningCategory category, Path path) {
-        warningPaths.computeIfAbsent(category, k -> new ArrayList<>()).add(path);
+    /**
+     * Accumulates warning counts and a capped set of example paths per category.
+     * Keeps only the first {@value TorgoAuditWarningGroup#MAX_EXAMPLES} paths in memory.
+     */
+    private static final class WarningAccumulator {
+        private final Map<WarningCategory, Integer> counts = new EnumMap<>(WarningCategory.class);
+        private final Map<WarningCategory, List<Path>> examples = new EnumMap<>(WarningCategory.class);
+
+        void record(WarningCategory category, Path path) {
+            counts.merge(category, 1, Integer::sum);
+            List<Path> list = examples.computeIfAbsent(category, k -> new ArrayList<>());
+            if (list.size() < TorgoAuditWarningGroup.MAX_EXAMPLES) {
+                list.add(path);
+            }
+        }
+
+        int count(WarningCategory category) {
+            return counts.getOrDefault(category, 0);
+        }
+
+        List<Path> examples(WarningCategory category) {
+            return List.copyOf(examples.getOrDefault(category, List.of()));
+        }
+
+        Set<WarningCategory> categories() {
+            return counts.keySet();
+        }
     }
 }

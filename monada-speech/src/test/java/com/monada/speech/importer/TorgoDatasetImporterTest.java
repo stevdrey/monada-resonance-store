@@ -398,6 +398,18 @@ class TorgoDatasetImporterTest {
     }
 
     @Test
+    void importFromRejectsNullStore() throws IOException {
+        Path dataset = tempDir.resolve("torgo");
+        Path dir = dataset.resolve("M01/Session1/words");
+        Files.createDirectories(dir);
+        writeWav(dir, "hello.wav", makeSineWav(16000, 100, 1, 16));
+        writeTxt(dir, "hello", "hello");
+
+        assertThrows(NullPointerException.class,
+                () -> new TorgoDatasetImporter().importFrom(dataset, null));
+    }
+
+    @Test
     void importFromWarningsAreNotCappedAndPreserveDiscoveryOrder() throws IOException {
         Path dataset = tempDir.resolve("torgo");
         Path dir = dataset.resolve("M01/Session1/words");

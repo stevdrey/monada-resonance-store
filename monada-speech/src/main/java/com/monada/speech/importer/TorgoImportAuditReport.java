@@ -3,6 +3,9 @@ package com.monada.speech.importer;
 import com.monada.speech.domain.SpeechCondition;
 import com.monada.speech.domain.SpeechTaskType;
 
+import java.util.Collections;
+import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 
@@ -57,11 +60,21 @@ public record TorgoImportAuditReport(
         Objects.requireNonNull(byTaskType, "byTaskType");
         Objects.requireNonNull(byLanguage, "byLanguage");
         Objects.requireNonNull(warningGroups, "warningGroups");
-        bySpeaker = Map.copyOf(bySpeaker);
-        byCondition = Map.copyOf(byCondition);
-        byTaskType = Map.copyOf(byTaskType);
-        byLanguage = Map.copyOf(byLanguage);
-        warningGroups = Map.copyOf(warningGroups);
+        bySpeaker = bySpeaker.isEmpty()
+                ? Map.of()
+                : Collections.unmodifiableMap(new LinkedHashMap<>(bySpeaker));
+        byCondition = byCondition.isEmpty()
+                ? Map.of()
+                : Collections.unmodifiableMap(new EnumMap<>(byCondition));
+        byTaskType = byTaskType.isEmpty()
+                ? Map.of()
+                : Collections.unmodifiableMap(new EnumMap<>(byTaskType));
+        byLanguage = byLanguage.isEmpty()
+                ? Map.of()
+                : Collections.unmodifiableMap(new LinkedHashMap<>(byLanguage));
+        warningGroups = warningGroups.isEmpty()
+                ? Map.of()
+                : Collections.unmodifiableMap(new EnumMap<>(warningGroups));
     }
 
     /** Total number of distinct warning categories observed. */
