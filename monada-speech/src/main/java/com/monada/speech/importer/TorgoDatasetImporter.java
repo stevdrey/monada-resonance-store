@@ -12,8 +12,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -52,6 +55,10 @@ public final class TorgoDatasetImporter {
     /**
      * Imports WAV files found under {@code datasetRoot} into {@code sampleStore}.
      *
+     * <p>This is a convenience wrapper around
+     * {@link #auditFrom(Path, SpeechSampleStore)} that returns the lightweight
+     * {@link TorgoDatasetImportReport} for backward compatibility.
+     *
      * @param datasetRoot root directory to scan; must exist
      * @param sampleStore store to persist valid samples into
      * @return an import report with counts and any warnings
@@ -59,15 +66,58 @@ public final class TorgoDatasetImporter {
      */
     public TorgoDatasetImportReport importFrom(Path datasetRoot, SpeechSampleStore sampleStore)
             throws IOException {
+        var audit = auditFrom(datasetRoot, sampleStore);
+        var warnings = audit.warningGroups().values().stream()
+                .flatMap(group ->
+                    group.pathExamples().stream()
+                        .map(p -> new TorgoDatasetImportWarning(p, group.category().displayName()))
+                )
+                .toList();
+        return new TorgoDatasetImportReport(
+                audit.discoveredAudioFiles(),
+                audit.importedSamples(),
+                audit.skippedSamples(),
+                warnings);
+    }
+
+    /**
+     * Scans or imports WAV files found under {@code datasetRoot} and returns a
+     * rich {@link TorgoImportAuditReport} with grouped counts and categorised
+     * warnings.
+     *
+     * <p>When {@code sampleStore} is {@code null} the method performs a
+     * <em>dry-run</em>: all validation and inference steps run as normal but no
+     * samples are written. The resulting report has {@code importedSamples == 0}
+     * and {@code dryRun == true}; the grouped maps ({@code bySpeaker}, etc.)
+     * reflect what <em>would</em> have been imported.
+     *
+     * <p>When {@code sampleStore} is non-{@code null} the method behaves like
+     * {@link #importFrom} but additionally populates the grouped maps.
+     *
+     * @param datasetRoot root directory to scan; must exist
+     * @param sampleStore store to persist valid samples into, or {@code null}
+     *                    for a dry-run scan
+     * @return a rich audit report
+     * @throws IOException if scanning the directory tree fails
+     */
+    public TorgoImportAuditReport auditFrom(Path datasetRoot, SpeechSampleStore sampleStore)
+            throws IOException {
         if (!Files.isDirectory(datasetRoot)) {
             throw new IOException("datasetRoot does not exist or is not a directory: " + datasetRoot);
         }
 
+        boolean dryRun = (sampleStore == null);
         Instant importTime = Instant.now();
-        List<TorgoDatasetImportWarning> warnings = new ArrayList<>();
+
         LinkedHashSet<String> seenIds = new LinkedHashSet<>();
         int imported = 0;
         int skipped = 0;
+
+        Map<String, Integer> bySpeaker = new LinkedHashMap<>();
+        Map<SpeechCondition, Integer> byCondition = new EnumMap<>(SpeechCondition.class);
+        Map<SpeechTaskType, Integer> byTaskType = new EnumMap<>(SpeechTaskType.class);
+        Map<String, Integer> byLanguage = new LinkedHashMap<>();
+        Map<WarningCategory, List<Path>> warningPaths = new EnumMap<>(WarningCategory.class);
 
         List<Path> wavFiles;
         try (var stream = Files.walk(datasetRoot)) {
@@ -86,16 +136,17 @@ public final class TorgoDatasetImporter {
             try {
                 transcript = TorgoTranscriptResolver.resolve(wavPath);
             } catch (IOException e) {
-                warnings.add(new TorgoDatasetImportWarning(wavPath,
-                        "unreadable transcript file: " + e.getMessage()));
+                recordWarning(warningPaths, WarningCategory.UNREADABLE_TRANSCRIPT, wavPath);
                 skipped++;
                 continue;
             }
 
             if (transcript.isEmpty()) {
                 boolean companionExists = Files.exists(siblingTxt(wavPath));
-                String reason = companionExists ? "blank transcript" : "missing transcript";
-                warnings.add(new TorgoDatasetImportWarning(wavPath, reason));
+                WarningCategory cat = companionExists
+                        ? WarningCategory.BLANK_TRANSCRIPT
+                        : WarningCategory.MISSING_TRANSCRIPT;
+                recordWarning(warningPaths, cat, wavPath);
                 skipped++;
                 continue;
             }
@@ -105,8 +156,7 @@ public final class TorgoDatasetImporter {
             try {
                 audioMetadata = WavMetadataReader.read(wavPath);
             } catch (IOException e) {
-                warnings.add(new TorgoDatasetImportWarning(wavPath,
-                        "unreadable or unsupported audio file: " + e.getMessage()));
+                recordWarning(warningPaths, WarningCategory.UNREADABLE_AUDIO, wavPath);
                 skipped++;
                 continue;
             }
@@ -114,46 +164,70 @@ public final class TorgoDatasetImporter {
             // Infer path-based fields
             Optional<String> speakerIdOpt = TorgoPathInference.speakerId(datasetRoot, wavPath);
             if (speakerIdOpt.isEmpty()) {
-                warnings.add(new TorgoDatasetImportWarning(wavPath,
-                        "cannot infer speaker id (file at dataset root)"));
+                recordWarning(warningPaths, WarningCategory.UNSUPPORTED_LAYOUT, wavPath);
                 skipped++;
                 continue;
             }
             String speakerId = speakerIdOpt.get();
             SpeechCondition condition = TorgoPathInference.condition(speakerId);
             SpeechTaskType taskType = TorgoPathInference.taskType(datasetRoot, wavPath);
+            String language = "en-US";
 
             // Derive deterministic stable ID
             String sampleId = deriveId(datasetRoot, wavPath);
 
             // Duplicate detection
             if (seenIds.contains(sampleId)) {
-                warnings.add(new TorgoDatasetImportWarning(wavPath,
-                        "duplicate sample id: " + sampleId));
+                recordWarning(warningPaths, WarningCategory.DUPLICATE_ID, wavPath);
                 skipped++;
                 continue;
             }
             seenIds.add(sampleId);
 
-            SpeechSample sample = new SpeechSample(
-                    sampleId,
-                    speakerId,
-                    SpeechDatasetSource.TORGO,
-                    wavPath,
-                    transcript.get(),
-                    List.of(),
-                    condition,
-                    taskType,
-                    "en-US",
-                    audioMetadata,
-                    importTime
-            );
+            // Accumulate grouped counts
+            bySpeaker.merge(speakerId, 1, Integer::sum);
+            byCondition.merge(condition, 1, Integer::sum);
+            byTaskType.merge(taskType, 1, Integer::sum);
+            byLanguage.merge(language, 1, Integer::sum);
 
-            sampleStore.save(sample);
-            imported++;
+            if (!dryRun) {
+                SpeechSample sample = new SpeechSample(
+                        sampleId,
+                        speakerId,
+                        SpeechDatasetSource.TORGO,
+                        wavPath,
+                        transcript.get(),
+                        List.of(),
+                        condition,
+                        taskType,
+                        language,
+                        audioMetadata,
+                        importTime
+                );
+                sampleStore.save(sample);
+                imported++;
+            }
         }
 
-        return new TorgoDatasetImportReport(discovered, imported, skipped, warnings);
+        Map<WarningCategory, TorgoAuditWarningGroup> warningGroups = new EnumMap<>(WarningCategory.class);
+        for (Map.Entry<WarningCategory, List<Path>> entry : warningPaths.entrySet()) {
+            List<Path> paths = entry.getValue();
+            int count = paths.size();
+            List<Path> examples = paths.subList(0, Math.min(count, TorgoAuditWarningGroup.MAX_EXAMPLES));
+            warningGroups.put(entry.getKey(),
+                    new TorgoAuditWarningGroup(entry.getKey(), count, examples));
+        }
+
+        return new TorgoImportAuditReport(
+                discovered,
+                imported,
+                skipped,
+                dryRun,
+                bySpeaker,
+                byCondition,
+                byTaskType,
+                byLanguage,
+                warningGroups);
     }
 
     /**
@@ -176,6 +250,11 @@ public final class TorgoDatasetImporter {
             joined = joined.substring(0, joined.length() - 4);
         }
         return "torgo_" + joined.toLowerCase();
+    }
+
+    private static void recordWarning(Map<WarningCategory, List<Path>> warningPaths,
+                                      WarningCategory category, Path path) {
+        warningPaths.computeIfAbsent(category, k -> new ArrayList<>()).add(path);
     }
 
     private static Path siblingTxt(Path wavPath) {
