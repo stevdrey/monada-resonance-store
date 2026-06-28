@@ -157,12 +157,14 @@ class TorgoImportAuditTest {
         writeWav(dir, "x.wav", wav);
         writeTxt(dir, "x", "text");
 
-        SpeechSampleStore store = store(tempDir.resolve("storeX"));
+        int filesBefore = countFiles(dataset);
+
         TorgoImportAuditReport report = new TorgoDatasetImporter().auditFrom(dataset, null);
 
         assertTrue(report.dryRun(), "report must indicate dry-run");
         assertEquals(0, report.importedSamples(), "dry-run must not report any imported samples");
-        assertTrue(store.findAll().isEmpty(), "dry-run must not write to any store");
+        assertEquals(filesBefore, countFiles(dataset),
+                "dry-run must not create or modify any files under the dataset root");
     }
 
     // -------------------------------------------------------------------------
@@ -505,5 +507,11 @@ class TorgoImportAuditTest {
         assertEquals(List.of("M02", "M01", "FC1"), List.copyOf(report.bySpeaker().keySet()));
         assertEquals(List.of(SpeechCondition.CONTROL, SpeechCondition.DYSARTHRIC),
                 List.copyOf(report.byCondition().keySet()));
+    }
+
+    private int countFiles(Path root) throws IOException {
+        try (var stream = Files.walk(root)) {
+            return (int) stream.filter(Files::isRegularFile).count();
+        }
     }
 }

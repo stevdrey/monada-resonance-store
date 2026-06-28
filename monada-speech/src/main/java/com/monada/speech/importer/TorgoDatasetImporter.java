@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -143,8 +144,10 @@ public final class TorgoDatasetImporter {
                 transcript = TorgoTranscriptResolver.resolve(wavPath);
             } catch (IOException e) {
                 warningAccumulator.record(WarningCategory.UNREADABLE_TRANSCRIPT, wavPath);
-                warnings.add(new TorgoDatasetImportWarning(wavPath,
-                        "unreadable transcript file: " + e.getMessage()));
+                if (!dryRun) {
+                    warnings.add(new TorgoDatasetImportWarning(wavPath,
+                            "unreadable transcript file: " + e.getMessage()));
+                }
                 skipped++;
                 continue;
             }
@@ -155,7 +158,9 @@ public final class TorgoDatasetImporter {
                         ? WarningCategory.BLANK_TRANSCRIPT
                         : WarningCategory.MISSING_TRANSCRIPT;
                 warningAccumulator.record(cat, wavPath);
-                warnings.add(new TorgoDatasetImportWarning(wavPath, cat.displayName()));
+                if (!dryRun) {
+                    warnings.add(new TorgoDatasetImportWarning(wavPath, cat.displayName()));
+                }
                 skipped++;
                 continue;
             }
@@ -166,8 +171,10 @@ public final class TorgoDatasetImporter {
                 audioMetadata = WavMetadataReader.read(wavPath);
             } catch (IOException e) {
                 warningAccumulator.record(WarningCategory.UNREADABLE_AUDIO, wavPath);
-                warnings.add(new TorgoDatasetImportWarning(wavPath,
-                        "unreadable or unsupported audio file: " + e.getMessage()));
+                if (!dryRun) {
+                    warnings.add(new TorgoDatasetImportWarning(wavPath,
+                            "unreadable or unsupported audio file: " + e.getMessage()));
+                }
                 skipped++;
                 continue;
             }
@@ -176,8 +183,10 @@ public final class TorgoDatasetImporter {
             Optional<String> speakerIdOpt = TorgoPathInference.speakerId(datasetRoot, wavPath);
             if (speakerIdOpt.isEmpty()) {
                 warningAccumulator.record(WarningCategory.UNSUPPORTED_LAYOUT, wavPath);
-                warnings.add(new TorgoDatasetImportWarning(wavPath,
-                        "cannot infer speaker id (file at dataset root)"));
+                if (!dryRun) {
+                    warnings.add(new TorgoDatasetImportWarning(wavPath,
+                            "cannot infer speaker id (file at dataset root)"));
+                }
                 skipped++;
                 continue;
             }
@@ -192,8 +201,10 @@ public final class TorgoDatasetImporter {
             // Duplicate detection
             if (seenIds.contains(sampleId)) {
                 warningAccumulator.record(WarningCategory.DUPLICATE_ID, wavPath);
-                warnings.add(new TorgoDatasetImportWarning(wavPath,
-                        "duplicate sample id: " + sampleId));
+                if (!dryRun) {
+                    warnings.add(new TorgoDatasetImportWarning(wavPath,
+                            "duplicate sample id: " + sampleId));
+                }
                 skipped++;
                 continue;
             }
@@ -260,10 +271,10 @@ public final class TorgoDatasetImporter {
         String joined = relative.toString()
                 .replace(java.io.File.separatorChar, '_')
                 .replace('/', '_');
-        if (joined.toLowerCase().endsWith(".wav")) {
+        if (joined.toLowerCase(Locale.ROOT).endsWith(".wav")) {
             joined = joined.substring(0, joined.length() - 4);
         }
-        return "torgo_" + joined.toLowerCase();
+        return "torgo_" + joined.toLowerCase(Locale.ROOT);
     }
 
     /**
