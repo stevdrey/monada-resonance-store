@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -454,5 +455,19 @@ class TorgoImportAuditTest {
         assertNotNull(group);
         assertThrows(UnsupportedOperationException.class,
                 () -> group.pathExamples().add(Path.of("/fake")));
+    }
+
+    @Test
+    void rejectsImportedPlusSkippedExceedingDiscoveredInNonDryRun() {
+        assertThrows(IllegalArgumentException.class, () -> new TorgoImportAuditReport(
+                1, 1, 1, false,
+                Map.of(), Map.of(), Map.of(), Map.of(), Map.of()));
+    }
+
+    @Test
+    void allowsDryRunWithZeroImportedAndSkippedEqualToDiscovered() {
+        assertDoesNotThrow(() -> new TorgoImportAuditReport(
+                5, 0, 5, true,
+                Map.of(), Map.of(), Map.of(), Map.of(), Map.of()));
     }
 }

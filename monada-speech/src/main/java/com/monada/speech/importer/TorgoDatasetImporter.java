@@ -66,18 +66,12 @@ public final class TorgoDatasetImporter {
      */
     public TorgoDatasetImportReport importFrom(Path datasetRoot, SpeechSampleStore sampleStore)
             throws IOException {
-        var audit = auditFrom(datasetRoot, sampleStore);
-        var warnings = audit.warningGroups().values().stream()
-                .flatMap(group ->
-                    group.pathExamples().stream()
-                        .map(p -> new TorgoDatasetImportWarning(p, group.category().displayName()))
-                )
-                .toList();
+        ScanResult result = scan(datasetRoot, sampleStore);
         return new TorgoDatasetImportReport(
-                audit.discoveredAudioFiles(),
-                audit.importedSamples(),
-                audit.skippedSamples(),
-                warnings);
+                result.auditReport().discoveredAudioFiles(),
+                result.auditReport().importedSamples(),
+                result.auditReport().skippedSamples(),
+                result.warnings());
     }
 
     /**
@@ -102,6 +96,14 @@ public final class TorgoDatasetImporter {
      */
     public TorgoImportAuditReport auditFrom(Path datasetRoot, SpeechSampleStore sampleStore)
             throws IOException {
+        return scan(datasetRoot, sampleStore).auditReport();
+    }
+
+    private record ScanResult(TorgoImportAuditReport auditReport,
+                              List<TorgoDatasetImportWarning> warnings) {
+    }
+
+    private ScanResult scan(Path datasetRoot, SpeechSampleStore sampleStore) throws IOException {
         if (!Files.isDirectory(datasetRoot)) {
             throw new IOException("datasetRoot does not exist or is not a directory: " + datasetRoot);
         }
@@ -118,6 +120,7 @@ public final class TorgoDatasetImporter {
         Map<SpeechTaskType, Integer> byTaskType = new EnumMap<>(SpeechTaskType.class);
         Map<String, Integer> byLanguage = new LinkedHashMap<>();
         Map<WarningCategory, List<Path>> warningPaths = new EnumMap<>(WarningCategory.class);
+        List<TorgoDatasetImportWarning> warnings = new ArrayList<>();
 
         List<Path> wavFiles;
         try (var stream = Files.walk(datasetRoot)) {
@@ -137,16 +140,18 @@ public final class TorgoDatasetImporter {
                 transcript = TorgoTranscriptResolver.resolve(wavPath);
             } catch (IOException e) {
                 recordWarning(warningPaths, WarningCategory.UNREADABLE_TRANSCRIPT, wavPath);
+                warnings.add(new TorgoDatasetImportWarning(wavPath, WarningCategory.UNREADABLE_TRANSCRIPT.displayName()));
                 skipped++;
                 continue;
             }
 
             if (transcript.isEmpty()) {
-                boolean companionExists = Files.exists(siblingTxt(wavPath));
+                boolean companionExists = Files.exists(TorgoPathUtils.siblingTxt(wavPath));
                 WarningCategory cat = companionExists
                         ? WarningCategory.BLANK_TRANSCRIPT
                         : WarningCategory.MISSING_TRANSCRIPT;
                 recordWarning(warningPaths, cat, wavPath);
+                warnings.add(new TorgoDatasetImportWarning(wavPath, cat.displayName()));
                 skipped++;
                 continue;
             }
@@ -157,6 +162,7 @@ public final class TorgoDatasetImporter {
                 audioMetadata = WavMetadataReader.read(wavPath);
             } catch (IOException e) {
                 recordWarning(warningPaths, WarningCategory.UNREADABLE_AUDIO, wavPath);
+                warnings.add(new TorgoDatasetImportWarning(wavPath, WarningCategory.UNREADABLE_AUDIO.displayName()));
                 skipped++;
                 continue;
             }
@@ -165,6 +171,7 @@ public final class TorgoDatasetImporter {
             Optional<String> speakerIdOpt = TorgoPathInference.speakerId(datasetRoot, wavPath);
             if (speakerIdOpt.isEmpty()) {
                 recordWarning(warningPaths, WarningCategory.UNSUPPORTED_LAYOUT, wavPath);
+                warnings.add(new TorgoDatasetImportWarning(wavPath, WarningCategory.UNSUPPORTED_LAYOUT.displayName()));
                 skipped++;
                 continue;
             }
@@ -179,6 +186,7 @@ public final class TorgoDatasetImporter {
             // Duplicate detection
             if (seenIds.contains(sampleId)) {
                 recordWarning(warningPaths, WarningCategory.DUPLICATE_ID, wavPath);
+                warnings.add(new TorgoDatasetImportWarning(wavPath, WarningCategory.DUPLICATE_ID.displayName()));
                 skipped++;
                 continue;
             }
@@ -218,7 +226,7 @@ public final class TorgoDatasetImporter {
                     new TorgoAuditWarningGroup(entry.getKey(), count, examples));
         }
 
-        return new TorgoImportAuditReport(
+        TorgoImportAuditReport auditReport = new TorgoImportAuditReport(
                 discovered,
                 imported,
                 skipped,
@@ -228,6 +236,7 @@ public final class TorgoDatasetImporter {
                 byTaskType,
                 byLanguage,
                 warningGroups);
+        return new ScanResult(auditReport, warnings);
     }
 
     /**
@@ -255,12 +264,5 @@ public final class TorgoDatasetImporter {
     private static void recordWarning(Map<WarningCategory, List<Path>> warningPaths,
                                       WarningCategory category, Path path) {
         warningPaths.computeIfAbsent(category, k -> new ArrayList<>()).add(path);
-    }
-
-    private static Path siblingTxt(Path wavPath) {
-        String filename = wavPath.getFileName().toString();
-        int dot = filename.lastIndexOf('.');
-        String stem = dot > 0 ? filename.substring(0, dot) : filename;
-        return wavPath.resolveSibling(stem + ".txt");
     }
 }

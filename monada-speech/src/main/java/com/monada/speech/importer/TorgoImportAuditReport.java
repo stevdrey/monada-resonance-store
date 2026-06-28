@@ -47,6 +47,11 @@ public record TorgoImportAuditReport(
         if (skippedSamples < 0) {
             throw new IllegalArgumentException("skippedSamples must be non-negative");
         }
+        if (!dryRun && importedSamples + skippedSamples > discoveredAudioFiles) {
+            throw new IllegalArgumentException(
+                    "importedSamples (" + importedSamples + ") + skippedSamples (" + skippedSamples
+                            + ") exceeds discoveredAudioFiles (" + discoveredAudioFiles + ")");
+        }
         Objects.requireNonNull(bySpeaker, "bySpeaker");
         Objects.requireNonNull(byCondition, "byCondition");
         Objects.requireNonNull(byTaskType, "byTaskType");

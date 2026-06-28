@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -118,6 +119,14 @@ public final class SpeechBenchmarkMain {
         }
 
         Path storeRoot = Files.createTempDirectory("monada-speech-benchmark-");
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                deleteRecursively(storeRoot);
+            } catch (IOException e) {
+                System.err.println("warning: failed to clean up benchmark temp directory "
+                        + storeRoot + ": " + e.getMessage());
+            }
+        }));
         SpeechSampleStore sampleStore = new FileSpeechSampleStore(storeRoot);
         SpeechFeatureStore featureStore = new FileSpeechFeatureStore(storeRoot);
 
@@ -246,6 +255,18 @@ public final class SpeechBenchmarkMain {
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException(
                     "invalid integer for " + systemProperty + "/" + envVar + ": " + value, e);
+        }
+    }
+
+    static void deleteRecursively(Path root) throws IOException {
+        if (!Files.exists(root)) {
+            return;
+        }
+        try (var stream = Files.walk(root)) {
+            List<Path> paths = stream.sorted(Comparator.reverseOrder()).toList();
+            for (Path p : paths) {
+                Files.deleteIfExists(p);
+            }
         }
     }
 }
