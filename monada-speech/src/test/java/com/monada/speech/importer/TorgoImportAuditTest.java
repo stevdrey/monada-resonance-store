@@ -467,6 +467,20 @@ class TorgoImportAuditTest {
     }
 
     @Test
+    void rejectsImportedPlusSkippedExceedingDiscoveredInDryRun() {
+        assertThrows(IllegalArgumentException.class, () -> new TorgoImportAuditReport(
+                1, 0, 2, true,
+                Map.of(), Map.of(), Map.of(), Map.of(), Map.of()));
+    }
+
+    @Test
+    void rejectsNonZeroImportedInDryRun() {
+        assertThrows(IllegalArgumentException.class, () -> new TorgoImportAuditReport(
+                5, 1, 0, true,
+                Map.of(), Map.of(), Map.of(), Map.of(), Map.of()));
+    }
+
+    @Test
     void allowsDryRunWithZeroImportedAndSkippedEqualToDiscovered() {
         assertDoesNotThrow(() -> new TorgoImportAuditReport(
                 5, 0, 5, true,

@@ -143,7 +143,8 @@ public final class TorgoDatasetImporter {
                 transcript = TorgoTranscriptResolver.resolve(wavPath);
             } catch (IOException e) {
                 warningAccumulator.record(WarningCategory.UNREADABLE_TRANSCRIPT, wavPath);
-                warnings.add(new TorgoDatasetImportWarning(wavPath, WarningCategory.UNREADABLE_TRANSCRIPT.displayName()));
+                warnings.add(new TorgoDatasetImportWarning(wavPath,
+                        "unreadable transcript file: " + e.getMessage()));
                 skipped++;
                 continue;
             }
@@ -165,7 +166,8 @@ public final class TorgoDatasetImporter {
                 audioMetadata = WavMetadataReader.read(wavPath);
             } catch (IOException e) {
                 warningAccumulator.record(WarningCategory.UNREADABLE_AUDIO, wavPath);
-                warnings.add(new TorgoDatasetImportWarning(wavPath, WarningCategory.UNREADABLE_AUDIO.displayName()));
+                warnings.add(new TorgoDatasetImportWarning(wavPath,
+                        "unreadable or unsupported audio file: " + e.getMessage()));
                 skipped++;
                 continue;
             }
@@ -174,7 +176,8 @@ public final class TorgoDatasetImporter {
             Optional<String> speakerIdOpt = TorgoPathInference.speakerId(datasetRoot, wavPath);
             if (speakerIdOpt.isEmpty()) {
                 warningAccumulator.record(WarningCategory.UNSUPPORTED_LAYOUT, wavPath);
-                warnings.add(new TorgoDatasetImportWarning(wavPath, WarningCategory.UNSUPPORTED_LAYOUT.displayName()));
+                warnings.add(new TorgoDatasetImportWarning(wavPath,
+                        "cannot infer speaker id (file at dataset root)"));
                 skipped++;
                 continue;
             }
@@ -189,7 +192,8 @@ public final class TorgoDatasetImporter {
             // Duplicate detection
             if (seenIds.contains(sampleId)) {
                 warningAccumulator.record(WarningCategory.DUPLICATE_ID, wavPath);
-                warnings.add(new TorgoDatasetImportWarning(wavPath, WarningCategory.DUPLICATE_ID.displayName()));
+                warnings.add(new TorgoDatasetImportWarning(wavPath,
+                        "duplicate sample id: " + sampleId));
                 skipped++;
                 continue;
             }

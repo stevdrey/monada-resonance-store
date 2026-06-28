@@ -26,8 +26,11 @@ import java.util.Objects;
  * {@link #importedSamples()} is always {@code 0} and the grouped maps reflect
  * what <em>would</em> have been imported.
  *
- * <p>All maps are unmodifiable and use deterministic insertion order (import /
- * scan order within each group).
+ * <p>All maps are unmodifiable. String-keyed maps ({@link #bySpeaker()},
+ * {@link #byLanguage()}) preserve insertion (scan) order using {@code LinkedHashMap}.
+ * Enum-keyed maps ({@link #byCondition()}, {@link #byTaskType()},
+ * {@link #warningGroups()}) use {@code EnumMap} and iterate in enum declaration
+ * order, which is deterministic but not scan order.
  */
 public record TorgoImportAuditReport(
         int discoveredAudioFiles,
@@ -50,7 +53,11 @@ public record TorgoImportAuditReport(
         if (skippedSamples < 0) {
             throw new IllegalArgumentException("skippedSamples must be non-negative");
         }
-        if (!dryRun && importedSamples + skippedSamples > discoveredAudioFiles) {
+        if (dryRun && importedSamples != 0) {
+            throw new IllegalArgumentException(
+                    "importedSamples must be 0 in dry-run mode but was " + importedSamples);
+        }
+        if (importedSamples + skippedSamples > discoveredAudioFiles) {
             throw new IllegalArgumentException(
                     "importedSamples (" + importedSamples + ") + skippedSamples (" + skippedSamples
                             + ") exceeds discoveredAudioFiles (" + discoveredAudioFiles + ")");
