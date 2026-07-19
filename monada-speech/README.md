@@ -245,12 +245,10 @@ for (SpeechRetrievalResult result : results) {
 var importer = new TorgoDatasetImporter();
 TorgoDatasetImportReport report = importer.importFrom(datasetPath, sampleStore);
 
-// 2. Encode and persist acoustic vectors
+// 2. Encode new acoustic vectors and inspect coverage
 AcousticFeatureEncoder encoder = new BasicAcousticFeatureEncoder(64);
-for (SpeechSample sample : sampleStore.findAll()) {
-    FrequencyVector vector = encoder.encode(sample.audioPath());
-    featureStore.save(sample.id(), vector);
-}
+var encodingReport = new SpeechFeatureEncodingJob(encoder).run(sampleStore, featureStore);
+System.out.println(encodingReport.render());
 
 // 3. Query by acoustic similarity
 Path queryWav = Path.of("/path/to/query.wav");
@@ -261,6 +259,11 @@ List<SpeechRetrievalResult> results = retriever.search(queryWav, sampleStore, fe
 SpeechSample bestMatch = results.get(0).sample();
 double similarityScore = results.get(0).score();
 ```
+
+`SpeechFeatureEncodingJob` processes sample IDs in deterministic order. Its report
+shows newly encoded, already-present, and failed samples, plus metadata coverage and
+failure reasons. Re-running it skips sample IDs that already have a persisted vector,
+so the append-only feature store does not accumulate duplicate feature entries.
 
 ### Retrieval Characteristics
 
@@ -281,12 +284,10 @@ sample IDs and produces deterministic aggregate and per-query metrics.
 SpeechSampleStore sampleStore = new FileSpeechSampleStore(rootPath);
 SpeechFeatureStore featureStore = new FileSpeechFeatureStore(rootPath);
 
-// 2. Encode and persist acoustic vectors
+// 2. Encode new acoustic vectors and inspect coverage
 AcousticFeatureEncoder encoder = new BasicAcousticFeatureEncoder(64);
-for (SpeechSample sample : sampleStore.findAll()) {
-    FrequencyVector vector = encoder.encode(sample.audioPath());
-    featureStore.save(sample.id(), vector);
-}
+var encodingReport = new SpeechFeatureEncodingJob(encoder).run(sampleStore, featureStore);
+System.out.println(encodingReport.render());
 
 // 3. Run evaluation
 SpeechSampleRetriever retriever = new SpeechSampleRetriever(encoder);
