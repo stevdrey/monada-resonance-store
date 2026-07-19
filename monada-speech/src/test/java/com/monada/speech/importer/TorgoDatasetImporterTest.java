@@ -396,4 +396,78 @@ class TorgoDatasetImporterTest {
         assertEquals(1, report.warnings().size());
         assertEquals("missing transcript", report.warnings().get(0).reason());
     }
+
+    @Test
+    void importFromUnsupportedLayoutWarningUsesLegacyReason() throws IOException {
+        Path dataset = tempDir.resolve("torgo");
+        Files.createDirectories(dataset);
+        byte[] wav = makeSineWav(16000, 200, 1, 16);
+        writeWav(dataset, "orphan.wav", wav);
+        writeTxt(dataset, "orphan", "no speaker dir");
+
+        SpeechSampleStore store = store(tempDir.resolve("storeLayout"));
+        TorgoDatasetImportReport report = new TorgoDatasetImporter().importFrom(dataset, store);
+
+        assertEquals(1, report.skippedSamples());
+        assertEquals(1, report.warnings().size());
+        assertEquals("cannot infer speaker id (file at dataset root)",
+                report.warnings().get(0).reason());
+    }
+
+    @Test
+    void importFromUnreadableAudioWarningUsesLegacyReason() throws IOException {
+        Path dataset = tempDir.resolve("torgo");
+        Path dir = dataset.resolve("M01/Session1/words");
+        Files.createDirectories(dir);
+        writeWav(dir, "bad.wav", new byte[]{0, 1, 2, 3});
+        writeTxt(dir, "bad", "corrupt audio");
+
+        SpeechSampleStore store = store(tempDir.resolve("storeAudio"));
+        TorgoDatasetImportReport report = new TorgoDatasetImporter().importFrom(dataset, store);
+
+        assertEquals(1, report.skippedSamples());
+        assertEquals(1, report.warnings().size());
+        assertTrue(report.warnings().get(0).reason().startsWith("unreadable or unsupported audio file:"),
+                "reason should start with legacy prefix: " + report.warnings().get(0).reason());
+    }
+
+    @Test
+    void importFromRejectsNullStore() throws IOException {
+        Path dataset = tempDir.resolve("torgo");
+        Path dir = dataset.resolve("M01/Session1/words");
+        Files.createDirectories(dir);
+        writeWav(dir, "hello.wav", makeSineWav(16000, 100, 1, 16));
+        writeTxt(dir, "hello", "hello");
+
+        assertThrows(NullPointerException.class,
+                () -> new TorgoDatasetImporter().importFrom(dataset, null));
+    }
+
+    @Test
+    void importFromWarningsAreNotCappedAndPreserveDiscoveryOrder() throws IOException {
+        Path dataset = tempDir.resolve("torgo");
+        Path dir = dataset.resolve("M01/Session1/words");
+        Files.createDirectories(dir);
+        byte[] wav = makeSineWav(16000, 100, 1, 16);
+
+        // 8 missing transcripts, lexicographically sorted: word1..word8
+        for (int i = 1; i <= 8; i++) {
+            writeWav(dir, "word" + i + ".wav", wav);
+        }
+
+        SpeechSampleStore store = store(tempDir.resolve("storeCap"));
+        TorgoDatasetImportReport report = new TorgoDatasetImporter().importFrom(dataset, store);
+
+        assertEquals(8, report.discoveredAudioFiles());
+        assertEquals(0, report.importedSamples());
+        assertEquals(8, report.skippedSamples());
+        assertEquals(8, report.warnings().size(),
+                "legacy importFrom must return one warning per skipped file, not be capped");
+        for (int i = 0; i < 8; i++) {
+            assertEquals("missing transcript", report.warnings().get(i).reason());
+            assertEquals("word" + (i + 1) + ".wav",
+                    report.warnings().get(i).path().getFileName().toString(),
+                    "warning " + i + " should correspond to word" + (i + 1) + ".wav in discovery order");
+        }
+    }
 }

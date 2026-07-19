@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -143,5 +144,24 @@ class SpeechBenchmarkMainParseQueriesTest {
                 () -> SpeechBenchmarkMain.parseQueries(manifest, tempDir, 2));
         assertTrue(ex.getMessage().contains("line 1"), ex.getMessage());
         assertTrue(ex.getMessage().contains("relevant"), ex.getMessage());
+    }
+
+    @Test
+    void deleteRecursivelyRemovesNestedTempDirectory() throws IOException {
+        Path root = tempDir.resolve("benchmark-cleanup");
+        Path nested = Files.createDirectories(root.resolve("samples").resolve("nested"));
+        Files.writeString(nested.resolve("file.txt"), "data", StandardCharsets.UTF_8);
+
+        assertTrue(Files.isDirectory(root));
+        SpeechBenchmarkMain.deleteRecursively(root);
+        assertFalse(Files.exists(root));
+    }
+
+    @Test
+    void deleteRecursivelyIsNoOpForMissingPath() throws IOException {
+        Path missing = tempDir.resolve("does-not-exist");
+        assertFalse(Files.exists(missing));
+        SpeechBenchmarkMain.deleteRecursively(missing);
+        assertFalse(Files.exists(missing));
     }
 }

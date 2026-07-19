@@ -12,10 +12,13 @@ import com.monada.speech.storage.SpeechFeatureStore;
 import com.monada.speech.storage.SpeechSampleStore;
 
 import java.io.IOException;
+import java.nio.file.FileVisitResult;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -118,6 +121,14 @@ public final class SpeechBenchmarkMain {
         }
 
         Path storeRoot = Files.createTempDirectory("monada-speech-benchmark-");
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                deleteRecursively(storeRoot);
+            } catch (IOException e) {
+                System.err.println("warning: failed to clean up benchmark temp directory "
+                        + storeRoot + ": " + e.getMessage());
+            }
+        }));
         SpeechSampleStore sampleStore = new FileSpeechSampleStore(storeRoot);
         SpeechFeatureStore featureStore = new FileSpeechFeatureStore(storeRoot);
 
@@ -247,5 +258,28 @@ public final class SpeechBenchmarkMain {
             throw new IllegalArgumentException(
                     "invalid integer for " + systemProperty + "/" + envVar + ": " + value, e);
         }
+    }
+
+    static void deleteRecursively(Path root) throws IOException {
+        if (!Files.exists(root)) {
+            return;
+        }
+        Files.walkFileTree(root, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws IOException {
+                Files.deleteIfExists(file);
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult postVisitDirectory(Path directory, IOException exception)
+                    throws IOException {
+                if (exception != null) {
+                    throw exception;
+                }
+                Files.deleteIfExists(directory);
+                return FileVisitResult.CONTINUE;
+            }
+        });
     }
 }

@@ -126,6 +126,75 @@ Key properties:
 > directory variant is handled yet — future phases may extend the importer to
 > cover additional layouts.
 
+## Corpus Import Audit
+
+`TorgoDatasetImporter.auditFrom(datasetRoot, sampleStore)` scans a TORGO-style
+corpus and returns a rich `TorgoImportAuditReport` with grouped counts and
+categorised warnings.
+
+Pass `null` as `sampleStore` for a **dry-run** scan that validates the dataset
+without writing any samples:
+
+```java
+var importer = new TorgoDatasetImporter();
+
+// Dry-run: inspect coverage without persisting anything
+TorgoImportAuditReport audit = importer.auditFrom(Path.of("/data/torgo"), null);
+System.out.println("dry-run: " + audit.dryRun());           // true
+System.out.println("discovered: " + audit.discoveredAudioFiles());
+System.out.println("would-import: " + audit.bySpeaker());   // {M01=12, FC1=8, …}
+System.out.println("by condition: " + audit.byCondition()); // {DYSARTHRIC=12, CONTROL=8}
+System.out.println("by task:      " + audit.byTaskType());  // {WORD=10, SENTENCE=10}
+
+// Inspect warning categories and example paths
+for (var entry : audit.warningGroups().entrySet()) {
+    TorgoAuditWarningGroup g = entry.getValue();
+    System.out.println(g.category() + ": " + g.count() + " files");
+    g.pathExamples().forEach(p -> System.out.println("  example: " + p));
+}
+```
+
+Pass a real `SpeechSampleStore` for an **import + audit** run:
+
+```java
+SpeechSampleStore store = new FileSpeechSampleStore(Path.of(".monada-speech"));
+TorgoImportAuditReport audit = importer.auditFrom(Path.of("/data/torgo"), store);
+System.out.println("imported: " + audit.importedSamples());
+```
+
+### Report fields
+
+| Field | Description |
+|---|---|
+| `discoveredAudioFiles` | Total `.wav` files found under the dataset root. |
+| `importedSamples` | Samples written to the store (0 in dry-run). |
+| `skippedSamples` | Files skipped for any reason. |
+| `dryRun` | `true` when no store was provided. |
+| `bySpeaker` | Importable count per speaker ID. |
+| `byCondition` | Importable count per `SpeechCondition`. |
+| `byTaskType` | Importable count per `SpeechTaskType`. |
+| `byLanguage` | Importable count per language tag (currently always `en-US`). |
+| `warningGroups` | One `TorgoAuditWarningGroup` per `WarningCategory`; each group has `count` and up to 5 example paths. |
+
+### Warning categories
+
+| Category | Reason |
+|---|---|
+| `MISSING_TRANSCRIPT` | No sibling `.txt` file found. |
+| `BLANK_TRANSCRIPT` | Sibling `.txt` exists but is blank after trimming. |
+| `UNREADABLE_TRANSCRIPT` | Sibling `.txt` exists but threw an I/O error on read. |
+| `UNREADABLE_AUDIO` | WAV file could not be parsed or has an unsupported format. |
+| `UNSUPPORTED_LAYOUT` | Path does not conform to `<speaker>/<session>/<task>/<file>.wav` (e.g. file at dataset root). |
+| `DUPLICATE_ID` | Two files derive the same stable sample ID within one run. |
+
+### Running the audit from the command line
+
+Use the existing `runSpeechBenchmark` Gradle task to perform a full import +
+evaluation against a local corpus. To audit only (no evaluation), call
+`auditFrom` with `null` store from a small standalone script or integrate it
+into a custom `main` method under `monada-speech/src/test/java` gated by an
+environment variable (see `LocalSpeechBenchmarkTest` for a pattern).
+
 ## Out of Scope (Phase L)
 
 This phase intentionally does NOT implement:
