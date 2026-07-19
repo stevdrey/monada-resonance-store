@@ -46,6 +46,12 @@ public record SpeechFeatureEncodingReport(
         coverageByCondition = immutableEnumMap(coverageByCondition, SpeechCondition.class);
         coverageByTaskType = immutableEnumMap(coverageByTaskType, SpeechTaskType.class);
 
+        for (Map.Entry<String, SpeechFeatureEncodingFailureGroup> entry : failuresByReason.entrySet()) {
+            if (!entry.getKey().equals(entry.getValue().reason())) {
+                throw new IllegalArgumentException(
+                        "failure map key must match group reason: " + entry.getKey());
+            }
+        }
         int failedSamples = skippedSamples - existingFeatureSamples;
         int groupedFailures = failuresByReason.values().stream()
                 .mapToInt(SpeechFeatureEncodingFailureGroup::count)
