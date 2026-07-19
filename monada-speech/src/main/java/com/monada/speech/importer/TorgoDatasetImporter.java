@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -131,7 +132,7 @@ public final class TorgoDatasetImporter {
             wavFiles = stream
                     .filter(Files::isRegularFile)
                     .filter(p -> p.getFileName().toString().toLowerCase().endsWith(".wav"))
-                    .sorted()
+                    .sorted(Comparator.comparing(Path::toString))
                     .toList();
         }
 

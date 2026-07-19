@@ -12,12 +12,14 @@ import com.monada.speech.storage.SpeechFeatureStore;
 import com.monada.speech.storage.SpeechSampleStore;
 
 import java.io.IOException;
+import java.nio.file.FileVisitResult;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -262,11 +264,22 @@ public final class SpeechBenchmarkMain {
         if (!Files.exists(root)) {
             return;
         }
-        try (var stream = Files.walk(root)) {
-            List<Path> paths = stream.sorted(Comparator.reverseOrder()).toList();
-            for (Path p : paths) {
-                Files.deleteIfExists(p);
+        Files.walkFileTree(root, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws IOException {
+                Files.deleteIfExists(file);
+                return FileVisitResult.CONTINUE;
             }
-        }
+
+            @Override
+            public FileVisitResult postVisitDirectory(Path directory, IOException exception)
+                    throws IOException {
+                if (exception != null) {
+                    throw exception;
+                }
+                Files.deleteIfExists(directory);
+                return FileVisitResult.CONTINUE;
+            }
+        });
     }
 }

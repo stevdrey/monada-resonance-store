@@ -272,6 +272,24 @@ class TorgoImportAuditTest {
     }
 
     @Test
+    void pathExamplesFollowLexicographicWavDiscoveryOrder() throws IOException {
+        Path dataset = tempDir.resolve("torgo");
+        Path dir = dataset.resolve("M01/Session1/words");
+        Files.createDirectories(dir);
+        byte[] wav = makeSineWav(16000, 100, 1, 16);
+        for (String name : List.of("word1.wav", "word2.wav", "word3.wav", "word10.wav", "word11.wav", "word12.wav")) {
+            writeWav(dir, name, wav);
+        }
+
+        TorgoImportAuditReport report = new TorgoDatasetImporter().auditFrom(dataset, null);
+
+        TorgoAuditWarningGroup group = report.warningGroups().get(WarningCategory.MISSING_TRANSCRIPT);
+        assertNotNull(group);
+        assertEquals(List.of("word1.wav", "word10.wav", "word11.wav", "word12.wav", "word2.wav"),
+                group.pathExamples().stream().map(path -> path.getFileName().toString()).toList());
+    }
+
+    @Test
     void pathExamplesAreSubsetOfActualPaths() throws IOException {
         Path dataset = tempDir.resolve("torgo");
         Path dir = dataset.resolve("M01/Session1/words");
