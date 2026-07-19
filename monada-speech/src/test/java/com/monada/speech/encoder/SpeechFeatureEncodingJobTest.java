@@ -22,6 +22,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SpeechFeatureEncodingJobTest {
@@ -45,7 +46,8 @@ class SpeechFeatureEncodingJobTest {
         assertEquals(1, report.existingFeatureSamples());
         assertEquals(1, report.failedSamples());
         assertEquals(2, report.coveredSamples());
-        assertEquals(List.of("alpha", "bravo", "charlie"), featureStore.findRequests());
+        assertEquals(1, featureStore.findAllRequests());
+        assertTrue(featureStore.findRequests().isEmpty());
         assertEquals(List.of(bravo.audioPath(), charlie.audioPath()), encoder.encodedPaths());
         assertTrue(featureStore.findBySampleId("bravo").isPresent());
 
@@ -84,6 +86,35 @@ class SpeechFeatureEncodingJobTest {
         assertEquals(7, failure.count());
         assertEquals(List.of("sample-1", "sample-2", "sample-3", "sample-4", "sample-5"),
                 failure.sampleIdExamples());
+    }
+
+    @Test
+    void propagatesFeaturePreloadFailureWithoutEncodingSamples() {
+        var sample = sample("alpha", "speaker", SpeechCondition.CONTROL, SpeechTaskType.WORD);
+        var featureStore = new InMemoryFeatureStore(Map.of(), new IOException("cannot preload feature store"));
+        var encoder = new RecordingEncoder(Map.of(sample.audioPath(), vector(4)), Map.of());
+
+        var failure = assertThrows(IOException.class, () -> new SpeechFeatureEncodingJob(encoder)
+                .run(new InMemorySampleStore(List.of(sample)), featureStore));
+
+        assertEquals("cannot preload feature store", failure.getMessage());
+        assertEquals(1, featureStore.findAllRequests());
+        assertTrue(encoder.encodedPaths().isEmpty());
+    }
+
+    @Test
+    void usesLastPreloadedVectorWhenAStoreReturnsDuplicateSampleIds() throws IOException {
+        var sample = sample("alpha", "speaker", SpeechCondition.CONTROL, SpeechTaskType.WORD);
+        var featureStore = new PreloadedFeatureStore(List.of(
+                new StoredSpeechFeatureVector("alpha", vector(4)),
+                new StoredSpeechFeatureVector("alpha", vector(8))));
+
+        var report = new SpeechFeatureEncodingJob(new RecordingEncoder(Map.of(), Map.of()))
+                .run(new InMemorySampleStore(List.of(sample)), featureStore);
+
+        assertEquals(1, report.existingFeatureSamples());
+        assertEquals(Map.of(8, 1), report.vectorsByDimension());
+        assertEquals(1, featureStore.findAllRequests());
     }
 
     private static SpeechSample sample(
@@ -168,9 +199,16 @@ class SpeechFeatureEncodingJobTest {
     private static final class InMemoryFeatureStore implements SpeechFeatureStore {
         private final Map<String, FrequencyVector> features = new LinkedHashMap<>();
         private final List<String> findRequests = new ArrayList<>();
+        private final IOException findAllFailure;
+        private int findAllRequests;
 
         private InMemoryFeatureStore(Map<String, FrequencyVector> initialFeatures) {
+            this(initialFeatures, null);
+        }
+
+        private InMemoryFeatureStore(Map<String, FrequencyVector> initialFeatures, IOException findAllFailure) {
             features.putAll(initialFeatures);
+            this.findAllFailure = findAllFailure;
         }
 
         @Override
@@ -185,7 +223,11 @@ class SpeechFeatureEncodingJobTest {
         }
 
         @Override
-        public List<StoredSpeechFeatureVector> findAll() {
+        public List<StoredSpeechFeatureVector> findAll() throws IOException {
+            findAllRequests++;
+            if (findAllFailure != null) {
+                throw findAllFailure;
+            }
             return features.entrySet().stream()
                     .map(entry -> new StoredSpeechFeatureVector(entry.getKey(), entry.getValue()))
                     .toList();
@@ -193,6 +235,39 @@ class SpeechFeatureEncodingJobTest {
 
         List<String> findRequests() {
             return List.copyOf(findRequests);
+        }
+
+        int findAllRequests() {
+            return findAllRequests;
+        }
+    }
+
+    private static final class PreloadedFeatureStore implements SpeechFeatureStore {
+        private final List<StoredSpeechFeatureVector> vectors;
+        private int findAllRequests;
+
+        private PreloadedFeatureStore(List<StoredSpeechFeatureVector> vectors) {
+            this.vectors = List.copyOf(vectors);
+        }
+
+        @Override
+        public void save(String sampleId, FrequencyVector vector) {
+            throw new AssertionError("existing sample must not be saved");
+        }
+
+        @Override
+        public Optional<FrequencyVector> findBySampleId(String sampleId) {
+            throw new AssertionError("batch job must not query individual sample IDs");
+        }
+
+        @Override
+        public List<StoredSpeechFeatureVector> findAll() {
+            findAllRequests++;
+            return vectors;
+        }
+
+        int findAllRequests() {
+            return findAllRequests;
         }
     }
 }

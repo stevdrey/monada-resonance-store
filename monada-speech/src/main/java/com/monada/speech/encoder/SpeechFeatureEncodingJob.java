@@ -6,11 +6,13 @@ import com.monada.speech.domain.SpeechSample;
 import com.monada.speech.domain.SpeechTaskType;
 import com.monada.speech.storage.SpeechFeatureStore;
 import com.monada.speech.storage.SpeechSampleStore;
+import com.monada.speech.storage.StoredSpeechFeatureVector;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -20,9 +22,10 @@ import java.util.stream.Collectors;
 /**
  * Sequentially encodes speech samples and reports deterministic feature coverage.
  *
- * <p>Samples with an existing feature vector are intentionally not rewritten because the
- * current file-backed feature store is append-only. Audio encoding failures are recorded in
- * the returned report; storage failures are propagated to the caller.
+ * <p>Existing feature vectors are loaded once before processing so duplicate checks do not
+ * repeatedly scan the file-backed index. Samples with an existing vector are intentionally not
+ * rewritten because the current feature store is append-only. Audio encoding failures are
+ * recorded in the returned report; storage failures are propagated to the caller.
  */
 public final class SpeechFeatureEncodingJob {
 
@@ -46,6 +49,7 @@ public final class SpeechFeatureEncodingJob {
 
         List<SpeechSample> samples = new ArrayList<>(sampleStore.findAll());
         samples.sort(Comparator.comparing(SpeechSample::id));
+        Map<String, FrequencyVector> existingVectors = loadExistingVectors(featureStore);
 
         var coverageBySpeaker = new TreeMap<String, CoverageAccumulator>();
         var coverageByCondition = new EnumMap<SpeechCondition, CoverageAccumulator>(SpeechCondition.class);
@@ -68,10 +72,10 @@ public final class SpeechFeatureEncodingJob {
             conditionCoverage.recordTotal();
             taskCoverage.recordTotal();
 
-            var existingVector = featureStore.findBySampleId(sample.id());
-            if (existingVector.isPresent()) {
+            FrequencyVector existingVector = existingVectors.get(sample.id());
+            if (existingVector != null) {
                 existing++;
-                recordDimension(vectorsByDimension, existingVector.get());
+                recordDimension(vectorsByDimension, existingVector);
                 speakerCoverage.recordExisting();
                 conditionCoverage.recordExisting();
                 taskCoverage.recordExisting();
@@ -93,6 +97,7 @@ public final class SpeechFeatureEncodingJob {
             }
 
             featureStore.save(sample.id(), vector);
+            existingVectors.put(sample.id(), vector);
             encoded++;
             recordDimension(vectorsByDimension, vector);
             speakerCoverage.recordEncoded();
@@ -110,6 +115,16 @@ public final class SpeechFeatureEncodingJob {
                 toCoverage(coverageBySpeaker),
                 toCoverage(coverageByCondition),
                 toCoverage(coverageByTaskType));
+    }
+
+    private static Map<String, FrequencyVector> loadExistingVectors(SpeechFeatureStore featureStore)
+            throws IOException {
+        return featureStore.findAll().stream()
+                .collect(Collectors.toMap(
+                        StoredSpeechFeatureVector::sampleId,
+                        StoredSpeechFeatureVector::vector,
+                        (first, replacement) -> replacement,
+                        LinkedHashMap::new));
     }
 
     private static void recordDimension(Map<Integer, Integer> vectorsByDimension, FrequencyVector vector) {
