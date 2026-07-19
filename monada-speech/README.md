@@ -404,6 +404,88 @@ q_hello	M01/Session1/words/hello.wav	torgo_m01_session1_words_hello
 corpus is configured — so CI failures come only from the protected generated-fixture
 baseline, never from an absent real dataset.
 
+### Evaluating an existing local speech store
+
+Use `runSpeechEvaluation` after a local corpus has already been imported and its acoustic
+features encoded. Unlike `runSpeechBenchmark`, it does not import a corpus, create a temporary
+store, or write data; it opens the supplied store read-only and evaluates its current contents.
+
+```bash
+./gradlew :monada-speech:runSpeechEvaluation \
+  -Dmonada.speech.evaluation.store=/path/to/speech-store \
+  -Dmonada.speech.evaluation.queries=/path/to/queries.tsv \
+  -Dmonada.speech.evaluation.k=5 \
+  -Dmonada.speech.evaluation.dims=64
+```
+
+Configuration uses a system property first and then its environment-variable equivalent:
+
+| Setting | System property | Environment variable | Default |
+| --- | --- | --- | --- |
+| store root (required) | `monada.speech.evaluation.store` | `MONADA_SPEECH_EVALUATION_STORE` | — |
+| query TSV (required) | `monada.speech.evaluation.queries` | `MONADA_SPEECH_EVALUATION_QUERIES` | — |
+| evaluation `k` | `monada.speech.evaluation.k` | `MONADA_SPEECH_EVALUATION_K` | `5` |
+| encoder dimensions | `monada.speech.evaluation.dims` | `MONADA_SPEECH_EVALUATION_DIMS` | `64` |
+| report label | `monada.speech.evaluation.label` | `MONADA_SPEECH_EVALUATION_LABEL` | store-directory name |
+
+The supplied root must contain the standard `samples/speech-samples-000001.jsonl`,
+`features/speech-features-000001.f32`, and `indexes/speech-feature-map.idx` files. The command
+fails before opening the stores if that layout is absent, and it rejects empty stores or feature
+vectors whose dimensions do not match the configured encoder.
+
+The UTF-8 query TSV keeps the original three-column benchmark format compatible and adds optional
+per-query retrieval settings. Blank lines and lines beginning with `#` are ignored; paths are
+absolute or relative to the TSV's directory.
+
+| Column | Required | Meaning |
+| --- | --- | --- |
+| `queryId` | yes | Stable, unique query identifier. |
+| `queryWavPath` | yes | WAV to encode for this query. |
+| `relevantIds` | yes | Comma-separated stored sample IDs considered relevant. |
+| `topK` | no | Retrieval result count; defaults to evaluation `k` and must be at least `k`. |
+| `datasetSource` | no | `TORGO`, `UA_SPEECH`, `EASY_CALL`, or `CUSTOM`. |
+| `condition` | no | `CONTROL`, `DYSARTHRIC`, or `UNKNOWN`. |
+| `taskType` | no | `WORD`, `SENTENCE`, `COMMAND`, `SPONTANEOUS`, or `UNKNOWN`. |
+| `speakerId` | no | Exact speaker identifier filter. |
+| `language` | no | Exact language-code filter. |
+
+For example, the minimal compatible form uses three fields:
+
+```text
+q_hello	queries/hello.wav	torgo_m01_session1_words_hello
+```
+
+An extended query can constrain retrieval to the matching metadata:
+
+```text
+q_hello	queries/hello.wav	torgo_m01_session1_words_hello	5	TORGO	DYSARTHRIC	WORD	M01	en-US
+```
+
+The report is deterministic, preserves the TSV query order, and includes aggregate metrics plus
+the ranked top-K IDs and missed relevant IDs for every query. A generated two-query fixture emits
+the following representative output without relying on an external corpus:
+
+```text
+Mode: EXPLORATORY
+Policy: exploratory local real-data run (NOT enforced in CI)
+Label: fixture-store
+Corpus size: 2
+Query count: 2
+k: 1
+
+Aggregate metrics
+-----------------
+Precision@k: 1.0000
+Recall@k: 1.0000
+Hit rate@k: 1.0000
+MRR: 1.0000
+
+Per-query diagnostics
+---------------------
+q_440: retrieved=[s_440] missed=[] hit=true rr=1.0000
+q_880: retrieved=[s_880] missed=[] hit=true rr=1.0000
+```
+
 ### Follow-up guidance
 
 When a real-data exploratory run reveals a recall gap, do not loosen the protected baseline.

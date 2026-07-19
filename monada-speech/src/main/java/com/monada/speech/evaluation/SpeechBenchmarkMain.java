@@ -4,7 +4,6 @@ import com.monada.speech.encoder.BasicAcousticFeatureEncoder;
 import com.monada.speech.encoder.SpeechFeatureEncodingJob;
 import com.monada.speech.importer.TorgoDatasetImporter;
 import com.monada.speech.importer.TorgoDatasetImportReport;
-import com.monada.speech.retrieval.SpeechRetrievalOptions;
 import com.monada.speech.retrieval.SpeechSampleRetriever;
 import com.monada.speech.storage.FileSpeechFeatureStore;
 import com.monada.speech.storage.FileSpeechSampleStore;
@@ -13,16 +12,12 @@ import com.monada.speech.storage.SpeechSampleStore;
 
 import java.io.IOException;
 import java.nio.file.FileVisitResult;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 
 /**
  * Command-line entrypoint for the <strong>exploratory</strong> local real-data speech benchmark.
@@ -43,10 +38,12 @@ import java.util.Set;
  *
  * <h2>Query manifest format</h2>
  * UTF-8 text, one query per line. Blank lines and lines starting with {@code #} are ignored.
- * Each line has three tab-separated fields:
+ * The first three tab-separated fields are:
  * <pre>
  * queryId &lt;TAB&gt; queryWavPath &lt;TAB&gt; relevantId1,relevantId2,...
  * </pre>
+ * It also accepts the optional {@code topK}, dataset source, condition, task type, speaker ID,
+ * and language fields defined by {@link SpeechEvaluationQueryTsvParser}.
  * {@code queryWavPath} may be absolute or relative to the corpus dir. Relevant IDs are the
  * stable sample IDs produced by {@link TorgoDatasetImporter} (e.g. {@code torgo_m01_session1_words_hello}).
  */
@@ -165,49 +162,7 @@ public final class SpeechBenchmarkMain {
 
     static List<SpeechEvaluationQuery> parseQueries(Path manifest, Path corpusDir, int k)
             throws IOException {
-        List<SpeechEvaluationQuery> queries = new ArrayList<>();
-        List<String> lines = Files.readAllLines(manifest, StandardCharsets.UTF_8);
-        for (int lineNo = 1; lineNo <= lines.size(); lineNo++) {
-            String line = lines.get(lineNo - 1);
-            String trimmedLine = line.strip();
-            if (trimmedLine.isEmpty() || trimmedLine.startsWith("#")) {
-                continue;
-            }
-            String[] fields = line.split("\t", -1);
-            if (fields.length != 3) {
-                throw new IOException("manifest line " + lineNo
-                        + " must have exactly 3 tab-separated fields (queryId, queryWavPath, relevantIds): " + line);
-            }
-            String queryId = fields[0].strip();
-            if (queryId.isEmpty()) {
-                throw new IOException("manifest line " + lineNo + " has a blank queryId: " + line);
-            }
-            String queryWavField = fields[1].strip();
-            if (queryWavField.isEmpty()) {
-                throw new IOException("manifest line " + lineNo + " has a blank queryWavPath: " + line);
-            }
-            Path queryWav;
-            try {
-                queryWav = resolveAudio(corpusDir, queryWavField);
-            } catch (InvalidPathException e) {
-                throw new IOException("manifest line " + lineNo
-                        + " has an invalid queryWavPath: " + queryWavField, e);
-            }
-            Set<String> relevant = parseRelevant(fields[2]);
-            if (relevant.isEmpty()) {
-                throw new IOException("manifest line " + lineNo + " has no relevant sample IDs: " + line);
-            }
-            if (!Files.isRegularFile(queryWav)) {
-                throw new IOException("manifest line " + lineNo
-                        + " references a query WAV that does not exist: " + queryWav);
-            }
-            queries.add(new SpeechEvaluationQuery(
-                    queryId,
-                    queryWav,
-                    relevant,
-                    new SpeechRetrievalOptions(k, null, null, null, null, null)));
-        }
-        return queries;
+        return SpeechEvaluationQueryTsvParser.parse(manifest, corpusDir, k);
     }
 
     static Path parseConfigPath(String label, String value) {
@@ -216,22 +171,6 @@ public final class SpeechBenchmarkMain {
         } catch (InvalidPathException e) {
             throw new IllegalArgumentException(label + " is not a valid path: " + value, e);
         }
-    }
-
-    private static Set<String> parseRelevant(String field) {
-        Set<String> relevant = new LinkedHashSet<>();
-        for (String id : field.split(",")) {
-            String trimmed = id.strip();
-            if (!trimmed.isEmpty()) {
-                relevant.add(trimmed);
-            }
-        }
-        return relevant;
-    }
-
-    private static Path resolveAudio(Path corpusDir, String value) {
-        Path path = Path.of(value);
-        return path.isAbsolute() ? path : corpusDir.resolve(path);
     }
 
     private static String config(String systemProperty, String envVar) {

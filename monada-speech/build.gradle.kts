@@ -20,3 +20,15 @@ tasks.register<JavaExec>("runSpeechBenchmark") {
         .filter { it.startsWith("monada.speech.benchmark.") }
         .associateWith { System.getProperty(it) }
 }
+
+tasks.register<JavaExec>("runSpeechEvaluation") {
+    description = "Evaluate an existing local speech store (NOT a protected CI baseline)"
+    group = "application"
+    mainClass.set("com.monada.speech.evaluation.SpeechEvaluationMain")
+    classpath = sourceSets["main"].runtimeClasspath
+    // Forward JVM system properties and inherit MONADA_SPEECH_EVALUATION_* variables.
+    systemProperties = System.getProperties()
+        .stringPropertyNames()
+        .filter { it.startsWith("monada.speech.evaluation.") }
+        .associateWith { System.getProperty(it) }
+}
