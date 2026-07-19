@@ -1,7 +1,7 @@
 package com.monada.speech.evaluation;
 
-import com.monada.speech.domain.SpeechSample;
 import com.monada.speech.encoder.BasicAcousticFeatureEncoder;
+import com.monada.speech.encoder.SpeechFeatureEncodingJob;
 import com.monada.speech.importer.TorgoDatasetImporter;
 import com.monada.speech.importer.TorgoDatasetImportReport;
 import com.monada.speech.retrieval.SpeechRetrievalOptions;
@@ -142,9 +142,8 @@ public final class SpeechBenchmarkMain {
         }
 
         TorgoDatasetImportReport importReport = new TorgoDatasetImporter().importFrom(corpusDir, sampleStore);
-        for (SpeechSample sample : sampleStore.findAll()) {
-            featureStore.save(sample.id(), encoder.encode(sample.audioPath()));
-        }
+        var encodingReport = new SpeechFeatureEncodingJob(encoder).run(sampleStore, featureStore);
+        System.out.println(encodingReport.render());
 
         var retriever = new SpeechSampleRetriever(encoder);
         var runner = new SpeechBenchmarkRunner();
