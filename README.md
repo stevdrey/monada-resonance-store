@@ -51,12 +51,21 @@ The main domain record is `KnowledgeAtom`. Text content is encoded into `Frequen
 ./gradlew :monada-evaluation:runLatency -q
 ./gradlew :monada-evaluation:runProjectMemory -q
 ./gradlew :monada-speech:test
+./gradlew :monada-speech:runSpeechImport
 ./gradlew :monada-speech:runSpeechEvaluation
 ```
 
 ## Local Speech Store Evaluation
 
-Evaluate an already imported and encoded local speech store with an inspectable TSV query file:
+First, create a persistent store from a local TORGO-style corpus:
+
+```bash
+./gradlew :monada-speech:runSpeechImport \
+  -Dmonada.speech.import.dir=/path/to/corpus \
+  -Dmonada.speech.import.store=/path/to/speech-store
+```
+
+Then evaluate that store with an inspectable TSV query file:
 
 ```bash
 ./gradlew :monada-speech:runSpeechEvaluation \

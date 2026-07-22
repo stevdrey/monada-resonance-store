@@ -32,3 +32,15 @@ tasks.register<JavaExec>("runSpeechEvaluation") {
         .filter { it.startsWith("monada.speech.evaluation.") }
         .associateWith { System.getProperty(it) }
 }
+
+tasks.register<JavaExec>("runSpeechImport") {
+    description = "Import a local TORGO-style corpus into a persistent speech store"
+    group = "application"
+    mainClass.set("com.monada.speech.importer.SpeechImportMain")
+    classpath = sourceSets["main"].runtimeClasspath
+    // Forward JVM system properties and inherit MONADA_SPEECH_IMPORT_* variables.
+    systemProperties = System.getProperties()
+        .stringPropertyNames()
+        .filter { it.startsWith("monada.speech.import.") }
+        .associateWith { System.getProperty(it) }
+}

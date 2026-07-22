@@ -180,7 +180,7 @@ System.out.println("imported: " + audit.importedSamples());
 
 | Category | Reason |
 |---|---|
-| `MISSING_TRANSCRIPT` | No sibling `.txt` file found. |
+| `MISSING_TRANSCRIPT` | No supported transcript file found: sibling `.txt` or native `prompts/<id>.txt` for `wav_arrayMic/<id>.wav`. |
 | `BLANK_TRANSCRIPT` | Sibling `.txt` exists but is blank after trimming. |
 | `UNREADABLE_TRANSCRIPT` | Sibling `.txt` exists but threw an I/O error on read. |
 | `UNREADABLE_AUDIO` | WAV file could not be parsed or has an unsupported format. |
@@ -406,9 +406,41 @@ baseline, never from an absent real dataset.
 
 ### Evaluating an existing local speech store
 
-Use `runSpeechEvaluation` after a local corpus has already been imported and its acoustic
-features encoded. Unlike `runSpeechBenchmark`, it does not import a corpus, create a temporary
-store, or write data; it opens the supplied store read-only and evaluates its current contents.
+Use `runSpeechImport` to create or update a persistent local store from a TORGO-style corpus.
+It writes the standard sample log, feature segment, and feature index under the specified store
+root. Existing feature vectors are reused rather than rewritten; the task rejects a configured
+dimension that differs from vectors already present in that store.
+
+```bash
+./gradlew :monada-speech:runSpeechImport \
+  -Dmonada.speech.import.dir=/path/to/corpus \
+  -Dmonada.speech.import.store=/path/to/speech-store \
+  -Dmonada.speech.import.dims=64
+```
+
+Configuration uses a system property first and then its environment-variable equivalent:
+
+| Setting | System property | Environment variable | Default |
+| --- | --- | --- | --- |
+| corpus directory (required) | `monada.speech.import.dir` | `MONADA_SPEECH_IMPORT_DIR` | — |
+| persistent store root (required) | `monada.speech.import.store` | `MONADA_SPEECH_IMPORT_STORE` | — |
+| encoder dimensions | `monada.speech.import.dims` | `MONADA_SPEECH_IMPORT_DIMS` | `64` |
+
+The corpus may use the normalized layout `<speaker>/<session>/<task>/<file>.wav`, with a
+non-blank sibling `<file>.txt` transcript for every WAV that should be imported. It also accepts
+the native TORGO array-microphone layout, resolving the session prompt automatically. For example:
+
+```text
+/path/to/corpus/M01/Session1/words/hello.wav
+/path/to/corpus/M01/Session1/words/hello.txt
+
+/path/to/corpus/M01/Session1/wav_arrayMic/0001.wav
+/path/to/corpus/M01/Session1/prompts/0001.txt
+```
+
+Once the import succeeds, use `runSpeechEvaluation` against the same store. Unlike
+`runSpeechBenchmark`, the evaluation task does not import a corpus, create a temporary store, or
+write data; it opens the supplied store read-only and evaluates its current contents.
 
 ```bash
 ./gradlew :monada-speech:runSpeechEvaluation \
