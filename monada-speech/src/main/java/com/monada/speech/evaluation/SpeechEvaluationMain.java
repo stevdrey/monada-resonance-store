@@ -81,7 +81,7 @@ public final class SpeechEvaluationMain {
                     new SpeechSampleRetriever(encoder),
                     sampleStore,
                     featureStore,
-                    new SpeechEvaluationOptions(configuration.k(), true));
+                    new SpeechEvaluationOptions(configuration.k(), true, configuration.diagnostics()));
             out.print(report.render());
             return EXIT_SUCCESS;
         } catch (IllegalArgumentException e) {
@@ -116,6 +116,12 @@ public final class SpeechEvaluationMain {
                 "monada.speech.evaluation.k", "MONADA_SPEECH_EVALUATION_K", DEFAULT_K, "k");
         int dimensions = parsePositiveInt(systemProperties, environment,
                 "monada.speech.evaluation.dims", "MONADA_SPEECH_EVALUATION_DIMS", DEFAULT_DIMENSIONS, "dimensions");
+        boolean diagnostics = parseBoolean(
+                systemProperties,
+                environment,
+                "monada.speech.evaluation.diagnostics",
+                "MONADA_SPEECH_EVALUATION_DIAGNOSTICS",
+                false);
         String label = configurationValue(
                 systemProperties, environment, "monada.speech.evaluation.label", "MONADA_SPEECH_EVALUATION_LABEL");
         if (label == null) {
@@ -125,7 +131,7 @@ public final class SpeechEvaluationMain {
         if (label.isBlank()) {
             throw new IllegalArgumentException("label must not be blank");
         }
-        return new EvaluationConfiguration(storeRoot, queryManifest, k, dimensions, label);
+        return new EvaluationConfiguration(storeRoot, queryManifest, k, dimensions, label, diagnostics);
     }
 
     static Path parseConfigPath(String label, String value) {
@@ -200,6 +206,27 @@ public final class SpeechEvaluationMain {
         return null;
     }
 
+    private static boolean parseBoolean(
+            Map<String, String> systemProperties,
+            Map<String, String> environment,
+            String property,
+            String environmentVariable,
+            boolean defaultValue
+    ) {
+        String value = configurationValue(systemProperties, environment, property, environmentVariable);
+        if (value == null) {
+            return defaultValue;
+        }
+        if ("true".equalsIgnoreCase(value)) {
+            return true;
+        }
+        if ("false".equalsIgnoreCase(value)) {
+            return false;
+        }
+        throw new IllegalArgumentException(
+                "invalid boolean for " + property + "/" + environmentVariable + ": " + value);
+    }
+
     private static Map<String, String> systemProperties() {
         Map<String, String> properties = new HashMap<>();
         for (String name : System.getProperties().stringPropertyNames()) {
@@ -208,6 +235,13 @@ public final class SpeechEvaluationMain {
         return Map.copyOf(properties);
     }
 
-    record EvaluationConfiguration(Path storeRoot, Path queryManifest, int k, int dimensions, String label) {
+    record EvaluationConfiguration(
+            Path storeRoot,
+            Path queryManifest,
+            int k,
+            int dimensions,
+            String label,
+            boolean diagnostics
+    ) {
     }
 }

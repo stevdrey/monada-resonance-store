@@ -34,6 +34,8 @@ import java.util.List;
  *   <li>query manifest — {@code monada.speech.benchmark.queries} / {@code MONADA_SPEECH_BENCHMARK_QUERIES} (required)</li>
  *   <li>k — {@code monada.speech.benchmark.k} / {@code MONADA_SPEECH_BENCHMARK_K} (optional, default 5)</li>
  *   <li>encoder dims — {@code monada.speech.benchmark.dims} / {@code MONADA_SPEECH_BENCHMARK_DIMS} (optional, default 64)</li>
+ *   <li>deep diagnostics — {@code monada.speech.benchmark.diagnostics} /
+ *       {@code MONADA_SPEECH_BENCHMARK_DIAGNOSTICS} (optional, default false)</li>
  * </ul>
  *
  * <h2>Query manifest format</h2>
@@ -68,15 +70,21 @@ public final class SpeechBenchmarkMain {
             System.err.println("Optional:");
             System.err.println("  -Dmonada.speech.benchmark.k=<k>                 (default " + DEFAULT_K + ")");
             System.err.println("  -Dmonada.speech.benchmark.dims=<dimensions>     (default " + DEFAULT_DIMENSIONS + ")");
+            System.err.println("  -Dmonada.speech.benchmark.diagnostics=<boolean> (default false)");
             System.exit(2);
             return;
         }
 
         int k;
         int dimensions;
+        boolean diagnostics;
         try {
             k = intConfig("monada.speech.benchmark.k", "MONADA_SPEECH_BENCHMARK_K", DEFAULT_K);
             dimensions = intConfig("monada.speech.benchmark.dims", "MONADA_SPEECH_BENCHMARK_DIMS", DEFAULT_DIMENSIONS);
+            diagnostics = booleanConfig(
+                    "monada.speech.benchmark.diagnostics",
+                    "MONADA_SPEECH_BENCHMARK_DIAGNOSTICS",
+                    false);
             if (k <= 0) {
                 throw new IllegalArgumentException("k must be positive: " + k);
             }
@@ -144,7 +152,7 @@ public final class SpeechBenchmarkMain {
 
         var retriever = new SpeechSampleRetriever(encoder);
         var runner = new SpeechBenchmarkRunner();
-        var options = new SpeechEvaluationOptions(k, true);
+        var options = new SpeechEvaluationOptions(k, true, diagnostics);
 
         SpeechBenchmarkReport report = runner.run(
                 SpeechBenchmarkMode.EXPLORATORY,
@@ -196,6 +204,21 @@ public final class SpeechBenchmarkMain {
             throw new IllegalArgumentException(
                     "invalid integer for " + systemProperty + "/" + envVar + ": " + value, e);
         }
+    }
+
+    private static boolean booleanConfig(String systemProperty, String envVar, boolean defaultValue) {
+        String value = config(systemProperty, envVar);
+        if (value == null) {
+            return defaultValue;
+        }
+        if ("true".equalsIgnoreCase(value)) {
+            return true;
+        }
+        if ("false".equalsIgnoreCase(value)) {
+            return false;
+        }
+        throw new IllegalArgumentException(
+                "invalid boolean for " + systemProperty + "/" + envVar + ": " + value);
     }
 
     static void deleteRecursively(Path root) throws IOException {

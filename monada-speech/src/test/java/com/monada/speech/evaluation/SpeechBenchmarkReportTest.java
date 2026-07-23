@@ -2,6 +2,10 @@ package com.monada.speech.evaluation;
 
 import com.monada.speech.domain.SpeechCondition;
 import com.monada.speech.domain.SpeechTaskType;
+import com.monada.speech.retrieval.SpeechCandidateDiagnostic;
+import com.monada.speech.retrieval.SpeechCandidateStatus;
+import com.monada.speech.retrieval.SpeechMetadataFilter;
+import com.monada.speech.retrieval.SpeechRetrievalDiagnostic;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -68,6 +72,76 @@ class SpeechBenchmarkReportTest {
         var report = new SpeechBenchmarkReport(
                 SpeechBenchmarkMode.PROTECTED, "fixture", 3, 2, sampleReport());
         assertEquals(report.render(), report.render());
+    }
+
+    @Test
+    void renderIncludesOptInAcousticSummaryAndRelevantCandidatesOnly() {
+        var retrievalDiagnostic = new SpeechRetrievalDiagnostic(
+                2,
+                0,
+                0,
+                1,
+                1,
+                0,
+                0.9,
+                0.9,
+                0.9,
+                0.9,
+                0.0,
+                List.of(
+                        new SpeechCandidateDiagnostic(
+                                "a_scored", SpeechCandidateStatus.SCORED, List.of(), 0.9, 1),
+                        new SpeechCandidateDiagnostic(
+                                "b_filtered",
+                                SpeechCandidateStatus.METADATA_FILTERED,
+                                List.of(SpeechMetadataFilter.CONDITION),
+                                0.0,
+                                0)));
+        var acousticDiagnostic = new SpeechQueryAcousticDiagnostic(
+                retrievalDiagnostic,
+                List.of(
+                        new SpeechRelevantCandidateDiagnostic(
+                                "a_scored",
+                                SpeechRelevantCandidateStatus.RETRIEVED_AT_K,
+                                List.of(),
+                                0.9,
+                                1),
+                        new SpeechRelevantCandidateDiagnostic(
+                                "b_filtered",
+                                SpeechRelevantCandidateStatus.METADATA_FILTERED,
+                                List.of(SpeechMetadataFilter.CONDITION),
+                                0.0,
+                                0)));
+        var queryResult = new SpeechQueryEvaluationResult(
+                "q1",
+                1,
+                1,
+                true,
+                1.0,
+                0.5,
+                1.0,
+                List.of("a_scored"),
+                List.of("b_filtered"),
+                "a_scored",
+                0.9,
+                acousticDiagnostic);
+        var evaluationReport = new SpeechEvaluationReport(
+                1, 1.0, 0.5, 1.0, 1.0, List.of(queryResult), Map.of(), Map.of());
+        var report = new SpeechBenchmarkReport(
+                SpeechBenchmarkMode.EXPLORATORY, "diagnostic", 2, 1, evaluationReport);
+
+        String rendered = report.render();
+
+        assertTrue(rendered.contains(
+                "scan: vectors=2 orphan=0 incompatible=0 filtered=1 scored=1 ties=0"), rendered);
+        assertTrue(rendered.contains(
+                "scores: min=0.9000 mean=0.9000 max=0.9000 top=0.9000 top-gap=0.0000"), rendered);
+        assertTrue(rendered.contains(
+                "relevant a_scored: status=RETRIEVED_AT_K rank=1 score=0.9000"), rendered);
+        assertTrue(rendered.contains(
+                "relevant b_filtered: status=METADATA_FILTERED filters=[CONDITION]"), rendered);
+        assertFalse(rendered.contains("candidate a_scored"), rendered);
+        assertEquals(rendered, report.render());
     }
 
     @Test

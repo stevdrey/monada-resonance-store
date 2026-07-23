@@ -383,6 +383,91 @@ class SpeechRetrievalEvaluatorTest {
     }
 
     @Test
+    void acousticDiagnosticsClassifyEveryRelevantCandidateOutcome() throws IOException {
+        Path queryAudio = tempDir.resolve("diagnostic-query.wav");
+        Files.createFile(queryAudio);
+
+        var sampleStore = new InMemorySampleStore();
+        var featureStore = new InMemoryFeatureStore();
+        sampleStore.save(sample(
+                "a_retrieved", "M01", tempDir.resolve("a.wav"),
+                SpeechCondition.DYSARTHRIC, SpeechTaskType.WORD));
+        sampleStore.save(sample(
+                "b_below", "M02", tempDir.resolve("b.wav"),
+                SpeechCondition.DYSARTHRIC, SpeechTaskType.WORD));
+        sampleStore.save(sample(
+                "c_filtered", "C01", tempDir.resolve("c.wav"),
+                SpeechCondition.CONTROL, SpeechTaskType.WORD));
+        sampleStore.save(sample(
+                "d_incompatible", "M03", tempDir.resolve("d.wav"),
+                SpeechCondition.DYSARTHRIC, SpeechTaskType.WORD));
+        sampleStore.save(sample(
+                "e_missing_vector", "M04", tempDir.resolve("e.wav"),
+                SpeechCondition.DYSARTHRIC, SpeechTaskType.WORD));
+
+        featureStore.save("a_retrieved", vector(1.0f, 0.0f, 0.0f, 0.0f));
+        featureStore.save("b_below", vector(0.5f, 0.5f, 0.0f, 0.0f));
+        featureStore.save("c_filtered", vector(1.0f, 0.0f, 0.0f, 0.0f));
+        featureStore.save("d_incompatible", vector(1.0f, 0.0f));
+        featureStore.save("f_orphan", vector(1.0f, 0.0f, 0.0f, 0.0f));
+
+        Set<String> relevantIds = Set.of(
+                "a_retrieved",
+                "b_below",
+                "c_filtered",
+                "d_incompatible",
+                "e_missing_vector",
+                "f_orphan",
+                "g_missing_sample");
+        var query = new SpeechEvaluationQuery(
+                "q_diagnostic",
+                queryAudio,
+                relevantIds,
+                new SpeechRetrievalOptions(
+                        7, null, SpeechCondition.DYSARTHRIC, null, null, null));
+
+        SpeechEvaluationReport report = evaluator.evaluate(
+                List.of(query),
+                retriever,
+                sampleStore,
+                featureStore,
+                new SpeechEvaluationOptions(1, true, true));
+
+        SpeechQueryAcousticDiagnostic diagnostic = report.queryResults().get(0).acousticDiagnostic();
+        assertNotNull(diagnostic);
+        assertEquals(5, diagnostic.retrieval().scannedVectorCount());
+        assertEquals(1, diagnostic.retrieval().orphanVectorCount());
+        assertEquals(1, diagnostic.retrieval().incompatibleDimensionCount());
+        assertEquals(1, diagnostic.retrieval().metadataFilteredCandidateCount());
+        assertEquals(2, diagnostic.retrieval().scoredCandidateCount());
+        assertEquals(
+                List.of(
+                        SpeechRelevantCandidateStatus.RETRIEVED_AT_K,
+                        SpeechRelevantCandidateStatus.SCORED_BELOW_K,
+                        SpeechRelevantCandidateStatus.METADATA_FILTERED,
+                        SpeechRelevantCandidateStatus.INCOMPATIBLE_DIMENSIONS,
+                        SpeechRelevantCandidateStatus.MISSING_VECTOR,
+                        SpeechRelevantCandidateStatus.ORPHAN_VECTOR,
+                        SpeechRelevantCandidateStatus.MISSING_SAMPLE),
+                diagnostic.relevantCandidates().stream()
+                        .map(SpeechRelevantCandidateDiagnostic::status)
+                        .toList());
+        assertEquals(
+                List.of(com.monada.speech.retrieval.SpeechMetadataFilter.CONDITION),
+                diagnostic.relevantCandidates().get(2).failedFilters());
+        assertEquals(1, diagnostic.relevantCandidates().get(0).rank());
+        assertEquals(2, diagnostic.relevantCandidates().get(1).rank());
+    }
+
+    @Test
+    void acousticDiagnosticsRequirePerQueryResultsAndRemainOptInByDefault() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new SpeechEvaluationOptions(1, false, true));
+        assertFalse(new SpeechEvaluationOptions(1, true).includeAcousticRetrievalDiagnostics());
+    }
+
+    @Test
     void groupedMetricsByConditionAndTaskType() throws IOException {
         Path queryAudio1 = tempDir.resolve("query1.wav");
         Path queryAudio2 = tempDir.resolve("query2.wav");

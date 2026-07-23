@@ -122,7 +122,7 @@ class SpeechRetrievalEvaluatorIntegrationTest {
                 queryWav,
                 Set.of("dys_word", "dys_sentence"),
                 new SpeechRetrievalOptions(5, null, SpeechCondition.DYSARTHRIC, null, null, null));
-        var options = new SpeechEvaluationOptions(5, true);
+        var options = new SpeechEvaluationOptions(5, true, true);
 
         var report = evaluator.evaluate(List.of(query), retriever, sampleStore, featureStore, options);
 
@@ -144,6 +144,18 @@ class SpeechRetrievalEvaluatorIntegrationTest {
         assertEquals(1, dysarthricMetrics.queryCount());
         assertEquals(1.0, dysarthricMetrics.hitRateAtK(), 1e-9);
         assertTrue(report.queryResults().get(0).hitAtK());
+        var diagnostic = report.queryResults().get(0).acousticDiagnostic();
+        assertNotNull(diagnostic);
+        assertEquals(3, diagnostic.retrieval().scannedVectorCount());
+        assertEquals(1, diagnostic.retrieval().metadataFilteredCandidateCount());
+        assertEquals(2, diagnostic.retrieval().scoredCandidateCount());
+        assertEquals(
+                List.of(
+                        SpeechRelevantCandidateStatus.RETRIEVED_AT_K,
+                        SpeechRelevantCandidateStatus.RETRIEVED_AT_K),
+                diagnostic.relevantCandidates().stream()
+                        .map(SpeechRelevantCandidateDiagnostic::status)
+                        .toList());
 
         var wordMetrics = report.metricsByTaskType().get(SpeechTaskType.WORD);
         assertNotNull(wordMetrics);

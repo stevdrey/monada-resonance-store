@@ -23,6 +23,8 @@ import java.time.Instant;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SpeechEvaluationMainTest {
@@ -51,6 +53,26 @@ class SpeechEvaluationMainTest {
         assertTrue(first.stdout().contains("q_440: retrieved=[s_440]"), first.stdout());
         assertTrue(first.stdout().contains("q_880: retrieved=[s_880]"), first.stdout());
         assertTrue(first.stdout().indexOf("q_440:") < first.stdout().indexOf("q_880:"), first.stdout());
+        assertFalse(first.stdout().contains("scan: vectors="), first.stdout());
+    }
+
+    @Test
+    void optInDiagnosticsRenderDeterministicScanAndRelevantCandidateFields() throws IOException {
+        Fixture fixture = createFixture();
+        Map<String, String> properties = new java.util.HashMap<>(
+                configuration(fixture.storeRoot(), fixture.manifest()));
+        properties.put("monada.speech.evaluation.diagnostics", "true");
+
+        RunResult first = run(Map.copyOf(properties));
+        RunResult second = run(Map.copyOf(properties));
+
+        assertEquals(0, first.exitCode());
+        assertEquals("", first.stderr());
+        assertEquals(first.stdout(), second.stdout());
+        assertTrue(first.stdout().contains(
+                "scan: vectors=2 orphan=0 incompatible=0 filtered=1 scored=1 ties=0"), first.stdout());
+        assertTrue(first.stdout().contains(
+                "relevant s_440: status=RETRIEVED_AT_K rank=1"), first.stdout());
     }
 
     @Test
@@ -88,25 +110,39 @@ class SpeechEvaluationMainTest {
                 Map.of(
                         "monada.speech.evaluation.store", propertyStore.toString(),
                         "monada.speech.evaluation.queries", propertyManifest.toString(),
-                        "monada.speech.evaluation.k", "2"),
+                        "monada.speech.evaluation.k", "2",
+                        "monada.speech.evaluation.diagnostics", "true"),
                 Map.of(
                         "MONADA_SPEECH_EVALUATION_STORE", tempDir.resolve("environment-store").toString(),
                         "MONADA_SPEECH_EVALUATION_QUERIES", tempDir.resolve("environment.tsv").toString(),
-                        "MONADA_SPEECH_EVALUATION_K", "4"));
+                        "MONADA_SPEECH_EVALUATION_K", "4",
+                        "MONADA_SPEECH_EVALUATION_DIAGNOSTICS", "false"));
 
         assertEquals(propertyStore, configuration.storeRoot());
         assertEquals(propertyManifest, configuration.queryManifest());
         assertEquals(2, configuration.k());
+        assertTrue(configuration.diagnostics());
 
         var environmentOnly = SpeechEvaluationMain.parseConfiguration(
                 Map.of(),
                 Map.of(
                         "MONADA_SPEECH_EVALUATION_STORE", tempDir.resolve("environment-store").toString(),
                         "MONADA_SPEECH_EVALUATION_QUERIES", tempDir.resolve("environment.tsv").toString(),
-                        "MONADA_SPEECH_EVALUATION_K", "4"));
+                        "MONADA_SPEECH_EVALUATION_K", "4",
+                        "MONADA_SPEECH_EVALUATION_DIAGNOSTICS", "true"));
         assertEquals(tempDir.resolve("environment-store"), environmentOnly.storeRoot());
         assertEquals(tempDir.resolve("environment.tsv"), environmentOnly.queryManifest());
         assertEquals(4, environmentOnly.k());
+        assertTrue(environmentOnly.diagnostics());
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> SpeechEvaluationMain.parseConfiguration(
+                        Map.of(
+                                "monada.speech.evaluation.store", propertyStore.toString(),
+                                "monada.speech.evaluation.queries", propertyManifest.toString(),
+                                "monada.speech.evaluation.diagnostics", "yes"),
+                        Map.of()));
     }
 
     private Fixture createFixture() throws IOException {

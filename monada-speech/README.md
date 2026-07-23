@@ -231,6 +231,15 @@ List<SpeechRetrievalResult> results = retriever.search(
     options
 );
 
+// Opt in to side-effect-free scan/filter/score diagnostics when debugging a miss
+SpeechRetrievalOutcome outcome = retriever.searchWithDiagnostics(
+    queryAudioPath,
+    sampleStore,
+    featureStore,
+    options
+);
+SpeechRetrievalDiagnostic diagnostic = outcome.diagnostic();
+
 // Inspect ranked results
 for (SpeechRetrievalResult result : results) {
     System.out.println("Rank " + result.rank() + ": " + 
@@ -272,6 +281,8 @@ so the append-only feature store does not accumulate duplicate feature entries.
 - **Metadata filtering**: Optional filters for dataset source, condition, task type, speaker, language
 - **Graceful handling**: Skips orphan vectors and dimension mismatches with warnings
 - **Linear scan**: Suitable for MVP scale, matches existing `LinearScanResonanceIndex` pattern
+- **Opt-in diagnostics**: `searchWithDiagnostics(...)` reports every stored vector as scored,
+  metadata-filtered, dimension-incompatible, or orphaned without changing the ranked results
 
 ## Speech Evaluation
 
@@ -389,6 +400,7 @@ Configuration (system property first, then environment variable):
 | query manifest (required) | `monada.speech.benchmark.queries` | `MONADA_SPEECH_BENCHMARK_QUERIES` | — |
 | evaluation `k` | `monada.speech.benchmark.k` | `MONADA_SPEECH_BENCHMARK_K` | `5` |
 | encoder dimensions | `monada.speech.benchmark.dims` | `MONADA_SPEECH_BENCHMARK_DIMS` | `64` |
+| acoustic diagnostics | `monada.speech.benchmark.diagnostics` | `MONADA_SPEECH_BENCHMARK_DIAGNOSTICS` | `false` |
 
 Query manifest format (UTF-8; blank lines and `#` comments ignored). Each query is three
 tab-separated fields — `queryId`, `queryWavPath` (absolute or relative to the corpus dir),
@@ -459,6 +471,7 @@ Configuration uses a system property first and then its environment-variable equ
 | evaluation `k` | `monada.speech.evaluation.k` | `MONADA_SPEECH_EVALUATION_K` | `5` |
 | encoder dimensions | `monada.speech.evaluation.dims` | `MONADA_SPEECH_EVALUATION_DIMS` | `64` |
 | report label | `monada.speech.evaluation.label` | `MONADA_SPEECH_EVALUATION_LABEL` | store-directory name |
+| acoustic diagnostics | `monada.speech.evaluation.diagnostics` | `MONADA_SPEECH_EVALUATION_DIAGNOSTICS` | `false` |
 
 The supplied root must contain the standard `samples/speech-samples-000001.jsonl`,
 `features/speech-features-000001.f32`, and `indexes/speech-feature-map.idx` files. The command
@@ -517,6 +530,49 @@ Per-query diagnostics
 q_440: retrieved=[s_440] missed=[] hit=true rr=1.0000
 q_880: retrieved=[s_880] missed=[] hit=true rr=1.0000
 ```
+
+### Acoustic miss and filter diagnostics
+
+Deep acoustic diagnostics are disabled by default so existing API calls, protected reports,
+and exploratory output retain their current shape. Enable them only when investigating a
+specific miss:
+
+```bash
+./gradlew :monada-speech:runSpeechEvaluation \
+  -Dmonada.speech.evaluation.store=/path/to/speech-store \
+  -Dmonada.speech.evaluation.queries=/path/to/queries.tsv \
+  -Dmonada.speech.evaluation.diagnostics=true
+```
+
+The local import-and-benchmark workflow accepts the equivalent
+`-Dmonada.speech.benchmark.diagnostics=true`. Diagnostic output remains deterministic and
+prints a compact summary plus one explanation for each relevant sample ID:
+
+```text
+q_hello: retrieved=[torgo_m01_session1_words_hello] missed=[] hit=true rr=1.0000
+  scan: vectors=42 orphan=1 incompatible=0 filtered=35 scored=6 ties=1
+  scores: min=0.4120 mean=0.6815 max=0.9340 top=0.9340 top-gap=0.0170
+  relevant torgo_m01_session1_words_hello: status=RETRIEVED_AT_K rank=1 score=0.9340
+```
+
+Interpret the fields as follows:
+
+- `vectors` is the number of stored feature vectors inspected. The orphan, incompatible,
+  filtered, and scored counts partition that total.
+- `orphan` means a feature vector references no sample metadata; `incompatible` means its
+  dimensions differ from the encoded query.
+- `filtered` counts candidates rejected by dataset, condition, task type, speaker, or language.
+  Relevant-candidate lines list every failed filter in that fixed order.
+- `ties` counts candidates after the first in each exact-score group; sample ID ordering resolves
+  those ties deterministically.
+- `min`, `mean`, and `max` describe all scored candidates. `top-gap` is the top score minus the
+  second score; a small value indicates weak acoustic separation near rank 1.
+- Relevant statuses distinguish `RETRIEVED_AT_K`, `SCORED_BELOW_K`, `METADATA_FILTERED`,
+  `INCOMPATIBLE_DIMENSIONS`, `ORPHAN_VECTOR`, `MISSING_VECTOR`, and `MISSING_SAMPLE`.
+
+The programmatic diagnostic retains per-vector details sorted by sample ID, while rendered
+reports intentionally show only the summary and relevant IDs so real-corpus reports stay
+inspectable.
 
 ### Follow-up guidance
 

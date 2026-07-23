@@ -284,6 +284,89 @@ class SpeechSampleRetrieverTest {
     }
 
     @Test
+    void diagnosticSearchMatchesRegularSearchAndAggregatesCandidateReasons() throws IOException {
+        Path queryFile = createTestWav("diagnostic_query", 440.0f);
+        SpeechSampleStore sampleStore = createStore();
+        SpeechFeatureStore featureStore = createFeatureStore();
+        FrequencyVector matchingVector = encoder.encode(queryFile);
+
+        SpeechSample scoredA = createSampleFull(
+                "a_scored", "M01", SpeechCondition.DYSARTHRIC, SpeechTaskType.WORD, "en-US");
+        SpeechSample scoredB = createSampleFull(
+                "b_scored", "M02", SpeechCondition.DYSARTHRIC, SpeechTaskType.WORD, "en-US");
+        SpeechSample filtered = new SpeechSample(
+                "c_filtered",
+                "C01",
+                SpeechDatasetSource.UA_SPEECH,
+                tempDir.resolve("c_filtered.wav"),
+                "filtered",
+                List.of(),
+                SpeechCondition.CONTROL,
+                SpeechTaskType.SENTENCE,
+                "es-ES",
+                new AudioMetadata(16000, 1, 500, "filtered"),
+                Instant.EPOCH);
+        SpeechSample incompatible = createSampleFull(
+                "d_incompatible", "M03", SpeechCondition.DYSARTHRIC, SpeechTaskType.WORD, "en-US");
+
+        sampleStore.save(scoredA);
+        sampleStore.save(scoredB);
+        sampleStore.save(filtered);
+        sampleStore.save(incompatible);
+        featureStore.save(scoredA.id(), matchingVector);
+        featureStore.save(scoredB.id(), matchingVector);
+        featureStore.save(filtered.id(), matchingVector);
+        featureStore.save(incompatible.id(), new FrequencyVector(new float[]{1.0f, 0.0f}));
+        featureStore.save("e_orphan", matchingVector);
+
+        var options = new SpeechRetrievalOptions(
+                5,
+                SpeechDatasetSource.TORGO,
+                SpeechCondition.DYSARTHRIC,
+                SpeechTaskType.WORD,
+                null,
+                "en-US");
+
+        List<SpeechRetrievalResult> regularResults =
+                retriever.search(queryFile, sampleStore, featureStore, options);
+        SpeechRetrievalOutcome outcome =
+                retriever.searchWithDiagnostics(queryFile, sampleStore, featureStore, options);
+
+        assertEquals(regularResults, outcome.results());
+        assertEquals(List.of("a_scored", "b_scored"), outcome.results().stream()
+                .map(result -> result.sample().id())
+                .toList());
+
+        SpeechRetrievalDiagnostic diagnostic = outcome.diagnostic();
+        assertEquals(5, diagnostic.scannedVectorCount());
+        assertEquals(1, diagnostic.orphanVectorCount());
+        assertEquals(1, diagnostic.incompatibleDimensionCount());
+        assertEquals(1, diagnostic.metadataFilteredCandidateCount());
+        assertEquals(2, diagnostic.scoredCandidateCount());
+        assertEquals(1, diagnostic.tieCount());
+        assertEquals(1.0, diagnostic.minimumScore(), 1e-6);
+        assertEquals(1.0, diagnostic.meanScore(), 1e-6);
+        assertEquals(1.0, diagnostic.maximumScore(), 1e-6);
+        assertEquals(1.0, diagnostic.topResultScore(), 1e-6);
+        assertEquals(0.0, diagnostic.topScoreGap(), 1e-9);
+        assertEquals(
+                List.of("a_scored", "b_scored", "c_filtered", "d_incompatible", "e_orphan"),
+                diagnostic.candidates().stream().map(SpeechCandidateDiagnostic::sampleId).toList());
+
+        SpeechCandidateDiagnostic filteredDiagnostic = diagnostic.candidates().get(2);
+        assertEquals(SpeechCandidateStatus.METADATA_FILTERED, filteredDiagnostic.status());
+        assertEquals(
+                List.of(
+                        SpeechMetadataFilter.DATASET_SOURCE,
+                        SpeechMetadataFilter.CONDITION,
+                        SpeechMetadataFilter.TASK_TYPE,
+                        SpeechMetadataFilter.LANGUAGE),
+                filteredDiagnostic.failedFilters());
+        assertEquals(SpeechCandidateStatus.INCOMPATIBLE_DIMENSIONS, diagnostic.candidates().get(3).status());
+        assertEquals(SpeechCandidateStatus.ORPHAN_VECTOR, diagnostic.candidates().get(4).status());
+    }
+
+    @Test
     void integrationStyleTest() throws IOException {
         // Complete workflow test
         Path queryFile = createTestWav("query", 440.0f);
