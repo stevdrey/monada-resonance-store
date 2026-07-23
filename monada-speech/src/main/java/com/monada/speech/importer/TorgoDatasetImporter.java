@@ -31,7 +31,8 @@ import java.util.Set;
  * <ol>
  *   <li>Recursively discovers {@code .wav} files under {@code datasetRoot}.</li>
  *   <li>Sorts them lexicographically for deterministic import order.</li>
- *   <li>Resolves transcripts from sibling {@code .txt} files; skips samples
+ *   <li>Resolves transcripts from sibling {@code .txt} files or native
+ *       {@code prompts/<id>.txt} files for {@code wav_arrayMic/<id>.wav}; skips samples
  *       with missing or blank transcripts.</li>
  *   <li>Reads audio metadata (sample rate, channels, duration, SHA-256) from
  *       each WAV file using JDK NIO.</li>
@@ -46,8 +47,8 @@ import java.util.Set;
  * <p>All {@code createdAt} timestamps are set to the instant the import run
  * starts, ensuring consistency across a single batch.
  *
- * <p>No real TORGO dataset download is required; any WAV + sibling {@code .txt}
- * layout matching the conventions is accepted.
+ * <p>No real TORGO dataset download is required; normalized sibling-transcript layouts and
+ * native array-microphone/prompt layouts matching the conventions are accepted.
  *
  * <p><strong>Layout assumption:</strong> this implementation supports a
  * conservative normalized layout
@@ -154,7 +155,7 @@ public final class TorgoDatasetImporter {
             }
 
             if (transcript.isEmpty()) {
-                boolean companionExists = Files.exists(TorgoPathUtils.siblingTxt(wavPath));
+                boolean companionExists = TorgoTranscriptResolver.transcriptFileExists(wavPath);
                 WarningCategory cat = companionExists
                         ? WarningCategory.BLANK_TRANSCRIPT
                         : WarningCategory.MISSING_TRANSCRIPT;

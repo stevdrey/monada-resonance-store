@@ -1,6 +1,7 @@
 package com.monada.speech.storage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -45,6 +46,19 @@ class FileSpeechSampleStoreTest {
 
         var found = store.findById("nonexistent");
         assertTrue(found.isEmpty());
+    }
+
+    @Test
+    void detectsSamplesWithoutParsingTheSampleLog() throws IOException {
+        var store = new FileSpeechSampleStore(tempDir);
+        assertFalse(store.hasSamples());
+
+        Path sampleFile = tempDir.resolve("samples/speech-samples-000001.jsonl");
+        Files.writeString(sampleFile, "\n  \n\t\n", StandardCharsets.UTF_8);
+        assertFalse(store.hasSamples());
+
+        store.save(createSample("sample1", "speaker1"));
+        assertTrue(store.hasSamples());
     }
 
     @Test

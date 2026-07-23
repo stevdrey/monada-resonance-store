@@ -4,16 +4,18 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 
 /**
- * Resolves the transcript text for a TORGO WAV file by looking for a sibling
- * plain-text file with the same stem and a {@code .txt} extension.
+ * Resolves the transcript text for a TORGO WAV file from an inspectable local text file.
  *
- * <p>Example: {@code M01/Session1/words/hello.wav} → {@code M01/Session1/words/hello.txt}
+ * <p>The resolver first uses a sibling plain-text file with the same stem. When that file is
+ * absent, it also recognizes the native array-microphone layout:
+ * {@code M01/Session1/wav_arrayMic/0001.wav} → {@code M01/Session1/prompts/0001.txt}.
  *
- * <p>Returns {@link Optional#empty()} when the companion file does not exist or its
- * trimmed content is blank.
+ * <p>Returns {@link Optional#empty()} when no supported transcript file exists or the selected
+ * file's trimmed content is blank.
  */
 final class TorgoTranscriptResolver {
 
@@ -25,15 +27,32 @@ final class TorgoTranscriptResolver {
      * Attempts to resolve the transcript for the given WAV path.
      *
      * @param wavPath path to the WAV file
-     * @return trimmed transcript text, or empty if the companion file does not exist or is blank
-     * @throws IOException if the companion file exists but cannot be read
+     * @return trimmed transcript text, or empty if no supported companion file exists or it is blank
+     * @throws IOException if the selected companion file exists but cannot be read
      */
     static Optional<String> resolve(Path wavPath) throws IOException {
-        Path companion = TorgoPathUtils.siblingTxt(wavPath);
-        if (Files.notExists(companion)) {
-            return Optional.empty();
+        for (Path candidate : transcriptCandidates(wavPath)) {
+            if (Files.notExists(candidate)) {
+                continue;
+            }
+            return readTranscript(candidate);
         }
-        String content = Files.readString(companion, StandardCharsets.UTF_8).strip();
+        return Optional.empty();
+    }
+
+    /** Returns whether any supported transcript companion path exists. */
+    static boolean transcriptFileExists(Path wavPath) {
+        return transcriptCandidates(wavPath).stream().anyMatch(Files::exists);
+    }
+
+    private static List<Path> transcriptCandidates(Path wavPath) {
+        Path sibling = TorgoPathUtils.siblingTxt(wavPath);
+        Path arrayMicPrompt = TorgoPathUtils.arrayMicPromptTxt(wavPath);
+        return arrayMicPrompt == null ? List.of(sibling) : List.of(sibling, arrayMicPrompt);
+    }
+
+    private static Optional<String> readTranscript(Path transcriptPath) throws IOException {
+        String content = Files.readString(transcriptPath, StandardCharsets.UTF_8).strip();
         if (content.isBlank()) {
             return Optional.empty();
         }

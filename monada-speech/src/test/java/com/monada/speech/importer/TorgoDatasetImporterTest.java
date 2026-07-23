@@ -129,6 +129,43 @@ class TorgoDatasetImporterTest {
     }
 
     @Test
+    void importsNativeArrayMicrophoneLayoutUsingSessionPrompt() throws IOException {
+        Path dataset = tempDir.resolve("torgo");
+        Path audioDirectory = dataset.resolve("M01/Session1/wav_arrayMic");
+        Path promptDirectory = dataset.resolve("M01/Session1/prompts");
+        Files.createDirectories(audioDirectory);
+        Files.createDirectories(promptDirectory);
+        writeWav(audioDirectory, "0001.wav", makeSineWav(16_000, 500, 1, 16));
+        writeTxt(promptDirectory, "0001", "native TORGO prompt");
+
+        SpeechSampleStore store = store(tempDir.resolve("native-array-store"));
+        TorgoDatasetImportReport report = new TorgoDatasetImporter().importFrom(dataset, store);
+
+        assertEquals(1, report.importedSamples());
+        assertTrue(report.warnings().isEmpty());
+        assertEquals("native TORGO prompt", store.findAll().getFirst().transcript());
+        assertEquals(SpeechTaskType.UNKNOWN, store.findAll().getFirst().taskType());
+    }
+
+    @Test
+    void reportsBlankNativeArrayMicrophonePromptAsBlankTranscript() throws IOException {
+        Path dataset = tempDir.resolve("torgo");
+        Path audioDirectory = dataset.resolve("M01/Session1/wav_arrayMic");
+        Path promptDirectory = dataset.resolve("M01/Session1/prompts");
+        Files.createDirectories(audioDirectory);
+        Files.createDirectories(promptDirectory);
+        writeWav(audioDirectory, "0001.wav", makeSineWav(16_000, 500, 1, 16));
+        writeTxt(promptDirectory, "0001", "   ");
+
+        TorgoDatasetImportReport report = new TorgoDatasetImporter().importFrom(
+                dataset, store(tempDir.resolve("blank-native-array-store")));
+
+        assertEquals(0, report.importedSamples());
+        assertEquals(1, report.skippedSamples());
+        assertEquals("blank transcript", report.warnings().getFirst().reason());
+    }
+
+    @Test
     void importsMultipleSamplesInDeterministicOrder() throws IOException {
         Path dataset = tempDir.resolve("torgo");
         Path dir = dataset.resolve("M01/Session1/sentences");

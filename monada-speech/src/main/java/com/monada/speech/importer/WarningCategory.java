@@ -10,13 +10,13 @@ package com.monada.speech.importer;
  */
 public enum WarningCategory {
 
-    /** No sibling {@code .txt} file was found alongside the WAV. */
+    /** No supported sibling or native TORGO prompt transcript file was found. */
     MISSING_TRANSCRIPT("missing transcript"),
 
-    /** A sibling {@code .txt} file exists but its trimmed content is blank. */
+    /** A selected sibling or native TORGO prompt transcript is blank after trimming. */
     BLANK_TRANSCRIPT("blank transcript"),
 
-    /** The sibling {@code .txt} file exists but could not be read (I/O error). */
+    /** The selected sibling or native TORGO prompt transcript could not be read (I/O error). */
     UNREADABLE_TRANSCRIPT("unreadable transcript"),
 
     /** The WAV file exists but could not be parsed or has an unsupported format. */

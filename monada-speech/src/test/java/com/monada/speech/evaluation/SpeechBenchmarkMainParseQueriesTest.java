@@ -1,5 +1,8 @@
 package com.monada.speech.evaluation;
 
+import com.monada.speech.domain.SpeechCondition;
+import com.monada.speech.domain.SpeechDatasetSource;
+import com.monada.speech.domain.SpeechTaskType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -41,6 +44,21 @@ class SpeechBenchmarkMainParseQueriesTest {
     }
 
     @Test
+    void parsesExtendedManifestWithFiltersAndExplicitTopK() throws IOException {
+        touchAudio("q1.wav");
+        Path manifest = manifest("q1\tq1.wav\ts1,s2\t3\ttorgo\tcontrol\tword\tM01\ten-US\n");
+
+        SpeechEvaluationQuery query = SpeechBenchmarkMain.parseQueries(manifest, tempDir, 2).getFirst();
+
+        assertEquals(3, query.retrievalOptions().topK());
+        assertEquals(SpeechDatasetSource.TORGO, query.retrievalOptions().datasetSource());
+        assertEquals(SpeechCondition.CONTROL, query.retrievalOptions().condition());
+        assertEquals(SpeechTaskType.WORD, query.retrievalOptions().taskType());
+        assertEquals("M01", query.retrievalOptions().speakerId());
+        assertEquals("en-US", query.retrievalOptions().language());
+    }
+
+    @Test
     void rejectsMissingQueryWav() throws IOException {
         Path manifest = manifest("q1\tmissing.wav\ts1\n");
         IOException ex = assertThrows(IOException.class,
@@ -75,21 +93,20 @@ class SpeechBenchmarkMainParseQueriesTest {
     }
 
     @Test
-    void rejectsLineWithExtraFields() throws IOException {
-        Path manifest = manifest("q1\tq1.wav\ts1\textra\n");
+    void rejectsLineWithTooManyFields() throws IOException {
+        Path manifest = manifest("q1\tq1.wav\ts1\t2\tTORGO\tCONTROL\tWORD\tM01\ten-US\textra\n");
         IOException ex = assertThrows(IOException.class,
                 () -> SpeechBenchmarkMain.parseQueries(manifest, tempDir, 2));
         assertTrue(ex.getMessage().contains("line 1"), ex.getMessage());
-        assertTrue(ex.getMessage().contains("exactly 3"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("3 to 9"), ex.getMessage());
     }
 
     @Test
-    void rejectsLineWithExtraTrailingField() throws IOException {
+    void acceptsBlankOptionalTrailingField() throws IOException {
         Path manifest = manifest("q1\tq1.wav\ts1\t\n");
-        IOException ex = assertThrows(IOException.class,
-                () -> SpeechBenchmarkMain.parseQueries(manifest, tempDir, 2));
-        assertTrue(ex.getMessage().contains("line 1"), ex.getMessage());
-        assertTrue(ex.getMessage().contains("exactly 3"), ex.getMessage());
+        touchAudio("q1.wav");
+        SpeechEvaluationQuery query = SpeechBenchmarkMain.parseQueries(manifest, tempDir, 2).getFirst();
+        assertEquals(2, query.retrievalOptions().topK());
     }
 
     @Test
@@ -144,6 +161,30 @@ class SpeechBenchmarkMainParseQueriesTest {
                 () -> SpeechBenchmarkMain.parseQueries(manifest, tempDir, 2));
         assertTrue(ex.getMessage().contains("line 1"), ex.getMessage());
         assertTrue(ex.getMessage().contains("relevant"), ex.getMessage());
+    }
+
+    @Test
+    void rejectsDuplicateQueryIds() throws IOException {
+        touchAudio("q1.wav");
+        Path manifest = manifest("q1\tq1.wav\ts1\nq1\tq1.wav\ts2\n");
+        IOException ex = assertThrows(IOException.class,
+                () -> SpeechBenchmarkMain.parseQueries(manifest, tempDir, 2));
+        assertTrue(ex.getMessage().contains("line 2"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("duplicates queryId"), ex.getMessage());
+    }
+
+    @Test
+    void rejectsInvalidFilterEnumAndTopKBelowEvaluationK() throws IOException {
+        touchAudio("q1.wav");
+        Path invalidEnum = manifest("q1\tq1.wav\ts1\t2\tnot-a-source\n");
+        IOException enumException = assertThrows(IOException.class,
+                () -> SpeechBenchmarkMain.parseQueries(invalidEnum, tempDir, 2));
+        assertTrue(enumException.getMessage().contains("datasetSource"), enumException.getMessage());
+
+        Path topKTooSmall = manifest("q1\tq1.wav\ts1\t1\n");
+        IOException topKException = assertThrows(IOException.class,
+                () -> SpeechBenchmarkMain.parseQueries(topKTooSmall, tempDir, 2));
+        assertTrue(topKException.getMessage().contains("must be >= evaluation k"), topKException.getMessage());
     }
 
     @Test

@@ -87,6 +87,44 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
         return List.copyOf(byId.values());
     }
 
+    /**
+     * Validates the dimensions of every active stored vector without materializing float values.
+     *
+     * <p>The feature index remains append-only, so repeated sample IDs use the last index entry,
+     * matching {@link #findAll()}. The returned count is the number of active vectors inspected.
+     * This method validates offsets and vector-dimension headers only; callers that need vector
+     * values must still use {@link #findAll()} or {@link #findBySampleId(String)}.
+     *
+     * @param expectedDimensions dimensions required by the caller
+     * @return number of active vectors validated, or zero when the feature index is empty
+     * @throws IOException if an active index entry or dimension header is invalid
+     * @throws IllegalArgumentException if expected dimensions are non-positive or do not match
+     */
+    public int validateStoredVectorDimensions(int expectedDimensions) throws IOException {
+        if (expectedDimensions <= 0) {
+            throw new IllegalArgumentException("expected dimensions must be positive: " + expectedDimensions);
+        }
+
+        var activeEntries = new LinkedHashMap<String, IndexEntry>();
+        for (IndexEntry entry : readIndexEntries()) {
+            activeEntries.put(entry.sampleId(), entry);
+        }
+
+        var fileSize = Files.size(vectorFile);
+        try (var file = new RandomAccessFile(vectorFile.toFile(), "r")) {
+            for (IndexEntry entry : activeEntries.values()) {
+                validateOffset(entry.offset(), fileSize, entry.sampleId());
+                file.seek(entry.offset());
+                int actualDimensions = readVectorDimensions(file, entry.sampleId(), entry.offset());
+                if (actualDimensions != expectedDimensions) {
+                    throw new IllegalArgumentException("feature vector dimensions for sample " + entry.sampleId()
+                            + " are " + actualDimensions + ", expected " + expectedDimensions);
+                }
+            }
+        }
+        return activeEntries.size();
+    }
+
     private Long findOffset(String sampleId) throws IOException {
         try (var lines = Files.lines(vectorMap, StandardCharsets.UTF_8)) {
             return lines
@@ -122,18 +160,28 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
     }
 
     private FrequencyVector readVector(RandomAccessFile file, String sampleId, long offset) throws IOException {
+        int dimensions = readVectorDimensions(file, sampleId, offset);
         try {
-            var dimensions = file.readInt();
-            if (dimensions <= 0 || dimensions > MAX_DIMENSIONS) {
-                throw new IOException(
-                        "Invalid vector dimensions (" + dimensions + ") for sampleId=" + sampleId
-                                + " at offset=" + offset);
-            }
             var values = new float[dimensions];
             for (var i = 0; i < dimensions; i++) {
                 values[i] = file.readFloat();
             }
             return new FrequencyVector(values);
+        } catch (EOFException e) {
+            throw new IOException(
+                    "Feature vector segment truncated while reading sampleId=" + sampleId + " at offset=" + offset, e);
+        }
+    }
+
+    private int readVectorDimensions(RandomAccessFile file, String sampleId, long offset) throws IOException {
+        try {
+            int dimensions = file.readInt();
+            if (dimensions <= 0 || dimensions > MAX_DIMENSIONS) {
+                throw new IOException(
+                        "Invalid vector dimensions (" + dimensions + ") for sampleId=" + sampleId
+                                + " at offset=" + offset);
+            }
+            return dimensions;
         } catch (EOFException e) {
             throw new IOException(
                     "Feature vector segment truncated while reading sampleId=" + sampleId + " at offset=" + offset, e);

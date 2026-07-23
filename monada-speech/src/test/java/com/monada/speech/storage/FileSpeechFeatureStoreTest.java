@@ -39,6 +39,32 @@ class FileSpeechFeatureStoreTest {
     }
 
     @Test
+    void validatesActiveVectorDimensionsWithoutMaterializingVectors() throws IOException {
+        var store = new FileSpeechFeatureStore(tempDir);
+        assertEquals(0, store.validateStoredVectorDimensions(64));
+
+        store.save("sample1", new FrequencyVector(new float[64]));
+        store.save("sample2", new FrequencyVector(new float[64]));
+
+        assertEquals(2, store.validateStoredVectorDimensions(64));
+        var exception = assertThrows(IllegalArgumentException.class,
+                () -> store.validateStoredVectorDimensions(32));
+        assertTrue(exception.getMessage().contains("feature vector dimensions for sample sample1 are 64, expected 32"));
+    }
+
+    @Test
+    void validatesOnlyTheLastVectorForDuplicateSampleIds() throws IOException {
+        var store = new FileSpeechFeatureStore(tempDir);
+        store.save("sample1", new FrequencyVector(new float[32]));
+        store.save("sample1", new FrequencyVector(new float[64]));
+
+        assertEquals(1, store.validateStoredVectorDimensions(64));
+        var exception = assertThrows(IllegalArgumentException.class,
+                () -> store.validateStoredVectorDimensions(32));
+        assertTrue(exception.getMessage().contains("feature vector dimensions for sample sample1 are 64, expected 32"));
+    }
+
+    @Test
     void preservesVectorDimensionsAndValues() throws IOException {
         var store = new FileSpeechFeatureStore(tempDir);
         float[] values = new float[]{1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f};
