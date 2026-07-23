@@ -4,7 +4,6 @@ import com.monada.speech.encoder.BasicAcousticFeatureEncoder;
 import com.monada.speech.retrieval.SpeechSampleRetriever;
 import com.monada.speech.storage.FileSpeechFeatureStore;
 import com.monada.speech.storage.FileSpeechSampleStore;
-import com.monada.speech.storage.StoredSpeechFeatureVector;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -67,14 +66,12 @@ public final class SpeechEvaluationMain {
         try {
             var sampleStore = new FileSpeechSampleStore(configuration.storeRoot());
             var featureStore = new FileSpeechFeatureStore(configuration.storeRoot());
-            if (sampleStore.findAll().isEmpty()) {
+            if (!sampleStore.hasSamples()) {
                 throw new IllegalArgumentException("speech store has no samples: " + configuration.storeRoot());
             }
-            List<StoredSpeechFeatureVector> vectors = featureStore.findAll();
-            if (vectors.isEmpty()) {
+            if (featureStore.validateStoredVectorDimensions(configuration.dimensions()) == 0) {
                 throw new IllegalArgumentException("speech store has no feature vectors: " + configuration.storeRoot());
             }
-            validateDimensions(vectors, configuration.dimensions());
 
             var encoder = new BasicAcousticFeatureEncoder(configuration.dimensions());
             var report = new SpeechBenchmarkRunner().run(
@@ -160,16 +157,6 @@ public final class SpeechEvaluationMain {
             throw new IllegalArgumentException("query manifest has no parent directory: " + manifest);
         }
         return parent;
-    }
-
-    private static void validateDimensions(List<StoredSpeechFeatureVector> vectors, int expectedDimensions) {
-        for (StoredSpeechFeatureVector vector : vectors) {
-            int actualDimensions = vector.vector().dimensions();
-            if (actualDimensions != expectedDimensions) {
-                throw new IllegalArgumentException("feature vector dimensions for sample " + vector.sampleId()
-                        + " are " + actualDimensions + ", expected " + expectedDimensions);
-            }
-        }
     }
 
     private static int parsePositiveInt(

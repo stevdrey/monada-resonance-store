@@ -54,6 +54,18 @@ public class FileSpeechSampleStore implements SpeechSampleStore {
         Files.writeString(sampleLog, line + System.lineSeparator(), StandardCharsets.UTF_8, StandardOpenOption.APPEND);
     }
 
+    /**
+     * Returns whether the sample log contains at least one non-blank entry without parsing it.
+     *
+     * <p>This is intended for lightweight store validation. Call {@link #findAll()} when sample
+     * metadata is required or full JSONL validation is needed.
+     */
+    public boolean hasSamples() throws IOException {
+        try (var lines = Files.lines(sampleLog, StandardCharsets.UTF_8)) {
+            return lines.anyMatch(line -> !line.isBlank());
+        }
+    }
+
     @Override
     public Optional<SpeechSample> findById(String sampleId) throws IOException {
         return findAll().stream()

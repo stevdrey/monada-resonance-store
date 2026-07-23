@@ -4,7 +4,6 @@ import com.monada.speech.encoder.BasicAcousticFeatureEncoder;
 import com.monada.speech.encoder.SpeechFeatureEncodingJob;
 import com.monada.speech.storage.FileSpeechFeatureStore;
 import com.monada.speech.storage.FileSpeechSampleStore;
-import com.monada.speech.storage.StoredSpeechFeatureVector;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -12,7 +11,6 @@ import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -56,7 +54,7 @@ public final class SpeechImportMain {
         try {
             var sampleStore = new FileSpeechSampleStore(configuration.storeRoot());
             var featureStore = new FileSpeechFeatureStore(configuration.storeRoot());
-            validateExistingFeatureDimensions(featureStore.findAll(), configuration.dimensions());
+            featureStore.validateStoredVectorDimensions(configuration.dimensions());
 
             TorgoDatasetImportReport importReport = new TorgoDatasetImporter().importFrom(
                     configuration.corpusDirectory(), sampleStore);
@@ -108,20 +106,6 @@ public final class SpeechImportMain {
             return Path.of(value);
         } catch (InvalidPathException e) {
             throw new IllegalArgumentException(label + " is not a valid path: " + value, e);
-        }
-    }
-
-    private static void validateExistingFeatureDimensions(
-            List<StoredSpeechFeatureVector> vectors,
-            int expectedDimensions
-    ) {
-        for (StoredSpeechFeatureVector vector : vectors) {
-            int actualDimensions = vector.vector().dimensions();
-            if (actualDimensions != expectedDimensions) {
-                throw new IllegalArgumentException("feature vector dimensions for sample " + vector.sampleId()
-                        + " are " + actualDimensions + ", expected " + expectedDimensions
-                        + "; use a separate store or the original encoder dimensions");
-            }
         }
     }
 
