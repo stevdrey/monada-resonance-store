@@ -181,8 +181,8 @@ System.out.println("imported: " + audit.importedSamples());
 | Category | Reason |
 |---|---|
 | `MISSING_TRANSCRIPT` | No supported transcript file found: sibling `.txt` or native `prompts/<id>.txt` for `wav_arrayMic/<id>.wav`. |
-| `BLANK_TRANSCRIPT` | Sibling `.txt` exists but is blank after trimming. |
-| `UNREADABLE_TRANSCRIPT` | Sibling `.txt` exists but threw an I/O error on read. |
+| `BLANK_TRANSCRIPT` | A supported sibling `.txt` or native `prompts/<id>.txt` transcript exists but is blank after trimming. |
+| `UNREADABLE_TRANSCRIPT` | A supported sibling `.txt` or native `prompts/<id>.txt` transcript could not be read because of an I/O error. |
 | `UNREADABLE_AUDIO` | WAV file could not be parsed or has an unsupported format. |
 | `UNSUPPORTED_LAYOUT` | Path does not conform to `<speaker>/<session>/<task>/<file>.wav` (e.g. file at dataset root). |
 | `DUPLICATE_ID` | Two files derive the same stable sample ID within one run. |
