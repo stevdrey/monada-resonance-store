@@ -25,7 +25,9 @@ public final class ExpandedMain {
         try {
             var report = new EvaluationRunner()
                     .run(ExpandedTechnologyDataset.get(), workdir);
-            System.out.println(report.render());
+            var versionedReport = new VersionedTextEvaluationReport(
+                    TextEvaluationCatalog.EXPANDED_TECHNOLOGY, report);
+            System.out.println(versionedReport.render());
         } finally {
             EvaluationTempDirectories.deleteRecursively(workdir);
         }

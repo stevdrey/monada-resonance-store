@@ -12,6 +12,8 @@ The project follows a measurement-first path: improve retrieval quality only aft
 - Deterministic resonance ranking.
 - Feedback-aware ranking with query-key strategies.
 - Protected baseline evaluation.
+- Versioned text evaluation snapshots with explicit protected/exploratory report labels and
+  deterministic regression gates.
 - Expanded exploratory evaluation.
 - A/B profile comparison.
 - Evaluation diagnostics.

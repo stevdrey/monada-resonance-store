@@ -55,6 +55,31 @@ The main domain record is `KnowledgeAtom`. Text content is encoded into `Frequen
 ./gradlew :monada-speech:runSpeechEvaluation
 ```
 
+## Text Evaluation Baselines
+
+Text evaluation reports identify their dataset, dataset version, retrieval profile, and mode.
+`PROTECTED` reports use a versioned snapshot and are enforced by
+`./gradlew :monada-evaluation:test`; `EXPLORATORY` reports expose current gaps but never gate CI.
+The protected snapshots are readable `.properties` resources under
+`monada-evaluation/src/main/resources/com/monada/evaluation/baselines/` and are listed in that
+directory's `index.txt`.
+
+The current protected policy uses exact aggregate values with an explicit floating-point
+tolerance. Both improvements and regressions therefore require review. To update a baseline
+intentionally:
+
+1. Run the affected evaluation entry point and review aggregate metrics plus every query's top-K
+   output.
+2. If the corpus, query set, or relevance judgments changed, increment the dataset version, add a
+   new versioned snapshot, and update `index.txt`.
+3. If only the retrieval behavior changed intentionally, keep the dataset version and update the
+   expected values in its snapshot with the rationale in the same commit or PR.
+4. Run `./gradlew :monada-evaluation:test` and `./gradlew test` before submitting the change.
+
+Snapshot metrics use `EXACT:<value>` when any drift must be reviewed and `MINIMUM:<value>` when
+only regressions below a threshold should fail. Exploratory datasets must not be added to the
+protected baseline registry.
+
 ## Local Speech Store Evaluation
 
 First, create a persistent store from a local TORGO-style corpus:
