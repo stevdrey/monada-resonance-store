@@ -223,14 +223,6 @@ SpeechRetrievalOptions options = new SpeechRetrievalOptions(
     null                  // optional language filter
 );
 
-// Search for similar samples
-List<SpeechRetrievalResult> results = retriever.search(
-    queryAudioPath,
-    sampleStore,
-    featureStore,
-    options
-);
-
 // Opt in to side-effect-free scan/filter/score diagnostics when debugging a miss
 SpeechRetrievalOutcome outcome = retriever.searchWithDiagnostics(
     queryAudioPath,
@@ -238,6 +230,7 @@ SpeechRetrievalOutcome outcome = retriever.searchWithDiagnostics(
     featureStore,
     options
 );
+List<SpeechRetrievalResult> results = outcome.results();
 SpeechRetrievalDiagnostic diagnostic = outcome.diagnostic();
 
 // Inspect ranked results
