@@ -19,6 +19,7 @@ import java.util.Objects;
  * @param missedRelevantSampleIds relevant sample IDs that did not appear in the top-k, sorted
  * @param topResultSampleId   sample ID of the highest-ranked result, or null if no results
  * @param topResultScore      score of the highest-ranked result, or 0.0 if no results
+ * @param acousticDiagnostic  optional deep acoustic retrieval diagnostic
  */
 public record SpeechQueryEvaluationResult(
         String queryId,
@@ -31,8 +32,40 @@ public record SpeechQueryEvaluationResult(
         List<String> retrievedSampleIds,
         List<String> missedRelevantSampleIds,
         String topResultSampleId,
-        double topResultScore
+        double topResultScore,
+        SpeechQueryAcousticDiagnostic acousticDiagnostic
 ) {
+    /**
+     * Backwards-compatible constructor without deep acoustic retrieval diagnostics.
+     */
+    public SpeechQueryEvaluationResult(
+            String queryId,
+            int retrievedCount,
+            int relevantRetrievedCount,
+            boolean hitAtK,
+            double precisionAtK,
+            double recallAtK,
+            double reciprocalRank,
+            List<String> retrievedSampleIds,
+            List<String> missedRelevantSampleIds,
+            String topResultSampleId,
+            double topResultScore
+    ) {
+        this(
+                queryId,
+                retrievedCount,
+                relevantRetrievedCount,
+                hitAtK,
+                precisionAtK,
+                recallAtK,
+                reciprocalRank,
+                retrievedSampleIds,
+                missedRelevantSampleIds,
+                topResultSampleId,
+                topResultScore,
+                null);
+    }
+
     public SpeechQueryEvaluationResult {
         Objects.requireNonNull(queryId, "queryId");
         if (queryId.isBlank()) {

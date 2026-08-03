@@ -91,11 +91,54 @@ public record SpeechBenchmarkReport(
                 sb.append(" missed=").append(r.missedRelevantSampleIds());
                 sb.append(String.format(Locale.ROOT, " hit=%b rr=%.4f", r.hitAtK(), r.reciprocalRank()));
                 sb.append('\n');
+                appendAcousticDiagnostic(sb, r.acousticDiagnostic());
             }
             sb.append('\n');
         }
 
         return sb.toString();
+    }
+
+    private static void appendAcousticDiagnostic(
+            StringBuilder sb,
+            SpeechQueryAcousticDiagnostic diagnostic
+    ) {
+        if (diagnostic == null) {
+            return;
+        }
+        var retrieval = diagnostic.retrieval();
+        sb.append(String.format(
+                Locale.ROOT,
+                "  scan: vectors=%d orphan=%d incompatible=%d filtered=%d scored=%d ties=%d%n",
+                retrieval.scannedVectorCount(),
+                retrieval.orphanVectorCount(),
+                retrieval.incompatibleDimensionCount(),
+                retrieval.metadataFilteredCandidateCount(),
+                retrieval.scoredCandidateCount(),
+                retrieval.tieCount()));
+        sb.append(String.format(
+                Locale.ROOT,
+                "  scores: min=%.4f mean=%.4f max=%.4f top=%.4f top-gap=%.4f%n",
+                retrieval.minimumScore(),
+                retrieval.meanScore(),
+                retrieval.maximumScore(),
+                retrieval.topResultScore(),
+                retrieval.topScoreGap()));
+        for (SpeechRelevantCandidateDiagnostic relevant : diagnostic.relevantCandidates()) {
+            sb.append("  relevant ").append(relevant.sampleId());
+            sb.append(": status=").append(relevant.status().name());
+            if (!relevant.failedFilters().isEmpty()) {
+                sb.append(" filters=").append(relevant.failedFilters());
+            }
+            if (relevant.rank() > 0) {
+                sb.append(String.format(
+                        Locale.ROOT,
+                        " rank=%d score=%.4f",
+                        relevant.rank(),
+                        relevant.score()));
+            }
+            sb.append('\n');
+        }
     }
 
     private static void appendGroupedByCondition(

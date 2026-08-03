@@ -3,6 +3,9 @@ package com.monada.speech.evaluation;
 import com.monada.speech.domain.SpeechCondition;
 import com.monada.speech.domain.SpeechSample;
 import com.monada.speech.domain.SpeechTaskType;
+import com.monada.speech.retrieval.SpeechCandidateDiagnostic;
+import com.monada.speech.retrieval.SpeechRetrievalDiagnostic;
+import com.monada.speech.retrieval.SpeechRetrievalOutcome;
 import com.monada.speech.retrieval.SpeechRetrievalResult;
 import com.monada.speech.retrieval.SpeechSampleRetriever;
 import com.monada.speech.storage.SpeechFeatureStore;
@@ -81,6 +84,14 @@ public final class SpeechRetrievalEvaluator {
                         (existing, replacement) -> existing,
                         LinkedHashMap::new
                 ));
+        Map<String, SpeechSample> samplesById = allSamples.stream()
+                .sorted(Comparator.comparing(SpeechSample::id))
+                .collect(Collectors.toMap(
+                        SpeechSample::id,
+                        Function.identity(),
+                        (existing, replacement) -> existing,
+                        LinkedHashMap::new
+                ));
 
         Map<SpeechCondition, List<SpeechQueryEvaluationResult>> resultsByCondition = new EnumMap<>(SpeechCondition.class);
         Map<SpeechTaskType, List<SpeechQueryEvaluationResult>> resultsByTaskType = new EnumMap<>(SpeechTaskType.class);
@@ -93,12 +104,23 @@ public final class SpeechRetrievalEvaluator {
                         "retrievalOptions.topK() (" + query.retrievalOptions().topK()
                         + ") must be >= evaluation k (" + k + ") for query: " + query.queryId());
             }
-            List<SpeechRetrievalResult> retrieved = retriever.search(
-                    query.queryAudio(),
-                    sampleStore,
-                    featureStore,
-                    query.retrievalOptions()
-            );
+            List<SpeechRetrievalResult> retrieved;
+            SpeechRetrievalDiagnostic retrievalDiagnostic = null;
+            if (options.includeAcousticRetrievalDiagnostics()) {
+                SpeechRetrievalOutcome outcome = retriever.searchWithDiagnostics(
+                        query.queryAudio(),
+                        sampleStore,
+                        featureStore,
+                        query.retrievalOptions());
+                retrieved = outcome.results();
+                retrievalDiagnostic = outcome.diagnostic();
+            } else {
+                retrieved = retriever.search(
+                        query.queryAudio(),
+                        sampleStore,
+                        featureStore,
+                        query.retrievalOptions());
+            }
 
             List<SpeechRetrievalResult> topK = retrieved.subList(0, Math.min(retrieved.size(), k));
             List<String> retrievedIds = topK.stream()
@@ -136,6 +158,9 @@ public final class SpeechRetrievalEvaluator {
 
             String topResultSampleId = topK.isEmpty() ? null : topK.get(0).sample().id();
             double topResultScore = topK.isEmpty() ? 0.0 : topK.get(0).score();
+            SpeechQueryAcousticDiagnostic acousticDiagnostic = retrievalDiagnostic == null
+                    ? null
+                    : createAcousticDiagnostic(retrievalDiagnostic, relevantIds, samplesById, k);
 
             SpeechQueryEvaluationResult queryResult = new SpeechQueryEvaluationResult(
                     query.queryId(),
@@ -148,7 +173,8 @@ public final class SpeechRetrievalEvaluator {
                     retrievedIds,
                     missedRelevantIds,
                     topResultSampleId,
-                    topResultScore
+                    topResultScore,
+                    acousticDiagnostic
             );
 
             queryResults.add(queryResult);
@@ -183,6 +209,51 @@ public final class SpeechRetrievalEvaluator {
                 Map.copyOf(metricsByCondition),
                 Map.copyOf(metricsByTaskType)
         );
+    }
+
+    private SpeechQueryAcousticDiagnostic createAcousticDiagnostic(
+            SpeechRetrievalDiagnostic retrievalDiagnostic,
+            Set<String> relevantIds,
+            Map<String, SpeechSample> samplesById,
+            int k
+    ) {
+        Map<String, SpeechCandidateDiagnostic> candidatesById = retrievalDiagnostic.candidates().stream()
+                .collect(Collectors.toMap(
+                        SpeechCandidateDiagnostic::sampleId,
+                        Function.identity(),
+                        (existing, replacement) -> existing,
+                        LinkedHashMap::new));
+
+        List<SpeechRelevantCandidateDiagnostic> relevantCandidates = new ArrayList<>();
+        List<String> sortedRelevantIds = relevantIds.stream().sorted().toList();
+        for (String relevantId : sortedRelevantIds) {
+            SpeechCandidateDiagnostic candidate = candidatesById.get(relevantId);
+            if (candidate == null) {
+                SpeechRelevantCandidateStatus status = samplesById.containsKey(relevantId)
+                        ? SpeechRelevantCandidateStatus.MISSING_VECTOR
+                        : SpeechRelevantCandidateStatus.MISSING_SAMPLE;
+                relevantCandidates.add(new SpeechRelevantCandidateDiagnostic(
+                        relevantId, status, List.of(), 0.0, 0));
+                continue;
+            }
+
+            SpeechRelevantCandidateStatus status = switch (candidate.status()) {
+                case SCORED -> candidate.rank() <= k
+                        ? SpeechRelevantCandidateStatus.RETRIEVED_AT_K
+                        : SpeechRelevantCandidateStatus.SCORED_BELOW_K;
+                case METADATA_FILTERED -> SpeechRelevantCandidateStatus.METADATA_FILTERED;
+                case INCOMPATIBLE_DIMENSIONS -> SpeechRelevantCandidateStatus.INCOMPATIBLE_DIMENSIONS;
+                case ORPHAN_VECTOR -> SpeechRelevantCandidateStatus.ORPHAN_VECTOR;
+            };
+            relevantCandidates.add(new SpeechRelevantCandidateDiagnostic(
+                    relevantId,
+                    status,
+                    candidate.failedFilters(),
+                    candidate.score(),
+                    candidate.rank()));
+        }
+
+        return new SpeechQueryAcousticDiagnostic(retrievalDiagnostic, relevantCandidates);
     }
 
     private void validateQuery(SpeechEvaluationQuery query) {

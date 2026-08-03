@@ -57,6 +57,40 @@ public final class SpeechSampleRetriever {
             SpeechFeatureStore featureStore,
             SpeechRetrievalOptions options
     ) throws IOException {
+        return executeSearch(queryAudio, sampleStore, featureStore, options, false).results();
+    }
+
+    /**
+     * Searches for speech samples while capturing deterministic candidate and score diagnostics.
+     *
+     * <p>The ranked results are produced by the same implementation as {@link #search};
+     * diagnostic collection does not affect candidate inclusion, scores, or ordering.
+     *
+     * @param queryAudio path to the query audio file
+     * @param sampleStore store for retrieving speech samples
+     * @param featureStore store for retrieving acoustic feature vectors
+     * @param options search configuration options
+     * @return ranked results together with acoustic retrieval diagnostics
+     * @throws IOException if query audio cannot be read or encoded
+     * @throws NullPointerException if any required parameter is null
+     */
+    public SpeechRetrievalOutcome searchWithDiagnostics(
+            Path queryAudio,
+            SpeechSampleStore sampleStore,
+            SpeechFeatureStore featureStore,
+            SpeechRetrievalOptions options
+    ) throws IOException {
+        SearchExecution execution = executeSearch(queryAudio, sampleStore, featureStore, options, true);
+        return new SpeechRetrievalOutcome(execution.results(), execution.diagnostic());
+    }
+
+    private SearchExecution executeSearch(
+            Path queryAudio,
+            SpeechSampleStore sampleStore,
+            SpeechFeatureStore featureStore,
+            SpeechRetrievalOptions options,
+            boolean captureDiagnostics
+    ) throws IOException {
         Objects.requireNonNull(queryAudio, "queryAudio");
         Objects.requireNonNull(sampleStore, "sampleStore");
         Objects.requireNonNull(featureStore, "featureStore");
@@ -72,6 +106,9 @@ public final class SpeechSampleRetriever {
         // Load all stored feature vectors
         List<StoredSpeechFeatureVector> storedVectors = featureStore.findAll();
         List<CandidateScore> candidates = new ArrayList<>();
+        List<SpeechCandidateDiagnostic> candidateDiagnostics = captureDiagnostics
+                ? new ArrayList<>(storedVectors.size())
+                : List.of();
 
         // Score each candidate
         for (StoredSpeechFeatureVector storedVector : storedVectors) {
@@ -82,6 +119,10 @@ public final class SpeechSampleRetriever {
             SpeechSample sample = samplesById.get(sampleId);
             if (sample == null) {
                 logger.warning("Skipping orphan feature vector for sample: " + sampleId);
+                if (captureDiagnostics) {
+                    candidateDiagnostics.add(excludedCandidate(
+                            sampleId, SpeechCandidateStatus.ORPHAN_VECTOR, List.of()));
+                }
                 continue;
             }
 
@@ -89,11 +130,25 @@ public final class SpeechSampleRetriever {
             if (queryVector.dimensions() != candidateVector.dimensions()) {
                 logger.warning("Skipping vector with incompatible dimensions for sample: " + sampleId +
                         " (query: " + queryVector.dimensions() + ", candidate: " + candidateVector.dimensions() + ")");
+                if (captureDiagnostics) {
+                    candidateDiagnostics.add(excludedCandidate(
+                            sampleId, SpeechCandidateStatus.INCOMPATIBLE_DIMENSIONS, List.of()));
+                }
                 continue;
             }
 
             // Apply metadata filters
-            if (!matchesFilters(sample, options)) {
+            List<SpeechMetadataFilter> failedFilters = captureDiagnostics
+                    ? failedFilters(sample, options)
+                    : List.of();
+            boolean matchesFilters = captureDiagnostics
+                    ? failedFilters.isEmpty()
+                    : matchesFilters(sample, options);
+            if (!matchesFilters) {
+                if (captureDiagnostics) {
+                    candidateDiagnostics.add(excludedCandidate(
+                            sampleId, SpeechCandidateStatus.METADATA_FILTERED, failedFilters));
+                }
                 continue;
             }
 
@@ -115,7 +170,22 @@ public final class SpeechSampleRetriever {
             results.add(new SpeechRetrievalResult(candidate.sample(), candidate.score(), i + 1));
         }
 
-        return results;
+        SpeechRetrievalDiagnostic diagnostic = null;
+        if (captureDiagnostics) {
+            for (int i = 0; i < candidates.size(); i++) {
+                CandidateScore candidate = candidates.get(i);
+                candidateDiagnostics.add(new SpeechCandidateDiagnostic(
+                        candidate.sample().id(),
+                        SpeechCandidateStatus.SCORED,
+                        List.of(),
+                        candidate.score(),
+                        i + 1));
+            }
+            candidateDiagnostics.sort(Comparator.comparing(SpeechCandidateDiagnostic::sampleId));
+            diagnostic = createDiagnostic(storedVectors.size(), candidates, candidateDiagnostics);
+        }
+
+        return new SearchExecution(results, diagnostic);
     }
 
     /**
@@ -138,6 +208,97 @@ public final class SpeechSampleRetriever {
             return false;
         }
         return true;
+    }
+
+    private List<SpeechMetadataFilter> failedFilters(
+            SpeechSample sample,
+            SpeechRetrievalOptions options
+    ) {
+        List<SpeechMetadataFilter> failed = new ArrayList<>();
+        if (options.datasetSource() != null && options.datasetSource() != sample.datasetSource()) {
+            failed.add(SpeechMetadataFilter.DATASET_SOURCE);
+        }
+        if (options.condition() != null && options.condition() != sample.condition()) {
+            failed.add(SpeechMetadataFilter.CONDITION);
+        }
+        if (options.taskType() != null && options.taskType() != sample.taskType()) {
+            failed.add(SpeechMetadataFilter.TASK_TYPE);
+        }
+        if (options.speakerId() != null && !options.speakerId().equals(sample.speakerId())) {
+            failed.add(SpeechMetadataFilter.SPEAKER_ID);
+        }
+        if (options.language() != null && !options.language().equals(sample.language())) {
+            failed.add(SpeechMetadataFilter.LANGUAGE);
+        }
+        return List.copyOf(failed);
+    }
+
+    private SpeechCandidateDiagnostic excludedCandidate(
+            String sampleId,
+            SpeechCandidateStatus status,
+            List<SpeechMetadataFilter> failedFilters
+    ) {
+        return new SpeechCandidateDiagnostic(sampleId, status, failedFilters, 0.0, 0);
+    }
+
+    private SpeechRetrievalDiagnostic createDiagnostic(
+            int scannedVectorCount,
+            List<CandidateScore> scoredCandidates,
+            List<SpeechCandidateDiagnostic> candidateDiagnostics
+    ) {
+        int orphanCount = 0;
+        int incompatibleCount = 0;
+        int filteredCount = 0;
+        for (SpeechCandidateDiagnostic candidate : candidateDiagnostics) {
+            switch (candidate.status()) {
+                case ORPHAN_VECTOR -> orphanCount++;
+                case INCOMPATIBLE_DIMENSIONS -> incompatibleCount++;
+                case METADATA_FILTERED -> filteredCount++;
+                case SCORED -> {
+                    // Counted from scoredCandidates below.
+                }
+            }
+        }
+
+        int tieCount = 0;
+        double minimumScore = 0.0;
+        double meanScore = 0.0;
+        double maximumScore = 0.0;
+        double topResultScore = 0.0;
+        double topScoreGap = 0.0;
+        if (!scoredCandidates.isEmpty()) {
+            minimumScore = scoredCandidates.get(0).score();
+            maximumScore = scoredCandidates.get(0).score();
+            double scoreSum = 0.0;
+            for (int i = 0; i < scoredCandidates.size(); i++) {
+                double score = scoredCandidates.get(i).score();
+                minimumScore = Math.min(minimumScore, score);
+                maximumScore = Math.max(maximumScore, score);
+                scoreSum += score;
+                if (i > 0 && Double.compare(score, scoredCandidates.get(i - 1).score()) == 0) {
+                    tieCount++;
+                }
+            }
+            meanScore = scoreSum / scoredCandidates.size();
+            topResultScore = scoredCandidates.get(0).score();
+            if (scoredCandidates.size() > 1) {
+                topScoreGap = topResultScore - scoredCandidates.get(1).score();
+            }
+        }
+
+        return new SpeechRetrievalDiagnostic(
+                scannedVectorCount,
+                orphanCount,
+                incompatibleCount,
+                filteredCount,
+                scoredCandidates.size(),
+                tieCount,
+                minimumScore,
+                meanScore,
+                maximumScore,
+                topResultScore,
+                topScoreGap,
+                candidateDiagnostics);
     }
 
     /**
@@ -178,5 +339,10 @@ public final class SpeechSampleRetriever {
     private record CandidateScore(
             SpeechSample sample,
             double score
+    ) {}
+
+    private record SearchExecution(
+            List<SpeechRetrievalResult> results,
+            SpeechRetrievalDiagnostic diagnostic
     ) {}
 }
