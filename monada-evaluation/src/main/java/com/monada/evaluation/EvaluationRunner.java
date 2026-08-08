@@ -25,13 +25,26 @@ public final class EvaluationRunner {
     private static final double EVALUATION_THRESHOLD = Double.NEGATIVE_INFINITY;
 
     private final List<Integer> ks;
+    private final TextEncodingDiagnosticOptions encodingDiagnosticOptions;
 
     public EvaluationRunner() {
-        this(DEFAULT_KS);
+        this(DEFAULT_KS, TextEncodingDiagnosticOptions.disabled());
     }
 
     public EvaluationRunner(List<Integer> ks) {
+        this(ks, TextEncodingDiagnosticOptions.disabled());
+    }
+
+    public EvaluationRunner(TextEncodingDiagnosticOptions encodingDiagnosticOptions) {
+        this(DEFAULT_KS, encodingDiagnosticOptions);
+    }
+
+    public EvaluationRunner(
+            List<Integer> ks,
+            TextEncodingDiagnosticOptions encodingDiagnosticOptions) {
         Objects.requireNonNull(ks, "ks");
+        this.encodingDiagnosticOptions = Objects.requireNonNull(
+                encodingDiagnosticOptions, "encodingDiagnosticOptions");
         if (ks.isEmpty()) {
             throw new IllegalArgumentException("ks must not be empty");
         }
@@ -68,8 +81,7 @@ public final class EvaluationRunner {
 
         var memory = MonadaMemory.open(memoryPath, options);
         var seeding = seedAtoms(dataset, memory);
-        return evaluate(dataset, memory, seeding.idToLabel(),
-                options.feedbackQueryKeyStrategy(), options.feedbackAwareRanking());
+        return evaluate(dataset, memory, seeding.idToLabel(), options);
     }
 
     /**
@@ -113,7 +125,26 @@ public final class EvaluationRunner {
      * reopening memory with default options.
      */
     EvaluationReport evaluate(EvaluationDataset dataset, MonadaMemory memory, Map<String, String> idToLabel) {
-        return evaluate(dataset, memory, idToLabel, null, false);
+        return evaluateInternal(dataset, memory, idToLabel, null, false, null);
+    }
+
+    /**
+     * Evaluates with the complete memory configuration required to reconstruct
+     * encoding diagnostics from the production normalizer and weights.
+     */
+    EvaluationReport evaluate(
+            EvaluationDataset dataset,
+            MonadaMemory memory,
+            Map<String, String> idToLabel,
+            MonadaMemoryOptions options) {
+        Objects.requireNonNull(options, "options");
+        return evaluateInternal(
+                dataset,
+                memory,
+                idToLabel,
+                options.feedbackQueryKeyStrategy(),
+                options.feedbackAwareRanking(),
+                options);
     }
 
     /**
@@ -130,6 +161,17 @@ public final class EvaluationRunner {
             Map<String, String> idToLabel,
             FeedbackQueryKeyStrategy queryKeyStrategy,
             boolean feedbackAware) {
+        return evaluateInternal(
+                dataset, memory, idToLabel, queryKeyStrategy, feedbackAware, null);
+    }
+
+    private EvaluationReport evaluateInternal(
+            EvaluationDataset dataset,
+            MonadaMemory memory,
+            Map<String, String> idToLabel,
+            FeedbackQueryKeyStrategy queryKeyStrategy,
+            boolean feedbackAware,
+            MonadaMemoryOptions memoryOptions) {
         var maxK = ks.stream().mapToInt(Integer::intValue).max().orElse(1);
 
         var queryResults = new ArrayList<QueryEvaluation>(dataset.queries().size());
@@ -150,8 +192,14 @@ public final class EvaluationRunner {
                     .execute();
 
             var rankedLabels = new ArrayList<String>(recall.results().size());
-            for (var result : recall.results()) {
-                rankedLabels.add(idToLabel.getOrDefault(result.atom().id(), result.atom().id()));
+            var standardRanking = new ArrayList<TextEncodingDiagnosticGenerator.RankedResult>(
+                    recall.results().size());
+            for (var i = 0; i < recall.results().size(); i++) {
+                var result = recall.results().get(i);
+                var label = idToLabel.getOrDefault(result.atom().id(), result.atom().id());
+                rankedLabels.add(label);
+                standardRanking.add(new TextEncodingDiagnosticGenerator.RankedResult(
+                        label, i + 1, result.score()));
             }
 
             var precisionByK = new TreeMap<Integer, Double>();
@@ -196,6 +244,32 @@ public final class EvaluationRunner {
                         : QueryKeyDiagnostic.withoutFeedback(effectiveKey, strategyName);
             }
 
+            TextEncodingDiagnostic encodingDiagnostic = null;
+            if (encodingDiagnosticOptions.enabled() && memoryOptions != null) {
+                // Run an independent, read-only full-corpus query after the normal
+                // top-K result has already been captured. It is used only to locate
+                // missed expected atoms and never feeds ranking output or metrics.
+                var diagnosticRecall = memory.resonate(query.text())
+                        .topK(dataset.atoms().size())
+                        .threshold(EVALUATION_THRESHOLD)
+                        .execute();
+                var diagnosticRanking = new ArrayList<TextEncodingDiagnosticGenerator.RankedResult>(
+                        diagnosticRecall.results().size());
+                for (var i = 0; i < diagnosticRecall.results().size(); i++) {
+                    var result = diagnosticRecall.results().get(i);
+                    var label = idToLabel.getOrDefault(result.atom().id(), result.atom().id());
+                    diagnosticRanking.add(new TextEncodingDiagnosticGenerator.RankedResult(
+                            label, i + 1, result.score()));
+                }
+                encodingDiagnostic = TextEncodingDiagnosticGenerator.generate(
+                        dataset,
+                        query,
+                        standardRanking,
+                        diagnosticRanking,
+                        memoryOptions,
+                        encodingDiagnosticOptions);
+            }
+
             queryResults.add(new QueryEvaluation(
                     query.text(),
                     query.expectedLabels(),
@@ -204,7 +278,8 @@ public final class EvaluationRunner {
                     recallByK,
                     hitByK,
                     rr,
-                    diagnostic));
+                    diagnostic,
+                    encodingDiagnostic));
         }
 
         var n = dataset.queries().size();

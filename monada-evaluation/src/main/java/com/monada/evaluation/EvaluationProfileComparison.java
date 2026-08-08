@@ -80,7 +80,8 @@ public record EvaluationProfileComparison(
         int maxK = baseReport.averagePrecisionByK().keySet().stream().mapToInt(Integer::intValue).max().orElse(5);
 
         // Per-query section.
-        for (var queryResult : perQuery) {
+        for (var queryIndex = 0; queryIndex < perQuery.size(); queryIndex++) {
+            var queryResult = perQuery.get(queryIndex);
             sb.append("Query: ").append(queryResult.queryText()).append('\n');
             sb.append("Expected: ")
                     .append(String.join(", ", new TreeSet<>(queryResult.expectedLabels())))
@@ -107,6 +108,14 @@ public record EvaluationProfileComparison(
                         sb.append(String.format(Locale.ROOT, "  [%s] Feedback Key Match: %s%n",
                                 profile.name(), diagnostic.feedbackKeyMatch()));
                     }
+                }
+
+                var profileQueryResults = reportByProfile.get(profile).queryResults();
+                var encodingDiagnostic = queryIndex < profileQueryResults.size()
+                        ? profileQueryResults.get(queryIndex).textEncodingDiagnostic()
+                        : null;
+                if (encodingDiagnostic != null) {
+                    TextEncodingDiagnosticRenderer.append(sb, encodingDiagnostic, "    ");
                 }
 
                 if (profile != baseProfile) {
@@ -141,7 +150,7 @@ public record EvaluationProfileComparison(
         return sb.toString();
     }
 
-    private static void appendMetricMap(StringBuilder sb, String label, Map<Integer, Double> map) {
+    private void appendMetricMap(StringBuilder sb, String label, Map<Integer, Double> map) {
         for (var e : map.entrySet()) {
             sb.append(String.format(Locale.ROOT, "%s@%d: %.4f%n", label, e.getKey(), e.getValue()));
         }

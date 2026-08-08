@@ -23,7 +23,8 @@ public final class ExpandedMain {
     public static void main(String[] args) throws IOException {
         var workdir = Files.createTempDirectory("monada-evaluation-expanded-");
         try {
-            var report = new EvaluationRunner()
+            var diagnosticOptions = TextEncodingDiagnosticEnvironment.parse(System.getenv());
+            var report = new EvaluationRunner(diagnosticOptions)
                     .run(ExpandedTechnologyDataset.get(), workdir);
             var versionedReport = new VersionedTextEvaluationReport(
                     TextEvaluationCatalog.EXPANDED_TECHNOLOGY, report);

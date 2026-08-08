@@ -70,6 +70,11 @@ public record EvaluationReport(
                 }
             }
 
+            if (qr.textEncodingDiagnostic() != null) {
+                TextEncodingDiagnosticRenderer.append(
+                        sb, qr.textEncodingDiagnostic(), "");
+            }
+
             sb.append('\n');
         }
 
@@ -82,14 +87,14 @@ public record EvaluationReport(
         return sb.toString();
     }
 
-    private static void appendMetricMap(StringBuilder sb, String label, Map<Integer, Double> map) {
+    private void appendMetricMap(StringBuilder sb, String label, Map<Integer, Double> map) {
         for (Map.Entry<Integer, Double> e : map.entrySet()) {
             sb.append(String.format(Locale.ROOT, "%s@%d: %.2f%n", label, e.getKey(), e.getValue()));
         }
         sb.append('\n');
     }
 
-    private static void appendScalar(StringBuilder sb, String label, double value) {
+    private void appendScalar(StringBuilder sb, String label, double value) {
         sb.append(String.format(Locale.ROOT, "%s: %.2f%n", label, value));
     }
 }

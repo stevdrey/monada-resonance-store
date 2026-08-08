@@ -170,8 +170,7 @@ public final class EvaluationProfileRunner {
 
         // Evaluate with query-key diagnostics
         var report = evaluationRunner.evaluate(
-                dataset, memory, seeding.idToLabel(),
-                queryKeyStrategy, profile.feedbackAware());
+                dataset, memory, seeding.idToLabel(), options);
 
         // Enhance query evaluations with complete diagnostics including seed keys
         return enhanceWithSeedQueryKeys(report, seedQueryKeys, profile.feedbackAware(),
@@ -225,7 +224,8 @@ public final class EvaluationProfileRunner {
                         qe.recallByK(),
                         qe.hitByK(),
                         qe.reciprocalRank(),
-                        enhancedDiag));
+                        enhancedDiag,
+                        qe.textEncodingDiagnostic()));
             } else {
                 enhancedResults.add(qe);
             }
@@ -243,7 +243,7 @@ public final class EvaluationProfileRunner {
      * Classifies query-level change: compares rank of the first expected label.
      * Returns {@link RankingChange#MAINTAINED} when returned labels are identical.
      */
-    private static RankingChange classifyQueryChange(QueryEvaluation before, QueryEvaluation after) {
+    private RankingChange classifyQueryChange(QueryEvaluation before, QueryEvaluation after) {
         if (before.returnedLabels().equals(after.returnedLabels())) {
             return RankingChange.MAINTAINED;
         }
@@ -258,7 +258,7 @@ public final class EvaluationProfileRunner {
         return RankingChange.MAINTAINED;
     }
 
-    private static int firstExpectedRank(java.util.Set<String> expected, List<String> returned) {
+    private int firstExpectedRank(java.util.Set<String> expected, List<String> returned) {
         for (var i = 0; i < returned.size(); i++) {
             if (expected.contains(returned.get(i))) {
                 return i;
@@ -268,7 +268,7 @@ public final class EvaluationProfileRunner {
     }
 
     /** Converts a profile name to a safe directory component. */
-    private static String sanitize(String name) {
+    private String sanitize(String name) {
         return name.toLowerCase().replaceAll("[^a-z0-9_-]", "_");
     }
 }

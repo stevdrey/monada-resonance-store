@@ -23,7 +23,8 @@ public final class Main {
     public static void main(String[] args) throws IOException {
         Path workdir = Files.createTempDirectory("monada-evaluation-");
         try {
-            EvaluationReport report = new EvaluationRunner()
+            var diagnosticOptions = TextEncodingDiagnosticEnvironment.parse(System.getenv());
+            EvaluationReport report = new EvaluationRunner(diagnosticOptions)
                     .run(DefaultDatabasesDataset.get(), workdir);
             var versionedReport = new VersionedTextEvaluationReport(
                     TextEvaluationCatalog.DEFAULT_DATABASES, report);
