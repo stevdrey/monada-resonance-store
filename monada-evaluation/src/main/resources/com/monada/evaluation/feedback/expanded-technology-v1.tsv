@@ -1,0 +1,6 @@
+# queryText	queryKey	targetLabel	signal	delta	createdAt	expectedScope
+recording state as immutable sequence of changes	recording state as immutable sequence of changes	ka_append_only_log	POSITIVE	0.05	2026-01-01T00:00:00Z	MATCHING_EVALUATION_QUERY
+recording state as immutable sequence of changes	recording state as immutable sequence of changes	ka_append_only_log	POSITIVE	0.05	2026-01-01T00:00:01Z	MATCHING_EVALUATION_QUERY
+similarity search over high dimensional representations	similarity search over high dimensional representations	ka_embeddings	POSITIVE	0.10	2026-01-01T00:00:02Z	MATCHING_EVALUATION_QUERY
+similarity search over high dimensional representations	similarity search over high dimensional representations	ka_hypervectors	NEGATIVE	-0.05	2026-01-01T00:00:03Z	MATCHING_EVALUATION_QUERY
+memory recall improved by user signals	unmatched:memory recall improved by user signals	ka_associative_memory	POSITIVE	0.50	2026-01-01T00:00:04Z	UNMATCHED_EVALUATION_QUERY

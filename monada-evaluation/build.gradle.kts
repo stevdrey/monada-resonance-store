@@ -27,6 +27,13 @@ tasks.register<JavaExec>("runProfileComparison") {
     classpath = sourceSets["main"].runtimeClasspath
 }
 
+tasks.register<JavaExec>("runFeedbackReplay") {
+    description = "Compare empty, synthetic, and persisted feedback replay modes (exploratory)"
+    group = "application"
+    mainClass.set("com.monada.evaluation.FeedbackReplayMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
 tasks.register<JavaExec>("runLatency") {
     description = "Run recall latency and scan diagnostics over the expanded dataset"
     group = "application"
