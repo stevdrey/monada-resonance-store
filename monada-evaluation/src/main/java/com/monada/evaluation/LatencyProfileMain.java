@@ -29,7 +29,7 @@ public final class LatencyProfileMain {
         try {
             var report = new LatencyEvaluationRunner()
                     .run(ExpandedTechnologyDataset.get(), workdir);
-            System.out.println(report.render());
+            System.out.println(TextEvaluationCatalog.EXPANDED_LATENCY.render(report.render()));
         } finally {
             EvaluationTempDirectories.deleteRecursively(workdir);
         }

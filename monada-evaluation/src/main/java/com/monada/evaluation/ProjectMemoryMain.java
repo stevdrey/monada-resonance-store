@@ -25,7 +25,9 @@ public final class ProjectMemoryMain {
         try {
             var report = new EvaluationRunner()
                     .run(ProjectMemoryDataset.get(), workdir);
-            System.out.println(report.render());
+            var versionedReport = new VersionedTextEvaluationReport(
+                    TextEvaluationCatalog.PROJECT_MEMORY, report);
+            System.out.println(versionedReport.render());
         } finally {
             EvaluationTempDirectories.deleteRecursively(workdir);
         }

@@ -42,7 +42,8 @@ public final class ProfileComparisonMain {
             );
             var comparison = new EvaluationProfileRunner()
                     .run(ExpandedTechnologyDataset.get(), profiles, basedir);
-            System.out.println(comparison.render());
+            System.out.println(TextEvaluationCatalog.EXPANDED_PROFILE_COMPARISON
+                    .render(comparison.render()));
         } finally {
             EvaluationTempDirectories.deleteRecursively(basedir);
         }

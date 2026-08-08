@@ -25,7 +25,9 @@ public final class Main {
         try {
             EvaluationReport report = new EvaluationRunner()
                     .run(DefaultDatabasesDataset.get(), workdir);
-            System.out.println(report.render());
+            var versionedReport = new VersionedTextEvaluationReport(
+                    TextEvaluationCatalog.DEFAULT_DATABASES, report);
+            System.out.println(versionedReport.render());
         } finally {
             EvaluationTempDirectories.deleteRecursively(workdir);
         }
