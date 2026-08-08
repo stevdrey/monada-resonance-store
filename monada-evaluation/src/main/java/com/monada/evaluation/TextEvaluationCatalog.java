@@ -13,6 +13,8 @@ final class TextEvaluationCatalog {
             "project-memory", "1", PRODUCTION_DEFAULTS_PROFILE, TextEvaluationMode.EXPLORATORY);
     static final TextEvaluationMetadata EXPANDED_PROFILE_COMPARISON = new TextEvaluationMetadata(
             "expanded-technology", "1", "MULTI_PROFILE_COMPARISON", TextEvaluationMode.EXPLORATORY);
+    static final TextEvaluationMetadata EXPANDED_FEEDBACK_REPLAY = new TextEvaluationMetadata(
+            "expanded-technology", "1", "FEEDBACK_REPLAY_COMPARISON", TextEvaluationMode.EXPLORATORY);
     static final TextEvaluationMetadata EXPANDED_LATENCY = new TextEvaluationMetadata(
             "expanded-technology", "1", EvaluationProfile.LEXICAL_ENRICHED.name(),
             TextEvaluationMode.EXPLORATORY);

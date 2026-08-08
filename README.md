@@ -48,6 +48,7 @@ The main domain record is `KnowledgeAtom`. Text content is encoded into `Frequen
 ./gradlew :monada-evaluation:run -q
 ./gradlew :monada-evaluation:runExpanded -q
 ./gradlew :monada-evaluation:runProfileComparison -q
+./gradlew :monada-evaluation:runFeedbackReplay -q
 ./gradlew :monada-evaluation:runLatency -q
 ./gradlew :monada-evaluation:runProjectMemory -q
 ./gradlew :monada-speech:test
@@ -79,6 +80,34 @@ intentionally:
 Snapshot metrics use `EXACT:<value>` when any drift must be reviewed and `MINIMUM:<value>` when
 only regressions below a threshold should fail. Exploratory datasets must not be added to the
 protected baseline registry.
+
+## Persisted Feedback Replay Evaluation
+
+The exploratory feedback replay evaluates the `ExpandedTechnologyDataset` with the same
+lexical-enriched, exact-query retrieval configuration in three modes: `BASELINE` uses an empty
+feedback log, `SEEDED_SYNTHETIC` preserves the profile runner's deterministic one-event-per-query
+seeding, and `REPLAYED_PERSISTED` appends explicit fixture events to an isolated store's real JSONL
+feedback log before re-running retrieval.
+
+```bash
+./gradlew :monada-evaluation:runFeedbackReplay -q
+```
+
+The versioned fixture is an inspectable TSV resource with seven fields in this order:
+
+```text
+queryText  queryKey  targetLabel  signal  delta  createdAt  expectedScope
+```
+
+Fields are tab-separated. Blank lines and lines beginning with `#` are ignored. Repeated rows
+represent repeated persisted signals. `expectedScope` is either `MATCHING_EVALUATION_QUERY` or
+`UNMATCHED_EVALUATION_QUERY`; the runner validates that declaration against the effective
+evaluation query keys before writing any event. The report includes aggregate metric deltas,
+per-query top-K results, and an event-by-event key-match audit.
+
+This fixture format belongs only to `monada-evaluation`: targets use stable dataset labels that are
+resolved to atom IDs during the run. The production append-only JSONL feedback format, exact-query
+default, public API defaults, and protected text baseline remain unchanged.
 
 ## Text Encoding Contribution Diagnostics
 
