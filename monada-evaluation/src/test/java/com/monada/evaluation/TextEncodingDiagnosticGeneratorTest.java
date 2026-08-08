@@ -28,8 +28,6 @@ class TextEncodingDiagnosticGeneratorTest {
                         ranked("top", 1, 0.9),
                         ranked("other", 2, 0.5)),
                 List.of(
-                        ranked("top", 1, 0.9),
-                        ranked("other", 2, 0.5),
                         ranked("expected-a", 3, 0.4),
                         ranked("expected-b", 4, 0.3)),
                 options,
@@ -75,8 +73,6 @@ class TextEncodingDiagnosticGeneratorTest {
                         ranked("top", 1, 0.9),
                         ranked("other", 2, 0.5)),
                 List.of(
-                        ranked("top", 1, 0.9),
-                        ranked("other", 2, 0.5),
                         ranked("expected-a", 3, 0.4),
                         ranked("expected-b", 4, 0.3)),
                 memoryOptions(),

@@ -246,26 +246,36 @@ public final class EvaluationRunner {
 
             TextEncodingDiagnostic encodingDiagnostic = null;
             if (encodingDiagnosticOptions.enabled() && memoryOptions != null) {
-                // Run an independent, read-only full-corpus query after the normal
-                // top-K result has already been captured. It is used only to locate
-                // missed expected atoms and never feeds ranking output or metrics.
-                var diagnosticRecall = memory.resonate(query.text())
-                        .topK(dataset.atoms().size())
-                        .threshold(EVALUATION_THRESHOLD)
-                        .execute();
-                var diagnosticRanking = new ArrayList<TextEncodingDiagnosticGenerator.RankedResult>(
-                        diagnosticRecall.results().size());
-                for (var i = 0; i < diagnosticRecall.results().size(); i++) {
-                    var result = diagnosticRecall.results().get(i);
-                    var label = idToLabel.getOrDefault(result.atom().id(), result.atom().id());
-                    diagnosticRanking.add(new TextEncodingDiagnosticGenerator.RankedResult(
-                            label, i + 1, result.score()));
+                var missingExpectedLabels = new HashSet<>(query.expectedLabels());
+                missingExpectedLabels.removeAll(rankedLabels);
+                var missedExpectedRanking = new ArrayList<TextEncodingDiagnosticGenerator.RankedResult>(
+                        missingExpectedLabels.size());
+                if (!missingExpectedLabels.isEmpty()) {
+                    // Run an independent, read-only full-corpus query after the normal
+                    // top-K result has already been captured. Retain only missed expected
+                    // atoms while preserving their full-corpus rank. These results never
+                    // feed ranking output or metrics.
+                    var diagnosticRecall = memory.resonate(query.text())
+                            .topK(dataset.atoms().size())
+                            .threshold(EVALUATION_THRESHOLD)
+                            .execute();
+                    for (var i = 0; i < diagnosticRecall.results().size(); i++) {
+                        var result = diagnosticRecall.results().get(i);
+                        var label = idToLabel.getOrDefault(result.atom().id(), result.atom().id());
+                        if (missingExpectedLabels.remove(label)) {
+                            missedExpectedRanking.add(new TextEncodingDiagnosticGenerator.RankedResult(
+                                    label, i + 1, result.score()));
+                            if (missingExpectedLabels.isEmpty()) {
+                                break;
+                            }
+                        }
+                    }
                 }
                 encodingDiagnostic = TextEncodingDiagnosticGenerator.generate(
                         dataset,
                         query,
                         standardRanking,
-                        diagnosticRanking,
+                        missedExpectedRanking,
                         memoryOptions,
                         encodingDiagnosticOptions);
             }

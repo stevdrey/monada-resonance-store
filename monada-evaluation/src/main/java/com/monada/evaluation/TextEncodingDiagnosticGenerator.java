@@ -36,13 +36,14 @@ final class TextEncodingDiagnosticGenerator {
             EvaluationDataset dataset,
             EvaluationQuery query,
             List<RankedResult> standardRanking,
-            List<RankedResult> diagnosticRanking,
+            List<RankedResult> missedExpectedRanking,
             MonadaMemoryOptions memoryOptions,
             TextEncodingDiagnosticOptions diagnosticOptions) {
         Objects.requireNonNull(dataset, "dataset");
         Objects.requireNonNull(query, "query");
         standardRanking = List.copyOf(Objects.requireNonNull(standardRanking, "standardRanking"));
-        diagnosticRanking = List.copyOf(Objects.requireNonNull(diagnosticRanking, "diagnosticRanking"));
+        missedExpectedRanking = List.copyOf(
+                Objects.requireNonNull(missedExpectedRanking, "missedExpectedRanking"));
         Objects.requireNonNull(memoryOptions, "memoryOptions");
         Objects.requireNonNull(diagnosticOptions, "diagnosticOptions");
         if (!diagnosticOptions.enabled()) {
@@ -81,15 +82,15 @@ final class TextEncodingDiagnosticGenerator {
         for (RankedResult result : standardRanking) {
             returnedLabels.add(result.label());
         }
-        Map<String, RankedResult> diagnosticByLabel = new HashMap<>();
-        for (RankedResult result : diagnosticRanking) {
-            diagnosticByLabel.put(result.label(), result);
+        Map<String, RankedResult> missedExpectedByLabel = new HashMap<>();
+        for (RankedResult result : missedExpectedRanking) {
+            missedExpectedByLabel.put(result.label(), result);
         }
 
         List<MissingExpected> missingExpected = new ArrayList<>();
         for (String expected : query.expectedLabels()) {
             if (!returnedLabels.contains(expected)) {
-                missingExpected.add(new MissingExpected(expected, diagnosticByLabel.get(expected)));
+                missingExpected.add(new MissingExpected(expected, missedExpectedByLabel.get(expected)));
             }
         }
         missingExpected.sort(Comparator
