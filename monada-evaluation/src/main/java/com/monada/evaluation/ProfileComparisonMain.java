@@ -33,6 +33,7 @@ public final class ProfileComparisonMain {
     public static void main(String[] args) throws IOException {
         var basedir = Files.createTempDirectory("monada-profile-comparison-");
         try {
+            var diagnosticOptions = TextEncodingDiagnosticEnvironment.parse(System.getenv());
             var profiles = List.of(
                     EvaluationProfile.RAW,
                     EvaluationProfile.LEXICAL_ENRICHED_FULL_EXPANSION_WEIGHT,
@@ -40,7 +41,9 @@ public final class ProfileComparisonMain {
                     EvaluationProfile.LEXICAL_ENRICHED_WITH_FEEDBACK,
                     EvaluationProfile.LEXICAL_ENRICHED_WITH_LEXICAL_FEEDBACK_KEY
             );
-            var comparison = new EvaluationProfileRunner()
+            var comparison = new EvaluationProfileRunner(
+                    new EvaluationRunner(diagnosticOptions),
+                    new EvaluationComparator())
                     .run(ExpandedTechnologyDataset.get(), profiles, basedir);
             System.out.println(TextEvaluationCatalog.EXPANDED_PROFILE_COMPARISON
                     .render(comparison.render()));

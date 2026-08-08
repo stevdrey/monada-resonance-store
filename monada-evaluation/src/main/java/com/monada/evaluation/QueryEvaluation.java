@@ -16,7 +16,8 @@ public record QueryEvaluation(
         Map<Integer, Double> recallByK,
         Map<Integer, Double> hitByK,
         double reciprocalRank,
-        QueryKeyDiagnostic queryKeyDiagnostic
+        QueryKeyDiagnostic queryKeyDiagnostic,
+        TextEncodingDiagnostic textEncodingDiagnostic
 ) {
     public QueryEvaluation {
         Objects.requireNonNull(queryText, "queryText");
@@ -27,6 +28,23 @@ public record QueryEvaluation(
         hitByK = sortedCopy(hitByK, "hitByK");
         reciprocalRank = validateUnitInterval(reciprocalRank, "reciprocalRank");
         // queryKeyDiagnostic can be null when not captured
+        // textEncodingDiagnostic is null unless contribution diagnostics were enabled
+    }
+
+    /**
+     * Backwards-compatible constructor without encoding contribution diagnostics.
+     */
+    public QueryEvaluation(
+            String queryText,
+            Set<String> expectedLabels,
+            List<String> returnedLabels,
+            Map<Integer, Double> precisionByK,
+            Map<Integer, Double> recallByK,
+            Map<Integer, Double> hitByK,
+            double reciprocalRank,
+            QueryKeyDiagnostic queryKeyDiagnostic) {
+        this(queryText, expectedLabels, returnedLabels, precisionByK, recallByK, hitByK,
+                reciprocalRank, queryKeyDiagnostic, null);
     }
 
     /**
@@ -42,6 +60,6 @@ public record QueryEvaluation(
             Map<Integer, Double> hitByK,
             double reciprocalRank) {
         this(queryText, expectedLabels, returnedLabels, precisionByK, recallByK, hitByK,
-                reciprocalRank, null);
+                reciprocalRank, null, null);
     }
 }

@@ -80,6 +80,64 @@ Snapshot metrics use `EXACT:<value>` when any drift must be reviewed and `MINIMU
 only regressions below a threshold should fail. Exploratory datasets must not be added to the
 protected baseline registry.
 
+## Text Encoding Contribution Diagnostics
+
+Text evaluation can optionally explain the weighted lexical representation behind a query and a
+bounded set of ranked or missed-expected atoms. Diagnostics are disabled by default, so normal
+reports, protected metrics, ranking, and persisted vectors remain unchanged.
+
+Enable the diagnostic on an existing text entry point with an environment variable:
+
+```bash
+MONADA_EVALUATION_ENCODING_DIAGNOSTICS=true \
+  ./gradlew :monada-evaluation:runProjectMemory -q
+```
+
+The standard defaults show three top-ranked atoms, three missed expected atoms, and twenty unique
+weighted terms per representation. Override the bounds when a smaller report is preferable:
+
+```bash
+MONADA_EVALUATION_ENCODING_DIAGNOSTICS=true \
+MONADA_EVALUATION_ENCODING_DIAGNOSTICS_TOP_RESULTS=1 \
+MONADA_EVALUATION_ENCODING_DIAGNOSTICS_MISSED_EXPECTED=1 \
+MONADA_EVALUATION_ENCODING_DIAGNOSTICS_TERMS=6 \
+  ./gradlew :monada-evaluation:runProjectMemory -q
+```
+
+The same variables apply to `run`, `runExpanded`, and `runProfileComparison`. Contribution capture
+is intentionally not added to `runLatency`, because its second full-corpus diagnostic search would
+distort latency measurements. Programmatic callers opt in explicitly:
+
+```java
+var diagnosticOptions = new TextEncodingDiagnosticOptions(true, 3, 3, 20);
+var report = new EvaluationRunner(diagnosticOptions).run(dataset, memoryPath, memoryOptions);
+```
+
+Each term is labeled as `ORIGINAL`, `EXPANSION`, `ALIAS`, or `ALIAS_EXPANSION` and reports its
+per-occurrence weight, occurrence count, and total input weight. Candidate blocks include the
+observed rank and score plus exact normalized-token overlaps with the query. A missed expected
+atom's rank is labeled `full-corpus-rank` because it comes from the independent diagnostic search,
+not the normal top-K result. For example, the project-memory report includes:
+
+```text
+Encoding Contributions
+  Query terms:
+    ORIGINAL: commands weight=1.000000 occurrences=1 total=1.000000
+    ORIGINAL: evaluation weight=1.000000 occurrences=1 total=1.000000
+  Candidate: ka_evaluation_commands [TOP_RANKED, rank=1, score=0.317439]
+    Lexical overlap: [commands, evaluation, run]
+    Terms:
+      ORIGINAL: evaluation weight=1.000000 occurrences=7 total=7.000000
+      ORIGINAL: gradlew weight=1.000000 occurrences=7 total=7.000000
+      ... omitted terms: 14
+  Omitted top-ranked candidates: 4
+```
+
+Use overlaps and source weights to decide whether a future alias or lexical-weight experiment is
+justified. They describe the encoder inputs, not a direct additive decomposition of cosine score:
+hash-bucket collisions, signed hashing, vector normalization, and feedback adjustments can also
+affect the observed score.
+
 ## Local Speech Store Evaluation
 
 First, create a persistent store from a local TORGO-style corpus:

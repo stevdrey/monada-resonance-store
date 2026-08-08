@@ -43,17 +43,26 @@ public class NormalizedText {
     }
 
     public WeightedText toWeightedText(LexicalExpansionOptions options) {
+        return toWeightedTextParts(options).toWeightedText();
+    }
+
+    /**
+     * Returns the exact weighted tokens used by {@link #toWeightedText}, split
+     * into normalized-original and lexical-expansion terms for diagnostics.
+     */
+    public WeightedTextParts toWeightedTextParts(LexicalExpansionOptions options) {
         Objects.requireNonNull(options, "options");
-        List<WeightedToken> tokens = new ArrayList<>();
+        List<WeightedToken> originalTokens = new ArrayList<>();
         for (String token : tokenize(normalized)) {
-            tokens.add(new WeightedToken(token, options.originalWeight()));
+            originalTokens.add(new WeightedToken(token, options.originalWeight()));
         }
+        List<WeightedToken> expansionTokens = new ArrayList<>();
         for (String expansion : expansions) {
             for (String token : tokenize(expansion)) {
-                tokens.add(new WeightedToken(token, options.expansionWeight()));
+                expansionTokens.add(new WeightedToken(token, options.expansionWeight()));
             }
         }
-        return new WeightedText(tokens);
+        return new WeightedTextParts(originalTokens, expansionTokens);
     }
 
     private List<String> tokenize(String text) {
