@@ -34,6 +34,13 @@ tasks.register<JavaExec>("runFeedbackReplay") {
     classpath = sourceSets["main"].runtimeClasspath
 }
 
+tasks.register<JavaExec>("runFeedbackQueryKeyComparison") {
+    description = "Compare exact, normalized, and lexical persisted feedback query keys (exploratory)"
+    group = "application"
+    mainClass.set("com.monada.evaluation.FeedbackQueryKeyComparisonMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
 tasks.register<JavaExec>("runLatency") {
     description = "Run recall latency and scan diagnostics over the expanded dataset"
     group = "application"

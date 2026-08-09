@@ -1,0 +1,7 @@
+# id	category	seedQueryText	evaluationQueryText	targetLabel	signal	delta	createdAt	expectedTargetRelevant
+exact_append_only	EXACT_CONTROL	recording state as immutable sequence of changes	recording state as immutable sequence of changes	ka_append_only_log	POSITIVE	0.10	2026-02-01T00:00:00Z	true
+normalized_embedded	NORMALIZATION_EQUIVALENT	EMBEDDED LIGHTWEIGHT STORAGE ENGINE!!!	embedded lightweight storage engine	ka_rocksdb	POSITIVE	0.50	2026-02-01T00:00:01Z	true
+lexical_second_pass	LEXICAL_EQUIVALENCE	second pass model	improving search results order using a second pass model	ka_ranking	POSITIVE	0.50	2026-02-01T00:00:02Z	true
+confusable_similarity	CONFUSABLE_NEIGHBOR	similarity search over dense vectors	similarity search metric measuring directional alignment between vectors	ka_vector_database	POSITIVE	10.0	2026-02-01T00:00:03Z	false
+temporary_lookup_intent	SHARED_GENERIC_PHRASE	temporary lookup cache for session data	temporary lookup table for query planning	ka_redis	POSITIVE	10.0	2026-02-01T00:00:04Z	false
+ordered_terms_intent	ORDERED_TERMS_DIFFERENT_INTENT	database replicates ledger	ledger replicates database	ka_database_to_ledger_replication	POSITIVE	10.0	2026-02-01T00:00:05Z	false

@@ -49,6 +49,7 @@ The main domain record is `KnowledgeAtom`. Text content is encoded into `Frequen
 ./gradlew :monada-evaluation:runExpanded -q
 ./gradlew :monada-evaluation:runProfileComparison -q
 ./gradlew :monada-evaluation:runFeedbackReplay -q
+./gradlew :monada-evaluation:runFeedbackQueryKeyComparison -q
 ./gradlew :monada-evaluation:runLatency -q
 ./gradlew :monada-evaluation:runProjectMemory -q
 ./gradlew :monada-speech:test
@@ -108,6 +109,23 @@ per-query top-K results, and an event-by-event key-match audit.
 This fixture format belongs only to `monada-evaluation`: targets use stable dataset labels that are
 resolved to atom IDs during the run. The production append-only JSONL feedback format, exact-query
 default, public API defaults, and protected text baseline remain unchanged.
+
+## Feedback Query-Key Strategy Comparison
+
+The exploratory query-key comparison replays the same deterministic feedback cases through exact,
+normalized, and lexically enriched feedback keys. It uses a fresh real JSONL feedback store for
+each strategy and reports intended transfer separately from false sharing or contamination of a
+non-relevant target.
+
+```bash
+./gradlew :monada-evaluation:runFeedbackQueryKeyComparison -q
+```
+
+The report includes the seed and evaluation keys, full-corpus target rank and score before/after,
+top-K results, per-query metric deltas, aggregate metrics, and a conservative evidence conclusion.
+It is exploratory only: even a favorable result does not change the `ExactQueryKeyStrategy`
+production default. Any generalized-key collision is reported as risk rather than being hidden by
+aggregate recall improvements.
 
 ## Text Encoding Contribution Diagnostics
 
