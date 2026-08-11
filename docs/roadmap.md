@@ -18,6 +18,8 @@ The project follows a measurement-first path: improve retrieval quality only aft
 - A/B profile comparison.
 - Evaluation diagnostics.
 - Controlled persisted-feedback query-key comparison with explicit transfer and contamination cases.
+- Real-world project-memory normalized feedback validation with eight positive transfers, eight
+  confusable negative cases, and explicit false-sharing evidence.
 - Speech sample storage, TORGO-style import, acoustic feature encoding, and acoustic retrieval.
 - Speech retrieval evaluation metrics (Precision@k, Recall@k, Hit rate@k, MRR).
 - Protected speech benchmark: a CI-enforced generated-fixture baseline plus a non-enforced
@@ -63,6 +65,12 @@ Non-goals:
 ### Candidate — Hybrid transcript + acoustic diagnostics
 
 Compare transcript-only and acoustic-only retrieval profiles before creating any default hybrid ranking behavior.
+
+### Candidate — Normalized feedback-key collision stress
+
+Stress normalized feedback keys with broader project-like phrasing and dedicated collision cases
+before considering normalized matching as a supported opt-in contract. The exact strategy remains
+the default unless both project-memory validation and stress evidence remain favorable.
 
 ### Candidate — Storage compatibility hardening
 

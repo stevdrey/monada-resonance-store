@@ -50,6 +50,7 @@ The main domain record is `KnowledgeAtom`. Text content is encoded into `Frequen
 ./gradlew :monada-evaluation:runProfileComparison -q
 ./gradlew :monada-evaluation:runFeedbackReplay -q
 ./gradlew :monada-evaluation:runFeedbackQueryKeyComparison -q
+./gradlew :monada-evaluation:runProjectMemoryFeedbackKeyValidation -q
 ./gradlew :monada-evaluation:runLatency -q
 ./gradlew :monada-evaluation:runProjectMemory -q
 ./gradlew :monada-speech:test
@@ -126,6 +127,35 @@ top-K results, per-query metric deltas, aggregate metrics, and a conservative ev
 It is exploratory only: even a favorable result does not change the `ExactQueryKeyStrategy`
 production default. Any generalized-key collision is reported as risk rather than being hidden by
 aggregate recall improvements.
+
+## Project-Memory Normalized Feedback Validation
+
+The project-memory validation extends the controlled query-key comparison to the exploratory
+project-memory v2 corpus. It replays one exact control, eight normalization-equivalent transfers,
+and eight semantically distinct negative cases through isolated exact and normalized
+`FileFeedbackStore` arms.
+
+```bash
+./gradlew :monada-evaluation:runProjectMemoryFeedbackKeyValidation -q
+```
+
+The versioned TSV fixture covers case, punctuation and token separators, whitespace, configured
+stop-word removal, configured plural normalization, and combined normalization. Negative cases
+exercise confusable module ownership, text/speech boundaries, storage layout versus compatibility,
+project purpose versus non-goals, evaluation diagnostics versus runtime ranking, and Issue versus
+PR-review workflow.
+
+Every case reports effective keys, target relevance, full-corpus rank and score movement, top-K,
+metric deltas, and transfer or contamination classification. The report concludes
+`CONTINUE_NORMALIZED_INVESTIGATION` only when a non-exact normalized transfer improves rank, no
+negative key is shared, and aggregate retrieval does not degrade. Unsafe evidence concludes
+`KEEP_EXACT_ONLY`; evidence limited to exact control or no useful normalized movement concludes
+`INCONCLUSIVE_KEEP_EXACT`.
+
+The current deterministic fixture improves three normalized transfer targets, maintains six
+intended cases including the exact control, isolates all eight negatives, and reports `0/8` false
+sharing. This is evidence for deeper stress testing only; `ExactQueryKeyStrategy` remains the
+production default and no protected baseline changes.
 
 ## Text Encoding Contribution Diagnostics
 
