@@ -69,15 +69,15 @@ public final class ProjectMemoryFeedbackKeyValidationRunner {
     ProjectMemoryFeedbackKeyConclusion conclusionFor(
             List<FeedbackQueryKeyStrategyReport> reports) {
         FeedbackQueryKeyStrategyReport normalized = requireNormalized(reports);
-        if (normalized.meritsFurtherInvestigation()) {
-            return ProjectMemoryFeedbackKeyConclusion.CONTINUE_NORMALIZED_INVESTIGATION;
-        }
         FeedbackQueryKeyStrategySummary summary = normalized.summary();
         boolean unsafe = summary.falseSharingCount() > 0
                 || summary.intendedTransferDegraded() > 0
                 || normalized.replayedVsBaseline().aggregate() == RankingChange.DEGRADED;
-        return unsafe
-                ? ProjectMemoryFeedbackKeyConclusion.KEEP_EXACT_ONLY
+        if (unsafe) {
+            return ProjectMemoryFeedbackKeyConclusion.KEEP_EXACT_ONLY;
+        }
+        return normalized.meritsFurtherInvestigation()
+                ? ProjectMemoryFeedbackKeyConclusion.CONTINUE_NORMALIZED_INVESTIGATION
                 : ProjectMemoryFeedbackKeyConclusion.INCONCLUSIVE_KEEP_EXACT;
     }
 

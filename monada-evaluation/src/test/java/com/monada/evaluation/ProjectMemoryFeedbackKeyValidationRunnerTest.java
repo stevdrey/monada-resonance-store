@@ -139,6 +139,19 @@ class ProjectMemoryFeedbackKeyValidationRunnerTest {
                 runner.conclusionFor(List.of(normalized)));
     }
 
+    @Test
+    void intendedTransferDegradationCannotBeHiddenByAnotherImprovement() {
+        var runner = new ProjectMemoryFeedbackKeyValidationRunner();
+        var normalized = strategyReport(
+                FeedbackQueryKeyComparisonCaseCategory.CASE_NORMALIZATION,
+                new FeedbackQueryKeyStrategySummary(1, 0, 1, 0, 0, 0, 0, 0, 0));
+
+        assertEquals(RankingChange.IMPROVED, normalized.replayedVsBaseline().aggregate());
+        assertTrue(normalized.meritsFurtherInvestigation());
+        assertEquals(ProjectMemoryFeedbackKeyConclusion.KEEP_EXACT_ONLY,
+                runner.conclusionFor(List.of(normalized)));
+    }
+
     private FeedbackQueryKeyStrategyReport strategyReport(
             FeedbackQueryKeyComparisonCaseCategory category,
             FeedbackQueryKeyStrategySummary summary) {
