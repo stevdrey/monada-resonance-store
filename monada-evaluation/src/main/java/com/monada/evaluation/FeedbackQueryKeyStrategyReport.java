@@ -31,8 +31,18 @@ public record FeedbackQueryKeyStrategyReport(
     }
 
     public boolean meritsFurtherInvestigation() {
-        return summary.intendedTransferImproved() > 0
+        return hasImprovedGeneralizationTransfer()
                 && summary.falseSharingCount() == 0
                 && replayedVsBaseline.aggregate() != RankingChange.DEGRADED;
+    }
+
+    private boolean hasImprovedGeneralizationTransfer() {
+        return observations.stream().anyMatch(observation -> {
+            FeedbackQueryKeyComparisonCaseCategory category = observation.comparisonCase().category();
+            return category.intendedTransfer()
+                    && category != FeedbackQueryKeyComparisonCaseCategory.EXACT_CONTROL
+                    && observation.classification() == FeedbackQueryKeyCaseClassification.INTENDED_TRANSFER
+                    && observation.targetRankChange() == RankingChange.IMPROVED;
+        });
     }
 }

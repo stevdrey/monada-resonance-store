@@ -176,6 +176,32 @@ class FeedbackQueryKeyComparisonRunnerTest {
         assertFalse(strategyReport.meritsFurtherInvestigation());
     }
 
+    @Test
+    void exactControlImprovementAloneCannotPromoteGeneralizedStrategies(
+            @TempDir Path basePath) throws Exception {
+        var dataset = FeedbackQueryKeyComparisonDataset.get();
+        var exactControl = FeedbackQueryKeyComparisonMain.loadFixture().stream()
+                .filter(comparisonCase -> comparisonCase.category()
+                        == FeedbackQueryKeyComparisonCaseCategory.EXACT_CONTROL)
+                .findFirst()
+                .orElseThrow();
+
+        var report = new FeedbackQueryKeyComparisonRunner().run(
+                dataset, List.of(exactControl), basePath.resolve("exact-control-only"));
+
+        assertEquals(FeedbackQueryKeyRecommendation.INCONCLUSIVE_KEEP_EXACT_DEFAULT,
+                report.recommendation());
+        for (FeedbackQueryKeyComparisonStrategy strategy : List.of(
+                FeedbackQueryKeyComparisonStrategy.NORMALIZED,
+                FeedbackQueryKeyComparisonStrategy.LEXICALLY_ENRICHED)) {
+            var strategyReport = report.reportFor(strategy);
+            assertEquals(1, strategyReport.summary().intendedTransferImproved());
+            assertEquals(0, strategyReport.summary().falseSharingCount());
+            assertEquals(RankingChange.IMPROVED, strategyReport.replayedVsBaseline().aggregate());
+            assertFalse(strategyReport.meritsFurtherInvestigation());
+        }
+    }
+
     private void assertClassification(
             FeedbackQueryKeyStrategyReport report,
             String caseId,
