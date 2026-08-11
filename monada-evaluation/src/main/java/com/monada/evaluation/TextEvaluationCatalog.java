@@ -15,6 +15,9 @@ final class TextEvaluationCatalog {
             "expanded-technology", "1", "MULTI_PROFILE_COMPARISON", TextEvaluationMode.EXPLORATORY);
     static final TextEvaluationMetadata EXPANDED_FEEDBACK_REPLAY = new TextEvaluationMetadata(
             "expanded-technology", "1", "FEEDBACK_REPLAY_COMPARISON", TextEvaluationMode.EXPLORATORY);
+    static final TextEvaluationMetadata FEEDBACK_QUERY_KEY_COMPARISON = new TextEvaluationMetadata(
+            "feedback-query-key-comparison", "1", "QUERY_KEY_STRATEGY_COMPARISON",
+            TextEvaluationMode.EXPLORATORY);
     static final TextEvaluationMetadata EXPANDED_LATENCY = new TextEvaluationMetadata(
             "expanded-technology", "1", EvaluationProfile.LEXICAL_ENRICHED.name(),
             TextEvaluationMode.EXPLORATORY);
