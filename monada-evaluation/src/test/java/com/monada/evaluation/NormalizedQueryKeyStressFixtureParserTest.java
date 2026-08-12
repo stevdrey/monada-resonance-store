@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -69,21 +70,45 @@ class NormalizedQueryKeyStressFixtureParserTest {
         assertTrue(assertThrows(IllegalArgumentException.class,
                 () -> parser(malformedCount).parse()).getMessage().contains("11 tab-separated fields"));
 
-        String invalidEscape = row("bad\\q", "query b", "target", "target", "target");
+        String invalidEscape = row("id", "bad\\q", "query b", "target", "target", "target");
         assertTrue(assertThrows(IllegalArgumentException.class,
                 () -> parser(invalidEscape).parse()).getMessage().contains("unsupported query escape"));
 
-        String duplicateTarget = row("query a", "query b", "target,target", "target,target", "target");
+        String duplicateTarget = row(
+                "id", "query a", "query b", "target,target", "target,target", "target");
         assertTrue(assertThrows(IllegalArgumentException.class,
                 () -> parser(duplicateTarget).parse()).getMessage().contains("duplicate target label"));
     }
 
     @Test
     void caseModelRejectsInvalidSemanticRelevance() {
-        String invalid = row("query a", "query b", "target-a", "target-a", "target-a")
+        String invalid = row("id", "query a", "query b", "target-a", "target-a", "target-a")
                 .replace("\tEQUIVALENT\t", "\tDISTINCT\t");
         var parsed = assertThrows(IllegalArgumentException.class, () -> parser(invalid).parse());
         assertTrue(parsed.getMessage().contains("distinct query B"));
+    }
+
+    @Test
+    void rejectsCaseIdsThatCouldEscapeThePerCaseDirectory() {
+        for (String unsafeId : List.of("../escape", "folder/name", "folder\\name", ".", "..")) {
+            String fixture = row(
+                    unsafeId, "query a", "query b", "target", "target", "target");
+
+            var failure = assertThrows(
+                    IllegalArgumentException.class,
+                    () -> parser(fixture).parse(),
+                    unsafeId);
+
+            assertTrue(failure.getMessage().contains("safe path segment"), unsafeId);
+        }
+    }
+
+    @Test
+    void acceptsStableCaseIdsAsSinglePathSegments() throws Exception {
+        String fixture = row(
+                "case-id_1.0", "query a", "query b", "target", "target", "target");
+
+        assertEquals("case-id_1.0", parser(fixture).parse().getFirst().id());
     }
 
     private NormalizedQueryKeyStressFixtureParser parser(String content) {
@@ -92,13 +117,14 @@ class NormalizedQueryKeyStressFixtureParserTest {
     }
 
     private String row(
+            String id,
             String queryA,
             String queryB,
             String targetsA,
             String targetsB,
             String feedbackTarget) {
         return String.join("\t",
-                "id",
+                id,
                 "CASING",
                 "EQUIVALENT",
                 queryA,

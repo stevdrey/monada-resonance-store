@@ -21,7 +21,7 @@ public record NormalizedQueryKeyStressCase(
         Instant createdAt
 ) {
     public NormalizedQueryKeyStressCase {
-        id = requireNonBlank(id, "id");
+        id = requireSafePathSegment(id);
         Objects.requireNonNull(category, "category");
         Objects.requireNonNull(semanticRelationship, "semanticRelationship");
         queryA = requireNonBlank(queryA, "queryA");
@@ -51,7 +51,19 @@ public record NormalizedQueryKeyStressCase(
         }
     }
 
-    private static String requireNonBlank(String value, String name) {
+    private String requireSafePathSegment(String value) {
+        value = requireNonBlank(value, "id");
+        if (!value.matches("[A-Za-z0-9][A-Za-z0-9._-]*")
+                || value.equals(".")
+                || value.equals("..")) {
+            throw new IllegalArgumentException(
+                    "id must be a safe path segment beginning with a letter or digit and containing only "
+                            + "letters, digits, periods, underscores, or hyphens: " + value);
+        }
+        return value;
+    }
+
+    private String requireNonBlank(String value, String name) {
         Objects.requireNonNull(value, name);
         if (value.isBlank()) {
             throw new IllegalArgumentException(name + " must not be blank");
@@ -59,7 +71,7 @@ public record NormalizedQueryKeyStressCase(
         return value;
     }
 
-    private static Set<String> immutableNonEmpty(Set<String> values, String name) {
+    private Set<String> immutableNonEmpty(Set<String> values, String name) {
         Objects.requireNonNull(values, name);
         values = Collections.unmodifiableSet(new TreeSet<>(values));
         if (values.isEmpty()) {
