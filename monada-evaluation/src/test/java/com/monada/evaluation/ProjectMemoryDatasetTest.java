@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.util.HashSet;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -85,6 +86,7 @@ class ProjectMemoryDatasetTest {
         assertQueryExistsForAtom(dataset, "ka_roadmap_phase_p");
         assertQueryExistsForAtom(dataset, "ka_project_non_goals");
         assertQueryExistsForAtom(dataset, "ka_agent_spec_context");
+        assertQueryExistsForAtom(dataset, "ka_module_learning");
     }
 
     @Test
@@ -144,6 +146,17 @@ class ProjectMemoryDatasetTest {
                 "speech retrieval architecture", "acoustic recall extension");
         assertAliasesContain(dataset, "ka_roadmap_phase_p",
                 "speech evaluation phase", "Phase P");
+    }
+
+    @Test
+    void includesDirectFeedbackQueryKeyOwnershipQuery() {
+        var query = ProjectMemoryDataset.get().queries().stream()
+                .filter(candidate -> candidate.text().equals(
+                        "which module owns query-key strategies and feedback aggregation"))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(Set.of("ka_module_learning"), query.expectedLabels());
     }
 
     private static void assertQueryExistsForAtom(EvaluationDataset dataset, String label) {

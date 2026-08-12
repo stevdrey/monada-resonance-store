@@ -214,7 +214,10 @@ public final class ProjectMemoryDataset {
                         Set.of("ka_agent_spec_context")),
                 new EvaluationQuery(
                         "what are the design principles for experiments and defaults",
-                        Set.of("ka_design_principles"))
+                        Set.of("ka_design_principles")),
+                new EvaluationQuery(
+                        "which module owns query-key strategies and feedback aggregation",
+                        Set.of("ka_module_learning"))
         );
 
         return new EvaluationDataset(atoms, queries);
