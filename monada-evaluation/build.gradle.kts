@@ -48,6 +48,13 @@ tasks.register<JavaExec>("runProjectMemoryFeedbackKeyValidation") {
     classpath = sourceSets["main"].runtimeClasspath
 }
 
+tasks.register<JavaExec>("runNormalizedQueryKeyStress") {
+    description = "Stress normalized feedback keys with adversarial semantic collision pairs (exploratory)"
+    group = "application"
+    mainClass.set("com.monada.evaluation.NormalizedQueryKeyStressMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
 tasks.register<JavaExec>("runLatency") {
     description = "Run recall latency and scan diagnostics over the expanded dataset"
     group = "application"

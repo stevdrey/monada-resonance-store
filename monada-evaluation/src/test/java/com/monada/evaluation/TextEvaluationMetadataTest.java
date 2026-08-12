@@ -32,8 +32,10 @@ class TextEvaluationMetadataTest {
         assertExploratory(TextEvaluationCatalog.EXPANDED_PROFILE_COMPARISON);
         assertExploratory(TextEvaluationCatalog.EXPANDED_LATENCY);
         assertExploratory(TextEvaluationCatalog.PROJECT_MEMORY_FEEDBACK_KEY_VALIDATION);
+        assertExploratory(TextEvaluationCatalog.NORMALIZED_QUERY_KEY_STRESS);
         assertEquals("2", TextEvaluationCatalog.PROJECT_MEMORY.datasetVersion());
         assertEquals("2", TextEvaluationCatalog.PROJECT_MEMORY_FEEDBACK_KEY_VALIDATION.datasetVersion());
+        assertEquals("1", TextEvaluationCatalog.NORMALIZED_QUERY_KEY_STRESS.datasetVersion());
     }
 
     @Test

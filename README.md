@@ -51,6 +51,7 @@ The main domain record is `KnowledgeAtom`. Text content is encoded into `Frequen
 ./gradlew :monada-evaluation:runFeedbackReplay -q
 ./gradlew :monada-evaluation:runFeedbackQueryKeyComparison -q
 ./gradlew :monada-evaluation:runProjectMemoryFeedbackKeyValidation -q
+./gradlew :monada-evaluation:runNormalizedQueryKeyStress -q
 ./gradlew :monada-evaluation:runLatency -q
 ./gradlew :monada-evaluation:runProjectMemory -q
 ./gradlew :monada-speech:test
@@ -156,6 +157,51 @@ The current deterministic fixture improves three normalized transfer targets, ma
 intended cases including the exact control, isolates all eight negatives, and reports `0/8` false
 sharing. This is evidence for deeper stress testing only; `ExactQueryKeyStrategy` remains the
 production default and no protected baseline changes.
+
+## Normalized Query-Key Adversarial Stress
+
+The adversarial stress suite maps the current deterministic transformation surface of
+`NormalizedQueryKeyStrategy`. It evaluates 24 independently replayed query pairs: eight
+semantically equivalent invariance cases and sixteen semantically distinct cases covering
+stop-word-sensitive coordination and relations, token order, numeric identity, negation,
+technical terms, and the blank-normalization fallback boundary.
+
+```bash
+./gradlew :monada-evaluation:runNormalizedQueryKeyStress -q
+```
+
+Each pair runs against a fresh real `FileFeedbackStore` and reports raw queries, normalized forms,
+effective feedback keys, declared relevance, full-corpus target rank and score before/after, top-K
+results, and one of four classifications: `SAFE_EQUIVALENT_SHARING`, `SAFE_ISOLATION`,
+`COLLISION_WITHOUT_MOVEMENT`, or `CONTAMINATION`. The category matrix reports equivalent key-match,
+distinct collision, and contamination rates separately; categories without a relevant denominator
+render `N/A` rather than a misleading zero.
+
+The normal evaluation top-K and `full-corpus-rank` come from separate executions. For baseline and
+replay, the report compares the normal top-K with the same-sized prefix of the diagnostic
+`topK(corpusSize)` ranking. A false prefix-consistency flag warns that the diagnostic rank must not
+be interpreted as equivalent to placement in the normal top-K result path.
+
+The versioned TSV fixture uses these eleven fields:
+
+```text
+id  category  semanticRelationship  queryA  queryB  relevantTargetsA  relevantTargetsB  feedbackTargetLabel  expectedKeyRelation  delta  createdAt
+```
+
+Fields are tab-separated, target sets are comma-separated, and query fields support `\t`, `\n`,
+and `\\` escapes. `expectedKeyRelation` is `MATCH`, `DISTINCT`, or `DISCOVER`; `DISCOVER` records
+the actual key behavior without assuming a collision in advance.
+
+With the current resources, all `8/8` equivalent pairs share as intended. Semantically distinct
+pairs collide in `2/2` coordination cases, `4/4` relation/preposition cases, and `1/2` fallback
+boundary cases. All seven collisions cause observable score or rank contamination, including
+score-only cases whose full-corpus rank does not change. The decision is therefore
+`NORMALIZED_STRESS_RISK`: normalized feedback matching must not become a supported opt-in contract
+without a separate design issue. `ExactQueryKeyStrategy` remains the production default, and the
+suite changes no normalizer resources, ranking behavior, storage format, or protected baseline.
+In `mixed_whitespace_principles`, the baseline prefix is consistent, but replay moves the target
+from diagnostic full-corpus rank 36 to 1 while it remains absent from the normal top-5; the report
+now exposes that distinction without changing the risk decision.
 
 ## Text Encoding Contribution Diagnostics
 

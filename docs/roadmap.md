@@ -20,6 +20,10 @@ The project follows a measurement-first path: improve retrieval quality only aft
 - Controlled persisted-feedback query-key comparison with explicit transfer and contamination cases.
 - Real-world project-memory normalized feedback validation with eight positive transfers, eight
   confusable negative cases, and explicit false-sharing evidence.
+- Adversarial normalized feedback-key stress over 24 independent pairs, with all eight expected
+  invariances preserved but seven semantically distinct collisions across coordination,
+  relation/preposition, and fallback-boundary cases. The evidence signal is
+  `NORMALIZED_STRESS_RISK`, so exact-query matching remains the only conservative supported behavior.
 - Speech sample storage, TORGO-style import, acoustic feature encoding, and acoustic retrieval.
 - Speech retrieval evaluation metrics (Precision@k, Recall@k, Hit rate@k, MRR).
 - Protected speech benchmark: a CI-enforced generated-fixture baseline plus a non-enforced
@@ -66,12 +70,6 @@ Non-goals:
 
 Compare transcript-only and acoustic-only retrieval profiles before creating any default hybrid ranking behavior.
 
-### Candidate — Normalized feedback-key collision stress
-
-Stress normalized feedback keys with broader project-like phrasing and dedicated collision cases
-before considering normalized matching as a supported opt-in contract. The exact strategy remains
-the default unless both project-memory validation and stress evidence remain favorable.
-
 ### Candidate — Storage compatibility hardening
 
 Improve manifest metadata and rejection behavior for incompatible vector formats.
@@ -93,3 +91,7 @@ Improve scan efficiency only after a measurable baseline shows a real bottleneck
 ## Decision Rule
 
 A roadmap item is ready when it has a Spec Context with current state, measurable problem, scope, non-goals, affected modules, acceptance criteria, verification commands, and compatibility notes.
+
+Normalized feedback matching must not advance to a supported opt-in or protected contract from the
+current evidence. Any future attempt requires a separate design Issue that changes normalization
+semantics explicitly and re-runs both project-memory validation and adversarial stress evidence.
