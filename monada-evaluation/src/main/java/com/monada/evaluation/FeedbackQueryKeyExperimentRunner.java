@@ -31,22 +31,30 @@ final class FeedbackQueryKeyExperimentRunner {
 
     List<FeedbackQueryKeyStrategyReport> run(
             EvaluationDataset dataset,
-            List<FeedbackQueryKeyComparisonCase> comparisonCases,
-            Path basePath,
-            LexicalEnrichmentPipeline normalizer,
-            List<StrategyDefinition> strategyDefinitions) {
+        List<FeedbackQueryKeyComparisonCase> comparisonCases,
+        Path basePath,
+        LexicalEnrichmentPipeline normalizer,
+        List<StrategyDefinition> strategyDefinitions) {
         Objects.requireNonNull(dataset, "dataset");
-        comparisonCases = List.copyOf(Objects.requireNonNull(comparisonCases, "comparisonCases"));
+        List<FeedbackQueryKeyComparisonCase> immutableCases = List.copyOf(
+                Objects.requireNonNull(comparisonCases, "comparisonCases"));
         Objects.requireNonNull(basePath, "basePath");
         Objects.requireNonNull(normalizer, "normalizer");
         strategyDefinitions = List.copyOf(
                 Objects.requireNonNull(strategyDefinitions, "strategyDefinitions"));
-        validateCases(dataset, comparisonCases);
+        validateCases(dataset, immutableCases);
         validateStrategies(strategyDefinitions);
 
-        var reports = new ArrayList<FeedbackQueryKeyStrategyReport>(strategyDefinitions.size());
-        for (StrategyDefinition definition : strategyDefinitions) {
-            var preparedCases = prepareCases(comparisonCases, definition.queryKeyStrategy());
+        List<PreparedStrategy> preparedStrategies = strategyDefinitions.stream()
+                .map(definition -> new PreparedStrategy(
+                        definition,
+                        prepareCases(dataset, immutableCases, definition.queryKeyStrategy())))
+                .toList();
+
+        var reports = new ArrayList<FeedbackQueryKeyStrategyReport>(preparedStrategies.size());
+        for (PreparedStrategy preparedStrategy : preparedStrategies) {
+            StrategyDefinition definition = preparedStrategy.definition();
+            List<PreparedCase> preparedCases = preparedStrategy.preparedCases();
             var profile = new EvaluationProfile(
                     "FEEDBACK_QUERY_KEY_" + definition.strategy().name(),
                     normalizer,
@@ -96,12 +104,19 @@ final class FeedbackQueryKeyExperimentRunner {
     }
 
     private List<PreparedCase> prepareCases(
+            EvaluationDataset dataset,
             List<FeedbackQueryKeyComparisonCase> comparisonCases,
             FeedbackQueryKeyStrategy queryKeyStrategy) {
+        List<EvaluationQueryKey> evaluationQueryKeys = dataset.queries().stream()
+                .map(query -> new EvaluationQueryKey(
+                        query.text(), effectiveKey(queryKeyStrategy, query.text())))
+                .toList();
         var prepared = new ArrayList<PreparedCase>(comparisonCases.size());
         for (FeedbackQueryKeyComparisonCase comparisonCase : comparisonCases) {
             String seedKey = effectiveKey(queryKeyStrategy, comparisonCase.seedQueryText());
             String evaluationKey = effectiveKey(queryKeyStrategy, comparisonCase.evaluationQueryText());
+            List<String> expectedMatchedEvaluationQueries = expectedMatchedEvaluationQueries(
+                    comparisonCase, seedKey, evaluationKey, evaluationQueryKeys);
             var expectedScope = seedKey.equals(evaluationKey)
                     ? FeedbackReplayExpectedScope.MATCHING_EVALUATION_QUERY
                     : FeedbackReplayExpectedScope.UNMATCHED_EVALUATION_QUERY;
@@ -113,9 +128,31 @@ final class FeedbackQueryKeyExperimentRunner {
                     comparisonCase.delta(),
                     comparisonCase.createdAt(),
                     expectedScope);
-            prepared.add(new PreparedCase(comparisonCase, event, seedKey, evaluationKey));
+            prepared.add(new PreparedCase(
+                    comparisonCase, event, seedKey, evaluationKey, expectedMatchedEvaluationQueries));
         }
         return List.copyOf(prepared);
+    }
+
+    private List<String> expectedMatchedEvaluationQueries(
+            FeedbackQueryKeyComparisonCase comparisonCase,
+            String seedQueryKey,
+            String evaluationQueryKey,
+            List<EvaluationQueryKey> evaluationQueryKeys) {
+        List<String> actualMatches = evaluationQueryKeys.stream()
+                .filter(query -> seedQueryKey.equals(query.queryKey()))
+                .map(EvaluationQueryKey::queryText)
+                .toList();
+        List<String> expectedMatches = seedQueryKey.equals(evaluationQueryKey)
+                ? List.of(comparisonCase.evaluationQueryText())
+                : List.of();
+        if (!actualMatches.equals(expectedMatches)) {
+            throw new IllegalArgumentException(
+                    "case " + comparisonCase.id() + " seed query key '" + seedQueryKey
+                            + "' matched evaluation queries " + actualMatches
+                            + " but expected " + expectedMatches);
+        }
+        return expectedMatches;
     }
 
     private String effectiveKey(FeedbackQueryKeyStrategy queryKeyStrategy, String queryText) {
@@ -134,13 +171,13 @@ final class FeedbackQueryKeyExperimentRunner {
             PreparedCase prepared = preparedCases.get(index);
             FeedbackQueryKeyComparisonCase comparisonCase = prepared.comparisonCase();
             FeedbackReplayEventDiagnostic diagnostic = arm.replayDiagnostics().get(index);
-            boolean diagnosticMatchesEvaluationQuery = diagnostic.matchedEvaluationQueries()
-                    .contains(comparisonCase.evaluationQueryText());
-            boolean keysMatched = prepared.seedQueryKey().equals(prepared.evaluationQueryKey());
-            if (keysMatched != diagnosticMatchesEvaluationQuery) {
+            if (!diagnostic.matchedEvaluationQueries().equals(prepared.expectedMatchedEvaluationQueries())) {
                 throw new IllegalStateException(
-                        "case " + comparisonCase.id() + " did not produce the expected key-match audit");
+                        "case " + comparisonCase.id() + " query-match audit expected "
+                                + prepared.expectedMatchedEvaluationQueries() + " but was "
+                                + diagnostic.matchedEvaluationQueries());
             }
+            boolean keysMatched = !prepared.expectedMatchedEvaluationQueries().isEmpty();
 
             QueryEvaluation baselineQuery = requireQuery(
                     baselineByQuery, comparisonCase.evaluationQueryText(), "baseline");
@@ -392,6 +429,15 @@ final class FeedbackQueryKeyExperimentRunner {
             FeedbackQueryKeyComparisonCase comparisonCase,
             FeedbackReplayEvent event,
             String seedQueryKey,
-            String evaluationQueryKey) {
+            String evaluationQueryKey,
+            List<String> expectedMatchedEvaluationQueries) {
+    }
+
+    private record PreparedStrategy(
+            StrategyDefinition definition,
+            List<PreparedCase> preparedCases) {
+    }
+
+    private record EvaluationQueryKey(String queryText, String queryKey) {
     }
 }

@@ -140,6 +140,24 @@ class FeedbackQueryKeyComparisonRunnerTest {
     }
 
     @Test
+    void rejectsCrossCaseNormalizedMatchesBeforeCreatingStrategyStores(@TempDir Path basePath) throws Exception {
+        var dataset = FeedbackQueryKeyComparisonDataset.get();
+        var fixture = FeedbackQueryKeyComparisonMain.loadFixture();
+        FeedbackQueryKeyComparisonCase first = fixture.getFirst();
+        FeedbackQueryKeyComparisonCase second = fixture.get(1);
+        var collidingFirst = copyWithSeedQuery(first, second.seedQueryText());
+        Path replayPath = basePath.resolve("cross-case-match");
+
+        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                () -> new FeedbackQueryKeyComparisonRunner().run(
+                        dataset, List.of(collidingFirst, second), replayPath));
+
+        assertTrue(failure.getMessage().contains("case " + collidingFirst.id()));
+        assertTrue(failure.getMessage().contains(second.evaluationQueryText()));
+        assertFalse(Files.exists(replayPath));
+    }
+
+    @Test
     void classifiesSharedNegativeKeyWithoutRankOrScoreMovement() {
         var comparisonCase = new FeedbackQueryKeyComparisonCase(
                 "shared_without_movement",
@@ -230,6 +248,15 @@ class FeedbackQueryKeyComparisonRunnerTest {
         return new FeedbackQueryKeyComparisonCase(
                 source.id(), source.category(), source.seedQueryText(), source.evaluationQueryText(),
                 targetLabel, source.signal(), source.delta(), source.createdAt(),
+                source.expectedTargetRelevant());
+    }
+
+    private FeedbackQueryKeyComparisonCase copyWithSeedQuery(
+            FeedbackQueryKeyComparisonCase source,
+            String seedQueryText) {
+        return new FeedbackQueryKeyComparisonCase(
+                source.id(), source.category(), seedQueryText, source.evaluationQueryText(),
+                source.targetLabel(), source.signal(), source.delta(), source.createdAt(),
                 source.expectedTargetRelevant());
     }
 
