@@ -17,6 +17,8 @@ public record NormalizedQueryKeyStressObservation(
         boolean scoreChanged,
         List<String> baselineTopK,
         List<String> replayedTopK,
+        boolean baselineTopKPrefixConsistent,
+        boolean replayedTopKPrefixConsistent,
         NormalizedQueryKeyStressClassification classification
 ) {
     public NormalizedQueryKeyStressObservation {

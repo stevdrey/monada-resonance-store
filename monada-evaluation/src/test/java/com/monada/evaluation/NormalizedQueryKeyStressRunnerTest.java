@@ -53,6 +53,13 @@ class NormalizedQueryKeyStressRunnerTest {
         assertEquals(NormalizedQueryKeyStressClassification.CONTAMINATION,
                 scoreOnly.classification());
 
+        var prefixMismatch = observation(first, "mixed_whitespace_principles");
+        assertTrue(prefixMismatch.baselineTopKPrefixConsistent());
+        assertFalse(prefixMismatch.replayedTopKPrefixConsistent());
+        assertEquals(36, prefixMismatch.targetBeforeReplay().fullCorpusRank());
+        assertEquals(1, prefixMismatch.targetAfterReplay().fullCorpusRank());
+        assertFalse(prefixMismatch.replayedTopK().contains("ka_design_principles"));
+
         for (NormalizedQueryKeyStressCase stressCase : cases) {
             Path feedbackLog = firstBase.resolve("run")
                     .resolve(stressCase.id())
@@ -65,6 +72,12 @@ class NormalizedQueryKeyStressRunnerTest {
         assertTrue(rendered.contains("STOP_WORD_COORDINATION | 2 | N/A | 2/2 (1.0000) | 2/2 (1.0000)"));
         assertTrue(rendered.contains("BLANK_FALLBACK_BOUNDARY | 2 | N/A | 1/2 (0.5000) | 1/2 (0.5000)"));
         assertTrue(rendered.contains("Target score changed: true"));
+        assertTrue(rendered.contains("Baseline top-K prefix consistent: true"));
+        assertTrue(rendered.contains("Replayed top-K prefix consistent: false"));
+        assertTrue(rendered.contains(
+                "Prefix warning: full-corpus-rank comes from a separate topK(corpusSize) "
+                        + "diagnostic execution and must not be interpreted as equivalent to normal "
+                        + "evaluation top-K placement."));
         assertTrue(rendered.endsWith("ExactQueryKeyStrategy remains the production/default behavior.\n"));
     }
 
@@ -171,6 +184,8 @@ class NormalizedQueryKeyStressRunnerTest {
                 targetMoved,
                 List.of("target-b"),
                 List.of("target-b"),
+                true,
+                true,
                 runner.classify(relationship, keysMatched, targetMoved));
     }
 }

@@ -90,10 +90,14 @@ public final class NormalizedQueryKeyStressRunner {
                     profile);
             QueryEvaluation baselineQuery = arm.baseline().queryResults().getFirst();
             QueryEvaluation replayedQuery = arm.replayedPersisted().queryResults().getFirst();
+            List<PersistedFeedbackReplayRunner.FullCorpusRanking> baselineFullCorpus = fullCorpusRanking(
+                    arm.baselineFullCorpusByQuery(), stressCase.queryB());
+            List<PersistedFeedbackReplayRunner.FullCorpusRanking> replayedFullCorpus = fullCorpusRanking(
+                    arm.replayedFullCorpusByQuery(), stressCase.queryB());
             FeedbackQueryKeyTargetRank before = targetRank(
-                    arm.baselineFullCorpusByQuery(), stressCase.queryB(), stressCase.feedbackTargetLabel());
+                    baselineFullCorpus, stressCase.queryB(), stressCase.feedbackTargetLabel());
             FeedbackQueryKeyTargetRank after = targetRank(
-                    arm.replayedFullCorpusByQuery(), stressCase.queryB(), stressCase.feedbackTargetLabel());
+                    replayedFullCorpus, stressCase.queryB(), stressCase.feedbackTargetLabel());
             RankingChange rankChange = rankChange(before, after);
             boolean scoreChanged = Math.abs(before.score() - after.score())
                     > EvaluationComparator.DEFAULT_EPSILON;
@@ -112,6 +116,8 @@ public final class NormalizedQueryKeyStressRunner {
                     scoreChanged,
                     baselineQuery.returnedLabels(),
                     replayedQuery.returnedLabels(),
+                    isTopKPrefixConsistent(baselineQuery.returnedLabels(), baselineFullCorpus),
+                    isTopKPrefixConsistent(replayedQuery.returnedLabels(), replayedFullCorpus),
                     classification));
         }
         List<NormalizedQueryKeyStressObservation> immutableObservations = List.copyOf(observations);
@@ -247,20 +253,40 @@ public final class NormalizedQueryKeyStressRunner {
         return strategyKey == null || strategyKey.isBlank() ? queryText : strategyKey;
     }
 
-    private FeedbackQueryKeyTargetRank targetRank(
+    private List<PersistedFeedbackReplayRunner.FullCorpusRanking> fullCorpusRanking(
             Map<String, List<PersistedFeedbackReplayRunner.FullCorpusRanking>> rankingsByQuery,
-            String queryText,
-            String targetLabel) {
+            String queryText) {
         List<PersistedFeedbackReplayRunner.FullCorpusRanking> rankings = rankingsByQuery.get(queryText);
         if (rankings == null) {
             throw new IllegalStateException("full-corpus ranking is missing query: " + queryText);
         }
+        return rankings;
+    }
+
+    private FeedbackQueryKeyTargetRank targetRank(
+            List<PersistedFeedbackReplayRunner.FullCorpusRanking> rankings,
+            String queryText,
+            String targetLabel) {
         return rankings.stream()
                 .filter(result -> result.label().equals(targetLabel))
                 .findFirst()
                 .map(result -> new FeedbackQueryKeyTargetRank(result.rank(), result.score()))
                 .orElseThrow(() -> new IllegalStateException(
                         "full-corpus ranking is missing target " + targetLabel + " for query " + queryText));
+    }
+
+    private boolean isTopKPrefixConsistent(
+            List<String> normalTopK,
+            List<PersistedFeedbackReplayRunner.FullCorpusRanking> fullCorpusRanking) {
+        if (normalTopK.size() > fullCorpusRanking.size()) {
+            return false;
+        }
+        for (int index = 0; index < normalTopK.size(); index++) {
+            if (!normalTopK.get(index).equals(fullCorpusRanking.get(index).label())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private RankingChange rankChange(

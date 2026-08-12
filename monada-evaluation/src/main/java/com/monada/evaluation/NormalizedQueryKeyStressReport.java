@@ -39,6 +39,7 @@ public record NormalizedQueryKeyStressReport(
         sb.append("Mode: EXPLORATORY (production defaults are unchanged)\n");
         sb.append("Strategy: NormalizedQueryKeyStrategy\n");
         sb.append("Store: isolated real FileFeedbackStore JSONL per pair\n");
+        sb.append("Full-corpus ranks: separate diagnostic topK(corpusSize) executions\n");
         sb.append("Pairs: ").append(observations.size()).append("\n\n");
         appendSummaryMatrix(sb);
         appendEvidenceByCategory(sb);
@@ -107,7 +108,17 @@ public record NormalizedQueryKeyStressReport(
         sb.append("    Target rank change: ").append(observation.targetRankChange()).append('\n');
         sb.append("    Target score changed: ").append(observation.scoreChanged()).append('\n');
         sb.append("    Baseline top-K: ").append(observation.baselineTopK()).append('\n');
+        sb.append("    Baseline top-K prefix consistent: ")
+                .append(observation.baselineTopKPrefixConsistent()).append('\n');
         sb.append("    Replayed top-K: ").append(observation.replayedTopK()).append('\n');
+        sb.append("    Replayed top-K prefix consistent: ")
+                .append(observation.replayedTopKPrefixConsistent()).append('\n');
+        if (!observation.baselineTopKPrefixConsistent()
+                || !observation.replayedTopKPrefixConsistent()) {
+            sb.append("    Prefix warning: full-corpus-rank comes from a separate ")
+                    .append("topK(corpusSize) diagnostic execution and must not be interpreted as ")
+                    .append("equivalent to normal evaluation top-K placement.\n");
+        }
         sb.append("    Classification: ").append(observation.classification()).append('\n');
     }
 

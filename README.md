@@ -177,6 +177,11 @@ results, and one of four classifications: `SAFE_EQUIVALENT_SHARING`, `SAFE_ISOLA
 distinct collision, and contamination rates separately; categories without a relevant denominator
 render `N/A` rather than a misleading zero.
 
+The normal evaluation top-K and `full-corpus-rank` come from separate executions. For baseline and
+replay, the report compares the normal top-K with the same-sized prefix of the diagnostic
+`topK(corpusSize)` ranking. A false prefix-consistency flag warns that the diagnostic rank must not
+be interpreted as equivalent to placement in the normal top-K result path.
+
 The versioned TSV fixture uses these eleven fields:
 
 ```text
@@ -194,6 +199,9 @@ score-only cases whose full-corpus rank does not change. The decision is therefo
 `NORMALIZED_STRESS_RISK`: normalized feedback matching must not become a supported opt-in contract
 without a separate design issue. `ExactQueryKeyStrategy` remains the production default, and the
 suite changes no normalizer resources, ranking behavior, storage format, or protected baseline.
+In `mixed_whitespace_principles`, the baseline prefix is consistent, but replay moves the target
+from diagnostic full-corpus rank 36 to 1 while it remains absent from the normal top-5; the report
+now exposes that distinction without changing the risk decision.
 
 ## Text Encoding Contribution Diagnostics
 
