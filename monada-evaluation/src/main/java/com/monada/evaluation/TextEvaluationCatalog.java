@@ -21,6 +21,9 @@ final class TextEvaluationCatalog {
     static final TextEvaluationMetadata PROJECT_MEMORY_FEEDBACK_KEY_VALIDATION = new TextEvaluationMetadata(
             "project-memory", "2", "NORMALIZED_FEEDBACK_KEY_VALIDATION",
             TextEvaluationMode.EXPLORATORY);
+    static final TextEvaluationMetadata NORMALIZED_QUERY_KEY_STRESS = new TextEvaluationMetadata(
+            "normalized-query-key-stress", "1", "NORMALIZED_QUERY_KEY_STRESS",
+            TextEvaluationMode.EXPLORATORY);
     static final TextEvaluationMetadata EXPANDED_LATENCY = new TextEvaluationMetadata(
             "expanded-technology", "1", EvaluationProfile.LEXICAL_ENRICHED.name(),
             TextEvaluationMode.EXPLORATORY);
