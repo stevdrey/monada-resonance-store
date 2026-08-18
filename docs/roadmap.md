@@ -28,6 +28,13 @@ The project follows a measurement-first path: improve retrieval quality only aft
 - Speech retrieval evaluation metrics (Precision@k, Recall@k, Hit rate@k, MRR).
 - Protected speech benchmark: a CI-enforced generated-fixture baseline plus a non-enforced
   exploratory local real-data mode, with mode-labeled deterministic reports.
+- Paired transcript-only versus acoustic-only speech evaluation over the same generated queries,
+  with stable sample-ID alignment and complementary evidence for a controlled fusion experiment.
+- Evaluation-only transcript/acoustic score-fusion sweep with exact control arms, a fixed five-point
+  global weight sweep, per-query min-max normalization, explicit missing-modality handling, and no
+  production ranker. The generated fixture has a stable promising region across all three non-trivial
+  profiles and concludes `HYBRID_ROBUSTNESS_STUDY_JUSTIFIED`; this is evidence only for a deeper
+  robustness/protected-benchmark phase.
 
 ## Near-Term Direction
 
@@ -65,15 +72,6 @@ Non-goals:
 - scraping external services or GitHub;
 - adding private data or LLM-generated relevance judgments;
 - changing retrieval defaults or encoder behavior.
-
-### Phase V-Speech — Paired transcript-only vs acoustic-only retrieval evaluation
-
-The generated paired comparison evaluates the same queries through unchanged transcript and acoustic
-retrieval paths, maps results by stable speech sample ID, and reports per-query agreement,
-disagreement, metrics, and grouped outcomes. Its deterministic fixture contains transcript-only and
-acoustic-only wins, so the evidence concludes `HYBRID_EXPERIMENT_JUSTIFIED` for a future controlled
-fusion experiment. It does not compute a hybrid score, alter either ranking implementation, or add
-a production speech API.
 
 ### Candidate — Storage compatibility hardening
 
