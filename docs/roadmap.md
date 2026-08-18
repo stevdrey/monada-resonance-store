@@ -66,9 +66,14 @@ Non-goals:
 - adding private data or LLM-generated relevance judgments;
 - changing retrieval defaults or encoder behavior.
 
-### Candidate — Hybrid transcript + acoustic diagnostics
+### Phase V-Speech — Paired transcript-only vs acoustic-only retrieval evaluation
 
-Compare transcript-only and acoustic-only retrieval profiles before creating any default hybrid ranking behavior.
+The generated paired comparison evaluates the same queries through unchanged transcript and acoustic
+retrieval paths, maps results by stable speech sample ID, and reports per-query agreement,
+disagreement, metrics, and grouped outcomes. Its deterministic fixture contains transcript-only and
+acoustic-only wins, so the evidence concludes `HYBRID_EXPERIMENT_JUSTIFIED` for a future controlled
+fusion experiment. It does not compute a hybrid score, alter either ranking implementation, or add
+a production speech API.
 
 ### Candidate — Storage compatibility hardening
 
