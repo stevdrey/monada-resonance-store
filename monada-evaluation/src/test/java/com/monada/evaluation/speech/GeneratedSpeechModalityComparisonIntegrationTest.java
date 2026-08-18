@@ -103,8 +103,10 @@ class GeneratedSpeechModalityComparisonIntegrationTest {
     }
 
     @Test
-    void acousticArmMatchesDirectSpeechRetrieverRankingAndScore() throws IOException {
-        Run run = run(tempDir.resolve("acoustic"));
+    void acousticArmMatchesCompleteDirectSpeechRetrieverRankingAndScores() throws IOException {
+        Path root = tempDir.resolve("acoustic");
+        GeneratedSpeechModalityFixture.Fixture fixture = GeneratedSpeechModalityFixture.create(root);
+        Run run = run(fixture, fixture.samples().size(), root.resolve("transcript-memory"));
         PairedSpeechQuery query = query(run.fixture(), "q_transcript_only");
         List<SpeechRetrievalResult> direct = new SpeechSampleRetriever(run.fixture().encoder()).search(
                 query.queryAudio(),
@@ -112,20 +114,23 @@ class GeneratedSpeechModalityComparisonIntegrationTest {
                 run.fixture().featureStore(),
                 new SpeechRetrievalOptions(run.fixture().samples().size(), null, null, null, null, null));
 
-        SpeechModalityRankedResult actual = resultsById(run.report())
+        List<SpeechModalityRankedResult> actual = resultsById(run.report())
                 .get(query.queryId())
                 .acoustic()
-                .topResults()
-                .getFirst();
-        SpeechRetrievalResult expected = direct.getFirst();
-        assertEquals(expected.sample().id(), actual.sampleId());
-        assertEquals(expected.rank(), actual.rank());
-        assertEquals(expected.score(), actual.score(), 1e-12);
+                .topResults();
+        List<SpeechModalityRankedResult> expected = direct.stream()
+                .map(result -> new SpeechModalityRankedResult(
+                        result.sample().id(), result.score(), result.rank()))
+                .toList();
+
+        assertRankingsEqual(expected, actual);
     }
 
     @Test
     void transcriptArmMatchesDirectMemoryWithStableDuplicateExpansion() throws IOException {
-        Run run = run(tempDir.resolve("transcript"));
+        Path root = tempDir.resolve("transcript");
+        GeneratedSpeechModalityFixture.Fixture fixture = GeneratedSpeechModalityFixture.create(root);
+        Run run = run(fixture, fixture.samples().size(), root.resolve("transcript-memory"));
         PairedSpeechQuery query = query(run.fixture(), "q_acoustic_only");
         List<SpeechModalityRankedResult> direct = directTranscriptRanking(
                 run.fixture().samples(),
@@ -133,7 +138,7 @@ class GeneratedSpeechModalityComparisonIntegrationTest {
                 tempDir.resolve("direct-memory"));
 
         SpeechModalityQueryResult actual = resultsById(run.report()).get(query.queryId()).transcript();
-        assertEquals(direct.getFirst(), actual.topResults().getFirst());
+        assertRankingsEqual(direct, actual.topResults());
         assertEquals(2, actual.metrics().firstRelevantRank());
         assertEquals(0.5, actual.metrics().reciprocalRank(), 1e-12);
     }
@@ -143,11 +148,19 @@ class GeneratedSpeechModalityComparisonIntegrationTest {
     }
 
     private Run run(GeneratedSpeechModalityFixture.Fixture fixture, Path transcriptMemoryPath) throws IOException {
+        return run(fixture, fixture.k(), transcriptMemoryPath);
+    }
+
+    private Run run(
+            GeneratedSpeechModalityFixture.Fixture fixture,
+            int k,
+            Path transcriptMemoryPath
+    ) throws IOException {
         SpeechModalityComparisonReport report = new SpeechModalityComparisonRunner().run(
                 SpeechModalityEvidence.GENERATED_CI,
                 fixture.label(),
                 fixture.queries(),
-                fixture.k(),
+                k,
                 new SpeechSampleRetriever(fixture.encoder()),
                 fixture.sampleStore(),
                 fixture.featureStore(),
@@ -194,6 +207,20 @@ class GeneratedSpeechModalityComparisonIntegrationTest {
             }
         }
         return expanded;
+    }
+
+    private void assertRankingsEqual(
+            List<SpeechModalityRankedResult> expected,
+            List<SpeechModalityRankedResult> actual
+    ) {
+        assertEquals(expected.size(), actual.size());
+        for (int index = 0; index < expected.size(); index++) {
+            SpeechModalityRankedResult expectedResult = expected.get(index);
+            SpeechModalityRankedResult actualResult = actual.get(index);
+            assertEquals(expectedResult.sampleId(), actualResult.sampleId());
+            assertEquals(expectedResult.rank(), actualResult.rank());
+            assertEquals(expectedResult.score(), actualResult.score(), 1e-12);
+        }
     }
 
     private record Run(
