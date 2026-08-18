@@ -76,3 +76,10 @@ tasks.register<JavaExec>("runSpeechModalityComparison") {
     mainClass.set("com.monada.evaluation.speech.SpeechModalityComparisonMain")
     classpath = sourceSets["main"].runtimeClasspath
 }
+
+tasks.register<JavaExec>("runSpeechHybridSweep") {
+    description = "Evaluate deterministic transcript/acoustic score-fusion weights using generated fixtures"
+    group = "application"
+    mainClass.set("com.monada.evaluation.speech.SpeechHybridSweepMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}

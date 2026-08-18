@@ -55,6 +55,7 @@ The main domain record is `KnowledgeAtom`. Text content is encoded into `Frequen
 ./gradlew :monada-evaluation:runLatency -q
 ./gradlew :monada-evaluation:runProjectMemory -q
 ./gradlew :monada-evaluation:runSpeechModalityComparison -q
+./gradlew :monada-evaluation:runSpeechHybridSweep -q
 ./gradlew :monada-speech:test
 ./gradlew :monada-speech:runSpeechImport
 ./gradlew :monada-speech:runSpeechEvaluation
@@ -302,6 +303,26 @@ contains one transcript-only win, one acoustic-only win, one shared success, and
 It is labeled `GENERATED_CI`, so it is distinguishable from any future `LOCAL_EXPLORATORY` corpus
 run. Its deterministic evidence concludes `HYBRID_EXPERIMENT_JUSTIFIED`: a future experiment may
 evaluate score fusion, but no hybrid ranking is enabled or recommended as a production default.
+
+## Transcript + Acoustic Score-Fusion Sweep
+
+The evaluation-only hybrid sweep reuses the same complete paired rankings and aligns candidates by
+stable speech sample ID. Its five fixed global profiles retain exact transcript and acoustic control
+arms, then evaluate `0.75/0.25`, `0.50/0.50`, and `0.25/0.75` transcript/acoustic weights. Every
+non-trivial profile uses deterministic min-max normalization separately for each query and modality;
+constant arms are reported as having no discrimination. Candidates without either required modality
+are classified explicitly and excluded from non-trivial fusion rather than receiving an imputed score.
+
+```bash
+./gradlew :monada-evaluation:runSpeechHybridSweep -q
+```
+
+The report shows raw score ranges, normalization state, missing-modality IDs, top-K results, metrics,
+deltas against both controls, recovered and lost cases, ties, and the evidence decision. With the
+generated fixture, all three hybrid profiles recover the modality-specific and shared misses without
+losing a control hit, so the deterministic conclusion is `HYBRID_ROBUSTNESS_STUDY_JUSTIFIED`. This is
+evidence for a future robustness/protected-benchmark phase only: it adds no production hybrid
+retriever, default behavior, storage change, or protected hybrid baseline.
 
 ## Latency Profiling
 
