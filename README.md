@@ -54,6 +54,7 @@ The main domain record is `KnowledgeAtom`. Text content is encoded into `Frequen
 ./gradlew :monada-evaluation:runNormalizedQueryKeyStress -q
 ./gradlew :monada-evaluation:runLatency -q
 ./gradlew :monada-evaluation:runProjectMemory -q
+./gradlew :monada-evaluation:runSpeechModalityComparison -q
 ./gradlew :monada-speech:test
 ./gradlew :monada-speech:runSpeechImport
 ./gradlew :monada-speech:runSpeechEvaluation
@@ -282,6 +283,25 @@ Then evaluate that store with an inspectable TSV query file:
 The command is exploratory only: it does not download data, modify the store, or affect the
 protected speech baseline. See [`monada-speech/README.md`](monada-speech/README.md) for the TSV
 format, filters, and all configuration settings.
+
+## Paired Speech Modality Comparison
+
+The deterministic paired comparison evaluates the same semantic speech queries through the existing
+text resonance path and the existing acoustic retriever, then maps both results to stable speech
+sample IDs. It reports per-query and aggregate Precision@k, Recall@k, Hit@k, MRR, first relevant
+rank, top-K Jaccard agreement, outcome categories, and condition/task-type groups. Transcript and
+acoustic scores remain separate: this phase does not calculate a hybrid score or change either
+retrieval implementation.
+
+```bash
+./gradlew :monada-evaluation:runSpeechModalityComparison -q
+```
+
+The command uses eight generated 16 kHz mono PCM WAV samples and four paired queries. The fixture
+contains one transcript-only win, one acoustic-only win, one shared success, and one shared failure.
+It is labeled `GENERATED_CI`, so it is distinguishable from any future `LOCAL_EXPLORATORY` corpus
+run. Its deterministic evidence concludes `HYBRID_EXPERIMENT_JUSTIFIED`: a future experiment may
+evaluate score fusion, but no hybrid ranking is enabled or recommended as a production default.
 
 ## Latency Profiling
 

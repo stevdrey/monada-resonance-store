@@ -7,6 +7,7 @@ dependencies {
     implementation(project(":monada-api"))
     implementation(project(":monada-encoder"))
     implementation(project(":monada-storage"))
+    implementation(project(":monada-speech"))
 }
 
 application {
@@ -66,5 +67,12 @@ tasks.register<JavaExec>("runProjectMemory") {
     description = "Run the project-memory evaluation dataset built from the repository's own documentation (exploratory)"
     group = "application"
     mainClass.set("com.monada.evaluation.ProjectMemoryMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
+tasks.register<JavaExec>("runSpeechModalityComparison") {
+    description = "Compare transcript-only and acoustic-only speech retrieval using deterministic generated fixtures"
+    group = "application"
+    mainClass.set("com.monada.evaluation.speech.SpeechModalityComparisonMain")
     classpath = sourceSets["main"].runtimeClasspath
 }
