@@ -50,6 +50,8 @@ class SpeechModalityComparisonRunnerTest {
     void resultModelsRejectInconsistentMetrics() {
         assertThrows(IllegalArgumentException.class, () -> new SpeechModalityQueryMetrics(
                 1, 0, true, 0.0, 0.0, 0.0, 0));
+        assertThrows(IllegalArgumentException.class, () -> new SpeechModalityQueryMetrics(
+                1, 1, false, 1.0, 1.0, 1.0, 1));
         assertThrows(IllegalArgumentException.class, () -> new SpeechModalityQueryResult(
                 List.of(result("a")),
                 new SpeechModalityQueryMetrics(0, 0, false, 0.0, 0.0, 0.0, 0)));

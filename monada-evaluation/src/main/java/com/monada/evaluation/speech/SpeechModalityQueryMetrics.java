@@ -23,8 +23,8 @@ public record SpeechModalityQueryMetrics(
         if (firstRelevantRank < 0) {
             throw new IllegalArgumentException("firstRelevantRank must be non-negative");
         }
-        if (hitAtK && relevantRetrievedCount == 0) {
-            throw new IllegalArgumentException("hitAtK cannot be true when relevantRetrievedCount is 0");
+        if (hitAtK != (relevantRetrievedCount > 0)) {
+            throw new IllegalArgumentException("hitAtK must equal whether relevantRetrievedCount is positive");
         }
         if (firstRelevantRank == 0 && reciprocalRank != 0.0) {
             throw new IllegalArgumentException("reciprocalRank must be 0.0 when firstRelevantRank is 0");

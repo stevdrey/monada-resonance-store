@@ -70,7 +70,7 @@ final class GeneratedSpeechModalityFixture {
             samples.add(new SpeechSample(
                     spec.id(),
                     spec.speakerId(),
-                    SpeechDatasetSource.TORGO,
+                    SpeechDatasetSource.CUSTOM,
                     audioPath,
                     spec.transcript(),
                     List.of(),

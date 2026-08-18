@@ -3,6 +3,7 @@ package com.monada.evaluation.speech;
 import com.monada.api.MonadaMemory;
 import com.monada.core.ResonanceResult;
 import com.monada.speech.bridge.SpeechSampleAtomMapper;
+import com.monada.speech.domain.SpeechDatasetSource;
 import com.monada.speech.domain.SpeechSample;
 import com.monada.speech.retrieval.SpeechRetrievalOptions;
 import com.monada.speech.retrieval.SpeechRetrievalResult;
@@ -42,6 +43,8 @@ class GeneratedSpeechModalityComparisonIntegrationTest {
         assertEquals(1, report.aggregate().outcomeCount(SpeechModalityOutcome.TRANSCRIPT_ONLY));
         assertEquals(1, report.aggregate().outcomeCount(SpeechModalityOutcome.ACOUSTIC_ONLY));
         assertEquals(1, report.aggregate().outcomeCount(SpeechModalityOutcome.BOTH_FAIL));
+        assertTrue(run.fixture().samples().stream()
+                .allMatch(sample -> sample.datasetSource() == SpeechDatasetSource.CUSTOM));
 
         Map<String, SpeechModalityComparisonQueryResult> resultsById = resultsById(report);
         assertEquals(SpeechModalityOutcome.ACOUSTIC_ONLY, resultsById.get("q_acoustic_only").outcome());
