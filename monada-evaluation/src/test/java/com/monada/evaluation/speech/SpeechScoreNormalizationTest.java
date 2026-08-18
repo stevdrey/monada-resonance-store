@@ -34,6 +34,15 @@ class SpeechScoreNormalizationTest {
     }
 
     @Test
+    void treatsSignedZeroScoresAsAConstantArm() {
+        SpeechNormalizedScores scores = normalization.normalize(Map.of("negative", -0.0, "positive", 0.0));
+
+        assertEquals(SpeechScoreNormalizationStatus.CONSTANT_NO_DISCRIMINATION, scores.status());
+        assertEquals(0.0, scores.normalizedScoresBySampleId().get("negative"));
+        assertEquals(0.0, scores.normalizedScoresBySampleId().get("positive"));
+    }
+
+    @Test
     void marksAnAbsentModalityWithoutInventingScores() {
         SpeechNormalizedScores scores = normalization.normalize(Map.of());
 

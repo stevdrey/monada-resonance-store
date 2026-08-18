@@ -25,7 +25,7 @@ final class SpeechScoreNormalization {
         }
 
         Map<String, Double> normalized = new LinkedHashMap<>();
-        if (Double.compare(minimum, maximum) == 0) {
+        if (minimum == maximum) {
             rawScoresBySampleId.keySet().stream().sorted()
                     .forEach(sampleId -> normalized.put(sampleId, 0.0));
             return new SpeechNormalizedScores(
