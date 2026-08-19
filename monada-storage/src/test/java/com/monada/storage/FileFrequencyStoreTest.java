@@ -247,6 +247,20 @@ class FileFrequencyStoreTest {
     }
 
     @Test
+    void profiledStoreAllowsReorderedIndexEntriesWhenOffsetsCoverAllFrames() throws IOException {
+        var profile = VectorFormatProfile.currentFixedRaw(2);
+        FileFrequencyStore store = FileFrequencyStore.create(root, "vectors/segment-000001.f32", profile);
+        store.save("a", vector(1f, 2f));
+        store.save("b", vector(3f, 4f));
+
+        Path indexFile = root.resolve("indexes/vector-map.idx");
+        Files.write(indexFile, Files.readAllLines(indexFile).reversed(), StandardCharsets.UTF_8);
+
+        var reopened = FileFrequencyStore.openExisting(root, "vectors/segment-000001.f32", profile);
+        assertArrayEquals(new float[]{3f, 4f}, reopened.findByAtomId("b").orElseThrow().values());
+    }
+
+    @Test
     void profiledStoreRejectsUnsupportedFormatAndIndexVersions() {
         var invalidFormat = new VectorFormatProfile(2, VectorFormatProfile.ScalarType.FLOAT32,
                 VectorFormatProfile.ByteOrder.BIG_ENDIAN, VectorFormatProfile.Framing.FIXED_RAW, 2, 1);

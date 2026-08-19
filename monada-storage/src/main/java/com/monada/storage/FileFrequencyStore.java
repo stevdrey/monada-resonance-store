@@ -11,10 +11,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.BitSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.stream.Stream;
 
 public class FileFrequencyStore implements FrequencyStore {
@@ -165,21 +164,19 @@ public class FileFrequencyStore implements FrequencyStore {
                             + " bytes; manifest physical metadata or on-disk bytes are incompatible");
         }
 
-        Set<Long> expectedOffsets = new HashSet<>();
-        for (long offset = 0; offset < expectedSize; offset += frameSize) {
-            expectedOffsets.add(offset);
-        }
+        BitSet seenFrames = new BitSet(entries.size());
         for (IndexEntry entry : entries) {
             validateOffset(entry.offset(), actualSize, entry.atomId());
-            if (!expectedOffsets.remove(entry.offset())) {
+            int frameIndex = Math.toIntExact(entry.offset() / frameSize);
+            if (seenFrames.get(frameIndex)) {
                 throw new IOException(
                         "Duplicate or unexpected offset (" + entry.offset() + ") in vector index for atomId="
                                 + entry.atomId());
             }
+            seenFrames.set(frameIndex);
         }
-        if (!expectedOffsets.isEmpty()) {
-            throw new IOException("Vector index does not cover every physical vector frame");
-        }
+        // The size check establishes exactly one frame per index entry. Since every offset is aligned,
+        // in range, and unique, the index covers every physical frame without materializing Long offsets.
 
         if (vectorFormatProfile.framing() == VectorFormatProfile.Framing.LEGACY_LENGTH_PREFIXED) {
             validateLengthPrefixedHeaders(entries);
