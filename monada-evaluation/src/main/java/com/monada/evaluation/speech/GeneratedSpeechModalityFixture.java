@@ -126,7 +126,7 @@ final class GeneratedSpeechModalityFixture {
                 K);
     }
 
-    private static Path writeSineWav(Path directory, String name, float frequencyHz) throws IOException {
+    static Path writeSineWav(Path directory, String name, float frequencyHz) throws IOException {
         Path wav = directory.resolve(name + ".wav");
         Files.write(wav, generateSineWav(frequencyHz));
         return wav;

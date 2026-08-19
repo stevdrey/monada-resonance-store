@@ -83,3 +83,10 @@ tasks.register<JavaExec>("runSpeechHybridSweep") {
     mainClass.set("com.monada.evaluation.speech.SpeechHybridSweepMain")
     classpath = sourceSets["main"].runtimeClasspath
 }
+
+tasks.register<JavaExec>("runSpeechHybridRobustness") {
+    description = "Stress the fixed transcript/acoustic hybrid candidate using generated conflict fixtures"
+    group = "application"
+    mainClass.set("com.monada.evaluation.speech.SpeechHybridRobustnessMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}

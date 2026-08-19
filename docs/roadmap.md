@@ -35,6 +35,11 @@ The project follows a measurement-first path: improve retrieval quality only aft
   production ranker. The generated fixture has a stable promising region across all three non-trivial
   profiles and concludes `HYBRID_ROBUSTNESS_STUDY_JUSTIFIED`; this is evidence only for a deeper
   robustness/protected-benchmark phase.
+- Fixed-profile hybrid robustness study over deterministic control/dysarthric, task, speaker-relation,
+  direct-conflict, and missing-modality cases. The frozen `0.50/0.50` candidate preserves direct
+  conflict recoveries but regresses when a relevant candidate lacks one modality, so the evidence
+  concludes `HYBRID_CANDIDATE_RISKY`. No protected hybrid baseline, production retrieval path, or
+  default behavior is justified from this result.
 
 ## Near-Term Direction
 
