@@ -30,3 +30,8 @@ gradle/
 build/
 bin/
 monada-memory/
+
+# Local real-speech evaluation inputs and generated stores
+monada-speech-store/
+torgo-test/
+queries.tsv
