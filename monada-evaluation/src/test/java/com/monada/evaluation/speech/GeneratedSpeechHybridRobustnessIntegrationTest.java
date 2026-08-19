@@ -6,11 +6,13 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GeneratedSpeechHybridRobustnessIntegrationTest {
@@ -62,6 +64,31 @@ class GeneratedSpeechHybridRobustnessIntegrationTest {
     @Test
     void reportIsDeterministicAcrossFreshGeneratedStores() throws IOException {
         assertEquals(run(tempDir.resolve("first")).render(), run(tempDir.resolve("second")).render());
+    }
+
+    @Test
+    void unknownAvailabilityMaskIdsAreRejectedAgainstTheCollectedCorpusSet() throws IOException {
+        Path root = tempDir.resolve("unknown-mask");
+        GeneratedSpeechHybridRobustnessFixture.Fixture fixture = GeneratedSpeechHybridRobustnessFixture.create(root);
+        List<SpeechHybridRobustnessCase> cases = new ArrayList<>(fixture.cases());
+        int index = cases.stream().map(SpeechHybridRobustnessCase::expectedConflictCategory)
+                .toList().indexOf(SpeechHybridConflictCategory.TRANSCRIPT_MISSING);
+        SpeechHybridRobustnessCase original = cases.get(index);
+        cases.set(index, new SpeechHybridRobustnessCase(
+                original.query(), original.querySpeakerId(), original.expectedConflictCategory(),
+                Set.of("missing-sample"), Set.of()));
+
+        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class, () -> new SpeechHybridRobustnessRunner().run(
+                SpeechModalityEvidence.GENERATED_CI,
+                GeneratedSpeechHybridRobustnessFixture.LABEL,
+                cases,
+                fixture.k(),
+                new SpeechSampleRetriever(fixture.encoder()),
+                fixture.sampleStore(),
+                fixture.featureStore(),
+                root.resolve("transcript-memory")));
+
+        assertTrue(failure.getMessage().contains("transcript availability mask references unknown samples: [missing-sample]"));
     }
 
     private SpeechHybridRobustnessReport run(Path root) throws IOException {

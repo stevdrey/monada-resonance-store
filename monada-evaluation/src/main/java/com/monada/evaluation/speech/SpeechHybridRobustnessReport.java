@@ -26,12 +26,29 @@ record SpeechHybridRobustnessReport(
     SpeechHybridRobustnessReport {
         Objects.requireNonNull(evidence, "evidence");
         Objects.requireNonNull(label, "label");
+        if (label.isBlank()) {
+            throw new IllegalArgumentException("label must not be blank");
+        }
+        if (corpusSize <= 0) {
+            throw new IllegalArgumentException("corpusSize must be positive");
+        }
+        if (k <= 0) {
+            throw new IllegalArgumentException("k must be positive");
+        }
         Objects.requireNonNull(candidateWeights, "candidateWeights");
+        Objects.requireNonNull(queryResults, "queryResults");
         queryResults = List.copyOf(queryResults);
+        if (queryResults.isEmpty()) {
+            throw new IllegalArgumentException("queryResults must not be empty");
+        }
         Objects.requireNonNull(aggregate, "aggregate");
+        Objects.requireNonNull(byCondition, "byCondition");
         byCondition = Map.copyOf(byCondition);
+        Objects.requireNonNull(byTask, "byTask");
         byTask = Map.copyOf(byTask);
+        Objects.requireNonNull(bySpeakerRelation, "bySpeakerRelation");
         bySpeakerRelation = Map.copyOf(bySpeakerRelation);
+        Objects.requireNonNull(byConflict, "byConflict");
         byConflict = Map.copyOf(byConflict);
         Objects.requireNonNull(decision, "decision");
     }

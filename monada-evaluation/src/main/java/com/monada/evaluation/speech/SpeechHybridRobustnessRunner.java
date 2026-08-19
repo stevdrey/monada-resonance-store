@@ -9,6 +9,7 @@ import com.monada.speech.storage.SpeechSampleStore;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashMap;
@@ -48,13 +49,14 @@ final class SpeechHybridRobustnessRunner {
         SpeechPairedRankingSet collected = rankingCollector.collect(
                 cases.stream().map(SpeechHybridRobustnessCase::query).toList(), acousticRetriever,
                 sampleStore, featureStore, transcriptMemoryPath);
+        Set<String> corpusSampleIdSet = Set.copyOf(collected.corpusSampleIds());
         Map<String, SpeechSample> samplesById = sampleStore.findAll().stream()
                 .collect(Collectors.toMap(SpeechSample::id, sample -> sample));
 
         List<SpeechHybridRobustnessQueryResult> results = new ArrayList<>();
         for (SpeechPairedRanking collectedRanking : collected.queryRankings()) {
             SpeechHybridRobustnessCase stressCase = casesById.get(collectedRanking.query().queryId());
-            SpeechPairedRanking masked = applyAvailabilityMask(collectedRanking, stressCase, collected.corpusSampleIds());
+            SpeechPairedRanking masked = applyAvailabilityMask(collectedRanking, stressCase, corpusSampleIdSet);
             SpeechHybridQueryContext context = profileEvaluator.createContext(masked, collected.corpusSampleIds(), k);
             validateExpectedConflict(stressCase, context);
             SpeechHybridProfileQueryResult hybrid = profileEvaluator.evaluateProfileQuery(FIXED_CANDIDATE, context);
@@ -110,7 +112,7 @@ final class SpeechHybridRobustnessRunner {
     private SpeechPairedRanking applyAvailabilityMask(
             SpeechPairedRanking ranking,
             SpeechHybridRobustnessCase stressCase,
-            List<String> corpusSampleIds
+            Set<String> corpusSampleIds
     ) {
         validateKnownMaskIds(stressCase.transcriptUnavailableSampleIds(), corpusSampleIds, "transcript");
         validateKnownMaskIds(stressCase.acousticUnavailableSampleIds(), corpusSampleIds, "acoustic");
@@ -119,7 +121,7 @@ final class SpeechHybridRobustnessRunner {
                 filterAndRerank(ranking.acousticRanking(), stressCase.acousticUnavailableSampleIds()));
     }
 
-    private void validateKnownMaskIds(Set<String> ids, List<String> corpusSampleIds, String modality) {
+    private void validateKnownMaskIds(Set<String> ids, Set<String> corpusSampleIds, String modality) {
         Set<String> unknown = ids.stream().filter(id -> !corpusSampleIds.contains(id))
                 .collect(Collectors.toCollection(TreeSet::new));
         if (!unknown.isEmpty()) {
@@ -334,8 +336,30 @@ record SpeechHybridRobustnessSummary(
         Map<SpeechHybridComparison, Integer> strongerControlComparisonCounts,
         boolean groupRegression
 ) {
+    SpeechHybridRobustnessSummary {
+        Objects.requireNonNull(transcriptMetrics, "transcriptMetrics");
+        Objects.requireNonNull(acousticMetrics, "acousticMetrics");
+        Objects.requireNonNull(hybridMetrics, "hybridMetrics");
+        strongerControlComparisonCounts = immutableCounts(strongerControlComparisonCounts);
+    }
+
     static SpeechHybridRobustnessSummary empty() {
         SpeechEvaluationMetrics empty = new SpeechEvaluationMetrics(0.0, 0.0, 0.0, 0.0, 0);
         return new SpeechHybridRobustnessSummary(empty, empty, empty, Map.of(), false);
+    }
+
+    private static Map<SpeechHybridComparison, Integer> immutableCounts(
+            Map<SpeechHybridComparison, Integer> source
+    ) {
+        Objects.requireNonNull(source, "strongerControlComparisonCounts");
+        Map<SpeechHybridComparison, Integer> copy = new EnumMap<>(SpeechHybridComparison.class);
+        for (SpeechHybridComparison comparison : SpeechHybridComparison.values()) {
+            int count = source.getOrDefault(comparison, 0);
+            if (count < 0) {
+                throw new IllegalArgumentException("strongerControlComparisonCounts must be non-negative");
+            }
+            copy.put(comparison, count);
+        }
+        return Collections.unmodifiableMap(copy);
     }
 }
