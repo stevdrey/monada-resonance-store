@@ -324,6 +324,28 @@ losing a control hit, so the deterministic conclusion is `HYBRID_ROBUSTNESS_STUD
 evidence for a future robustness/protected-benchmark phase only: it adds no production hybrid
 retriever, default behavior, storage change, or protected hybrid baseline.
 
+## Fixed Hybrid Robustness Study
+
+The robustness study freezes the central candidate inherited from the score-fusion sweep
+(`transcript=0.50`, `acoustic=0.50`) and evaluates it without retuning against deterministic
+condition, task, speaker-relation, direct-conflict, and missing-modality cases.
+
+```bash
+./gradlew :monada-evaluation:runSpeechHybridRobustness -q
+```
+
+The report keeps both single-modality controls visible for every query, compares fusion with the
+stronger control by Recall@k and MRR, and separately reports grouped regressions. Its generated
+fixture covers control/dysarthric, word/sentence/command, same/cross-speaker, strict transcript or
+acoustic conflicts, ambiguous cases, and each missing-modality path. Incomplete candidates are
+excluded from fusion without an imputed score, exactly as in the sweep.
+
+The current generated evidence concludes `HYBRID_CANDIDATE_RISKY`: fusion preserves the two direct
+conflict recoveries, but loses the relevant candidate when its transcript or acoustic feature is
+unavailable while the other control remains correct. Aggregate improvements cannot override those
+per-case or grouped regressions. This does not change any production behavior and does not justify a
+protected hybrid benchmark or public hybrid retrieval path.
+
 ## Latency Profiling
 
 The `runLatency` task reports recall latency and scan diagnostics for the `ExpandedTechnologyDataset`. It records corpus size, query count, topK, scanned candidates, returned candidates, and best-effort elapsed time per query. Use this baseline to determine whether a bounded top-K or scan optimization is justified; do not optimize the scan path until the diagnostics expose a measurable bottleneck.
