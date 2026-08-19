@@ -43,6 +43,65 @@ class FileManifestStoreTest {
     }
 
     @Test
+    void savesAndLoadsPhysicalVectorFormatProfile() throws IOException {
+        FileManifestStore store = new FileManifestStore(root);
+        Manifest manifest = new Manifest(
+                "0.4", 64, "vectors/segment-000001.f32", "atoms/segment-000001.log",
+                "feedback/feedback-000001.log", null, VectorFormatProfile.currentFixedRaw(64));
+
+        store.save(manifest);
+
+        Manifest loaded = store.load().orElseThrow();
+        assertEquals(VectorFormatProfile.currentFixedRaw(64), loaded.vectorFormatProfile());
+        String json = Files.readString(root.resolve("manifest.json"));
+        assertTrue(json.contains("\"vectorFormatVersion\": 1"));
+        assertTrue(json.contains("\"vectorScalarType\": \"FLOAT32\""));
+        assertTrue(json.contains("\"vectorByteOrder\": \"BIG_ENDIAN\""));
+        assertTrue(json.contains("\"vectorFraming\": \"FIXED_RAW\""));
+        assertTrue(json.contains("\"vectorIndexFormatVersion\": 1"));
+    }
+
+    @Test
+    void parseRejectsPartialPhysicalVectorFormatMetadata() throws IOException {
+        Files.writeString(root.resolve("manifest.json"), """
+                {
+                  "version": "0.4",
+                  "dimensions": 64,
+                  "vectorSegment": "vectors/segment-000001.f32",
+                  "atomSegment": "atoms/segment-000001.log",
+                  "vectorScalarType": "FLOAT32"
+                }
+                """, StandardCharsets.UTF_8);
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> new FileManifestStore(root).load());
+        assertTrue(ex.getMessage().contains("physical vector format metadata"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "vectorScalarType, FLOAT16, vectorScalarType",
+            "vectorByteOrder, LITTLE_ENDIAN, vectorByteOrder",
+            "vectorFraming, QUANTIZED, vectorFraming"
+    })
+    void parseRejectsUnknownPhysicalFormatValues(String field, String value, String expectedMessage) throws IOException {
+        Files.writeString(root.resolve("manifest.json"), manifestWithPhysicalField(field, value), StandardCharsets.UTF_8);
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> new FileManifestStore(root).load());
+        assertTrue(ex.getMessage().contains(expectedMessage));
+        assertTrue(ex.getMessage().contains(value));
+    }
+
+    @Test
+    void manifestRejectsPhysicalDimensionsThatDifferFromManifestDimensions() {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> new Manifest("0.4", 64, "vectors/segment-000001.f32", "atoms/segment-000001.log",
+                        "feedback/feedback-000001.log", null, VectorFormatProfile.currentFixedRaw(32)));
+        assertTrue(ex.getMessage().contains("do not match manifest dimensions"));
+    }
+
+    @Test
     void escapesAndUnescapesSpecialCharactersOnRoundTrip() throws IOException {
         FileManifestStore store = new FileManifestStore(root);
         Manifest manifest = new Manifest(
@@ -115,5 +174,32 @@ class FileManifestStoreTest {
                   "aliasExpansionWeight": %s
                 }
                 """.formatted(originalWeight, expansionWeight, aliasOriginalWeight, aliasExpansionWeight);
+    }
+
+    private static String manifestWithPhysicalField(String field, String value) {
+        String scalarType = "FLOAT32";
+        String byteOrder = "BIG_ENDIAN";
+        String framing = "FIXED_RAW";
+        switch (field) {
+            case "vectorScalarType" -> scalarType = value;
+            case "vectorByteOrder" -> byteOrder = value;
+            case "vectorFraming" -> framing = value;
+            default -> throw new IllegalArgumentException("Unknown physical format field: " + field);
+        }
+        return """
+                {
+                  "version": "0.4",
+                  "dimensions": 64,
+                  "vectorSegment": "vectors/segment-000001.f32",
+                  "atomSegment": "atoms/segment-000001.log",
+                  "feedbackSegment": "feedback/feedback-000001.log",
+                  "vectorFormatVersion": 1,
+                  "vectorScalarType": "%s",
+                  "vectorByteOrder": "%s",
+                  "vectorFraming": "%s",
+                  "vectorDimensions": 64,
+                  "vectorIndexFormatVersion": 1
+                }
+                """.formatted(scalarType, byteOrder, framing);
     }
 }

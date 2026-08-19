@@ -1,10 +1,12 @@
 package com.monada.api;
 
 import com.monada.encoder.SimpleFrequencyEncoder;
+import com.monada.encoder.WeightedAtomEncoder;
 import com.monada.storage.FileAtomStore;
 import com.monada.storage.FileFrequencyStore;
 import com.monada.storage.FileManifestStore;
 import com.monada.storage.Manifest;
+import com.monada.storage.VectorFormatProfile;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -29,11 +31,13 @@ public final class VectorRebuilder {
         Files.createDirectories(tempDir);
 
         try {
-            var tempFreqStore = new FileFrequencyStore(tempDir, manifest.vectorSegment(), dimensions);
+            var vectorFormatProfile = VectorFormatProfile.currentFixedRaw(dimensions);
+            var tempFreqStore = FileFrequencyStore.create(tempDir, manifest.vectorSegment(), vectorFormatProfile);
             var encoder = new SimpleFrequencyEncoder(dimensions);
 
             for (var atom : atoms) {
-                var weightedText = com.monada.encoder.WeightedAtomEncoder.toWeightedText(atom, targetOptions.textNormalizer(), targetOptions.expansionOptions());
+                var weightedText = WeightedAtomEncoder.toWeightedText(
+                        atom, targetOptions.textNormalizer(), targetOptions.expansionOptions());
                 tempFreqStore.save(atom.id(), encoder.encode(weightedText));
             }
 
@@ -75,14 +79,17 @@ public final class VectorRebuilder {
                 Files.move(tempVectorFile, targetVectorFile, StandardCopyOption.REPLACE_EXISTING);
                 Files.move(tempVectorMap, targetVectorMap, StandardCopyOption.REPLACE_EXISTING);
 
+                FileFrequencyStore.openExisting(root, manifest.vectorSegment(), vectorFormatProfile);
+
                 var profile = MonadaMemory.getExpectedProfile(dimensions, targetOptions);
                 var updatedManifest = new Manifest(
-                        "0.3",
+                        "0.4",
                         dimensions,
                         manifest.vectorSegment(),
                         manifest.atomSegment(),
                         manifest.feedbackSegment(),
-                        profile
+                        profile,
+                        vectorFormatProfile
                 );
                 manifestStore.save(updatedManifest);
                 transactionCommitted = true;

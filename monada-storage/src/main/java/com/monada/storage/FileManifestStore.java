@@ -6,6 +6,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 public class FileManifestStore implements ManifestStore {
@@ -58,10 +60,20 @@ public class FileManifestStore implements ManifestStore {
             sb.append("  \"expansionWeight\": ").append(profile.expansionWeight()).append(",\n");
             sb.append("  \"aliasOriginalWeight\": ").append(profile.aliasOriginalWeight()).append(",\n");
             sb.append("  \"aliasExpansionWeight\": ").append(profile.aliasExpansionWeight()).append("\n");
-        } else {
-            sb.append("\n");
         }
-        sb.append("}\n");
+
+        VectorFormatProfile vectorFormatProfile = manifest.vectorFormatProfile();
+        if (vectorFormatProfile != null) {
+            sb.append(",\n");
+            sb.append("  \"vectorFormatVersion\": ").append(vectorFormatProfile.formatVersion()).append(",\n");
+            sb.append("  \"vectorScalarType\": \"").append(vectorFormatProfile.scalarType()).append("\",\n");
+            sb.append("  \"vectorByteOrder\": \"").append(vectorFormatProfile.byteOrder()).append("\",\n");
+            sb.append("  \"vectorFraming\": \"").append(vectorFormatProfile.framing()).append("\",\n");
+            sb.append("  \"vectorDimensions\": ").append(vectorFormatProfile.dimensions()).append(",\n");
+            sb.append("  \"vectorIndexFormatVersion\": ")
+                    .append(vectorFormatProfile.vectorIndexFormatVersion());
+        }
+        sb.append("\n}\n");
         Files.writeString(root.resolve("manifest.json"), sb.toString(), StandardCharsets.UTF_8);
     }
 
@@ -106,6 +118,64 @@ public class FileManifestStore implements ManifestStore {
                 );
             }
         }
-        return new Manifest(version, dimensions, vectorSegment, atomSegment, feedbackSegment, profile);
+        VectorFormatProfile vectorFormatProfile = parseVectorFormatProfile(fields);
+        return new Manifest(version, dimensions, vectorSegment, atomSegment, feedbackSegment, profile, vectorFormatProfile);
+    }
+
+    private static VectorFormatProfile parseVectorFormatProfile(Map<String, String> fields) {
+        var keys = List.of(
+                "vectorFormatVersion",
+                "vectorScalarType",
+                "vectorByteOrder",
+                "vectorFraming",
+                "vectorDimensions",
+                "vectorIndexFormatVersion");
+        long present = keys.stream().filter(fields::containsKey).count();
+        if (present == 0) {
+            return null;
+        }
+        if (present != keys.size()) {
+            throw new IllegalStateException(
+                    "Invalid manifest.json: physical vector format metadata must include " + String.join(", ", keys));
+        }
+        try {
+            return new VectorFormatProfile(
+                    Integer.parseInt(fields.get("vectorFormatVersion")),
+                    parseScalarType(fields.get("vectorScalarType")),
+                    parseByteOrder(fields.get("vectorByteOrder")),
+                    parseFraming(fields.get("vectorFraming")),
+                    Integer.parseInt(fields.get("vectorDimensions")),
+                    Integer.parseInt(fields.get("vectorIndexFormatVersion")));
+        } catch (NumberFormatException e) {
+            throw new IllegalStateException("Invalid numeric physical vector format metadata in manifest.json", e);
+        }
+    }
+
+    private static VectorFormatProfile.ScalarType parseScalarType(String value) {
+        try {
+            return VectorFormatProfile.ScalarType.valueOf(value);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException(
+                    "Unsupported vectorScalarType '" + value + "' in manifest.json; supported: FLOAT32", e);
+        }
+    }
+
+    private static VectorFormatProfile.ByteOrder parseByteOrder(String value) {
+        try {
+            return VectorFormatProfile.ByteOrder.valueOf(value);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException(
+                    "Unsupported vectorByteOrder '" + value + "' in manifest.json; supported: BIG_ENDIAN", e);
+        }
+    }
+
+    private static VectorFormatProfile.Framing parseFraming(String value) {
+        try {
+            return VectorFormatProfile.Framing.valueOf(value);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException(
+                    "Unsupported vectorFraming '" + value
+                            + "' in manifest.json; supported: FIXED_RAW, LEGACY_LENGTH_PREFIXED", e);
+        }
     }
 }

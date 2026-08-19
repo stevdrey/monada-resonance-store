@@ -62,6 +62,25 @@ monada-memory/
 
 Storage must stay readable enough for debugging. Format changes should be paired with manifest metadata, compatibility tests, and clear failure behavior for incompatible stores.
 
+### Physical Vector Format Contract
+
+Manifest `0.4` records a `VectorFormatProfile` separately from its encoding profile. The current
+profile is vector format `1`, scalar `FLOAT32`, big-endian byte order, `FIXED_RAW` framing,
+manifest dimensions, and vector-index format `1`. A fixed frame therefore contains exactly
+`dimensions * 4` bytes. The `vector-map.idx` v1 index is UTF-8 text with
+`atomId<TAB>byteOffset` entries.
+
+At open time, schema compatibility, encoding compatibility, physical-format compatibility, and
+on-disk structure are checked independently. The runtime validates frame size, full frame
+coverage, offsets, index parsing, and length headers where `LEGACY_LENGTH_PREFIXED` is declared.
+Unknown versions, scalars, byte orders, framing, or index formats fail fast with a rebuild hint;
+the bytes are never silently reinterpreted.
+
+Historical manifests `0.1` through `0.3` have no physical fields. Their only supported inferred
+layout is the fixed-frame big-endian `FLOAT32` form historically written by `MonadaMemory`.
+Opening them does not upgrade or rewrite their manifests. The no-manifest direct storage API may
+still use length-prefixed frames, but it is not a legacy-manifest inference rule.
+
 ## Speech Extension
 
 Speech is modeled as a separate extension layer:

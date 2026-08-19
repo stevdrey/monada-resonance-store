@@ -4,7 +4,9 @@ import com.monada.encoder.LexicalEnrichmentPipeline;
 import com.monada.encoder.LexicalExpansionOptions;
 import com.monada.encoder.NoOpTextNormalizer;
 import com.monada.storage.FileManifestStore;
+import com.monada.storage.FileFrequencyStore;
 import com.monada.storage.Manifest;
+import com.monada.storage.VectorFormatProfile;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -31,8 +33,9 @@ class MonadaMemoryMigrationTest {
         FileManifestStore manifestStore = new FileManifestStore(root);
         Manifest manifest = manifestStore.load().orElseThrow();
 
-        assertEquals("0.3", manifest.version());
+        assertEquals("0.4", manifest.version());
         assertNotNull(manifest.encodingProfile());
+        assertEquals(VectorFormatProfile.currentFixedRaw(128), manifest.vectorFormatProfile());
         assertEquals("SimpleFrequencyEncoder", manifest.encodingProfile().encoder());
         assertEquals("LexicalEnrichmentPipeline", manifest.encodingProfile().normalizer());
         assertEquals(128, manifest.encodingProfile().dimensions());
@@ -62,6 +65,7 @@ class MonadaMemoryMigrationTest {
         FileManifestStore manifestStore = new FileManifestStore(root);
         manifestStore.save(new Manifest(
                 "0.1", 128, "vectors/segment-000001.f32", "atoms/segment-000001.log"));
+        createLegacyPhysicalStore(128);
 
         MonadaMemory memory = MonadaMemory.open(root, MonadaMemoryOptions.defaults());
         assertNotNull(memory);
@@ -112,9 +116,10 @@ class MonadaMemoryMigrationTest {
 
         FileManifestStore manifestStore = new FileManifestStore(root);
         Manifest manifest = manifestStore.load().orElseThrow();
-        assertEquals("0.3", manifest.version());
+        assertEquals("0.4", manifest.version());
         assertEquals("NoOpTextNormalizer", manifest.encodingProfile().normalizer());
         assertEquals(0.8, manifest.encodingProfile().expansionWeight());
+        assertEquals(VectorFormatProfile.currentFixedRaw(128), manifest.vectorFormatProfile());
     }
 
     @Test
@@ -193,6 +198,7 @@ class MonadaMemoryMigrationTest {
         FileManifestStore manifestStore = new FileManifestStore(root);
         manifestStore.save(new Manifest(
                 "0.2", 128, "vectors/segment-000001.f32", "atoms/segment-000001.log"));
+        createLegacyPhysicalStore(128);
 
         MonadaMemoryOptions customExpansion = new MonadaMemoryOptions(
                 new LexicalEnrichmentPipeline(),
@@ -209,6 +215,7 @@ class MonadaMemoryMigrationTest {
         FileManifestStore manifestStore = new FileManifestStore(root);
         manifestStore.save(new Manifest(
                 "0.2", 128, "vectors/segment-000001.f32", "atoms/segment-000001.log"));
+        createLegacyPhysicalStore(128);
 
         assertNotNull(MonadaMemory.open(root, MonadaMemoryOptions.defaults()));
     }
@@ -264,7 +271,7 @@ class MonadaMemoryMigrationTest {
         var firstMemory = MonadaMemory.open(firstRoot, options);
         var firstAtom = firstMemory.remember("closeness resonance", List.of("similarity memory"));
 
-        var firstFreqStore = new com.monada.storage.FileFrequencyStore(firstRoot, "vectors/segment-000001.f32", 128);
+        var firstFreqStore = new FileFrequencyStore(firstRoot, "vectors/segment-000001.f32", 128);
         var firstVector = firstFreqStore.findByAtomId(firstAtom.id()).orElseThrow();
 
         VectorRebuilder.rebuild(firstRoot, options);
@@ -272,5 +279,10 @@ class MonadaMemoryMigrationTest {
         var rebuiltVector = firstFreqStore.findByAtomId(firstAtom.id()).orElseThrow();
 
         assertTrue(Arrays.equals(firstVector.values(), rebuiltVector.values()));
+    }
+
+    private void createLegacyPhysicalStore(int dimensions) throws Exception {
+        FileFrequencyStore.create(root, "vectors/segment-000001.f32",
+                VectorFormatProfile.currentFixedRaw(dimensions));
     }
 }

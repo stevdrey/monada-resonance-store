@@ -27,6 +27,27 @@ remember(content) -> encode -> persist -> resonate(query) -> recall topK results
 
 The main domain record is `KnowledgeAtom`. Text content is encoded into `FrequencyVector` values, stored locally, and retrieved by similarity. Feedback can adjust future ranking through deterministic, append-only events.
 
+## Persisted Vector Compatibility
+
+New manifests use version `0.4` and describe the physical vector format explicitly: `FLOAT32`,
+big-endian byte order, `FIXED_RAW` framing, the declared dimensions, vector format version `1`,
+and vector-index format version `1`. The current index is UTF-8 text with one
+`atomId<TAB>byteOffset` entry per vector frame.
+
+The runtime rejects unknown or contradictory physical metadata before reading persisted vectors;
+it never guesses a new byte interpretation or rebuilds a store automatically. Manifests `0.1`,
+`0.2`, and `0.3` remain readable in a documented compatibility mode: their historical
+`MonadaMemory` layout is inferred as fixed-frame, big-endian `FLOAT32` with index format `1`.
+They are not rewritten on open. The direct `FileFrequencyStore` legacy constructor still supports
+length-prefixed vectors without a manifest, but that layout is not inferred for legacy manifests.
+
+| Manifest | Physical metadata | Open behavior |
+| --- | --- | --- |
+| `0.4` | Required | Validate and use exactly as declared |
+| `0.3` | Absent | Infer the historical fixed-frame format |
+| `0.1`–`0.2` | Absent | Infer the same format plus existing encoding safeguards |
+| Unknown version, partial metadata, or metadata on `0.1`–`0.3` | Any | Reject; explicitly rebuild if conversion is required |
+
 ## Module Map
 
 | Module | Responsibility |

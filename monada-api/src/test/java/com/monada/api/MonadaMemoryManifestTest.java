@@ -1,13 +1,17 @@
 package com.monada.api;
 
 import com.monada.storage.FileManifestStore;
+import com.monada.storage.FileFrequencyStore;
 import com.monada.storage.Manifest;
+import com.monada.storage.VectorFormatProfile;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -23,7 +27,9 @@ class MonadaMemoryManifestTest {
     void openPersistsManifestWithDefaultDimensionsOnFreshDirectory() throws Exception {
         MonadaMemory.open(root);
         Manifest manifest = new FileManifestStore(root).load().orElseThrow();
+        assertEquals("0.4", manifest.version());
         assertEquals(128, manifest.dimensions());
+        assertEquals(VectorFormatProfile.currentFixedRaw(128), manifest.vectorFormatProfile());
         assertEquals("vectors/segment-000001.f32", manifest.vectorSegment());
         assertEquals("atoms/segment-000001.log", manifest.atomSegment());
         assertTrue(Files.exists(root.resolve("manifest.json")));
@@ -34,6 +40,7 @@ class MonadaMemoryManifestTest {
         FileManifestStore manifestStore = new FileManifestStore(root);
         manifestStore.save(new Manifest(
                 "0.1", 32, "vectors/segment-000001.f32", "atoms/segment-000001.log"));
+        createLegacyPhysicalStore(32);
 
         MonadaMemory memory = MonadaMemory.open(root);
         var atom = memory.remember("dimensions from manifest take precedence");
@@ -81,6 +88,7 @@ class MonadaMemoryManifestTest {
         FileManifestStore manifestStore = new FileManifestStore(root);
         manifestStore.save(new Manifest(
                 "0.1", 128, "vectors/segment-000001.f32", "atoms/segment-000001.log"));
+        createLegacyPhysicalStore(128);
 
         MonadaMemory memory = MonadaMemory.open(root);
 
@@ -91,6 +99,51 @@ class MonadaMemoryManifestTest {
 
         assertEquals(1.0, opts.originalWeight());
         assertEquals(1.0, opts.expansionWeight());
+    }
+
+    @Test
+    void openSupportsLegacy03ManifestWithoutPhysicalMetadataWithoutRewritingIt() throws Exception {
+        MonadaMemory memory = MonadaMemory.open(root);
+        var atom = memory.remember("legacy manifest physical profile fixture");
+        var manifestStore = new FileManifestStore(root);
+        Manifest current = manifestStore.load().orElseThrow();
+        manifestStore.save(new Manifest(
+                "0.3", current.dimensions(), current.vectorSegment(), current.atomSegment(), current.feedbackSegment(),
+                current.encodingProfile()));
+        byte[] manifestBefore = Files.readAllBytes(root.resolve("manifest.json"));
+        byte[] vectorBefore = Files.readAllBytes(root.resolve("vectors/segment-000001.f32"));
+
+        MonadaMemory reopened = MonadaMemory.open(root);
+
+        assertEquals(atom.id(), reopened.resonate("legacy manifest physical profile fixture")
+                .topK(1).threshold(0.0).execute().results().getFirst().atom().id());
+        assertTrue(Arrays.equals(manifestBefore, Files.readAllBytes(root.resolve("manifest.json"))));
+        assertTrue(Arrays.equals(vectorBefore, Files.readAllBytes(root.resolve("vectors/segment-000001.f32"))));
+    }
+
+    @Test
+    void openRejectsUnknownPhysicalMetadataBeforeOpeningTheSegment() throws Exception {
+        MonadaMemory.open(root);
+        Path manifestFile = root.resolve("manifest.json");
+        String manifest = Files.readString(manifestFile, StandardCharsets.UTF_8)
+                .replace("\"vectorScalarType\": \"FLOAT32\"", "\"vectorScalarType\": \"FLOAT16\"");
+        Files.writeString(manifestFile, manifest, StandardCharsets.UTF_8);
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () -> MonadaMemory.open(root));
+        assertTrue(ex.getMessage().contains("vectorScalarType"));
+        assertTrue(ex.getMessage().contains("FLOAT16"));
+    }
+
+    @Test
+    void openRejectsLegacyManifestThatDeclaresPhysicalMetadata() throws Exception {
+        var profile = VectorFormatProfile.currentFixedRaw(128);
+        new FileManifestStore(root).save(new Manifest(
+                "0.3", 128, "vectors/segment-000001.f32", "atoms/segment-000001.log",
+                "feedback/feedback-000001.log", null, profile));
+        FileFrequencyStore.create(root, "vectors/segment-000001.f32", profile);
+
+        UncheckedIOException ex = assertThrows(UncheckedIOException.class, () -> MonadaMemory.open(root));
+        assertTrue(ex.getCause().getMessage().contains("must not declare physical vector format metadata"));
     }
 
     @Test
@@ -119,5 +172,10 @@ class MonadaMemoryManifestTest {
         var results = reopened.resonate("hello world").topK(5).threshold(0.0).execute();
         assertEquals(1, results.results().size());
         assertEquals("hello world", results.results().getFirst().atom().content());
+    }
+
+    private void createLegacyPhysicalStore(int dimensions) throws Exception {
+        FileFrequencyStore.create(root, "vectors/segment-000001.f32",
+                VectorFormatProfile.currentFixedRaw(dimensions));
     }
 }
