@@ -224,7 +224,7 @@ final class SpeechHybridRobustnessRunner {
                 : context.transcriptControl().metrics();
     }
 
-    private SpeechHybridRobustnessSummary summarize(List<SpeechHybridRobustnessQueryResult> results) {
+    SpeechHybridRobustnessSummary summarize(List<SpeechHybridRobustnessQueryResult> results) {
         if (results.isEmpty()) return SpeechHybridRobustnessSummary.empty();
         double[] transcript = new double[4], acoustic = new double[4], hybrid = new double[4];
         Map<SpeechHybridComparison, Integer> comparisons = new EnumMap<>(SpeechHybridComparison.class);
@@ -264,7 +264,7 @@ final class SpeechHybridRobustnessRunner {
                 || hybrid.mrr() + tolerance < Math.max(transcript.mrr(), acoustic.mrr());
     }
 
-    private Map<String, SpeechHybridRobustnessSummary> summarizeBy(
+    Map<String, SpeechHybridRobustnessSummary> summarizeBy(
             List<SpeechHybridRobustnessQueryResult> results,
             java.util.function.Function<SpeechHybridRobustnessQueryResult, String> key
     ) {
@@ -288,7 +288,7 @@ final class SpeechHybridRobustnessRunner {
                 .orElse(null);
     }
 
-    private boolean hasGroupRegression(
+    boolean hasGroupRegression(
             SpeechHybridRobustnessSummary aggregate,
             Map<String, SpeechHybridRobustnessSummary> byCondition,
             Map<String, SpeechHybridRobustnessSummary> byTask,
