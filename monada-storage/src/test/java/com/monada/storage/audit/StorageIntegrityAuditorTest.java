@@ -499,4 +499,38 @@ class StorageIntegrityAuditorTest {
         assertEquals(0, report.statistics().atomLogPhysicalRecords());
         assertEquals(0, report.statistics().activeUniqueAtoms());
     }
+
+    @Test
+    void manifestWithVectorOrFeedbackSegmentEscapingStoreRootIsRejectedAsFatal() throws IOException {
+        Path storeDir = root.resolve("store-feedback");
+        Files.createDirectories(storeDir);
+        createCleanStore(storeDir, 4);
+
+        Path outsideFeedback = root.resolve("outside-feedback.log");
+        Files.writeString(outsideFeedback, "{\"query\":\"q\",\"atomId\":\"a\",\"signal\":\"POSITIVE\",\"delta\":\"1.0\",\"createdAt\":\"2024-01-01T00:00:00Z\"}\n", StandardCharsets.UTF_8);
+
+        Path manifestFile = storeDir.resolve("manifest.json");
+        Files.writeString(manifestFile, """
+                {
+                  "version": "0.1",
+                  "dimensions": 4,
+                  "vectorSegment": "../outside-vector.f32",
+                  "atomSegment": "atoms/segment-000001.log",
+                  "feedbackSegment": "../outside-feedback.log"
+                }
+                """, StandardCharsets.UTF_8);
+
+        StorageIntegrityReport report = auditor.audit(storeDir);
+
+        assertFalse(report.isHealthy());
+        assertTrue(report.findings().stream().anyMatch(f ->
+                f.severity() == StorageIntegritySeverity.FATAL
+                        && f.category() == StorageIntegrityCategory.MANIFEST_INVALID
+                        && f.message().contains("Vector segment path '../outside-vector.f32' escapes store root boundary")));
+        assertTrue(report.findings().stream().anyMatch(f ->
+                f.severity() == StorageIntegritySeverity.FATAL
+                        && f.category() == StorageIntegrityCategory.MANIFEST_INVALID
+                        && f.message().contains("Feedback segment path '../outside-feedback.log' escapes store root boundary")));
+        assertEquals(0, report.statistics().feedbackLogRecords());
+    }
 }

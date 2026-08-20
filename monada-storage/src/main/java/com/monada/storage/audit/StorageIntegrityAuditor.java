@@ -893,7 +893,7 @@ public class StorageIntegrityAuditor {
             Set<String> activeAtomIds,
             List<StorageIntegrityFinding> findings
     ) {
-        if (Files.notExists(feedbackPath)) {
+        if (feedbackPath == null || Files.notExists(feedbackPath)) {
             return 0;
         }
 
