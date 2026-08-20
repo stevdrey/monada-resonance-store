@@ -467,4 +467,36 @@ class StorageIntegrityAuditorTest {
         assertEquals(StorageIntegritySeverity.WARNING, report.findings().get(2).severity());
         assertEquals(StorageIntegritySeverity.INFO, report.findings().get(3).severity());
     }
+
+    @Test
+    void manifestWithRelativePathEscapingStoreRootIsRejectedAsFatalWithoutAccessingOutsideFile() throws IOException {
+        Path storeDir = root.resolve("store");
+        Files.createDirectories(storeDir);
+        createCleanStore(storeDir, 4);
+
+        Path outsideLog = root.resolve("outside.log");
+        Files.writeString(outsideLog, "outside-secret-data\n", StandardCharsets.UTF_8);
+
+        // Overwrite manifest with atomSegment pointing outside the store root
+        Path manifestFile = storeDir.resolve("manifest.json");
+        Files.writeString(manifestFile, """
+                {
+                  "version": "0.1",
+                  "dimensions": 4,
+                  "vectorSegment": "vectors/segment-000001.f32",
+                  "atomSegment": "../outside.log"
+                }
+                """, StandardCharsets.UTF_8);
+
+        StorageIntegrityReport report = auditor.audit(storeDir);
+
+        assertFalse(report.isHealthy());
+        assertTrue(report.findings().stream().anyMatch(f ->
+                f.severity() == StorageIntegritySeverity.FATAL
+                        && f.category() == StorageIntegrityCategory.MANIFEST_INVALID
+                        && f.message().contains("escapes store root boundary")));
+        // Confirm the outside file was never inspected as part of atom log stats
+        assertEquals(0, report.statistics().atomLogPhysicalRecords());
+        assertEquals(0, report.statistics().activeUniqueAtoms());
+    }
 }

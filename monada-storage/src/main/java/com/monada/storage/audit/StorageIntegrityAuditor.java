@@ -53,6 +53,8 @@ public class StorageIntegrityAuditor {
             return new StorageIntegrityReport(storeRoot, null, findings, StorageIntegrityStatistics.empty());
         }
 
+        Path normalizedRoot = storeRoot.toAbsolutePath().normalize();
+
         // 1. Audit Manifest
         ParsedManifestResult manifestResult = auditManifest(storeRoot, findings);
         Manifest manifest = manifestResult.manifest();
@@ -62,13 +64,13 @@ public class StorageIntegrityAuditor {
         Integer declaredDimensions = manifest != null ? manifest.dimensions() : null;
         VectorFormatProfile vectorFormatProfile = manifest != null ? manifest.vectorFormatProfile() : null;
 
-        // 2. Audit Segment Existence
-        Path atomPath = storeRoot.resolve(atomSegment);
-        Path vectorPath = storeRoot.resolve(vectorSegment);
-        Path vectorMapPath = storeRoot.resolve(DEFAULT_VECTOR_MAP);
-        Path feedbackPath = storeRoot.resolve(feedbackSegment);
+        // 2. Audit Segment Existence and Boundaries
+        Path atomPath = resolveSafePath(normalizedRoot, atomSegment, "Atom segment", findings);
+        Path vectorPath = resolveSafePath(normalizedRoot, vectorSegment, "Vector segment", findings);
+        Path vectorMapPath = resolveSafePath(normalizedRoot, DEFAULT_VECTOR_MAP, "Vector index", findings);
+        Path feedbackPath = resolveSafePath(normalizedRoot, feedbackSegment, "Feedback segment", findings);
 
-        if (Files.notExists(atomPath)) {
+        if (atomPath != null && Files.notExists(atomPath)) {
             findings.add(new StorageIntegrityFinding(
                     StorageIntegritySeverity.FATAL,
                     StorageIntegrityCategory.SEGMENT_MISSING,
@@ -76,7 +78,7 @@ public class StorageIntegrityAuditor {
                     "Atom segment file does not exist: " + atomSegment));
         }
 
-        if (Files.notExists(vectorPath)) {
+        if (vectorPath != null && Files.notExists(vectorPath)) {
             findings.add(new StorageIntegrityFinding(
                     StorageIntegritySeverity.FATAL,
                     StorageIntegrityCategory.SEGMENT_MISSING,
@@ -84,7 +86,7 @@ public class StorageIntegrityAuditor {
                     "Vector segment file does not exist: " + vectorSegment));
         }
 
-        if (Files.notExists(vectorMapPath)) {
+        if (vectorMapPath != null && Files.notExists(vectorMapPath)) {
             findings.add(new StorageIntegrityFinding(
                     StorageIntegritySeverity.FATAL,
                     StorageIntegrityCategory.SEGMENT_MISSING,
@@ -469,8 +471,38 @@ public class StorageIntegrityAuditor {
         return d;
     }
 
+    private Path resolveSafePath(Path normalizedRoot, String segmentPath, String fieldName, List<StorageIntegrityFinding> findings) {
+        if (segmentPath == null || segmentPath.isBlank()) {
+            findings.add(new StorageIntegrityFinding(
+                    StorageIntegritySeverity.FATAL,
+                    StorageIntegrityCategory.MANIFEST_INVALID,
+                    "manifest.json",
+                    fieldName + " path cannot be empty or blank"));
+            return null;
+        }
+        try {
+            Path resolved = normalizedRoot.resolve(segmentPath).normalize();
+            if (!resolved.startsWith(normalizedRoot) || resolved.equals(normalizedRoot)) {
+                findings.add(new StorageIntegrityFinding(
+                        StorageIntegritySeverity.FATAL,
+                        StorageIntegrityCategory.MANIFEST_INVALID,
+                        segmentPath,
+                        fieldName + " path '" + segmentPath + "' escapes store root boundary"));
+                return null;
+            }
+            return resolved;
+        } catch (Exception e) {
+            findings.add(new StorageIntegrityFinding(
+                    StorageIntegritySeverity.FATAL,
+                    StorageIntegrityCategory.MANIFEST_INVALID,
+                    segmentPath,
+                    fieldName + " path '" + segmentPath + "' is invalid: " + e.getMessage()));
+            return null;
+        }
+    }
+
     private AtomLogAuditResult auditAtomLog(Path atomPath, String atomSegment, List<StorageIntegrityFinding> findings) {
-        if (Files.notExists(atomPath)) {
+        if (atomPath == null || Files.notExists(atomPath)) {
             return new AtomLogAuditResult(0, 0, Map.of());
         }
 
@@ -616,7 +648,7 @@ public class StorageIntegrityAuditor {
     }
 
     private VectorMapAuditResult auditVectorMap(Path vectorMapPath, List<StorageIntegrityFinding> findings) {
-        if (Files.notExists(vectorMapPath)) {
+        if (vectorMapPath == null || Files.notExists(vectorMapPath)) {
             return new VectorMapAuditResult(0, List.of(), Map.of(), Map.of());
         }
 
@@ -712,7 +744,7 @@ public class StorageIntegrityAuditor {
             List<AuditIndexEntry> entries,
             List<StorageIntegrityFinding> findings
     ) {
-        if (Files.notExists(vectorPath)) {
+        if (vectorPath == null || Files.notExists(vectorPath)) {
             return;
         }
 
