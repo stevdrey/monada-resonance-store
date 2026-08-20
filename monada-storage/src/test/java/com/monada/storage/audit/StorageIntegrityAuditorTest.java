@@ -275,6 +275,28 @@ class StorageIntegrityAuditorTest {
         assertFalse(report.isHealthy());
         assertTrue(report.findings().stream().anyMatch(f ->
                 f.severity() == StorageIntegritySeverity.ERROR && f.category() == StorageIntegrityCategory.VECTOR_INDEX_MALFORMED));
+        assertEquals(3, report.statistics().vectorIndexEntries());
+        assertEquals(2, report.statistics().uniqueVectorIndexIds());
+        assertEquals(0, report.statistics().duplicateVectorIndexIds());
+        assertEquals(2, report.statistics().distinctVectorOffsets());
+        assertEquals(0, report.statistics().duplicateVectorOffsets());
+    }
+
+    @Test
+    void negativeVectorOffsetReportsErrorAndIsExcludedFromMappings() throws IOException {
+        createCleanStore(root, 4);
+
+        Path vectorMap = root.resolve("indexes/vector-map.idx");
+        Files.writeString(vectorMap, "a-neg\t-16\n", StandardCharsets.UTF_8, StandardOpenOption.APPEND);
+
+        StorageIntegrityReport report = auditor.audit(root);
+
+        assertFalse(report.isHealthy());
+        assertTrue(report.findings().stream().anyMatch(f ->
+                f.severity() == StorageIntegritySeverity.ERROR && f.category() == StorageIntegrityCategory.VECTOR_OFFSET_OUT_OF_BOUNDS));
+        assertEquals(3, report.statistics().vectorIndexEntries());
+        assertEquals(2, report.statistics().uniqueVectorIndexIds());
+        assertEquals(0, report.statistics().duplicateVectorIndexIds());
     }
 
     @Test

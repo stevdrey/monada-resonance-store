@@ -114,9 +114,13 @@ public class StorageIntegrityAuditor {
 
         long vectorIndexEntries = vectorMapResult.totalEntries();
         long uniqueVectorIndexIds = vectorMapResult.atomIdToOffsets().size();
-        long duplicateVectorIndexIds = Math.max(0, vectorIndexEntries - uniqueVectorIndexIds);
+        long duplicateVectorIndexIds = vectorMapResult.atomIdToOffsets().values().stream()
+                .mapToLong(offsets -> Math.max(0, offsets.size() - 1))
+                .sum();
         long distinctVectorOffsets = vectorMapResult.offsetToAtomIds().size();
-        long duplicateVectorOffsets = Math.max(0, vectorIndexEntries - distinctVectorOffsets);
+        long duplicateVectorOffsets = vectorMapResult.offsetToAtomIds().values().stream()
+                .mapToLong(atomIds -> Math.max(0, atomIds.size() - 1))
+                .sum();
 
         Set<String> activeAtomIds = atomResult.activeAtoms().keySet();
         Set<String> vectorIndexAtomIds = vectorMapResult.atomIdToOffsets().keySet();
@@ -659,6 +663,7 @@ public class StorageIntegrityAuditor {
                             StorageIntegrityCategory.VECTOR_OFFSET_OUT_OF_BOUNDS,
                             DEFAULT_VECTOR_MAP,
                             "Line " + lineNum + ": Negative offset (" + offset + ") for atomId=" + atomId));
+                    continue;
                 }
 
                 entries.add(new AuditIndexEntry(lineNum, atomId, offset));
@@ -723,13 +728,11 @@ public class StorageIntegrityAuditor {
             return;
         }
 
-        if (declaredDimensions == null) {
+        if (declaredDimensions == null || vectorFormatProfile == null) {
             return;
         }
 
-        VectorFormatProfile.Framing framing = vectorFormatProfile != null
-                ? vectorFormatProfile.framing()
-                : VectorFormatProfile.Framing.FIXED_RAW;
+        VectorFormatProfile.Framing framing = vectorFormatProfile.framing();
 
         long frameSize = framing == VectorFormatProfile.Framing.FIXED_RAW
                 ? (long) declaredDimensions * Float.BYTES
