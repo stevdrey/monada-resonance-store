@@ -214,6 +214,11 @@ class StorageIntegrityAuditorTest {
         assertFalse(report.isHealthy());
         assertTrue(report.findings().stream().anyMatch(f ->
                 f.severity() == StorageIntegritySeverity.ERROR && f.category() == StorageIntegrityCategory.ATOM_LOG_CORRUPT));
+        assertEquals(3, report.statistics().atomLogPhysicalRecords());
+        assertEquals(2, report.statistics().activeUniqueAtoms());
+        assertEquals(0, report.statistics().atomHistoryDuplicates());
+        assertFalse(report.findings().stream().anyMatch(f ->
+                f.severity() == StorageIntegritySeverity.INFO && f.message().contains("historical update records")));
     }
 
     @Test

@@ -9,6 +9,7 @@ import com.monada.storage.VectorFormatProfile;
 import com.monada.storage.feedback.FeedbackSignal;
 import com.monada.storage.feedback.FeedbackStore;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
@@ -109,7 +110,7 @@ public class StorageIntegrityAuditor {
         // Compute overall statistics
         long atomPhysicalRecords = atomResult.physicalRecords();
         long activeUniqueAtoms = atomResult.activeAtoms().size();
-        long atomHistoryDuplicates = Math.max(0, atomPhysicalRecords - activeUniqueAtoms);
+        long atomHistoryDuplicates = atomResult.historyDuplicates();
 
         long vectorIndexEntries = vectorMapResult.totalEntries();
         long uniqueVectorIndexIds = vectorMapResult.atomIdToOffsets().size();
@@ -466,138 +467,138 @@ public class StorageIntegrityAuditor {
 
     private AtomLogAuditResult auditAtomLog(Path atomPath, String atomSegment, List<StorageIntegrityFinding> findings) {
         if (Files.notExists(atomPath)) {
-            return new AtomLogAuditResult(0, Map.of());
-        }
-
-        List<String> lines;
-        try {
-            lines = Files.readAllLines(atomPath, StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            findings.add(new StorageIntegrityFinding(
-                    StorageIntegritySeverity.FATAL,
-                    StorageIntegrityCategory.ATOM_LOG_CORRUPT,
-                    atomSegment,
-                    "Failed to read atom segment: " + e.getMessage()));
-            return new AtomLogAuditResult(0, Map.of());
+            return new AtomLogAuditResult(0, 0, Map.of());
         }
 
         long physicalRecords = 0;
         Map<String, KnowledgeAtom> activeAtoms = new LinkedHashMap<>();
         Map<String, Integer> atomCounts = new LinkedHashMap<>();
 
-        for (int i = 0; i < lines.size(); i++) {
-            String line = lines.get(i);
-            int lineNum = i + 1;
-            if (line.isBlank()) {
-                continue;
-            }
-            physicalRecords++;
-            String[] parts = line.split("\t", -1);
-            if (parts.length != 5 && parts.length != 6) {
-                findings.add(new StorageIntegrityFinding(
-                        StorageIntegritySeverity.ERROR,
-                        StorageIntegrityCategory.ATOM_LOG_CORRUPT,
-                        atomSegment,
-                        "Line " + lineNum + ": Malformed atom log entry: expected 5 or 6 tab-delimited fields but found " + parts.length,
-                        line));
-                continue;
-            }
-
-            String id = parts[0];
-            if (id.isBlank()) {
-                findings.add(new StorageIntegrityFinding(
-                        StorageIntegritySeverity.ERROR,
-                        StorageIntegrityCategory.ATOM_LOG_CORRUPT,
-                        atomSegment,
-                        "Line " + lineNum + ": Empty atom ID",
-                        line));
-                continue;
-            }
-
-            AtomType atomType;
-            try {
-                atomType = AtomType.valueOf(parts[1]);
-            } catch (IllegalArgumentException e) {
-                findings.add(new StorageIntegrityFinding(
-                        StorageIntegritySeverity.ERROR,
-                        StorageIntegrityCategory.ATOM_LOG_CORRUPT,
-                        atomSegment,
-                        "Line " + lineNum + ": Invalid atom type '" + parts[1] + "' for atomId=" + id,
-                        line));
-                continue;
-            }
-
-            double weight;
-            try {
-                weight = Double.parseDouble(parts[2]);
-                if (!Double.isFinite(weight) || weight <= 0.0) {
+        try (BufferedReader reader = Files.newBufferedReader(atomPath, StandardCharsets.UTF_8)) {
+            String line;
+            int lineNum = 0;
+            while ((line = reader.readLine()) != null) {
+                lineNum++;
+                if (line.isBlank()) {
+                    continue;
+                }
+                physicalRecords++;
+                String[] parts = line.split("\t", -1);
+                if (parts.length != 5 && parts.length != 6) {
                     findings.add(new StorageIntegrityFinding(
                             StorageIntegritySeverity.ERROR,
                             StorageIntegrityCategory.ATOM_LOG_CORRUPT,
                             atomSegment,
-                            "Line " + lineNum + ": Non-positive or non-finite weight (" + parts[2] + ") for atomId=" + id,
+                            "Line " + lineNum + ": Malformed atom log entry: expected 5 or 6 tab-delimited fields but found " + parts.length,
                             line));
                     continue;
                 }
-            } catch (NumberFormatException e) {
-                findings.add(new StorageIntegrityFinding(
-                        StorageIntegritySeverity.ERROR,
-                        StorageIntegrityCategory.ATOM_LOG_CORRUPT,
-                        atomSegment,
-                        "Line " + lineNum + ": Non-numeric weight '" + parts[2] + "' for atomId=" + id,
-                        line));
-                continue;
-            }
 
-            Instant createdAt;
-            try {
-                createdAt = Instant.parse(parts[3]);
-            } catch (Exception e) {
-                findings.add(new StorageIntegrityFinding(
-                        StorageIntegritySeverity.ERROR,
-                        StorageIntegrityCategory.ATOM_LOG_CORRUPT,
-                        atomSegment,
-                        "Line " + lineNum + ": Corrupt createdAt timestamp '" + parts[3] + "' for atomId=" + id,
-                        line));
-                continue;
-            }
+                String id = parts[0];
+                if (id.isBlank()) {
+                    findings.add(new StorageIntegrityFinding(
+                            StorageIntegritySeverity.ERROR,
+                            StorageIntegrityCategory.ATOM_LOG_CORRUPT,
+                            atomSegment,
+                            "Line " + lineNum + ": Empty atom ID",
+                            line));
+                    continue;
+                }
 
-            String content;
-            try {
-                content = new String(Base64.getDecoder().decode(parts[4]), StandardCharsets.UTF_8);
-            } catch (IllegalArgumentException e) {
-                findings.add(new StorageIntegrityFinding(
-                        StorageIntegritySeverity.ERROR,
-                        StorageIntegrityCategory.ATOM_LOG_CORRUPT,
-                        atomSegment,
-                        "Line " + lineNum + ": Corrupt Base64 content for atomId=" + id,
-                        line));
-                continue;
-            }
-
-            List<String> aliases = List.of();
-            if (parts.length == 6 && !parts[5].isBlank()) {
+                AtomType atomType;
                 try {
-                    aliases = List.of(parts[5].split(",")).stream()
-                            .map(alias -> new String(Base64.getDecoder().decode(alias), StandardCharsets.UTF_8))
-                            .toList();
+                    atomType = AtomType.valueOf(parts[1]);
                 } catch (IllegalArgumentException e) {
                     findings.add(new StorageIntegrityFinding(
                             StorageIntegritySeverity.ERROR,
                             StorageIntegrityCategory.ATOM_LOG_CORRUPT,
                             atomSegment,
-                            "Line " + lineNum + ": Corrupt Base64 alias for atomId=" + id,
+                            "Line " + lineNum + ": Invalid atom type '" + parts[1] + "' for atomId=" + id,
                             line));
                     continue;
                 }
-            }
 
-            KnowledgeAtom atom = new KnowledgeAtom(id, atomType, content, aliases, Map.of(), weight, createdAt);
-            activeAtoms.put(id, atom);
-            atomCounts.merge(id, 1, Integer::sum);
+                double weight;
+                try {
+                    weight = Double.parseDouble(parts[2]);
+                    if (!Double.isFinite(weight) || weight <= 0.0) {
+                        findings.add(new StorageIntegrityFinding(
+                                StorageIntegritySeverity.ERROR,
+                                StorageIntegrityCategory.ATOM_LOG_CORRUPT,
+                                atomSegment,
+                                "Line " + lineNum + ": Non-positive or non-finite weight (" + parts[2] + ") for atomId=" + id,
+                                line));
+                        continue;
+                    }
+                } catch (NumberFormatException e) {
+                    findings.add(new StorageIntegrityFinding(
+                            StorageIntegritySeverity.ERROR,
+                            StorageIntegrityCategory.ATOM_LOG_CORRUPT,
+                            atomSegment,
+                            "Line " + lineNum + ": Non-numeric weight '" + parts[2] + "' for atomId=" + id,
+                            line));
+                    continue;
+                }
+
+                Instant createdAt;
+                try {
+                    createdAt = Instant.parse(parts[3]);
+                } catch (Exception e) {
+                    findings.add(new StorageIntegrityFinding(
+                            StorageIntegritySeverity.ERROR,
+                            StorageIntegrityCategory.ATOM_LOG_CORRUPT,
+                            atomSegment,
+                            "Line " + lineNum + ": Corrupt createdAt timestamp '" + parts[3] + "' for atomId=" + id,
+                            line));
+                    continue;
+                }
+
+                String content;
+                try {
+                    content = new String(Base64.getDecoder().decode(parts[4]), StandardCharsets.UTF_8);
+                } catch (IllegalArgumentException e) {
+                    findings.add(new StorageIntegrityFinding(
+                            StorageIntegritySeverity.ERROR,
+                            StorageIntegrityCategory.ATOM_LOG_CORRUPT,
+                            atomSegment,
+                            "Line " + lineNum + ": Corrupt Base64 content for atomId=" + id,
+                            line));
+                    continue;
+                }
+
+                List<String> aliases = List.of();
+                if (parts.length == 6 && !parts[5].isBlank()) {
+                    try {
+                        aliases = List.of(parts[5].split(",")).stream()
+                                .map(alias -> new String(Base64.getDecoder().decode(alias), StandardCharsets.UTF_8))
+                                .toList();
+                    } catch (IllegalArgumentException e) {
+                        findings.add(new StorageIntegrityFinding(
+                                StorageIntegritySeverity.ERROR,
+                                StorageIntegrityCategory.ATOM_LOG_CORRUPT,
+                                atomSegment,
+                                "Line " + lineNum + ": Corrupt Base64 alias for atomId=" + id,
+                                line));
+                        continue;
+                    }
+                }
+
+                KnowledgeAtom atom = new KnowledgeAtom(id, atomType, content, aliases, Map.of(), weight, createdAt);
+                activeAtoms.put(id, atom);
+                atomCounts.merge(id, 1, Integer::sum);
+            }
+        } catch (IOException e) {
+            findings.add(new StorageIntegrityFinding(
+                    StorageIntegritySeverity.FATAL,
+                    StorageIntegrityCategory.ATOM_LOG_CORRUPT,
+                    atomSegment,
+                    "Failed to read atom segment: " + e.getMessage()));
+            return new AtomLogAuditResult(0, 0, Map.of());
         }
 
-        long historyDuplicates = physicalRecords - activeAtoms.size();
+        long historyDuplicates = atomCounts.values().stream()
+                .mapToLong(count -> Math.max(0, count - 1))
+                .sum();
         if (historyDuplicates > 0) {
             findings.add(new StorageIntegrityFinding(
                     StorageIntegritySeverity.INFO,
@@ -607,23 +608,11 @@ public class StorageIntegrityAuditor {
                             + activeAtoms.size() + " active unique atoms (last-wins deduplication applied)"));
         }
 
-        return new AtomLogAuditResult(physicalRecords, activeAtoms);
+        return new AtomLogAuditResult(physicalRecords, historyDuplicates, activeAtoms);
     }
 
     private VectorMapAuditResult auditVectorMap(Path vectorMapPath, List<StorageIntegrityFinding> findings) {
         if (Files.notExists(vectorMapPath)) {
-            return new VectorMapAuditResult(0, List.of(), Map.of(), Map.of());
-        }
-
-        List<String> lines;
-        try {
-            lines = Files.readAllLines(vectorMapPath, StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            findings.add(new StorageIntegrityFinding(
-                    StorageIntegritySeverity.FATAL,
-                    StorageIntegrityCategory.VECTOR_INDEX_MALFORMED,
-                    DEFAULT_VECTOR_MAP,
-                    "Failed to read vector index: " + e.getMessage()));
             return new VectorMapAuditResult(0, List.of(), Map.of(), Map.of());
         }
 
@@ -632,47 +621,57 @@ public class StorageIntegrityAuditor {
         Map<Long, List<String>> offsetToAtomIds = new LinkedHashMap<>();
         Map<String, List<Long>> atomIdToOffsets = new LinkedHashMap<>();
 
-        for (int i = 0; i < lines.size(); i++) {
-            String line = lines.get(i);
-            int lineNum = i + 1;
-            if (line.isBlank()) {
-                continue;
-            }
-            totalEntries++;
-            String[] parts = line.split("\t", 2);
-            if (parts.length != 2 || parts[0].isBlank()) {
-                findings.add(new StorageIntegrityFinding(
-                        StorageIntegritySeverity.ERROR,
-                        StorageIntegrityCategory.VECTOR_INDEX_MALFORMED,
-                        DEFAULT_VECTOR_MAP,
-                        "Line " + lineNum + ": Malformed vector index entry: " + line));
-                continue;
-            }
+        try (BufferedReader reader = Files.newBufferedReader(vectorMapPath, StandardCharsets.UTF_8)) {
+            String line;
+            int lineNum = 0;
+            while ((line = reader.readLine()) != null) {
+                lineNum++;
+                if (line.isBlank()) {
+                    continue;
+                }
+                totalEntries++;
+                String[] parts = line.split("\t", 2);
+                if (parts.length != 2 || parts[0].isBlank()) {
+                    findings.add(new StorageIntegrityFinding(
+                            StorageIntegritySeverity.ERROR,
+                            StorageIntegrityCategory.VECTOR_INDEX_MALFORMED,
+                            DEFAULT_VECTOR_MAP,
+                            "Line " + lineNum + ": Malformed vector index entry: " + line));
+                    continue;
+                }
 
-            String atomId = parts[0];
-            long offset;
-            try {
-                offset = Long.parseLong(parts[1].trim());
-            } catch (NumberFormatException e) {
-                findings.add(new StorageIntegrityFinding(
-                        StorageIntegritySeverity.ERROR,
-                        StorageIntegrityCategory.VECTOR_INDEX_MALFORMED,
-                        DEFAULT_VECTOR_MAP,
-                        "Line " + lineNum + ": Invalid numeric offset '" + parts[1] + "' for atomId=" + atomId));
-                continue;
-            }
+                String atomId = parts[0];
+                long offset;
+                try {
+                    offset = Long.parseLong(parts[1].trim());
+                } catch (NumberFormatException e) {
+                    findings.add(new StorageIntegrityFinding(
+                            StorageIntegritySeverity.ERROR,
+                            StorageIntegrityCategory.VECTOR_INDEX_MALFORMED,
+                            DEFAULT_VECTOR_MAP,
+                            "Line " + lineNum + ": Invalid numeric offset '" + parts[1] + "' for atomId=" + atomId));
+                    continue;
+                }
 
-            if (offset < 0) {
-                findings.add(new StorageIntegrityFinding(
-                        StorageIntegritySeverity.ERROR,
-                        StorageIntegrityCategory.VECTOR_OFFSET_OUT_OF_BOUNDS,
-                        DEFAULT_VECTOR_MAP,
-                        "Line " + lineNum + ": Negative offset (" + offset + ") for atomId=" + atomId));
-            }
+                if (offset < 0) {
+                    findings.add(new StorageIntegrityFinding(
+                            StorageIntegritySeverity.ERROR,
+                            StorageIntegrityCategory.VECTOR_OFFSET_OUT_OF_BOUNDS,
+                            DEFAULT_VECTOR_MAP,
+                            "Line " + lineNum + ": Negative offset (" + offset + ") for atomId=" + atomId));
+                }
 
-            entries.add(new AuditIndexEntry(lineNum, atomId, offset));
-            offsetToAtomIds.computeIfAbsent(offset, k -> new ArrayList<>()).add(atomId);
-            atomIdToOffsets.computeIfAbsent(atomId, k -> new ArrayList<>()).add(offset);
+                entries.add(new AuditIndexEntry(lineNum, atomId, offset));
+                offsetToAtomIds.computeIfAbsent(offset, k -> new ArrayList<>()).add(atomId);
+                atomIdToOffsets.computeIfAbsent(atomId, k -> new ArrayList<>()).add(offset);
+            }
+        } catch (IOException e) {
+            findings.add(new StorageIntegrityFinding(
+                    StorageIntegritySeverity.FATAL,
+                    StorageIntegrityCategory.VECTOR_INDEX_MALFORMED,
+                    DEFAULT_VECTOR_MAP,
+                    "Failed to read vector index: " + e.getMessage()));
+            return new VectorMapAuditResult(0, List.of(), Map.of(), Map.of());
         }
 
         for (var entry : offsetToAtomIds.entrySet()) {
@@ -863,9 +862,54 @@ public class StorageIntegrityAuditor {
             return 0;
         }
 
-        List<String> lines;
-        try {
-            lines = Files.readAllLines(feedbackPath, StandardCharsets.UTF_8);
+        long records = 0;
+        try (BufferedReader reader = Files.newBufferedReader(feedbackPath, StandardCharsets.UTF_8)) {
+            String line;
+            int lineNum = 0;
+            while ((line = reader.readLine()) != null) {
+                lineNum++;
+                if (line.isBlank()) {
+                    continue;
+                }
+                records++;
+                try {
+                    var fields = JsonStrings.parseFlat(line, "feedback log");
+                    String query = fields.get("query");
+                    String atomId = fields.get("atomId");
+                    String signal = fields.get("signal");
+                    String delta = fields.get("delta");
+                    String createdAt = fields.get("createdAt");
+
+                    if (query == null || atomId == null || signal == null || delta == null || createdAt == null) {
+                        findings.add(new StorageIntegrityFinding(
+                                StorageIntegritySeverity.ERROR,
+                                StorageIntegrityCategory.FEEDBACK_LOG_CORRUPT,
+                                feedbackSegment,
+                                "Line " + lineNum + ": Missing required field in feedback log entry",
+                                line));
+                        continue;
+                    }
+
+                    FeedbackSignal.valueOf(signal);
+                    Double.parseDouble(delta);
+                    Instant.parse(createdAt);
+
+                    if (!activeAtomIds.isEmpty() && !activeAtomIds.contains(atomId)) {
+                        findings.add(new StorageIntegrityFinding(
+                                StorageIntegritySeverity.INFO,
+                                StorageIntegrityCategory.FEEDBACK_LOG_CORRUPT,
+                                feedbackSegment,
+                                "Line " + lineNum + ": Feedback references atomId '" + atomId + "' not present in active atom log"));
+                    }
+                } catch (Exception e) {
+                    findings.add(new StorageIntegrityFinding(
+                            StorageIntegritySeverity.ERROR,
+                            StorageIntegrityCategory.FEEDBACK_LOG_CORRUPT,
+                            feedbackSegment,
+                            "Line " + lineNum + ": Malformed feedback log entry: " + e.getMessage(),
+                            line));
+                }
+            }
         } catch (IOException e) {
             findings.add(new StorageIntegrityFinding(
                     StorageIntegritySeverity.ERROR,
@@ -874,60 +918,13 @@ public class StorageIntegrityAuditor {
                     "Failed to read feedback segment: " + e.getMessage()));
             return 0;
         }
-
-        long records = 0;
-        for (int i = 0; i < lines.size(); i++) {
-            String line = lines.get(i);
-            int lineNum = i + 1;
-            if (line.isBlank()) {
-                continue;
-            }
-            records++;
-            try {
-                var fields = JsonStrings.parseFlat(line, "feedback log");
-                String query = fields.get("query");
-                String atomId = fields.get("atomId");
-                String signal = fields.get("signal");
-                String delta = fields.get("delta");
-                String createdAt = fields.get("createdAt");
-
-                if (query == null || atomId == null || signal == null || delta == null || createdAt == null) {
-                    findings.add(new StorageIntegrityFinding(
-                            StorageIntegritySeverity.ERROR,
-                            StorageIntegrityCategory.FEEDBACK_LOG_CORRUPT,
-                            feedbackSegment,
-                            "Line " + lineNum + ": Missing required field in feedback log entry",
-                            line));
-                    continue;
-                }
-
-                FeedbackSignal.valueOf(signal);
-                Double.parseDouble(delta);
-                Instant.parse(createdAt);
-
-                if (!activeAtomIds.isEmpty() && !activeAtomIds.contains(atomId)) {
-                    findings.add(new StorageIntegrityFinding(
-                            StorageIntegritySeverity.INFO,
-                            StorageIntegrityCategory.FEEDBACK_LOG_CORRUPT,
-                            feedbackSegment,
-                            "Line " + lineNum + ": Feedback references atomId '" + atomId + "' not present in active atom log"));
-                }
-            } catch (Exception e) {
-                findings.add(new StorageIntegrityFinding(
-                        StorageIntegritySeverity.ERROR,
-                        StorageIntegrityCategory.FEEDBACK_LOG_CORRUPT,
-                        feedbackSegment,
-                        "Line " + lineNum + ": Malformed feedback log entry: " + e.getMessage(),
-                        line));
-            }
-        }
         return records;
     }
 
     private record ParsedManifestResult(Manifest manifest) {
     }
 
-    private record AtomLogAuditResult(long physicalRecords, Map<String, KnowledgeAtom> activeAtoms) {
+    private record AtomLogAuditResult(long physicalRecords, long historyDuplicates, Map<String, KnowledgeAtom> activeAtoms) {
     }
 
     private record VectorMapAuditResult(
