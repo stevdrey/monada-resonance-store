@@ -40,6 +40,10 @@ The project follows a measurement-first path: improve retrieval quality only aft
   conflict recoveries but regresses when a relevant candidate lacks one modality, so the evidence
   concludes `HYBRID_CANDIDATE_RISKY`. No protected hybrid baseline, production retrieval path, or
   default behavior is justified from this result.
+- Storage compatibility hardening: manifest `0.4` now separates encoding metadata from an explicit
+  physical vector profile (`FLOAT32`, big-endian, framing, dimensions, and index version). Current
+  and supported legacy layouts are validated before opening, while incompatible stores are rejected
+  without automatic migration or byte reinterpretation.
 
 ## Near-Term Direction
 
@@ -77,10 +81,6 @@ Non-goals:
 - scraping external services or GitHub;
 - adding private data or LLM-generated relevance judgments;
 - changing retrieval defaults or encoder behavior.
-
-### Candidate — Storage compatibility hardening
-
-Improve manifest metadata and rejection behavior for incompatible vector formats.
 
 ### Candidate — Bounded top-K scan optimization
 

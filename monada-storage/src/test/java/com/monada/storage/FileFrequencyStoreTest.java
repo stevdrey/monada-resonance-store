@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -221,5 +222,87 @@ class FileFrequencyStoreTest {
 
         IOException ex = assertThrows(IOException.class, store::findAll);
         assertTrue(ex.getMessage().toLowerCase().contains("not aligned"));
+    }
+
+    @Test
+    void profiledFixedRawStoreWritesBigEndianFloat32Frames() throws IOException {
+        FileFrequencyStore store = FileFrequencyStore.create(root, "vectors/segment-000001.f32",
+                VectorFormatProfile.currentFixedRaw(2));
+        store.save("a", vector(1f, -2.5f));
+
+        byte[] bytes = Files.readAllBytes(root.resolve("vectors/segment-000001.f32"));
+        assertArrayEquals(ByteBuffer.allocate(8).putFloat(1f).putFloat(-2.5f).array(), bytes);
+        assertArrayEquals(new float[]{1f, -2.5f}, store.findByAtomId("a").orElseThrow().values());
+    }
+
+    @Test
+    void profiledLengthPrefixedStoreRoundTripsAndValidatesHeaders() throws IOException {
+        var profile = VectorFormatProfile.legacyLengthPrefixed(2);
+        FileFrequencyStore store = FileFrequencyStore.create(root, "vectors/segment-000001.f32", profile);
+        store.save("a", vector(1f, 2f));
+
+        assertArrayEquals(new float[]{1f, 2f},
+                FileFrequencyStore.openExisting(root, "vectors/segment-000001.f32", profile)
+                        .findByAtomId("a").orElseThrow().values());
+    }
+
+    @Test
+    void profiledStoreAllowsReorderedIndexEntriesWhenOffsetsCoverAllFrames() throws IOException {
+        var profile = VectorFormatProfile.currentFixedRaw(2);
+        FileFrequencyStore store = FileFrequencyStore.create(root, "vectors/segment-000001.f32", profile);
+        store.save("a", vector(1f, 2f));
+        store.save("b", vector(3f, 4f));
+
+        Path indexFile = root.resolve("indexes/vector-map.idx");
+        Files.write(indexFile, Files.readAllLines(indexFile).reversed(), StandardCharsets.UTF_8);
+
+        var reopened = FileFrequencyStore.openExisting(root, "vectors/segment-000001.f32", profile);
+        assertArrayEquals(new float[]{3f, 4f}, reopened.findByAtomId("b").orElseThrow().values());
+    }
+
+    @Test
+    void profiledStoreRejectsUnsupportedFormatAndIndexVersions() {
+        var invalidFormat = new VectorFormatProfile(2, VectorFormatProfile.ScalarType.FLOAT32,
+                VectorFormatProfile.ByteOrder.BIG_ENDIAN, VectorFormatProfile.Framing.FIXED_RAW, 2, 1);
+        IllegalArgumentException formatEx = assertThrows(IllegalArgumentException.class,
+                () -> FileFrequencyStore.create(root, "vectors/segment-000001.f32", invalidFormat));
+        assertTrue(formatEx.getMessage().contains("vectorFormatVersion"));
+
+        var invalidIndex = new VectorFormatProfile(1, VectorFormatProfile.ScalarType.FLOAT32,
+                VectorFormatProfile.ByteOrder.BIG_ENDIAN, VectorFormatProfile.Framing.FIXED_RAW, 2, 2);
+        IllegalArgumentException indexEx = assertThrows(IllegalArgumentException.class,
+                () -> FileFrequencyStore.create(root, "vectors/segment-000001.f32", invalidIndex));
+        assertTrue(indexEx.getMessage().contains("vectorIndexFormatVersion"));
+    }
+
+    @Test
+    void profiledStoreRejectsDuplicateOffsetsAndContradictoryFraming() throws IOException {
+        var fixedProfile = VectorFormatProfile.currentFixedRaw(2);
+        FileFrequencyStore fixedStore = FileFrequencyStore.create(root, "vectors/segment-000001.f32", fixedProfile);
+        fixedStore.save("a", vector(1f, 2f));
+        fixedStore.save("b", vector(3f, 4f));
+        Files.writeString(root.resolve("indexes/vector-map.idx"), "a\t0\nb\t0\n", StandardCharsets.UTF_8);
+
+        IOException duplicateEx = assertThrows(IOException.class,
+                () -> FileFrequencyStore.openExisting(root, "vectors/segment-000001.f32", fixedProfile));
+        assertTrue(duplicateEx.getMessage().contains("Duplicate or unexpected offset"));
+
+        Path framingRoot = root.resolve("framing");
+        var lengthPrefixedProfile = VectorFormatProfile.legacyLengthPrefixed(2);
+        FileFrequencyStore lengthPrefixedStore = FileFrequencyStore.create(
+                framingRoot, "vectors/segment-000001.f32", lengthPrefixedProfile);
+        lengthPrefixedStore.save("a", vector(1f, 2f));
+
+        IOException framingEx = assertThrows(IOException.class,
+                () -> FileFrequencyStore.openExisting(framingRoot, "vectors/segment-000001.f32", fixedProfile));
+        assertTrue(framingEx.getMessage().contains("physical metadata"));
+    }
+
+    @Test
+    void profiledExistingStoreRejectsMissingArtifacts() throws IOException {
+        IOException ex = assertThrows(IOException.class,
+                () -> FileFrequencyStore.openExisting(root, "vectors/segment-000001.f32",
+                        VectorFormatProfile.currentFixedRaw(2)));
+        assertTrue(ex.getMessage().contains("Vector segment is missing"));
     }
 }

@@ -18,6 +18,7 @@ import com.monada.storage.FileManifestStore;
 import com.monada.storage.FrequencyStore;
 import com.monada.storage.Manifest;
 import com.monada.storage.ManifestStore;
+import com.monada.storage.VectorFormatProfile;
 import com.monada.storage.feedback.FeedbackEvent;
 import com.monada.storage.feedback.FeedbackSignal;
 import com.monada.storage.feedback.FeedbackStore;
@@ -34,7 +35,7 @@ import java.util.Optional;
 
 public class MonadaMemory {
 
-    private static final String MANIFEST_VERSION = "0.3";
+    private static final String MANIFEST_VERSION = "0.4";
     private static final int DEFAULT_DIMENSIONS = 128;
     private static final String DEFAULT_VECTOR_SEGMENT = "vectors/segment-000001.f32";
     private static final String DEFAULT_ATOM_SEGMENT = "atoms/segment-000001.log";
@@ -107,13 +108,18 @@ public class MonadaMemory {
             ManifestStore manifestStore = new FileManifestStore(path);
             Optional<Manifest> existing = manifestStore.load();
             Manifest manifest;
+            VectorFormatProfile vectorFormatProfile;
             LexicalExpansionOptions actualExpansionOptions = options.expansionOptions();
             if (existing.isPresent()) {
                 manifest = existing.get();
-                if (Objects.equals(manifest.version(), "0.3")) {
+                if (Objects.equals(manifest.version(), "0.4")) {
                     EncodingProfile storedProfile = manifest.encodingProfile();
                     if (storedProfile == null) {
-                        throw new IOException("Manifest version is 0.3 but encodingProfile is missing");
+                        throw new IOException("Manifest version is 0.4 but encodingProfile is missing");
+                    }
+                    vectorFormatProfile = manifest.vectorFormatProfile();
+                    if (vectorFormatProfile == null) {
+                        throw new IOException("Manifest version is 0.4 but physical vector format metadata is missing");
                     }
                     EncodingProfile expectedProfile = getExpectedProfile(manifest.dimensions(), options);
                     if (!Objects.equals(storedProfile, expectedProfile)) {
@@ -123,7 +129,23 @@ public class MonadaMemory {
                                 "Expected: " + expectedProfile + "\n" +
                                 "Please rebuild vectors using VectorRebuilder to match the new profile.");
                     }
+                } else if (Objects.equals(manifest.version(), "0.3")) {
+                    rejectUnexpectedLegacyPhysicalMetadata(manifest);
+                    EncodingProfile storedProfile = manifest.encodingProfile();
+                    if (storedProfile == null) {
+                        throw new IOException("Manifest version is 0.3 but encodingProfile is missing");
+                    }
+                    EncodingProfile expectedProfile = getExpectedProfile(manifest.dimensions(), options);
+                    if (!Objects.equals(storedProfile, expectedProfile)) {
+                        throw new IllegalArgumentException(
+                                "Requested encoding profile does not match the persisted encoding profile in the store.\n" +
+                                        "Stored: " + storedProfile + "\n" +
+                                        "Expected: " + expectedProfile + "\n" +
+                                        "Please rebuild vectors using VectorRebuilder to match the new profile.");
+                    }
+                    vectorFormatProfile = VectorFormatProfile.currentFixedRaw(manifest.dimensions());
                 } else if (Objects.equals(manifest.version(), "0.2")) {
+                    rejectUnexpectedLegacyPhysicalMetadata(manifest);
                     if (!options.textNormalizer().getClass().getSimpleName().equals("LexicalEnrichmentPipeline")) {
                         throw new IllegalArgumentException(
                                 "Requested normalizer " + options.textNormalizer().getClass().getSimpleName() +
@@ -149,7 +171,9 @@ public class MonadaMemory {
                                 "Please rebuild vectors using VectorRebuilder.");
                     }
                     actualExpansionOptions = LexicalExpansionOptions.DEFAULT;
+                    vectorFormatProfile = VectorFormatProfile.currentFixedRaw(manifest.dimensions());
                 } else if (Objects.equals(manifest.version(), "0.1")) {
+                    rejectUnexpectedLegacyPhysicalMetadata(manifest);
                     if (!options.textNormalizer().getClass().getSimpleName().equals("LexicalEnrichmentPipeline")) {
                         throw new IllegalArgumentException(
                                 "Requested normalizer " + options.textNormalizer().getClass().getSimpleName() +
@@ -166,22 +190,25 @@ public class MonadaMemory {
                                 "Please rebuild vectors using VectorRebuilder.");
                     }
                     actualExpansionOptions = new LexicalExpansionOptions(1.0, 1.0);
+                    vectorFormatProfile = VectorFormatProfile.currentFixedRaw(manifest.dimensions());
                 } else {
                     throw new IOException(
                             "Unsupported manifest version '" + manifest.version()
-                                    + "'; expected '0.3', '0.2', or '0.1'");
+                                    + "'; expected '0.4', '0.3', '0.2', or '0.1'");
                 }
             } else {
                 EncodingProfile profile = getExpectedProfile(DEFAULT_DIMENSIONS, options);
+                vectorFormatProfile = VectorFormatProfile.currentFixedRaw(DEFAULT_DIMENSIONS);
                 manifest = new Manifest(
-                        "0.3", DEFAULT_DIMENSIONS, DEFAULT_VECTOR_SEGMENT, DEFAULT_ATOM_SEGMENT,
-                        FeedbackStore.DEFAULT_SEGMENT, profile);
+                        MANIFEST_VERSION, DEFAULT_DIMENSIONS, DEFAULT_VECTOR_SEGMENT, DEFAULT_ATOM_SEGMENT,
+                        FeedbackStore.DEFAULT_SEGMENT, profile, vectorFormatProfile);
                 manifestStore.save(manifest);
             }
 
             AtomStore atomStore = new FileAtomStore(path, manifest.atomSegment());
-            FrequencyStore frequencyStore = new FileFrequencyStore(
-                    path, manifest.vectorSegment(), manifest.dimensions());
+            FrequencyStore frequencyStore = existing.isPresent()
+                    ? FileFrequencyStore.openExisting(path, manifest.vectorSegment(), vectorFormatProfile)
+                    : FileFrequencyStore.create(path, manifest.vectorSegment(), vectorFormatProfile);
             FeedbackStore feedbackStore = new FileFeedbackStore(path, manifest.feedbackSegment());
             FrequencyEncoder encoder = new SimpleFrequencyEncoder(manifest.dimensions());
             ResonanceIndex resonanceIndex = new LinearScanResonanceIndex(atomStore, frequencyStore);
@@ -190,6 +217,14 @@ public class MonadaMemory {
                     options.feedbackAwareRanking(), actualExpansionOptions, options.feedbackQueryKeyStrategy());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+    }
+
+    private static void rejectUnexpectedLegacyPhysicalMetadata(Manifest manifest) throws IOException {
+        if (manifest.vectorFormatProfile() != null) {
+            throw new IOException(
+                    "Manifest version " + manifest.version() + " must not declare physical vector format metadata; "
+                            + "rebuild explicitly to manifest version 0.4");
         }
     }
 

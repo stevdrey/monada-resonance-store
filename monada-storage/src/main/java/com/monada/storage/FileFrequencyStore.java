@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -23,67 +24,78 @@ public class FileFrequencyStore implements FrequencyStore {
 
     private final Path vectorFile;
     private final Path vectorMap;
-    /** When non-null, vectors are persisted as a raw float32 stream and every vector must match this length. */
+    /** Retained for source-compatible direct fixed-dimension use without a manifest profile. */
     private final Integer fixedDimensions;
+    private final VectorFormatProfile vectorFormatProfile;
 
     public FileFrequencyStore(Path root) throws IOException {
-        this(root, DEFAULT_SEGMENT, null);
+        this(root, DEFAULT_SEGMENT, null, null, false);
     }
 
     public FileFrequencyStore(Path root, String vectorSegment) throws IOException {
-        this(root, vectorSegment, null);
+        this(root, vectorSegment, null, null, false);
+    }
+
+    public FileFrequencyStore(Path root, String vectorSegment, Integer fixedDimensions) throws IOException {
+        this(root, vectorSegment, fixedDimensions, null, false);
+    }
+
+    public static FileFrequencyStore create(Path root, String vectorSegment, VectorFormatProfile vectorFormatProfile)
+            throws IOException {
+        return new FileFrequencyStore(root, vectorSegment, null, vectorFormatProfile, false);
+    }
+
+    public static FileFrequencyStore openExisting(Path root, String vectorSegment,
+                                                  VectorFormatProfile vectorFormatProfile) throws IOException {
+        return new FileFrequencyStore(root, vectorSegment, null, vectorFormatProfile, true);
     }
 
     public static Path resolveVectorMapPath(Path root) {
         return root.resolve("indexes").resolve("vector-map.idx");
     }
 
-    public FileFrequencyStore(Path root, String vectorSegment, Integer fixedDimensions) throws IOException {
+    private FileFrequencyStore(Path root, String vectorSegment, Integer fixedDimensions,
+                               VectorFormatProfile vectorFormatProfile, boolean requireExisting) throws IOException {
         if (fixedDimensions != null && fixedDimensions <= 0) {
             throw new IllegalArgumentException("fixedDimensions must be greater than zero");
+        }
+        if (vectorFormatProfile != null) {
+            vectorFormatProfile.requireSupportedRuntime();
         }
         this.vectorFile = root.resolve(vectorSegment);
         this.vectorMap = resolveVectorMapPath(root);
         this.fixedDimensions = fixedDimensions;
-        Files.createDirectories(vectorFile.getParent());
-        Files.createDirectories(vectorMap.getParent());
-        if (Files.notExists(vectorFile)) {
-            Files.createFile(vectorFile);
+        this.vectorFormatProfile = vectorFormatProfile;
+
+        if (requireExisting) {
+            requireExistingArtifacts();
+        } else {
+            ensureArtifacts();
         }
-        if (Files.notExists(vectorMap)) {
-            Files.createFile(vectorMap);
-        }
-        if (fixedDimensions != null) {
-            long frameSize = (long) fixedDimensions * Float.BYTES;
-            long indexCount = readIndexEntries().size();
-            long expected = indexCount * frameSize;
-            long actual = Files.size(vectorFile);
-            if (actual != expected) {
-                throw new IOException(
-                        "Vector segment size (" + actual + " bytes) does not match index entries x dimensions x 4 ("
-                                + expected + " bytes); manifest dimensions may not match the on-disk segment");
-            }
-        }
+        validatePhysicalStructure();
     }
 
     @Override
     public void save(String atomId, FrequencyVector vector) throws IOException {
         float[] values = vector.values();
-        if (fixedDimensions != null && values.length != fixedDimensions) {
+        Integer dimensions = declaredDimensions();
+        if (dimensions != null && values.length != dimensions) {
             throw new IllegalArgumentException(
-                    "Vector dimensions (" + values.length + ") do not match store dimensions (" + fixedDimensions
+                    "Vector dimensions (" + values.length + ") do not match store dimensions (" + dimensions
                             + ") for atomId=" + atomId);
         }
         long offset = Files.size(vectorFile);
-        try (DataOutputStream output = new DataOutputStream(Files.newOutputStream(vectorFile, StandardOpenOption.APPEND))) {
-            if (fixedDimensions == null) {
+        try (DataOutputStream output = new DataOutputStream(
+                Files.newOutputStream(vectorFile, StandardOpenOption.APPEND))) {
+            if (usesLengthPrefix()) {
                 output.writeInt(values.length);
             }
             for (float value : values) {
                 output.writeFloat(value);
             }
         }
-        Files.writeString(vectorMap, atomId + "\t" + offset + System.lineSeparator(), StandardCharsets.UTF_8, StandardOpenOption.APPEND);
+        Files.writeString(vectorMap, atomId + "\t" + offset + System.lineSeparator(), StandardCharsets.UTF_8,
+                StandardOpenOption.APPEND);
     }
 
     @Override
@@ -115,6 +127,94 @@ public class FileFrequencyStore implements FrequencyStore {
         return vectors;
     }
 
+    private void ensureArtifacts() throws IOException {
+        Files.createDirectories(vectorFile.getParent());
+        Files.createDirectories(vectorMap.getParent());
+        if (Files.notExists(vectorFile)) {
+            Files.createFile(vectorFile);
+        }
+        if (Files.notExists(vectorMap)) {
+            Files.createFile(vectorMap);
+        }
+    }
+
+    private void requireExistingArtifacts() throws IOException {
+        if (Files.notExists(vectorFile)) {
+            throw new IOException("Vector segment is missing: " + vectorFile);
+        }
+        if (Files.notExists(vectorMap)) {
+            throw new IOException("Vector index is missing: " + vectorMap);
+        }
+    }
+
+    private void validatePhysicalStructure() throws IOException {
+        if (vectorFormatProfile == null) {
+            validateLegacyFixedDimensionStructure();
+            return;
+        }
+
+        List<IndexEntry> entries = readIndexEntries();
+        long frameSize = vectorFormatProfile.frameSizeInBytes();
+        long expectedSize = entries.size() * frameSize;
+        long actualSize = Files.size(vectorFile);
+        if (actualSize != expectedSize) {
+            throw new IOException(
+                    "Vector segment size (" + actualSize + " bytes) does not match " + entries.size()
+                            + " indexed " + vectorFormatProfile.framing() + " frames of " + frameSize
+                            + " bytes; manifest physical metadata or on-disk bytes are incompatible");
+        }
+
+        BitSet seenFrames = new BitSet(entries.size());
+        for (IndexEntry entry : entries) {
+            validateOffset(entry.offset(), actualSize, entry.atomId());
+            int frameIndex = Math.toIntExact(entry.offset() / frameSize);
+            if (seenFrames.get(frameIndex)) {
+                throw new IOException(
+                        "Duplicate or unexpected offset (" + entry.offset() + ") in vector index for atomId="
+                                + entry.atomId());
+            }
+            seenFrames.set(frameIndex);
+        }
+        // The size check establishes exactly one frame per index entry. Since every offset is aligned,
+        // in range, and unique, the index covers every physical frame without materializing Long offsets.
+
+        if (vectorFormatProfile.framing() == VectorFormatProfile.Framing.LEGACY_LENGTH_PREFIXED) {
+            validateLengthPrefixedHeaders(entries);
+        }
+    }
+
+    private void validateLegacyFixedDimensionStructure() throws IOException {
+        if (fixedDimensions == null) {
+            return;
+        }
+        long frameSize = (long) fixedDimensions * Float.BYTES;
+        long indexCount = readIndexEntries().size();
+        long expected = indexCount * frameSize;
+        long actual = Files.size(vectorFile);
+        if (actual != expected) {
+            throw new IOException(
+                    "Vector segment size (" + actual + " bytes) does not match index entries x dimensions x 4 ("
+                            + expected + " bytes); manifest dimensions may not match the on-disk segment");
+        }
+    }
+
+    private void validateLengthPrefixedHeaders(List<IndexEntry> entries) throws IOException {
+        try (RandomAccessFile file = new RandomAccessFile(vectorFile.toFile(), "r")) {
+            for (IndexEntry entry : entries) {
+                file.seek(entry.offset());
+                int storedDimensions = file.readInt();
+                if (storedDimensions != vectorFormatProfile.dimensions()) {
+                    throw new IOException(
+                            "Length-prefixed vector dimensions (" + storedDimensions + ") do not match manifest "
+                                    + "physical dimensions (" + vectorFormatProfile.dimensions() + ") for atomId="
+                                    + entry.atomId());
+                }
+            }
+        } catch (EOFException e) {
+            throw new IOException("Vector segment truncated while validating length-prefixed frames", e);
+        }
+    }
+
     private Long findOffset(String atomId) throws IOException {
         try (Stream<String> lines = Files.lines(vectorMap, StandardCharsets.UTF_8)) {
             return lines
@@ -138,7 +238,7 @@ public class FileFrequencyStore implements FrequencyStore {
 
     private static IndexEntry parseEntry(String line) {
         String[] parts = line.split("\t", 2);
-        if (parts.length != 2) {
+        if (parts.length != 2 || parts[0].isBlank()) {
             throw new IllegalStateException("Malformed vector index entry: " + line);
         }
         try {
@@ -150,15 +250,20 @@ public class FileFrequencyStore implements FrequencyStore {
 
     private FrequencyVector readVector(RandomAccessFile file, String atomId, long offset) throws IOException {
         try {
-            int dimensions;
-            if (fixedDimensions != null) {
-                dimensions = fixedDimensions;
-            } else {
-                dimensions = file.readInt();
-                if (dimensions <= 0 || dimensions > MAX_LEGACY_DIMENSIONS) {
+            Integer dimensions = declaredDimensions();
+            if (usesLengthPrefix()) {
+                int storedDimensions = file.readInt();
+                if (dimensions == null) {
+                    dimensions = storedDimensions;
+                    if (dimensions <= 0 || dimensions > MAX_LEGACY_DIMENSIONS) {
+                        throw new IOException(
+                                "Invalid vector dimensions (" + dimensions + ") for atomId=" + atomId
+                                        + " at offset=" + offset);
+                    }
+                } else if (storedDimensions != dimensions) {
                     throw new IOException(
-                            "Invalid vector dimensions (" + dimensions + ") for atomId=" + atomId
-                                    + " at offset=" + offset);
+                            "Length-prefixed vector dimensions (" + storedDimensions + ") do not match store "
+                                    + "dimensions (" + dimensions + ") for atomId=" + atomId + " at offset=" + offset);
                 }
             }
             float[] values = new float[dimensions];
@@ -182,14 +287,30 @@ public class FileFrequencyStore implements FrequencyStore {
                     "Offset (" + offset + ") is beyond end of vector segment (" + fileSize
                             + " bytes) for atomId=" + atomId);
         }
-        if (fixedDimensions != null) {
-            long frameSize = (long) fixedDimensions * Float.BYTES;
+        Integer dimensions = declaredDimensions();
+        if (dimensions != null) {
+            long frameSize = vectorFormatProfile == null
+                    ? (long) dimensions * Float.BYTES
+                    : vectorFormatProfile.frameSizeInBytes();
             if (offset % frameSize != 0) {
                 throw new IOException(
                         "Offset (" + offset + ") is not aligned to frame size (" + frameSize
                                 + " bytes) for atomId=" + atomId);
             }
         }
+    }
+
+    private Integer declaredDimensions() {
+        if (vectorFormatProfile == null) {
+            return fixedDimensions;
+        }
+        return vectorFormatProfile.dimensions();
+    }
+
+    private boolean usesLengthPrefix() {
+        return vectorFormatProfile == null
+                ? fixedDimensions == null
+                : vectorFormatProfile.framing() == VectorFormatProfile.Framing.LEGACY_LENGTH_PREFIXED;
     }
 
     private record IndexEntry(String atomId, long offset) {
