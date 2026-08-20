@@ -44,6 +44,9 @@ The project follows a measurement-first path: improve retrieval quality only aft
   physical vector profile (`FLOAT32`, big-endian, framing, dimensions, and index version). Current
   and supported legacy layouts are validated before opening, while incompatible stores are rejected
   without automatic migration or byte reinterpretation.
+- Storage integrity audit: Phase W introduces `StorageIntegrityAuditor` and CLI `./gradlew :monada-storage:runIntegrityAudit`,
+  providing non-destructive, side-effect-free validation across manifests, atom append logs, vector frames,
+  indexes, and feedback logs with a deterministic corruption taxonomy and statistics.
 
 ## Near-Term Direction
 

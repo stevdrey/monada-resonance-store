@@ -81,6 +81,22 @@ layout is the fixed-frame big-endian `FLOAT32` form historically written by `Mon
 Opening them does not upgrade or rewrite their manifests. The no-manifest direct storage API may
 still use length-prefixed frames, but it is not a legacy-manifest inference rule.
 
+### Storage Integrity Audit and Corruption Diagnostics
+
+Storage integrity auditing (`com.monada.storage.audit`) provides an independent, read-only verification
+pass across manifest metadata, atom logs, vector segments, indexes, and feedback logs.
+
+The audit is strictly side-effect free: it never creates missing files, deletes records, or compacts segments.
+Its corruption taxonomy categorizes findings by severity (`INFO`, `WARNING`, `ERROR`, `FATAL`) and category
+(`MANIFEST_INVALID`, `SEGMENT_MISSING`, `ATOM_LOG_CORRUPT`, `VECTOR_SEGMENT_SIZE_MISMATCH`,
+`VECTOR_INDEX_MALFORMED`, `VECTOR_OFFSET_OUT_OF_BOUNDS`, `VECTOR_OFFSET_MISALIGNED`,
+`DUPLICATE_VECTOR_INDEX_ID`, `DUPLICATE_VECTOR_OFFSET`, `ATOM_WITHOUT_VECTOR`, `VECTOR_WITHOUT_ATOM`,
+`FORMAT_INCOMPATIBLE`, `FEEDBACK_LOG_CORRUPT`).
+
+Repeated atom IDs in the atom log represent valid append history under last-wins semantics and are summarized
+as informational history duplicates rather than flagged as corruption. In contrast, duplicate offsets in the
+vector index or out-of-bounds frame offsets are flagged as structural errors.
+
 ## Speech Extension
 
 Speech is modeled as a separate extension layer:
