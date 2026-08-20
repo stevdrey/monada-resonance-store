@@ -65,6 +65,7 @@ length-prefixed vectors without a manifest, but that layout is not inferred for 
 
 ```bash
 ./gradlew test
+./gradlew :monada-storage:runIntegrityAudit -Dmonada.store.dir=/path/to/store
 ./gradlew :monada-evaluation:test
 ./gradlew :monada-evaluation:run -q
 ./gradlew :monada-evaluation:runExpanded -q
@@ -81,6 +82,31 @@ length-prefixed vectors without a manifest, but that layout is not inferred for 
 ./gradlew :monada-speech:runSpeechImport
 ./gradlew :monada-speech:runSpeechEvaluation
 ```
+
+## Storage Integrity Audit and Diagnostics
+
+The storage integrity audit (`StorageIntegrityAuditor`) provides a non-destructive, side-effect-free diagnostic tool that validates structural and referential integrity across the manifest, atom append log, vector segments, vector index, and feedback logs.
+
+Run the audit CLI via Gradle:
+
+```bash
+./gradlew :monada-storage:runIntegrityAudit -Dmonada.store.dir=/path/to/store
+```
+
+The audit evaluates:
+- **Manifest validity & compatibility**: Ensures manifest fields and Issue #80 physical vector format metadata (`vectorFormatVersion`, `vectorScalarType`, `vectorByteOrder`, `vectorFraming`, `vectorDimensions`, `vectorIndexFormatVersion`) are valid and supported; legacy manifests (`0.1`–`0.3`) are classified with inferred layout notes.
+- **Segment presence**: Checks existence of referenced atom logs, vector files, and index maps.
+- **Atom log parsing & history**: Parses Base64-encoded content/aliases and tab delimiters; distinguishes valid last-wins append history from corrupt records.
+- **Vector index structure**: Validates tab formatting, offsets, duplicate offsets (`DUPLICATE_VECTOR_OFFSET`), and duplicate index atom IDs (`DUPLICATE_VECTOR_INDEX_ID`).
+- **Vector segment framing & bounds**: Checks segment size against indexed frame counts, byte alignment, and frame bounds; inspects length prefix headers where `LEGACY_LENGTH_PREFIXED` framing is declared without unbounded allocations.
+- **Referential consistency**: Reports active atoms missing from the vector index (`ATOM_WITHOUT_VECTOR`) and orphan vector index entries without an active atom (`VECTOR_WITHOUT_ATOM`).
+- **Feedback logs**: Validates JSON formatting and required fields when feedback logs are present.
+
+Severity levels:
+- `INFO`: Normal append history, inferred legacy format, or non-destructive informational notice.
+- `WARNING`: Suspicious or non-ideal condition that does not block reading (orphan vectors, duplicate index atom IDs, trailing unindexed data).
+- `ERROR`: Active referential inconsistency, corrupt line, misaligned or out-of-bounds offset, truncated segment, or missing vector for active atom.
+- `FATAL`: Unreadable manifest, missing required segments, or incompatible unsupported format versions.
 
 ## Text Evaluation Baselines
 
