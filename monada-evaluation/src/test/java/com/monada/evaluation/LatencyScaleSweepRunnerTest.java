@@ -7,6 +7,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -68,6 +69,7 @@ class LatencyScaleSweepRunnerTest {
         var res = report.results().getFirst();
         int totalTracked = res.maintainedQueryCount() + res.improvedQueryCount() + res.degradedQueryCount();
         assertEquals(base.queries().size(), totalTracked);
+        assertEquals(res.improvedQueryCount() + res.degradedQueryCount(), res.rankingShifts().size());
     }
 
     @Test
@@ -81,6 +83,72 @@ class LatencyScaleSweepRunnerTest {
 
         assertEquals(ScaleOptimizationDecision.INCONCLUSIVE_NEEDS_LARGER_SCALE, report.decision());
         assertTrue(report.decisionRationale().contains("below the multi-thousand"));
+    }
+
+    @Test
+    void decisionGateDistinctBranches() {
+        var runner = new LatencyScaleSweepRunner();
+        var dummyEval = new EvaluationReport(List.of(), Map.of(), Map.of(), Map.of(), 1.0);
+
+        // Branch 1: Insufficient scale (< 1000) -> INCONCLUSIVE_NEEDS_LARGER_SCALE
+        var smallPoint1 = new LatencyScalePointResult(
+                100, 10, 1, 0, 1, 1000, 1.0, 10,
+                new ScaleTimingStatistics(10, 1, 10, 10, 10, 10, 10, 10, 5, 100.0),
+                dummyEval, 0, 10, 0, List.of());
+        var smallPoint2 = new LatencyScalePointResult(
+                500, 10, 1, 0, 1, 5000, 1.0, 10,
+                new ScaleTimingStatistics(10, 1, 10, 50, 50, 50, 50, 50, 5, 20.0),
+                dummyEval, 0, 10, 0, List.of());
+        assertEquals(ScaleOptimizationDecision.INCONCLUSIVE_NEEDS_LARGER_SCALE,
+                runner.evaluateDecision(List.of(smallPoint1, smallPoint2)));
+
+        // Branch 2: Structural scan fraction < 0.99 -> OPTIMIZATION_NOT_YET_JUSTIFIED
+        var partialScanPoint1 = new LatencyScalePointResult(
+                100, 10, 1, 0, 1, 500, 0.5, 10,
+                new ScaleTimingStatistics(10, 1, 10, 10, 10, 10, 10, 10, 5, 100.0),
+                dummyEval, 0, 10, 0, List.of());
+        var partialScanPoint2 = new LatencyScalePointResult(
+                5000, 10, 1, 0, 1, 25000, 0.5, 10,
+                new ScaleTimingStatistics(10, 1, 10, 1000, 1000, 1000, 1000, 1000, 5, 1.0),
+                dummyEval, 0, 10, 0, List.of());
+        assertEquals(ScaleOptimizationDecision.OPTIMIZATION_NOT_YET_JUSTIFIED,
+                runner.evaluateDecision(List.of(partialScanPoint1, partialScanPoint2)));
+
+        // Branch 3: Large scale but flat/noisy timing (no scale curve growth) -> INCONCLUSIVE_NEEDS_LARGER_SCALE
+        var noisyPoint1 = new LatencyScalePointResult(
+                100, 10, 1, 0, 1, 1000, 1.0, 10,
+                new ScaleTimingStatistics(10, 1, 10, 500, 500, 500, 500, 500, 50, 2.0),
+                dummyEval, 0, 10, 0, List.of());
+        var noisyPoint2 = new LatencyScalePointResult(
+                5000, 10, 1, 0, 1, 50000, 1.0, 10,
+                new ScaleTimingStatistics(10, 1, 10, 400, 400, 400, 400, 400, 50, 2.5),
+                dummyEval, 0, 10, 0, List.of());
+        assertEquals(ScaleOptimizationDecision.INCONCLUSIVE_NEEDS_LARGER_SCALE,
+                runner.evaluateDecision(List.of(noisyPoint1, noisyPoint2)));
+
+        // Branch 4: Large scale where latency is comparable to standalone encode (< 2x) -> OPTIMIZATION_NOT_YET_JUSTIFIED
+        var fastPoint1 = new LatencyScalePointResult(
+                100, 10, 1, 0, 1, 1000, 1.0, 10,
+                new ScaleTimingStatistics(10, 1, 10, 100, 100, 100, 100, 100, 80, 10.0),
+                dummyEval, 0, 10, 0, List.of());
+        var fastPoint2 = new LatencyScalePointResult(
+                5000, 10, 1, 0, 1, 50000, 1.0, 10,
+                new ScaleTimingStatistics(10, 1, 10, 120, 120, 120, 120, 120, 80, 8.0),
+                dummyEval, 0, 10, 0, List.of());
+        assertEquals(ScaleOptimizationDecision.OPTIMIZATION_NOT_YET_JUSTIFIED,
+                runner.evaluateDecision(List.of(fastPoint1, fastPoint2)));
+
+        // Branch 5: Large scale with full scan and clear scale-curve growth -> BOUNDED_EXACT_TOP_K_EXPERIMENT_JUSTIFIED
+        var growthPoint1 = new LatencyScalePointResult(
+                100, 10, 1, 0, 1, 1000, 1.0, 10,
+                new ScaleTimingStatistics(10, 1, 10, 20_000, 20_000, 20_000, 20_000, 20_000, 100, 50.0),
+                dummyEval, 0, 10, 0, List.of());
+        var growthPoint2 = new LatencyScalePointResult(
+                5000, 10, 1, 0, 1, 50000, 1.0, 10,
+                new ScaleTimingStatistics(10, 1, 10, 1_000_000, 1_000_000, 1_000_000, 1_000_000, 1_000_000, 100, 1.0),
+                dummyEval, 0, 10, 0, List.of());
+        assertEquals(ScaleOptimizationDecision.BOUNDED_EXACT_TOP_K_EXPERIMENT_JUSTIFIED,
+                runner.evaluateDecision(List.of(growthPoint1, growthPoint2)));
     }
 
     @Test

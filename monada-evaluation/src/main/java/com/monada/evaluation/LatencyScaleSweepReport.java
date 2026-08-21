@@ -63,18 +63,19 @@ public record LatencyScaleSweepReport(
         sb.append("2. Latency and Throughput (Best-Effort Timing)\n");
         sb.append("----------------------------------------------\n");
         sb.append(String.format(Locale.ROOT,
-                "%-10s | %-6s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-10s%n",
-                "Scale (N)", "Top-K", "Avg Encode (ns)", "Avg Scan (ns)", "Avg Total (ns)", "Median (ns)", "P95 (ns)", "Max (ns)", "QPS"));
-        sb.append("-----------+--------+-----------------+-----------------+-----------------+-----------------+-----------------+-----------------+-----------\n");
+                "%-10s | %-6s | %-22s | %-18s | %-15s | %-15s | %-15s | %-10s%n",
+                "Scale (N)", "Top-K", "Standalone Encode (ns)", "Query Latency (ns)", "Median (ns)", "P95 (ns)", "Max (ns)", "QPS"));
+        sb.append("-----------+--------+------------------------+--------------------+-----------------+-----------------+-----------------+-----------\n");
         for (var r : results) {
             var t = r.timing();
             sb.append(String.format(Locale.ROOT,
-                    "%-10d | %-6d | %-15d | %-15d | %-15d | %-15d | %-15d | %-15d | %-10.1f%n",
+                    "%-10d | %-6d | %-22d | %-18d | %-15d | %-15d | %-15d | %-10.1f%n",
                     r.corpusSize(), r.topK(),
-                    t.avgEncodeNanos(), t.avgScanNanos(), t.avgNanos(),
+                    t.avgEncodeNanos(), t.avgNanos(),
                     t.medianNanos(), t.p95Nanos(), t.maxNanos(), t.queriesPerSecond()));
         }
-        sb.append('\n');
+        sb.append("Note: Standalone encode duration is measured separately as a diagnostic baseline;\n");
+        sb.append("query latency is the full end-to-end resonance recall duration.\n\n");
 
         sb.append("3. Retrieval Quality by Scale Point\n");
         sb.append("-----------------------------------\n");
@@ -106,6 +107,24 @@ public record LatencyScaleSweepReport(
                     "%-10d | %-6d | %-12d | %-10d | %-10d%n",
                     r.corpusSize(), r.topK(),
                     r.maintainedQueryCount(), r.improvedQueryCount(), r.degradedQueryCount()));
+        }
+
+        boolean hasShifts = results.stream().anyMatch(r -> !r.rankingShifts().isEmpty());
+        if (hasShifts) {
+            sb.append("\nObserved Ranking Shifts from Distractors:\n");
+            for (var r : results) {
+                if (!r.rankingShifts().isEmpty()) {
+                    sb.append(String.format(Locale.ROOT, "  Scale N=%d, Top-K=%d:%n", r.corpusSize(), r.topK()));
+                    for (var shift : r.rankingShifts()) {
+                        sb.append(String.format(Locale.ROOT,
+                                "    - Query: \"%s\"%n      expected=%s, baselineRank=%s, scaledRank=%s (%s)%n",
+                                shift.queryText(), shift.expectedLabels(),
+                                shift.baselineRank() == Integer.MAX_VALUE ? ">K" : String.valueOf(shift.baselineRank()),
+                                shift.scaledRank() == Integer.MAX_VALUE ? ">K" : String.valueOf(shift.scaledRank()),
+                                shift.change()));
+                    }
+                }
+            }
         }
         sb.append('\n');
 

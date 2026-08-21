@@ -1,5 +1,6 @@
 package com.monada.evaluation;
 
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -19,7 +20,8 @@ public record LatencyScalePointResult(
         EvaluationReport evaluationReport,
         int improvedQueryCount,
         int maintainedQueryCount,
-        int degradedQueryCount
+        int degradedQueryCount,
+        List<ScaleRankingShift> rankingShifts
 ) {
     public LatencyScalePointResult {
         if (corpusSize <= 0) {
@@ -57,6 +59,7 @@ public record LatencyScalePointResult(
         if (degradedQueryCount < 0) {
             throw new IllegalArgumentException("degradedQueryCount must be >= 0");
         }
+        rankingShifts = List.copyOf(Objects.requireNonNull(rankingShifts, "rankingShifts"));
     }
 
     public double averageScannedPerQuery() {

@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -182,11 +183,11 @@ public final class LatencyScaleSweepRunner {
         // 2. Measured repetitions
         var totalLatencies = new ArrayList<Long>(queryCount * Math.max(1, repetitionCount));
         var encodeLatencies = new ArrayList<Long>(queryCount * Math.max(1, repetitionCount));
-        var scanLatencies = new ArrayList<Long>(queryCount * Math.max(1, repetitionCount));
 
         int effectiveReps = Math.max(1, repetitionCount);
         for (int rep = 0; rep < effectiveReps; rep++) {
             for (var query : dataset.queries()) {
+                // Standalone query encoding diagnostic pass (independent from memory execution)
                 var startEncode = System.nanoTime();
                 var normalized = textNormalizer.normalize(query.text());
                 if (!normalized.enrichedText().isBlank()) {
@@ -194,18 +195,17 @@ public final class LatencyScaleSweepRunner {
                 }
                 var encodeNanos = System.nanoTime() - startEncode;
 
+                // End-to-end memory recall query pass
                 var startQuery = System.nanoTime();
                 memory.resonate(query.text())
                         .topK(topK)
                         .threshold(EVALUATION_THRESHOLD)
                         .execute();
                 var queryNanos = System.nanoTime() - startQuery;
-                var scanNanos = Math.max(0, queryNanos - encodeNanos);
 
                 if (repetitionCount > 0) {
                     totalLatencies.add(queryNanos);
                     encodeLatencies.add(encodeNanos);
-                    scanLatencies.add(scanNanos);
                 }
             }
         }
@@ -213,7 +213,6 @@ public final class LatencyScaleSweepRunner {
         var timing = ScaleTimingStatistics.from(
                 totalLatencies,
                 encodeLatencies,
-                scanLatencies,
                 queryCount,
                 repetitionCount
         );
@@ -290,15 +289,26 @@ public final class LatencyScaleSweepRunner {
         int improved = 0;
         int maintained = 0;
         int degraded = 0;
+        var shifts = new ArrayList<ScaleRankingShift>();
         if (seedBaselineReport != null && seedBaselineReport.queryResults().size() == queryCount) {
             for (int i = 0; i < queryCount; i++) {
                 var baseQuery = seedBaselineReport.queryResults().get(i);
                 var candidateQuery = evalReport.queryResults().get(i);
+                int baseRank = firstExpectedRank(baseQuery.expectedLabels(), baseQuery.returnedLabels());
+                int candidateRank = firstExpectedRank(candidateQuery.expectedLabels(), candidateQuery.returnedLabels());
                 var change = classifyQuery(baseQuery, candidateQuery);
                 switch (change) {
-                    case IMPROVED -> improved++;
+                    case IMPROVED -> {
+                        improved++;
+                        shifts.add(new ScaleRankingShift(baseQuery.queryText(), baseQuery.expectedLabels(),
+                                baseRank, candidateRank, change));
+                    }
                     case MAINTAINED -> maintained++;
-                    case DEGRADED -> degraded++;
+                    case DEGRADED -> {
+                        degraded++;
+                        shifts.add(new ScaleRankingShift(baseQuery.queryText(), baseQuery.expectedLabels(),
+                                baseRank, candidateRank, change));
+                    }
                 }
             }
         } else {
@@ -318,7 +328,8 @@ public final class LatencyScaleSweepRunner {
                 evalReport,
                 improved,
                 maintained,
-                degraded
+                degraded,
+                shifts
         );
     }
 
@@ -340,7 +351,7 @@ public final class LatencyScaleSweepRunner {
     private static int firstExpectedRank(Set<String> expected, List<String> returned) {
         for (int i = 0; i < returned.size(); i++) {
             if (expected.contains(returned.get(i))) {
-                return i;
+                return i + 1;
             }
         }
         return Integer.MAX_VALUE;
@@ -354,31 +365,60 @@ public final class LatencyScaleSweepRunner {
         return averages;
     }
 
-    private ScaleOptimizationDecision evaluateDecision(List<LatencyScalePointResult> results) {
+    /**
+     * Evaluates the optimization decision gate strictly from structural scan invariants
+     * and relative scale-curve behavior.
+     */
+    ScaleOptimizationDecision evaluateDecision(List<LatencyScalePointResult> results) {
         if (results.isEmpty()) {
             return ScaleOptimizationDecision.INCONCLUSIVE_NEEDS_LARGER_SCALE;
         }
+
         int maxScale = results.stream().mapToInt(LatencyScalePointResult::corpusSize).max().orElse(0);
-        if (maxScale < 1_000) {
+        int minScale = results.stream().mapToInt(LatencyScalePointResult::corpusSize).min().orElse(0);
+
+        // 1. Scale threshold check: multi-thousand corpus sizes required
+        if (maxScale < 1_000 || maxScale == minScale) {
             return ScaleOptimizationDecision.INCONCLUSIVE_NEEDS_LARGER_SCALE;
         }
 
-        // Structural check: all scale points have full scan fraction (1.0)
+        // 2. Structural scan invariant: full corpus scan hypothesis
         boolean fullScanAcrossAll = results.stream().allMatch(r -> r.scanFraction() >= 0.99);
         if (!fullScanAcrossAll) {
             return ScaleOptimizationDecision.OPTIMIZATION_NOT_YET_JUSTIFIED;
         }
 
-        // Check if scan time grows at larger scale
+        // 3. Relative scale-curve check: query latency should scale with corpus size
         var largest = results.stream()
                 .filter(r -> r.corpusSize() == maxScale)
-                .findFirst()
+                .max(Comparator.comparingLong(r -> r.timing().avgNanos()))
                 .orElse(null);
 
-        if (largest != null && largest.timing().avgScanNanos() > largest.timing().avgEncodeNanos()) {
-            return ScaleOptimizationDecision.BOUNDED_EXACT_TOP_K_EXPERIMENT_JUSTIFIED;
+        var smallest = results.stream()
+                .filter(r -> r.corpusSize() == minScale)
+                .min(Comparator.comparingLong(r -> r.timing().avgNanos()))
+                .orElse(null);
+
+        if (largest == null || smallest == null) {
+            return ScaleOptimizationDecision.INCONCLUSIVE_NEEDS_LARGER_SCALE;
         }
 
+        long largestLatency = largest.timing().avgNanos();
+        long smallestLatency = smallest.timing().avgNanos();
+        long encodeDiagnostic = largest.timing().avgEncodeNanos();
+
+        // If latency didn't grow or regressed despite larger corpus, timing evidence is contradictory/noisy
+        if (largestLatency <= smallestLatency) {
+            return ScaleOptimizationDecision.INCONCLUSIVE_NEEDS_LARGER_SCALE;
+        }
+
+        // If largest scale latency remains small and comparable to standalone encode time (less than 2x),
+        // scan is not yet a dominating bottleneck
+        if (encodeDiagnostic > 0 && largestLatency <= 2 * encodeDiagnostic) {
+            return ScaleOptimizationDecision.OPTIMIZATION_NOT_YET_JUSTIFIED;
+        }
+
+        // Relative scale growth confirmed with full structural scan
         return ScaleOptimizationDecision.BOUNDED_EXACT_TOP_K_EXPERIMENT_JUSTIFIED;
     }
 
@@ -389,9 +429,9 @@ public final class LatencyScaleSweepRunner {
         return switch (decision) {
             case INCONCLUSIVE_NEEDS_LARGER_SCALE ->
                     "Evaluated scale points (max N=" + maxScale
-                            + ") are below the multi-thousand scale threshold required to confirm scan bottlenecks.";
+                            + ") are below the multi-thousand scale threshold or have ambiguous curve data to confirm bottlenecks.";
             case OPTIMIZATION_NOT_YET_JUSTIFIED ->
-                    "Scan overhead remains within acceptable noise levels relative to encoding across evaluated points.";
+                    "Structural scan fraction did not match full scan or end-to-end query latency remained comparable to standalone encoding.";
             case BOUNDED_EXACT_TOP_K_EXPERIMENT_JUSTIFIED ->
                     "Structural scan fraction is 1.0 (scanned candidates = N) regardless of requested top-K. "
                             + "At scale (N=" + maxScale + "), candidate scoring and full sorting dominate query latency. "

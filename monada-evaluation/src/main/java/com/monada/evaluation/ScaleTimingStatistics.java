@@ -6,11 +6,11 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Summary of best-effort wall-clock timing and throughput statistics across
- * measured evaluation query repetitions.
+ * Summary of best-effort wall-clock query latency and standalone encoding diagnostics
+ * across measured evaluation query repetitions.
  *
  * <p>All timing values are reported for exploratory diagnostic purposes and
- * should not be asserted against strict thresholds in CI.
+ * are not asserted against strict thresholds in CI.
  */
 public record ScaleTimingStatistics(
         int queryCount,
@@ -22,7 +22,6 @@ public record ScaleTimingStatistics(
         long maxNanos,
         long avgNanos,
         long avgEncodeNanos,
-        long avgScanNanos,
         double queriesPerSecond
 ) {
     public ScaleTimingStatistics {
@@ -53,9 +52,6 @@ public record ScaleTimingStatistics(
         if (avgEncodeNanos < 0) {
             throw new IllegalArgumentException("avgEncodeNanos must be >= 0, got: " + avgEncodeNanos);
         }
-        if (avgScanNanos < 0) {
-            throw new IllegalArgumentException("avgScanNanos must be >= 0, got: " + avgScanNanos);
-        }
         if (!Double.isFinite(queriesPerSecond) || queriesPerSecond < 0.0) {
             throw new IllegalArgumentException("queriesPerSecond must be finite and >= 0, got: " + queriesPerSecond);
         }
@@ -64,12 +60,10 @@ public record ScaleTimingStatistics(
     public static ScaleTimingStatistics from(
             List<Long> latencies,
             List<Long> encodeLatencies,
-            List<Long> scanLatencies,
             int queryCount,
             int repetitionCount) {
         Objects.requireNonNull(latencies, "latencies");
         Objects.requireNonNull(encodeLatencies, "encodeLatencies");
-        Objects.requireNonNull(scanLatencies, "scanLatencies");
         if (queryCount < 0) {
             throw new IllegalArgumentException("queryCount must be >= 0, got: " + queryCount);
         }
@@ -79,7 +73,7 @@ public record ScaleTimingStatistics(
 
         int sampleCount = latencies.size();
         if (sampleCount == 0) {
-            return new ScaleTimingStatistics(queryCount, repetitionCount, 0, 0, 0, 0, 0, 0, 0, 0, 0.0);
+            return new ScaleTimingStatistics(queryCount, repetitionCount, 0, 0, 0, 0, 0, 0, 0, 0.0);
         }
 
         var sorted = new ArrayList<>(latencies);
@@ -103,12 +97,6 @@ public record ScaleTimingStatistics(
         }
         long avgEncode = encodeLatencies.isEmpty() ? 0 : totalEncode / encodeLatencies.size();
 
-        long totalScan = 0;
-        for (long scn : scanLatencies) {
-            totalScan += scn;
-        }
-        long avgScan = scanLatencies.isEmpty() ? 0 : totalScan / scanLatencies.size();
-
         double qps = avg == 0 ? 0.0 : (1_000_000_000.0 / avg);
 
         return new ScaleTimingStatistics(
@@ -121,7 +109,6 @@ public record ScaleTimingStatistics(
                 max,
                 avg,
                 avgEncode,
-                avgScan,
                 qps
         );
     }

@@ -33,8 +33,8 @@ class LatencyScaleSweepReportRenderingTest {
         assertTrue(rendered.contains("Decision: " + report.decision().name()));
         assertTrue(rendered.contains("Scale (N)"));
         assertTrue(rendered.contains("Scan Fraction"));
-        assertTrue(rendered.contains("Avg Encode (ns)"));
-        assertTrue(rendered.contains("Avg Scan (ns)"));
+        assertTrue(rendered.contains("Standalone Encode (ns)"));
+        assertTrue(rendered.contains("Query Latency (ns)"));
         assertTrue(rendered.contains("QPS"));
         assertTrue(rendered.contains("MRR"));
     }
