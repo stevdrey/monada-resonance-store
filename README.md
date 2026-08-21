@@ -75,6 +75,7 @@ length-prefixed vectors without a manifest, but that layout is not inferred for 
 ./gradlew :monada-evaluation:runProjectMemoryFeedbackKeyValidation -q
 ./gradlew :monada-evaluation:runNormalizedQueryKeyStress -q
 ./gradlew :monada-evaluation:runLatency -q
+./gradlew :monada-evaluation:runLatencyScaleSweep -q
 ./gradlew :monada-evaluation:runProjectMemory -q
 ./gradlew :monada-evaluation:runSpeechModalityComparison -q
 ./gradlew :monada-evaluation:runSpeechHybridSweep -q
@@ -400,6 +401,22 @@ The `runLatency` task reports recall latency and scan diagnostics for the `Expan
 ```bash
 ./gradlew :monada-evaluation:runLatency -q
 ```
+
+## Scaled Linear-Scan Benchmark and Decision Gate
+
+Phase V-Performance introduces the multi-scale linear-scan benchmark (`LatencyScaleSweepRunner` and `runLatencyScaleSweep`), evaluating recall behavior over configurable corpus sizes (100, 1,000, 5,000, 10,000 atoms) and top-K configurations ($K=1$ vs $K=5$).
+
+```bash
+./gradlew :monada-evaluation:runLatencyScaleSweep -q
+```
+
+The benchmark:
+- Generates reproducible distractor atoms with stable labels/content using `DeterministicScaleCorpusGenerator` (combining confusable domain overlaps with orthogonal topics).
+- Separates deterministic structural scan counts ($1.0$ scan fraction in linear scan) from best-effort wall-clock timing percentiles (min, median, p95, max, average, and queries/sec throughput).
+- Breaks down query time into flat query encoding (~30–120 $\mu\text{s}$) vs linear candidate scanning ($O(N)$ growth).
+- Proves top-K work invariance (scanned candidates equals the full corpus regardless of whether $K=1$ or $K=5$).
+- Tracks retrieval quality (Precision, Recall, Hit, MRR) and ranking stability per scale point.
+- Ends with an explicit evidence conclusion (`BOUNDED_EXACT_TOP_K_EXPERIMENT_JUSTIFIED`) without silently altering the production scan path.
 
 ## Design Invariants
 

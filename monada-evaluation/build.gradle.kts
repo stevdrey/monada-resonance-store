@@ -63,6 +63,13 @@ tasks.register<JavaExec>("runLatency") {
     classpath = sourceSets["main"].runtimeClasspath
 }
 
+tasks.register<JavaExec>("runLatencyScaleSweep") {
+    description = "Run the scaled linear-scan latency benchmark and decision gate across multiple corpus sizes"
+    group = "application"
+    mainClass.set("com.monada.evaluation.LatencyScaleSweepMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
 tasks.register<JavaExec>("runProjectMemory") {
     description = "Run the project-memory evaluation dataset built from the repository's own documentation (exploratory)"
     group = "application"
