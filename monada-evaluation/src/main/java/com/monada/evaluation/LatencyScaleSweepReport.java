@@ -82,9 +82,9 @@ public record LatencyScaleSweepReport(
         sb.append("3. Retrieval Quality by Scale Point\n");
         sb.append("-----------------------------------\n");
         sb.append(String.format(Locale.ROOT,
-                "%-10s | %-6s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s%n",
-                "Scale (N)", "Top-K", "P@1", "P@3", "P@5", "R@1", "R@3", "R@5", "Hit@1", "Hit@3", "MRR"));
-        sb.append("-----------+--------+----------+----------+----------+----------+----------+----------+----------+----------+----------\n");
+                "%-10s | %-6s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s%n",
+                "Scale (N)", "Top-K", "P@1", "P@3", "P@5", "R@1", "R@3", "R@5", "Hit@1", "Hit@3", "Hit@5", "MRR"));
+        sb.append("-----------+--------+----------+----------+----------+----------+----------+----------+----------+----------+----------+----------\n");
         for (var r : results) {
             var eval = r.evaluationReport();
             var p1 = r.topK() >= 1 ? String.format(Locale.ROOT, "%.4f", eval.averagePrecisionByK().getOrDefault(1, 0.0)) : "-";
@@ -95,9 +95,10 @@ public record LatencyScaleSweepReport(
             var r5 = r.topK() >= 5 ? String.format(Locale.ROOT, "%.4f", eval.averageRecallByK().getOrDefault(5, 0.0)) : "-";
             var h1 = r.topK() >= 1 ? String.format(Locale.ROOT, "%.4f", eval.averageHitByK().getOrDefault(1, 0.0)) : "-";
             var h3 = r.topK() >= 3 ? String.format(Locale.ROOT, "%.4f", eval.averageHitByK().getOrDefault(3, 0.0)) : "-";
+            var h5 = r.topK() >= 5 ? String.format(Locale.ROOT, "%.4f", eval.averageHitByK().getOrDefault(5, 0.0)) : "-";
             sb.append(String.format(Locale.ROOT,
-                    "%-10d | %-6d | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8.4f%n",
-                    r.corpusSize(), r.topK(), p1, p3, p5, r1, r3, r5, h1, h3, eval.meanReciprocalRank()));
+                    "%-10d | %-6d | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8.4f%n",
+                    r.corpusSize(), r.topK(), p1, p3, p5, r1, r3, r5, h1, h3, h5, eval.meanReciprocalRank()));
         }
         sb.append('\n');
 
@@ -114,13 +115,16 @@ public record LatencyScaleSweepReport(
                     r.maintainedQueryCount(), r.improvedQueryCount(), r.degradedQueryCount()));
         }
 
-        boolean hasShifts = results.stream().anyMatch(r -> !r.rankingShifts().isEmpty());
+        boolean hasShifts = results.stream().anyMatch(r -> r.improvedQueryCount() > 0 || r.degradedQueryCount() > 0);
         if (hasShifts) {
             sb.append("\nObserved Ranking Shifts from Distractors:\n");
             for (var r : results) {
-                if (!r.rankingShifts().isEmpty()) {
+                var changedShifts = r.rankingShifts().stream()
+                        .filter(s -> s.change() != RankingChange.MAINTAINED)
+                        .toList();
+                if (!changedShifts.isEmpty()) {
                     sb.append(String.format(Locale.ROOT, "  Scale N=%d, Top-K=%d:%n", r.corpusSize(), r.topK()));
-                    for (var shift : r.rankingShifts()) {
+                    for (var shift : changedShifts) {
                         var sortedExpected = new ArrayList<>(shift.expectedLabels());
                         Collections.sort(sortedExpected);
                         sb.append(String.format(Locale.ROOT,

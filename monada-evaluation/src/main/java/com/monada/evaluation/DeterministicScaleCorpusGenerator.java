@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
@@ -129,22 +130,25 @@ public final class DeterministicScaleCorpusGenerator {
             String label;
             String content;
             if (makeConfusable) {
-                confusableGenerated++;
-                label = String.format("distractor_confusable_%06d", confusableGenerated);
                 String template = CONFUSABLE_TEMPLATES.get(random.nextInt(CONFUSABLE_TEMPLATES.size()));
                 String subject = CONFUSABLE_SUBJECTS.get(random.nextInt(CONFUSABLE_SUBJECTS.size()));
+                do {
+                    confusableGenerated++;
+                    label = String.format(Locale.ROOT, "distractor_confusable_%06d", confusableGenerated);
+                } while (existingLabels.contains(label));
+                existingLabels.add(label);
                 content = String.format(template, subject) + " [id: " + label + "]";
             } else {
-                unrelatedGenerated++;
-                label = String.format("distractor_unrelated_%06d", unrelatedGenerated);
                 String template = UNRELATED_TEMPLATES.get(random.nextInt(UNRELATED_TEMPLATES.size()));
                 String subject = UNRELATED_SUBJECTS.get(random.nextInt(UNRELATED_SUBJECTS.size()));
+                do {
+                    unrelatedGenerated++;
+                    label = String.format(Locale.ROOT, "distractor_unrelated_%06d", unrelatedGenerated);
+                } while (existingLabels.contains(label));
+                existingLabels.add(label);
                 content = String.format(template, subject) + " [id: " + label + "]";
             }
 
-            if (!existingLabels.add(label)) {
-                throw new IllegalStateException("generated duplicate label: " + label);
-            }
             allAtoms.add(new DatasetAtom(label, content, List.of()));
         }
 

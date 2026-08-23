@@ -4,6 +4,7 @@ import com.monada.evaluation.datasets.ExpandedTechnologyDataset;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -119,6 +120,46 @@ class DeterministicScaleCorpusGeneratorTest {
                     "Mismatch at index " + i + " between scale 100 and scale 500");
             assertEquals(small.atoms().get(i).content(), large.atoms().get(i).content(),
                     "Content mismatch at index " + i + " between scale 100 and scale 500");
+        }
+    }
+
+    @Test
+    void skipsExistingSeedLabelsToPreventCollisions() {
+        // Base dataset already containing distractor_confusable_000001
+        var seedAtom = new DatasetAtom("distractor_confusable_000001", "Existing distractor content", List.of());
+        var seedQuery = new EvaluationQuery("test query", Set.of("distractor_confusable_000001"));
+        var seedDataset = new EvaluationDataset(List.of(seedAtom), List.of(seedQuery));
+
+        var gen = new DeterministicScaleCorpusGenerator(42L);
+        var scaled = gen.generate(seedDataset, 10);
+
+        assertEquals(10, scaled.atoms().size());
+        Set<String> labels = new HashSet<>();
+        for (var a : scaled.atoms()) {
+            assertTrue(labels.add(a.label()), "Duplicate label found: " + a.label());
+        }
+        // First generated confusable should advance past 000001 to 000002
+        assertTrue(labels.contains("distractor_confusable_000001"));
+    }
+
+    @Test
+    void generatesAsciiLabelsUnderNonWesternLocale() {
+        var defaultLocale = java.util.Locale.getDefault();
+        try {
+            // Set default locale to Arabic (which uses Eastern Arabic numerals in default String.format)
+            java.util.Locale.setDefault(java.util.Locale.forLanguageTag("ar-SA"));
+
+            var base = ExpandedTechnologyDataset.get();
+            var gen = new DeterministicScaleCorpusGenerator(42L);
+            var scaled = gen.generate(base, 50);
+
+            for (var atom : scaled.atoms()) {
+                // All atom labels must only contain standard ASCII characters
+                assertTrue(atom.label().matches("^[a-zA-Z0-9_]+$"),
+                        "Label contains non-ASCII characters: " + atom.label());
+            }
+        } finally {
+            java.util.Locale.setDefault(defaultLocale);
         }
     }
 

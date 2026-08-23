@@ -21,7 +21,7 @@ class LatencyScaleSweepIntegrationTest {
         var scalePoints = List.of(33, 60, 100);
         var topKs = List.of(1, 5);
 
-        var runner = new LatencyScaleSweepRunner(base, scalePoints, topKs, 1, 2, 42L);
+        var runner = new LatencyScaleSweepRunner("expanded-technology", base, scalePoints, topKs, 1, 2, 42L);
         var report = runner.run(tempDir);
 
         assertNotNull(report);

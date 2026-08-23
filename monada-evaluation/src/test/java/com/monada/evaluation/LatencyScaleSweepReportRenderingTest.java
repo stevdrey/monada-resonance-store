@@ -18,7 +18,7 @@ class LatencyScaleSweepReportRenderingTest {
         var scalePoints = List.of(33, 50);
         var topKs = List.of(1, 5);
 
-        var runner = new LatencyScaleSweepRunner(base, scalePoints, topKs, 1, 2, 42L);
+        var runner = new LatencyScaleSweepRunner("expanded-technology", base, scalePoints, topKs, 1, 2, 42L);
         var report = runner.run(tempDir);
         var rendered = report.render();
 
@@ -38,6 +38,7 @@ class LatencyScaleSweepReportRenderingTest {
         assertTrue(rendered.contains("QPS"));
         assertTrue(rendered.contains("P@1"));
         assertTrue(rendered.contains("R@1"));
+        assertTrue(rendered.contains("Hit@5"));
         assertTrue(rendered.contains("MRR"));
     }
 }

@@ -21,7 +21,7 @@ class LatencyScaleSweepRunnerTest {
         var scalePoints = List.of(33, 50);
         var topKs = List.of(1, 5);
 
-        var runner = new LatencyScaleSweepRunner(base, scalePoints, topKs, 0, 1, 42L);
+        var runner = new LatencyScaleSweepRunner("expanded-technology", base, scalePoints, topKs, 0, 1, 42L);
         var report = runner.run(tempDir);
 
         assertNotNull(report);
@@ -42,7 +42,7 @@ class LatencyScaleSweepRunnerTest {
         var scalePoints = List.of(50);
         var topKs = List.of(1, 5);
 
-        var runner = new LatencyScaleSweepRunner(base, scalePoints, topKs, 0, 1, 42L);
+        var runner = new LatencyScaleSweepRunner("expanded-technology", base, scalePoints, topKs, 0, 1, 42L);
         var report = runner.run(tempDir);
 
         assertEquals(2, report.results().size());
@@ -63,13 +63,18 @@ class LatencyScaleSweepRunnerTest {
         var scalePoints = List.of(60);
         var topKs = List.of(3, 5);
 
-        var runner = new LatencyScaleSweepRunner(base, scalePoints, topKs, 0, 1, 42L);
+        var runner = new LatencyScaleSweepRunner("expanded-technology", base, scalePoints, topKs, 0, 1, 42L);
         var report = runner.run(tempDir);
 
         var res = report.results().getFirst();
         int totalTracked = res.maintainedQueryCount() + res.improvedQueryCount() + res.degradedQueryCount();
         assertEquals(base.queries().size(), totalTracked);
-        assertEquals(res.improvedQueryCount() + res.degradedQueryCount(), res.rankingShifts().size());
+        // All query rankings are preserved in rankingShifts
+        assertEquals(base.queries().size(), res.rankingShifts().size());
+        long changedCount = res.rankingShifts().stream()
+                .filter(s -> s.change() != RankingChange.MAINTAINED)
+                .count();
+        assertEquals(res.improvedQueryCount() + res.degradedQueryCount(), changedCount);
     }
 
     @Test
@@ -78,7 +83,7 @@ class LatencyScaleSweepRunnerTest {
         var scalePoints = List.of(33, 60);
         var topKs = List.of(1, 5);
 
-        var runner = new LatencyScaleSweepRunner(base, scalePoints, topKs, 0, 1, 42L);
+        var runner = new LatencyScaleSweepRunner("expanded-technology", base, scalePoints, topKs, 0, 1, 42L);
         var report = runner.run(tempDir);
 
         assertEquals(ScaleOptimizationDecision.INCONCLUSIVE_NEEDS_LARGER_SCALE, report.decision());
@@ -91,7 +96,7 @@ class LatencyScaleSweepRunnerTest {
         var scalePoints = List.of(33, 5000);
         var topKs = List.of(1); // single topK arm
 
-        var runner = new LatencyScaleSweepRunner(base, scalePoints, topKs, 0, 1, 42L);
+        var runner = new LatencyScaleSweepRunner("expanded-technology", base, scalePoints, topKs, 0, 1, 42L);
         var report = runner.run(tempDir);
 
         assertEquals(ScaleOptimizationDecision.INCONCLUSIVE_NEEDS_LARGER_SCALE, report.decision());
@@ -255,8 +260,8 @@ class LatencyScaleSweepRunnerTest {
         var scalePoints = List.of(40);
         var topKs = List.of(1, 5);
 
-        var report1 = new LatencyScaleSweepRunner(base, scalePoints, topKs, 0, 1, 99L).run(tempDir1);
-        var report2 = new LatencyScaleSweepRunner(base, scalePoints, topKs, 0, 1, 99L).run(tempDir2);
+        var report1 = new LatencyScaleSweepRunner("expanded-technology", base, scalePoints, topKs, 0, 1, 99L).run(tempDir1);
+        var report2 = new LatencyScaleSweepRunner("expanded-technology", base, scalePoints, topKs, 0, 1, 99L).run(tempDir2);
 
         var res1 = report1.results().getFirst();
         var res2 = report2.results().getFirst();

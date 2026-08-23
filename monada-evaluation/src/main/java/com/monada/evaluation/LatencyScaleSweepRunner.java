@@ -68,22 +68,6 @@ public final class LatencyScaleSweepRunner {
     }
 
     public LatencyScaleSweepRunner(
-            EvaluationDataset seedDataset,
-            List<Integer> scalePoints,
-            List<Integer> topKs,
-            int warmupCount,
-            int repetitionCount,
-            long seed) {
-        this("expanded-technology",
-                seedDataset,
-                scalePoints,
-                topKs,
-                warmupCount,
-                repetitionCount,
-                seed);
-    }
-
-    public LatencyScaleSweepRunner(
             String datasetName,
             EvaluationDataset seedDataset,
             List<Integer> scalePoints,
@@ -426,30 +410,18 @@ public final class LatencyScaleSweepRunner {
                 int candidateRank = firstExpectedRank(candidateQuery.expectedLabels(), candidateQuery.returnedLabels());
                 var change = classifyQuery(baseQuery, candidateQuery);
                 switch (change) {
-                    case IMPROVED -> {
-                        improved++;
-                        shifts.add(new ScaleRankingShift(
-                                baseQuery.queryText(),
-                                baseQuery.expectedLabels(),
-                                baseQuery.returnedLabels(),
-                                candidateQuery.returnedLabels(),
-                                baseRank,
-                                candidateRank,
-                                change));
-                    }
+                    case IMPROVED -> improved++;
                     case MAINTAINED -> maintained++;
-                    case DEGRADED -> {
-                        degraded++;
-                        shifts.add(new ScaleRankingShift(
-                                baseQuery.queryText(),
-                                baseQuery.expectedLabels(),
-                                baseQuery.returnedLabels(),
-                                candidateQuery.returnedLabels(),
-                                baseRank,
-                                candidateRank,
-                                change));
-                    }
+                    case DEGRADED -> degraded++;
                 }
+                shifts.add(new ScaleRankingShift(
+                        baseQuery.queryText(),
+                        baseQuery.expectedLabels(),
+                        baseQuery.returnedLabels(),
+                        candidateQuery.returnedLabels(),
+                        baseRank,
+                        candidateRank,
+                        change));
             }
         } else {
             maintained = queryCount;
