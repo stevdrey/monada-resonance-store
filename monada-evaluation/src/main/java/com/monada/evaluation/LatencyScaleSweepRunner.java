@@ -250,7 +250,7 @@ public final class LatencyScaleSweepRunner {
         return new SeededStore(populatedMemory, Collections.unmodifiableMap(idToLabel));
     }
 
-    private static String formatAtomLine(KnowledgeAtom atom) {
+    private String formatAtomLine(KnowledgeAtom atom) {
         String encodedContent = Base64.getEncoder().encodeToString(atom.content().getBytes(StandardCharsets.UTF_8));
         String encodedAliases = atom.aliases().stream()
                 .map(alias -> Base64.getEncoder().encodeToString(alias.getBytes(StandardCharsets.UTF_8)))
@@ -477,7 +477,7 @@ public final class LatencyScaleSweepRunner {
         return RankingChange.MAINTAINED;
     }
 
-    private static int countRelevantHits(Set<String> expected, List<String> returned) {
+    private int countRelevantHits(Set<String> expected, List<String> returned) {
         int count = 0;
         for (String label : returned) {
             if (expected.contains(label)) {
@@ -487,7 +487,7 @@ public final class LatencyScaleSweepRunner {
         return count;
     }
 
-    private static int firstExpectedRank(Set<String> expected, List<String> returned) {
+    private int firstExpectedRank(Set<String> expected, List<String> returned) {
         for (int i = 0; i < returned.size(); i++) {
             if (expected.contains(returned.get(i))) {
                 return i + 1;
