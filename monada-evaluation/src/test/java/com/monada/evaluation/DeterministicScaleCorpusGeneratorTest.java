@@ -103,6 +103,26 @@ class DeterministicScaleCorpusGeneratorTest {
     }
 
     @Test
+    void generatedScaleCorporaAreStrictlyNested() {
+        var base = ExpandedTechnologyDataset.get();
+        var gen = new DeterministicScaleCorpusGenerator(42L);
+
+        var small = gen.generate(base, 100);
+        var large = gen.generate(base, 500);
+
+        assertEquals(100, small.atoms().size());
+        assertEquals(500, large.atoms().size());
+
+        // Every atom in small must be identical to the corresponding atom in large at the same index
+        for (int i = 0; i < 100; i++) {
+            assertEquals(small.atoms().get(i).label(), large.atoms().get(i).label(),
+                    "Mismatch at index " + i + " between scale 100 and scale 500");
+            assertEquals(small.atoms().get(i).content(), large.atoms().get(i).content(),
+                    "Content mismatch at index " + i + " between scale 100 and scale 500");
+        }
+    }
+
+    @Test
     void rejectsTargetSizeLessThanBase() {
         var base = ExpandedTechnologyDataset.get();
         var gen = new DeterministicScaleCorpusGenerator();

@@ -513,51 +513,72 @@ public final class LatencyScaleSweepRunner {
             return ScaleOptimizationDecision.INCONCLUSIVE_NEEDS_LARGER_SCALE;
         }
 
-        int maxScale = results.stream().mapToInt(LatencyScalePointResult::corpusSize).max().orElse(0);
-        int minScale = results.stream().mapToInt(LatencyScalePointResult::corpusSize).min().orElse(0);
+        // Group by distinct corpus scale points, sorted in ascending order
+        var byScale = new TreeMap<Integer, List<LatencyScalePointResult>>();
+        for (var r : results) {
+            byScale.computeIfAbsent(r.corpusSize(), k -> new ArrayList<>()).add(r);
+        }
 
-        // 1. Scale threshold check: multi-thousand corpus sizes required
-        if (maxScale < 1_000 || maxScale == minScale) {
+        if (byScale.size() < 2) {
             return ScaleOptimizationDecision.INCONCLUSIVE_NEEDS_LARGER_SCALE;
         }
 
-        // 2. Structural scan invariant: full corpus scan hypothesis
+        int maxScale = byScale.lastKey();
+        int minScale = byScale.firstKey();
+
+        // 1. Scale threshold check: multi-thousand corpus sizes required
+        if (maxScale < 1_000) {
+            return ScaleOptimizationDecision.INCONCLUSIVE_NEEDS_LARGER_SCALE;
+        }
+
+        // 2. Structural scan invariant: full corpus scan hypothesis across all points
         boolean fullScanAcrossAll = results.stream().allMatch(r -> r.scanFraction() >= 0.99);
         if (!fullScanAcrossAll) {
             return ScaleOptimizationDecision.OPTIMIZATION_NOT_YET_JUSTIFIED;
         }
 
-        // 3. Relative scale-curve check: query latency should scale with corpus size
-        var largest = results.stream()
-                .filter(r -> r.corpusSize() == maxScale)
-                .max(Comparator.comparingLong(r -> r.timing().avgNanos()))
-                .orElse(null);
+        // 3. Whole scale-curve monotonicity check across all configured scale points
+        long prevLatency = -1;
+        for (var entry : byScale.entrySet()) {
+            long avgLatencyForScale = (long) entry.getValue().stream()
+                    .mapToLong(r -> r.timing().avgNanos())
+                    .average()
+                    .orElse(0.0);
 
-        var smallest = results.stream()
-                .filter(r -> r.corpusSize() == minScale)
-                .min(Comparator.comparingLong(r -> r.timing().avgNanos()))
-                .orElse(null);
-
-        if (largest == null || smallest == null) {
-            return ScaleOptimizationDecision.INCONCLUSIVE_NEEDS_LARGER_SCALE;
+            // If an intermediate larger scale point has lower latency than a previous smaller scale point,
+            // curve is non-monotonic / noisy
+            if (prevLatency >= 0 && avgLatencyForScale < prevLatency) {
+                return ScaleOptimizationDecision.INCONCLUSIVE_NEEDS_LARGER_SCALE;
+            }
+            prevLatency = avgLatencyForScale;
         }
 
-        long largestLatency = largest.timing().avgNanos();
-        long smallestLatency = smallest.timing().avgNanos();
-        long encodeDiagnostic = largest.timing().avgEncodeNanos();
+        long minScaleAvgLatency = (long) byScale.get(minScale).stream()
+                .mapToLong(r -> r.timing().avgNanos())
+                .average()
+                .orElse(0.0);
 
-        // If latency didn't grow or regressed despite larger corpus, timing evidence is contradictory/noisy
-        if (largestLatency <= smallestLatency) {
-            return ScaleOptimizationDecision.INCONCLUSIVE_NEEDS_LARGER_SCALE;
-        }
+        long maxScaleAvgLatency = (long) byScale.get(maxScale).stream()
+                .mapToLong(r -> r.timing().avgNanos())
+                .average()
+                .orElse(0.0);
 
-        // If largest scale latency remains small and comparable to standalone encode time (less than 2x),
+        long maxScaleAvgEncode = (long) byScale.get(maxScale).stream()
+                .mapToLong(r -> r.timing().avgEncodeNanos())
+                .average()
+                .orElse(0.0);
+
+        // If largest scale latency remains small and comparable to standalone encode time (<= 2x),
         // scan is not yet a dominating bottleneck
-        if (encodeDiagnostic > 0 && largestLatency <= 2 * encodeDiagnostic) {
+        if (maxScaleAvgEncode > 0 && maxScaleAvgLatency <= 2 * maxScaleAvgEncode) {
             return ScaleOptimizationDecision.OPTIMIZATION_NOT_YET_JUSTIFIED;
         }
 
-        // Relative scale growth confirmed with full structural scan
+        // If latency growth between min and max scale is non-increasing
+        if (maxScaleAvgLatency <= minScaleAvgLatency) {
+            return ScaleOptimizationDecision.INCONCLUSIVE_NEEDS_LARGER_SCALE;
+        }
+
         return ScaleOptimizationDecision.BOUNDED_EXACT_TOP_K_EXPERIMENT_JUSTIFIED;
     }
 

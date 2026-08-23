@@ -22,12 +22,28 @@ class ScaleTimingStatisticsTest {
         assertEquals(2, stats.repetitionCount());
         assertEquals(10, stats.sampleCount());
         assertEquals(100L, stats.minNanos());
-        assertEquals(600L, stats.medianNanos());
+        assertEquals(550L, stats.medianNanos());
         assertEquals(1000L, stats.p95Nanos());
         assertEquals(1000L, stats.maxNanos());
         assertEquals(550L, stats.avgNanos());
         assertEquals(50L, stats.avgEncodeNanos());
         assertTrue(stats.queriesPerSecond() > 0.0);
+    }
+
+    @Test
+    void computesNearestRankP95AndOddMedianCorrectly() {
+        // 20 samples from 1 to 20
+        var latencies20 = java.util.stream.LongStream.rangeClosed(1, 20).boxed().toList();
+        var stats20 = ScaleTimingStatistics.from(latencies20, List.of(1L), 10, 2);
+
+        // Nearest-rank p95 for 20 samples: ceil(20 * 0.95) - 1 = 18 -> value 19
+        assertEquals(19L, stats20.p95Nanos());
+        // Median for 20 samples: (10 + 11) / 2 = 10
+        assertEquals(10L, stats20.medianNanos());
+
+        // Odd sample count (5 samples: 10, 20, 30, 40, 50)
+        var oddStats = ScaleTimingStatistics.from(List.of(10L, 20L, 30L, 40L, 50L), List.of(5L), 5, 1);
+        assertEquals(30L, oddStats.medianNanos());
     }
 
     @Test

@@ -81,7 +81,12 @@ public record ScaleTimingStatistics(
 
         long min = sorted.getFirst();
         long max = sorted.getLast();
-        long median = sorted.get(sampleCount / 2);
+        long median;
+        if (sampleCount % 2 == 1) {
+            median = sorted.get(sampleCount / 2);
+        } else {
+            median = (sorted.get(sampleCount / 2 - 1) + sorted.get(sampleCount / 2)) / 2;
+        }
         int p95Index = Math.max(0, Math.min(sampleCount - 1, (int) Math.ceil(sampleCount * 0.95) - 1));
         long p95 = sorted.get(p95Index);
 

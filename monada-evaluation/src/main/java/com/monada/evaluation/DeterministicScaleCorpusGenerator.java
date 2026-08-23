@@ -111,9 +111,6 @@ public final class DeterministicScaleCorpusGenerator {
         }
 
         int distractorsNeeded = targetCorpusSize - baseSize;
-        int confusableCount = (int) Math.round(distractorsNeeded * CONFUSABLE_RATIO);
-        int unrelatedCount = distractorsNeeded - confusableCount;
-
         Set<String> existingLabels = new HashSet<>();
         for (DatasetAtom atom : baseDataset.atoms()) {
             existingLabels.add(atom.label());
@@ -127,8 +124,7 @@ public final class DeterministicScaleCorpusGenerator {
         int unrelatedGenerated = 0;
 
         for (int i = 0; i < distractorsNeeded; i++) {
-            boolean makeConfusable = confusableGenerated < confusableCount
-                    && (unrelatedGenerated >= unrelatedCount || random.nextDouble() < CONFUSABLE_RATIO);
+            boolean makeConfusable = random.nextDouble() < CONFUSABLE_RATIO;
 
             String label;
             String content;

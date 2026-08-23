@@ -36,6 +36,8 @@ class LatencyScaleSweepReportRenderingTest {
         assertTrue(rendered.contains("Standalone Encode (ns)"));
         assertTrue(rendered.contains("Query Latency (ns)"));
         assertTrue(rendered.contains("QPS"));
+        assertTrue(rendered.contains("P@1"));
+        assertTrue(rendered.contains("R@1"));
         assertTrue(rendered.contains("MRR"));
     }
 }

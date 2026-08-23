@@ -126,6 +126,22 @@ class LatencyScaleSweepRunnerTest {
         assertEquals(ScaleOptimizationDecision.INCONCLUSIVE_NEEDS_LARGER_SCALE,
                 runner.evaluateDecision(List.of(noisyPoint1, noisyPoint2)));
 
+        // Branch 3b: Intermediate non-monotonic scale curve (100 -> 1000 -> 5000 where 1000 > 5000)
+        var interPoint1 = new LatencyScalePointResult(
+                100, 10, 1, 0, 1, 1000, 1.0, 10,
+                new ScaleTimingStatistics(10, 1, 10, 1000, 1000, 1000, 1000, 1000, 50, 1.0),
+                dummyEval, 0, 10, 0, List.of());
+        var interPoint2 = new LatencyScalePointResult(
+                1000, 10, 1, 0, 1, 10000, 1.0, 10,
+                new ScaleTimingStatistics(10, 1, 10, 50000, 50000, 50000, 50000, 50000, 50, 0.02),
+                dummyEval, 0, 10, 0, List.of());
+        var interPoint3 = new LatencyScalePointResult(
+                5000, 10, 1, 0, 1, 50000, 1.0, 10,
+                new ScaleTimingStatistics(10, 1, 10, 30000, 30000, 30000, 30000, 30000, 50, 0.03),
+                dummyEval, 0, 10, 0, List.of());
+        assertEquals(ScaleOptimizationDecision.INCONCLUSIVE_NEEDS_LARGER_SCALE,
+                runner.evaluateDecision(List.of(interPoint1, interPoint2, interPoint3)));
+
         // Branch 4: Large scale where latency is comparable to standalone encode (< 2x) -> OPTIMIZATION_NOT_YET_JUSTIFIED
         var fastPoint1 = new LatencyScalePointResult(
                 100, 10, 1, 0, 1, 1000, 1.0, 10,
