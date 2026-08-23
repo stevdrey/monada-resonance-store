@@ -47,6 +47,7 @@ public final class LatencyScaleSweepRunner {
     private static final double EVALUATION_THRESHOLD = Double.NEGATIVE_INFINITY;
     private static final int DEFAULT_DIMENSIONS = 128;
 
+    private final String datasetName;
     private final EvaluationDataset seedDataset;
     private final List<Integer> scalePoints;
     private final List<Integer> topKs;
@@ -57,7 +58,8 @@ public final class LatencyScaleSweepRunner {
     private final EvaluationRunner evaluationRunner;
 
     public LatencyScaleSweepRunner() {
-        this(ExpandedTechnologyDataset.get(),
+        this("expanded-technology",
+                ExpandedTechnologyDataset.get(),
                 DEFAULT_SCALE_POINTS,
                 DEFAULT_TOP_KS,
                 DEFAULT_WARMUP_COUNT,
@@ -72,6 +74,24 @@ public final class LatencyScaleSweepRunner {
             int warmupCount,
             int repetitionCount,
             long seed) {
+        this("expanded-technology",
+                seedDataset,
+                scalePoints,
+                topKs,
+                warmupCount,
+                repetitionCount,
+                seed);
+    }
+
+    public LatencyScaleSweepRunner(
+            String datasetName,
+            EvaluationDataset seedDataset,
+            List<Integer> scalePoints,
+            List<Integer> topKs,
+            int warmupCount,
+            int repetitionCount,
+            long seed) {
+        this.datasetName = Objects.requireNonNull(datasetName, "datasetName");
         this.seedDataset = Objects.requireNonNull(seedDataset, "seedDataset");
         Objects.requireNonNull(scalePoints, "scalePoints");
         Objects.requireNonNull(topKs, "topKs");
@@ -175,7 +195,7 @@ public final class LatencyScaleSweepRunner {
         var rationale = buildDecisionRationale(decision, pointResults);
 
         return new LatencyScaleSweepReport(
-                "expanded-technology",
+                datasetName,
                 seed,
                 scalePoints,
                 topKs,
@@ -408,14 +428,26 @@ public final class LatencyScaleSweepRunner {
                 switch (change) {
                     case IMPROVED -> {
                         improved++;
-                        shifts.add(new ScaleRankingShift(baseQuery.queryText(), baseQuery.expectedLabels(),
-                                baseRank, candidateRank, change));
+                        shifts.add(new ScaleRankingShift(
+                                baseQuery.queryText(),
+                                baseQuery.expectedLabels(),
+                                baseQuery.returnedLabels(),
+                                candidateQuery.returnedLabels(),
+                                baseRank,
+                                candidateRank,
+                                change));
                     }
                     case MAINTAINED -> maintained++;
                     case DEGRADED -> {
                         degraded++;
-                        shifts.add(new ScaleRankingShift(baseQuery.queryText(), baseQuery.expectedLabels(),
-                                baseRank, candidateRank, change));
+                        shifts.add(new ScaleRankingShift(
+                                baseQuery.queryText(),
+                                baseQuery.expectedLabels(),
+                                baseQuery.returnedLabels(),
+                                candidateQuery.returnedLabels(),
+                                baseRank,
+                                candidateRank,
+                                change));
                     }
                 }
             }
@@ -526,8 +558,9 @@ public final class LatencyScaleSweepRunner {
         int maxScale = byScale.lastKey();
         int minScale = byScale.firstKey();
 
-        // 1. Scale threshold check: multi-thousand corpus sizes required
-        if (maxScale < 1_000) {
+        // 1. Scale threshold and top-K arms check: multi-thousand scale and >= 2 top-K arms required
+        long distinctTopKs = results.stream().mapToInt(LatencyScalePointResult::topK).distinct().count();
+        if (distinctTopKs < 2 || maxScale < 1_000) {
             return ScaleOptimizationDecision.INCONCLUSIVE_NEEDS_LARGER_SCALE;
         }
 
@@ -586,10 +619,15 @@ public final class LatencyScaleSweepRunner {
             ScaleOptimizationDecision decision,
             List<LatencyScalePointResult> results) {
         int maxScale = results.stream().mapToInt(LatencyScalePointResult::corpusSize).max().orElse(0);
+        long distinctTopKs = results.stream().mapToInt(LatencyScalePointResult::topK).distinct().count();
         return switch (decision) {
-            case INCONCLUSIVE_NEEDS_LARGER_SCALE ->
-                    "Evaluated scale points (max N=" + maxScale
-                            + ") are below the multi-thousand scale threshold or have ambiguous curve data to confirm bottlenecks.";
+            case INCONCLUSIVE_NEEDS_LARGER_SCALE -> {
+                if (distinctTopKs < 2) {
+                    yield "Evaluated scale sweep requires at least two distinct top-K arms (e.g. K=1 and K=5) to establish empirical top-K work invariance.";
+                }
+                yield "Evaluated scale points (max N=" + maxScale
+                        + ") are below the multi-thousand scale threshold or have ambiguous curve data to confirm bottlenecks.";
+            }
             case OPTIMIZATION_NOT_YET_JUSTIFIED ->
                     "Structural scan fraction did not match full scan or end-to-end query latency remained comparable to standalone encoding.";
             case BOUNDED_EXACT_TOP_K_EXPERIMENT_JUSTIFIED ->

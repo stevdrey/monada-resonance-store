@@ -124,9 +124,14 @@ public record LatencyScaleSweepReport(
                         var sortedExpected = new ArrayList<>(shift.expectedLabels());
                         Collections.sort(sortedExpected);
                         sb.append(String.format(Locale.ROOT,
-                                "    - Query: \"%s\"%n      expected=%s, baselineRank=%s, scaledRank=%s (%s)%n",
+                                "    - Query: \"%s\"%n"
+                                        + "      expected=%s%n"
+                                        + "      baselineReturned=%s (rank=%s)%n"
+                                        + "      scaledReturned=%s (rank=%s) [%s]%n",
                                 shift.queryText(), sortedExpected,
+                                shift.baselineReturnedLabels(),
                                 shift.baselineRank() == Integer.MAX_VALUE ? ">K" : String.valueOf(shift.baselineRank()),
+                                shift.scaledReturnedLabels(),
                                 shift.scaledRank() == Integer.MAX_VALUE ? ">K" : String.valueOf(shift.scaledRank()),
                                 shift.change()));
                     }
