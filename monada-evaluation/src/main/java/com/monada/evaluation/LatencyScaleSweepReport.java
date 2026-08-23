@@ -1,5 +1,7 @@
 package com.monada.evaluation;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -85,13 +87,13 @@ public record LatencyScaleSweepReport(
         sb.append("-----------+--------+----------+----------+----------+----------+----------+----------\n");
         for (var r : results) {
             var eval = r.evaluationReport();
-            var p1 = eval.averagePrecisionByK().getOrDefault(1, 0.0);
-            var p3 = eval.averagePrecisionByK().getOrDefault(3, 0.0);
-            var p5 = eval.averagePrecisionByK().getOrDefault(5, 0.0);
-            var h1 = eval.averageHitByK().getOrDefault(1, 0.0);
-            var h3 = eval.averageHitByK().getOrDefault(3, 0.0);
+            var p1 = r.topK() >= 1 ? String.format(Locale.ROOT, "%.4f", eval.averagePrecisionByK().getOrDefault(1, 0.0)) : "-";
+            var p3 = r.topK() >= 3 ? String.format(Locale.ROOT, "%.4f", eval.averagePrecisionByK().getOrDefault(3, 0.0)) : "-";
+            var p5 = r.topK() >= 5 ? String.format(Locale.ROOT, "%.4f", eval.averagePrecisionByK().getOrDefault(5, 0.0)) : "-";
+            var h1 = r.topK() >= 1 ? String.format(Locale.ROOT, "%.4f", eval.averageHitByK().getOrDefault(1, 0.0)) : "-";
+            var h3 = r.topK() >= 3 ? String.format(Locale.ROOT, "%.4f", eval.averageHitByK().getOrDefault(3, 0.0)) : "-";
             sb.append(String.format(Locale.ROOT,
-                    "%-10d | %-6d | %-8.4f | %-8.4f | %-8.4f | %-8.4f | %-8.4f | %-8.4f%n",
+                    "%-10d | %-6d | %-8s | %-8s | %-8s | %-8s | %-8s | %-8.4f%n",
                     r.corpusSize(), r.topK(), p1, p3, p5, h1, h3, eval.meanReciprocalRank()));
         }
         sb.append('\n');
@@ -116,9 +118,11 @@ public record LatencyScaleSweepReport(
                 if (!r.rankingShifts().isEmpty()) {
                     sb.append(String.format(Locale.ROOT, "  Scale N=%d, Top-K=%d:%n", r.corpusSize(), r.topK()));
                     for (var shift : r.rankingShifts()) {
+                        var sortedExpected = new ArrayList<>(shift.expectedLabels());
+                        Collections.sort(sortedExpected);
                         sb.append(String.format(Locale.ROOT,
                                 "    - Query: \"%s\"%n      expected=%s, baselineRank=%s, scaledRank=%s (%s)%n",
-                                shift.queryText(), shift.expectedLabels(),
+                                shift.queryText(), sortedExpected,
                                 shift.baselineRank() == Integer.MAX_VALUE ? ">K" : String.valueOf(shift.baselineRank()),
                                 shift.scaledRank() == Integer.MAX_VALUE ? ">K" : String.valueOf(shift.scaledRank()),
                                 shift.change()));

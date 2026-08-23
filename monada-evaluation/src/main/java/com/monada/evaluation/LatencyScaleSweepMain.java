@@ -23,7 +23,7 @@ public final class LatencyScaleSweepMain {
         var workdir = Files.createTempDirectory("monada-latency-scale-sweep-");
         try {
             var report = new LatencyScaleSweepRunner().run(workdir);
-            System.out.println(report.render());
+            System.out.println(TextEvaluationCatalog.LATENCY_SCALE_SWEEP.render(report.render()));
         } finally {
             EvaluationTempDirectories.deleteRecursively(workdir);
         }

@@ -82,7 +82,7 @@ public record ScaleTimingStatistics(
         long min = sorted.getFirst();
         long max = sorted.getLast();
         long median = sorted.get(sampleCount / 2);
-        int p95Index = Math.min(sampleCount - 1, (int) Math.floor(sampleCount * 0.95));
+        int p95Index = Math.max(0, Math.min(sampleCount - 1, (int) Math.ceil(sampleCount * 0.95) - 1));
         long p95 = sorted.get(p95Index);
 
         long totalElapsed = 0;
