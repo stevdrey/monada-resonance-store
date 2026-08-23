@@ -49,8 +49,10 @@ The project follows a measurement-first path: improve retrieval quality only aft
   indexes, and feedback logs with a deterministic corruption taxonomy and statistics.
 - Scaled linear-scan benchmark and bounded top-K decision gate: Phase V introduces `DeterministicScaleCorpusGenerator`,
   `LatencyScaleSweepRunner`, and CLI `./gradlew :monada-evaluation:runLatencyScaleSweep -q`. Evaluating 100, 1,000, 5,000,
-  and 10,000 corpus sizes confirms a structural scan fraction of 1.0 across both K=1 and K=5, flat encoding duration (~30-120 us),
-  and linear scan scaling (~21 ms at N=100 up to ~2.17 s at N=10,000). The evidence concludes
+  and 10,000 corpus sizes with a fixed 128-dimensional encoder reports a structural scan fraction of 1.0 across both K=1 and K=5,
+  flat encoding duration (~30-120 us), and end-to-end recall growth (~21 ms at N=100 up to ~2.17 s at N=10,000). The baseline
+  combines an O(N) candidate scoring scan with complete O(M log M) result sorting, where M <= N; the timing does not isolate either
+  operation. The evidence concludes
   `BOUNDED_EXACT_TOP_K_EXPERIMENT_JUSTIFIED`, justifying a follow-up exact bounded top-K optimization experiment without
   changing production scan algorithms or introducing approximate indexing.
 

@@ -11,6 +11,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LatencyScaleSweepRunnerTest {
@@ -114,6 +115,16 @@ class LatencyScaleSweepRunnerTest {
 
         assertEquals("custom-tech-dataset", report.seedDatasetName());
         assertTrue(report.render().contains("Seed Dataset: custom-tech-dataset"));
+    }
+
+    @Test
+    void rejectsDuplicateTopKArms() {
+        var base = ExpandedTechnologyDataset.get();
+
+        var exception = assertThrows(IllegalArgumentException.class, () -> new LatencyScaleSweepRunner(
+                "expanded-technology", base, List.of(33), List.of(1, 5, 5), 0, 1, 42L));
+
+        assertTrue(exception.getMessage().contains("distinct"));
     }
 
     @Test

@@ -13,6 +13,7 @@ import java.util.Objects;
 public record LatencyScaleSweepReport(
         String seedDatasetName,
         long seed,
+        int vectorDimensions,
         List<Integer> scalePoints,
         List<Integer> topKs,
         int warmupCount,
@@ -23,6 +24,9 @@ public record LatencyScaleSweepReport(
 ) {
     public LatencyScaleSweepReport {
         Objects.requireNonNull(seedDatasetName, "seedDatasetName");
+        if (vectorDimensions <= 0) {
+            throw new IllegalArgumentException("vectorDimensions must be > 0");
+        }
         scalePoints = List.copyOf(Objects.requireNonNull(scalePoints, "scalePoints"));
         topKs = List.copyOf(Objects.requireNonNull(topKs, "topKs"));
         if (warmupCount < 0) {
@@ -42,6 +46,7 @@ public record LatencyScaleSweepReport(
         sb.append("=====================================================\n");
         sb.append("Seed Dataset: ").append(seedDatasetName).append('\n');
         sb.append("Generator Seed: ").append(seed).append('\n');
+        sb.append("Vector Dimensions: ").append(vectorDimensions).append('\n');
         sb.append("Scale Points: ").append(scalePoints).append('\n');
         sb.append("Top-K Sweep: ").append(topKs).append('\n');
         sb.append("Warmup Iterations: ").append(warmupCount).append('\n');
@@ -146,10 +151,17 @@ public record LatencyScaleSweepReport(
 
         sb.append("5. Top-K Work Invariance Evidence\n");
         sb.append("---------------------------------\n");
-        sb.append("In the current linear scan implementation, scanned candidates strictly equals the\n");
-        sb.append("total stored vector count regardless of requested top-K (scan fraction = 1.0).\n");
-        sb.append("Query execution scans the entire corpus and performs a complete sort of candidate\n");
-        sb.append("scores, confirming that work is O(N) in candidate count and independent of K.\n\n");
+        if (hasMeasuredFullScanTopKInvariance()) {
+            sb.append("Measured results establish full-scan top-K invariance: multiple top-K arms each\n");
+            sb.append("reported a scan fraction of 1.0. Candidate scoring scans N candidates in O(N);\n");
+            sb.append("the complete result sort costs O(M log M), where M <= N. Requested top-K does\n");
+            sb.append("not bound either baseline operation.\n\n");
+        } else {
+            sb.append("Measured results did not establish full-scan top-K invariance. This requires at\n");
+            sb.append("least two distinct top-K arms and a scan fraction of 1.0 for every result.\n");
+            sb.append("Candidate scoring scans N candidates in O(N); complete result sorting costs\n");
+            sb.append("O(M log M), where M <= N.\n\n");
+        }
 
         sb.append("6. Optimization Decision Gate\n");
         sb.append("-----------------------------\n");
@@ -158,5 +170,14 @@ public record LatencyScaleSweepReport(
         sb.append("Policy: Evaluation only — no production scan algorithm changes were made.\n");
 
         return sb.toString();
+    }
+
+    private boolean hasMeasuredFullScanTopKInvariance() {
+        long distinctTopKs = results.stream()
+                .mapToInt(LatencyScalePointResult::topK)
+                .distinct()
+                .count();
+        return distinctTopKs >= 2
+                && results.stream().allMatch(result -> Double.compare(result.scanFraction(), 1.0) == 0);
     }
 }

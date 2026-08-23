@@ -17,9 +17,8 @@ public enum ScaleOptimizationDecision {
     OPTIMIZATION_NOT_YET_JUSTIFIED,
 
     /**
-     * Structural scan fraction is 1.0 (full corpus scan) regardless of top-K, and
-     * candidate scan latency grows linearly with corpus size to become the dominant
-     * cost at scale. An exact bounded top-K optimization experiment is justified.
+     * The configured sweep meets its full-scan and scale-growth criteria across
+     * multiple top-K arms. An exact bounded top-K comparison experiment is justified.
      */
     BOUNDED_EXACT_TOP_K_EXPERIMENT_JUSTIFIED,
 

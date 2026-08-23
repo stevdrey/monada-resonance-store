@@ -23,6 +23,7 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -95,6 +96,9 @@ public final class LatencyScaleSweepRunner {
             if (k <= 0) {
                 throw new IllegalArgumentException("topK must be > 0, got: " + k);
             }
+        }
+        if (new HashSet<>(topKs).size() != topKs.size()) {
+            throw new IllegalArgumentException("topKs must contain distinct values");
         }
         if (warmupCount < 0) {
             throw new IllegalArgumentException("warmupCount must be >= 0, got: " + warmupCount);
@@ -181,6 +185,7 @@ public final class LatencyScaleSweepRunner {
         return new LatencyScaleSweepReport(
                 datasetName,
                 seed,
+                DEFAULT_DIMENSIONS,
                 scalePoints,
                 topKs,
                 warmupCount,
@@ -603,9 +608,9 @@ public final class LatencyScaleSweepRunner {
             case OPTIMIZATION_NOT_YET_JUSTIFIED ->
                     "Structural scan fraction did not match full scan or end-to-end query latency remained comparable to standalone encoding.";
             case BOUNDED_EXACT_TOP_K_EXPERIMENT_JUSTIFIED ->
-                    "Structural scan fraction is 1.0 (scanned candidates = N) regardless of requested top-K. "
-                            + "At scale (N=" + maxScale + "), candidate scoring and full sorting dominate query latency. "
-                            + "An exact bounded top-K scan experiment (e.g. bounded priority queue / threshold bounding) is justified.";
+                    "The configured sweep met the full-scan threshold across multiple top-K arms and showed end-to-end latency growth at scale "
+                            + "(max N=" + maxScale + "). The baseline performs a full candidate scan and complete result sort; "
+                            + "an exact bounded top-K comparison experiment (e.g. bounded priority queue / threshold bounding) is justified.";
         };
     }
 }
