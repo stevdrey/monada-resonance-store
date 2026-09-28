@@ -416,3 +416,9 @@ The `runLatency` task reports recall latency and scan diagnostics for the `Expan
 Read [`AGENTS.md`](AGENTS.md) before making changes. New tasks should use the Spec Context format in [`docs/specs/spec-context-template.md`](docs/specs/spec-context-template.md), and PR reviews should use [`docs/specs/pr-review-checklist.md`](docs/specs/pr-review-checklist.md).
 
 Canonical Devin-compatible skills live in `.agents/skills/<skill-name>/SKILL.md`. The same skills are mirrored under `.windsurf/skills/<skill-name>/SKILL.md` so Devin Desktop and Windsurf-derived local scanning can discover them when `.windsurf/rules` is already active. When updating a skill, edit the canonical `.agents/skills/` copy first and then mirror the same change into `.windsurf/skills/`.
+
+## Licensing
+
+Monada Resonance Store is licensed under the [Apache License 2.0](LICENSE).
+
+The license permits use, modification and distribution, including commercial use, subject to its terms. Trademark rights are not granted by the Apache License 2.0.
