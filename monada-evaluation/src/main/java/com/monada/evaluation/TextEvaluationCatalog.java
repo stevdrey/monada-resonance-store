@@ -27,6 +27,9 @@ final class TextEvaluationCatalog {
     static final TextEvaluationMetadata EXPANDED_LATENCY = new TextEvaluationMetadata(
             "expanded-technology", "1", EvaluationProfile.LEXICAL_ENRICHED.name(),
             TextEvaluationMode.EXPLORATORY);
+    static final TextEvaluationMetadata LATENCY_SCALE_SWEEP = new TextEvaluationMetadata(
+            "expanded-technology", "1", EvaluationProfile.LEXICAL_ENRICHED.name(),
+            TextEvaluationMode.EXPLORATORY);
 
     private TextEvaluationCatalog() {
     }
