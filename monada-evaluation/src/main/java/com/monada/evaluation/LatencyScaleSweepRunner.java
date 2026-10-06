@@ -154,7 +154,7 @@ public final class LatencyScaleSweepRunner {
                 var precisionByK = new TreeMap<Integer, Double>();
                 var recallByK = new TreeMap<Integer, Double>();
                 var hitByK = new TreeMap<Integer, Double>();
-                for (var kVal : EvaluationRunner.DEFAULT_KS) {
+                for (var kVal : metricCutoffs(k)) {
                     precisionByK.put(kVal, PrecisionAtK.compute(query.expectedLabels(), rankedLabels, kVal));
                     recallByK.put(kVal, RecallAtK.compute(query.expectedLabels(), rankedLabels, kVal));
                     hitByK.put(kVal, HitAtK.compute(query.expectedLabels(), rankedLabels, kVal));
@@ -358,7 +358,7 @@ public final class LatencyScaleSweepRunner {
         var precisionSums = new TreeMap<Integer, Double>();
         var recallSums = new TreeMap<Integer, Double>();
         var hitSums = new TreeMap<Integer, Double>();
-        for (var kVal : EvaluationRunner.DEFAULT_KS) {
+        for (var kVal : metricCutoffs(topK)) {
             precisionSums.put(kVal, 0.0);
             recallSums.put(kVal, 0.0);
             hitSums.put(kVal, 0.0);
@@ -391,7 +391,7 @@ public final class LatencyScaleSweepRunner {
             var precisionByK = new TreeMap<Integer, Double>();
             var recallByK = new TreeMap<Integer, Double>();
             var hitByK = new TreeMap<Integer, Double>();
-            for (var kVal : EvaluationRunner.DEFAULT_KS) {
+            for (var kVal : metricCutoffs(topK)) {
                 var p = PrecisionAtK.compute(query.expectedLabels(), rankedLabels, kVal);
                 var r = RecallAtK.compute(query.expectedLabels(), rankedLabels, kVal);
                 var h = HitAtK.compute(query.expectedLabels(), rankedLabels, kVal);
@@ -498,6 +498,14 @@ public final class LatencyScaleSweepRunner {
         } catch (IOException e) {
             throw new java.io.UncheckedIOException(e);
         }
+    }
+
+    /**
+     * Metric cutoffs supported by an arm: a cutoff above the requested top-K would be computed
+     * from a result list that was truncated before that rank, so it is not reported.
+     */
+    private static List<Integer> metricCutoffs(int topK) {
+        return EvaluationRunner.DEFAULT_KS.stream().filter(cutoff -> cutoff <= topK).toList();
     }
 
     private RankingChange classifyQuery(QueryEvaluation before, QueryEvaluation after) {

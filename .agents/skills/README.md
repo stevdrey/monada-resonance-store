@@ -16,4 +16,3 @@ Devin discovers skills from `.agents/skills/<skill-name>/SKILL.md` automatically
 | `monada-data-structures` | Adding compact vectors, indexes, caches, or new data structures. |
 | `monada-performance-optimization` | Optimizing after a measurable baseline exists. |
 | `monada-ml-dl-integration` | Planning model-based encoders, embeddings, ONNX, or learned ranking. |
-| `monada-executive-summary` | Generating plain-language executive summaries for completed Issues/milestones. |

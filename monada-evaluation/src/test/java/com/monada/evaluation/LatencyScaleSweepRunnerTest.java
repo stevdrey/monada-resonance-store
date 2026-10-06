@@ -176,6 +176,27 @@ class LatencyScaleSweepRunnerTest {
     }
 
     @Test
+    void qualityMetricsAreLimitedToCutoffsWithinTopK(@TempDir Path tempDir) throws IOException {
+        var base = ExpandedTechnologyDataset.get();
+
+        var report = new LatencyScaleSweepRunner("expanded-technology", base, List.of(60), List.of(1, 5), 0, 1, 42L)
+                .run(tempDir);
+
+        for (var point : report.results()) {
+            var expected = point.topK() == 1 ? java.util.Set.of(1) : java.util.Set.of(1, 3, 5);
+            var eval = point.evaluationReport();
+            assertEquals(expected, eval.averagePrecisionByK().keySet());
+            assertEquals(expected, eval.averageRecallByK().keySet());
+            assertEquals(expected, eval.averageHitByK().keySet());
+            for (var query : eval.queryResults()) {
+                assertEquals(expected, query.precisionByK().keySet());
+                assertEquals(expected, query.recallByK().keySet());
+                assertEquals(expected, query.hitByK().keySet());
+            }
+        }
+    }
+
+    @Test
     void rejectsDuplicateScalePoints() {
         var base = ExpandedTechnologyDataset.get();
 
