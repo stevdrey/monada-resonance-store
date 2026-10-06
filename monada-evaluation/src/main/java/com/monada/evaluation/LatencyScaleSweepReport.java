@@ -153,7 +153,8 @@ public record LatencyScaleSweepReport(
         sb.append("---------------------------------\n");
         if (hasMeasuredFullScanTopKInvariance()) {
             sb.append("Measured results establish full-scan top-K invariance: multiple top-K arms each\n");
-            sb.append("reported a scan fraction of 1.0. Candidate scoring scans N candidates in O(N);\n");
+            sb.append("reported a scan fraction of 1.0, counted from stored vectors actually read by a\n");
+            sb.append("counting linear-scan probe over the same store. Candidate scoring scans N candidates in O(N);\n");
             sb.append("the complete result sort costs O(M log M), where M <= N. Requested top-K does\n");
             sb.append("not bound either baseline operation.\n\n");
         } else {

@@ -158,6 +158,24 @@ class LatencyScaleSweepRunnerTest {
     }
 
     @Test
+    void scanFractionIsMeasuredAndExcludesBlankQueries(@TempDir Path tempDir) throws IOException {
+        var seed = ExpandedTechnologyDataset.get();
+        var queries = new java.util.ArrayList<>(seed.queries());
+        queries.add(new EvaluationQuery("!!! ???", java.util.Set.of(seed.atoms().getFirst().label())));
+        var dataset = new EvaluationDataset(seed.atoms(), queries);
+        int nonBlankQueries = seed.queries().size();
+
+        var report = new LatencyScaleSweepRunner("expanded-technology", dataset, List.of(60), List.of(1, 5), 0, 1, 42L)
+                .run(tempDir);
+
+        for (var point : report.results()) {
+            assertEquals(queries.size(), point.queryCount());
+            assertEquals(60L * nonBlankQueries, point.totalScanned());
+            assertEquals(1.0, point.scanFraction());
+        }
+    }
+
+    @Test
     void rejectsDuplicateScalePoints() {
         var base = ExpandedTechnologyDataset.get();
 

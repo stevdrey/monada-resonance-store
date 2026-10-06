@@ -10,6 +10,10 @@ import com.monada.encoder.SimpleFrequencyEncoder;
 import com.monada.encoder.TextNormalizer;
 import com.monada.encoder.WeightedAtomEncoder;
 import com.monada.evaluation.datasets.ExpandedTechnologyDataset;
+import com.monada.index.LinearScanResonanceIndex;
+import com.monada.storage.FileAtomStore;
+import com.monada.storage.FileFrequencyStore;
+import com.monada.storage.VectorFormatProfile;
 
 import java.io.BufferedOutputStream;
 import java.io.DataOutputStream;
@@ -169,14 +173,11 @@ public final class LatencyScaleSweepRunner {
             Files.createDirectories(scaleDir);
 
             var seeded = seedBenchmarkStore(scaledDataset, scaleDir, memoryOptions, textNormalizer, encoder);
-            var memory = seeded.memory();
-            var idToLabel = seeded.idToLabel();
 
             for (int k : topKs) {
                 var pointResult = evaluateScalePoint(
                         scaledDataset,
-                        memory,
-                        idToLabel,
+                        seeded,
                         corpusSize,
                         k,
                         textNormalizer,
@@ -205,7 +206,15 @@ public final class LatencyScaleSweepRunner {
         );
     }
 
-    private record SeededStore(MonadaMemory memory, Map<String, String> idToLabel) {}
+    /**
+     * Pairs the benchmark memory with an evaluation-only counting probe: a linear-scan index over
+     * the same persisted files whose frequency store counts every vector it reads.
+     */
+    private record SeededStore(
+            MonadaMemory memory,
+            Map<String, String> idToLabel,
+            LinearScanResonanceIndex probeIndex,
+            CountingFrequencyStore probeCounter) {}
 
     /**
      * Populates a fresh benchmark store in $O(N)$ bulk streaming time, bypassing
@@ -265,7 +274,10 @@ public final class LatencyScaleSweepRunner {
         Files.write(vectorMap, vectorMapLines, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
 
         var populatedMemory = MonadaMemory.open(storePath, options);
-        return new SeededStore(populatedMemory, Collections.unmodifiableMap(idToLabel));
+        var probeCounter = new CountingFrequencyStore(FileFrequencyStore.openExisting(
+                storePath, "vectors/segment-000001.f32", VectorFormatProfile.currentFixedRaw(dimensions)));
+        var probeIndex = new LinearScanResonanceIndex(new FileAtomStore(storePath, "atoms/segment-000001.log"), probeCounter);
+        return new SeededStore(populatedMemory, Collections.unmodifiableMap(idToLabel), probeIndex, probeCounter);
     }
 
     private String formatAtomLine(KnowledgeAtom atom) {
@@ -285,8 +297,7 @@ public final class LatencyScaleSweepRunner {
 
     private LatencyScalePointResult evaluateScalePoint(
             EvaluationDataset dataset,
-            MonadaMemory memory,
-            Map<String, String> idToLabel,
+            SeededStore seeded,
             int corpusSize,
             int topK,
             TextNormalizer textNormalizer,
@@ -294,6 +305,8 @@ public final class LatencyScaleSweepRunner {
             MonadaMemoryOptions memoryOptions,
             List<QueryEvaluation> seedBaselineQueries) {
 
+        var memory = seeded.memory();
+        var idToLabel = seeded.idToLabel();
         int queryCount = dataset.queries().size();
 
         // 1. Warm-up iterations (unmeasured)
@@ -353,6 +366,7 @@ public final class LatencyScaleSweepRunner {
         var reciprocalRankSum = 0.0;
         long totalScanned = 0;
         long totalReturned = 0;
+        int nonBlankQueryCount = 0;
 
         for (var query : dataset.queries()) {
             var recall = memory.resonate(query.text())
@@ -365,9 +379,13 @@ public final class LatencyScaleSweepRunner {
                 rankedLabels.add(idToLabel.getOrDefault(res.atom().id(), res.atom().id()));
             }
 
-            var isBlank = textNormalizer.normalize(query.text()).enrichedText().isBlank();
-            int scannedForQuery = isBlank ? 0 : corpusSize;
-            totalScanned += scannedForQuery;
+            var normalizedQuery = textNormalizer.normalize(query.text());
+            if (!normalizedQuery.enrichedText().isBlank()) {
+                nonBlankQueryCount++;
+                totalScanned += measureScannedCandidates(
+                        seeded, encoder.encode(normalizedQuery.toWeightedText(memoryOptions.expansionOptions())),
+                        topK, recall.results());
+            }
             totalReturned += recall.results().size();
 
             var precisionByK = new TreeMap<Integer, Double>();
@@ -404,9 +422,10 @@ public final class LatencyScaleSweepRunner {
         var mrr = queryCount == 0 ? 0.0 : reciprocalRankSum / queryCount;
         var evalReport = new EvaluationReport(queryEvaluations, avgPrecision, avgRecall, avgHit, mrr);
 
-        double scanFraction = (corpusSize == 0 || queryCount == 0)
+        // Blank queries never reach the index, so they are excluded from the scan-fraction denominator.
+        double scanFraction = (corpusSize == 0 || nonBlankQueryCount == 0)
                 ? 0.0
-                : (double) totalScanned / ((long) corpusSize * queryCount);
+                : (double) totalScanned / ((long) corpusSize * nonBlankQueryCount);
 
         // 4. Compare ranking changes vs unexpanded seed baseline
         int improved = 0;
@@ -454,6 +473,31 @@ public final class LatencyScaleSweepRunner {
                 degraded,
                 shifts
         );
+    }
+
+    /**
+     * Runs the query through the counting probe index and returns how many stored vectors it read,
+     * verifying the probe returns the same ranked atoms as the end-to-end recall.
+     */
+    private long measureScannedCandidates(
+            SeededStore seeded,
+            com.monada.core.FrequencyVector queryVector,
+            int topK,
+            List<com.monada.core.ResonanceResult> recallResults) {
+        try {
+            long before = seeded.probeCounter().scannedVectors();
+            var probeResults = seeded.probeIndex().search(queryVector, topK, EVALUATION_THRESHOLD);
+            long scanned = seeded.probeCounter().scannedVectors() - before;
+            var probeIds = probeResults.stream().map(r -> r.atom().id()).toList();
+            var recallIds = recallResults.stream().map(r -> r.atom().id()).toList();
+            if (!probeIds.equals(recallIds)) {
+                throw new IllegalStateException(
+                        "scan probe diverged from end-to-end recall: probe=" + probeIds + ", recall=" + recallIds);
+            }
+            return scanned;
+        } catch (IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
     }
 
     private RankingChange classifyQuery(QueryEvaluation before, QueryEvaluation after) {

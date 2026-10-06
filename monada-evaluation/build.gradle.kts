@@ -7,6 +7,7 @@ dependencies {
     implementation(project(":monada-api"))
     implementation(project(":monada-encoder"))
     implementation(project(":monada-storage"))
+    implementation(project(":monada-index"))
     implementation(project(":monada-speech"))
 }
 
