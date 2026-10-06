@@ -2,7 +2,7 @@
 
 ## Overview
 
-Monada Resonance Store is a Gradle multi-module Java 26 project. The architecture separates domain primitives, encoding, storage, ranking, learning/feedback, API orchestration, evaluation, and speech-specific experiments.
+Monada Resonance Store is a Gradle multi-module Java 27 project. The architecture separates domain primitives, encoding, storage, ranking, learning/feedback, API orchestration, evaluation, and speech-specific experiments.
 
 ## Module Responsibilities
 
