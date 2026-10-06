@@ -553,20 +553,22 @@ public final class LatencyScaleSweepRunner {
             return ScaleOptimizationDecision.OPTIMIZATION_NOT_YET_JUSTIFIED;
         }
 
-        // 3. Whole scale-curve monotonicity check across all configured scale points
-        long prevLatency = -1;
-        for (var entry : byScale.entrySet()) {
-            long avgLatencyForScale = (long) entry.getValue().stream()
-                    .mapToLong(r -> r.timing().avgNanos())
-                    .average()
-                    .orElse(0.0);
-
-            // If an intermediate larger scale point has lower latency than a previous smaller scale point,
-            // curve is non-monotonic / noisy
-            if (prevLatency >= 0 && avgLatencyForScale < prevLatency) {
-                return ScaleOptimizationDecision.INCONCLUSIVE_NEEDS_LARGER_SCALE;
+        // 3. Whole scale-curve monotonicity check, validated independently for every top-K arm so
+        // opposing arm curves cannot cancel out in a cross-arm average
+        var byTopK = new TreeMap<Integer, TreeMap<Integer, Long>>();
+        for (var r : results) {
+            byTopK.computeIfAbsent(r.topK(), k -> new TreeMap<>()).merge(r.corpusSize(), r.timing().avgNanos(), Long::sum);
+        }
+        for (var armCurve : byTopK.values()) {
+            // If a larger scale point has lower latency than a previous smaller scale point,
+            // the arm's curve is non-monotonic / noisy
+            long prevLatency = -1;
+            for (long latency : armCurve.values()) {
+                if (prevLatency >= 0 && latency < prevLatency) {
+                    return ScaleOptimizationDecision.INCONCLUSIVE_NEEDS_LARGER_SCALE;
+                }
+                prevLatency = latency;
             }
-            prevLatency = avgLatencyForScale;
         }
 
         long minScaleAvgLatency = (long) byScale.get(minScale).stream()

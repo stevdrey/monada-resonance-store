@@ -131,6 +131,33 @@ class LatencyScaleSweepRunnerTest {
     }
 
     @Test
+    void decisionGateChecksMonotonicityPerTopKArm() {
+        var runner = new LatencyScaleSweepRunner();
+        var dummyEval = new EvaluationReport(List.of(), Map.of(), Map.of(), Map.of(), 1.0);
+
+        // K=1 gets faster with scale while K=5 grows; the cross-arm average is monotonic and would mask it
+        var k1Small = new LatencyScalePointResult(
+                100, 10, 1, 0, 1, 1000, 1.0, 10,
+                new ScaleTimingStatistics(10, 1, 10, 1_000_000, 1_000_000, 1_000_000, 1_000_000, 1_000_000, 100, 1.0),
+                dummyEval, 0, 10, 0, List.of());
+        var k5Small = new LatencyScalePointResult(
+                100, 10, 5, 0, 1, 1000, 1.0, 10,
+                new ScaleTimingStatistics(10, 1, 10, 20_000, 20_000, 20_000, 20_000, 20_000, 100, 50.0),
+                dummyEval, 0, 10, 0, List.of());
+        var k1Large = new LatencyScalePointResult(
+                5000, 10, 1, 0, 1, 50000, 1.0, 10,
+                new ScaleTimingStatistics(10, 1, 10, 400_000, 400_000, 400_000, 400_000, 400_000, 100, 2.0),
+                dummyEval, 0, 10, 0, List.of());
+        var k5Large = new LatencyScalePointResult(
+                5000, 10, 5, 0, 1, 50000, 1.0, 10,
+                new ScaleTimingStatistics(10, 1, 10, 1_600_000, 1_600_000, 1_600_000, 1_600_000, 1_600_000, 100, 1.0),
+                dummyEval, 0, 10, 0, List.of());
+
+        assertEquals(ScaleOptimizationDecision.INCONCLUSIVE_NEEDS_LARGER_SCALE,
+                runner.evaluateDecision(List.of(k1Small, k5Small, k1Large, k5Large)));
+    }
+
+    @Test
     void rejectsDuplicateScalePoints() {
         var base = ExpandedTechnologyDataset.get();
 
