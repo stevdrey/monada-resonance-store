@@ -307,11 +307,10 @@ public final class LatencyScaleSweepRunner {
         }
 
         // 2. Measured repetitions
-        var totalLatencies = new ArrayList<Long>(queryCount * Math.max(1, repetitionCount));
-        var encodeLatencies = new ArrayList<Long>(queryCount * Math.max(1, repetitionCount));
+        var totalLatencies = new ArrayList<Long>(queryCount * repetitionCount);
+        var encodeLatencies = new ArrayList<Long>(queryCount * repetitionCount);
 
-        int effectiveReps = Math.max(1, repetitionCount);
-        for (int rep = 0; rep < effectiveReps; rep++) {
+        for (int rep = 0; rep < repetitionCount; rep++) {
             for (var query : dataset.queries()) {
                 // Standalone query encoding diagnostic pass (independent from memory execution)
                 var startEncode = System.nanoTime();
@@ -329,10 +328,8 @@ public final class LatencyScaleSweepRunner {
                         .execute();
                 var queryNanos = System.nanoTime() - startQuery;
 
-                if (repetitionCount > 0) {
-                    totalLatencies.add(queryNanos);
-                    encodeLatencies.add(encodeNanos);
-                }
+                totalLatencies.add(queryNanos);
+                encodeLatencies.add(encodeNanos);
             }
         }
 

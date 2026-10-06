@@ -70,16 +70,16 @@ public record LatencyScaleSweepReport(
         sb.append("2. Latency and Throughput (Best-Effort Timing)\n");
         sb.append("----------------------------------------------\n");
         sb.append(String.format(Locale.ROOT,
-                "%-10s | %-6s | %-22s | %-18s | %-15s | %-15s | %-15s | %-10s%n",
-                "Scale (N)", "Top-K", "Standalone Encode (ns)", "Query Latency (ns)", "Median (ns)", "P95 (ns)", "Max (ns)", "QPS"));
-        sb.append("-----------+--------+------------------------+--------------------+-----------------+-----------------+-----------------+-----------\n");
+                "%-10s | %-6s | %-22s | %-18s | %-15s | %-15s | %-15s | %-15s | %-10s%n",
+                "Scale (N)", "Top-K", "Standalone Encode (ns)", "Query Latency (ns)", "Min (ns)", "Median (ns)", "P95 (ns)", "Max (ns)", "QPS"));
+        sb.append("-----------+--------+------------------------+--------------------+-----------------+-----------------+-----------------+-----------------+-----------\n");
         for (var r : results) {
             var t = r.timing();
             sb.append(String.format(Locale.ROOT,
-                    "%-10d | %-6d | %-22d | %-18d | %-15d | %-15d | %-15d | %-10.1f%n",
+                    "%-10d | %-6d | %-22d | %-18d | %-15d | %-15d | %-15d | %-15d | %-10.1f%n",
                     r.corpusSize(), r.topK(),
                     t.avgEncodeNanos(), t.avgNanos(),
-                    t.medianNanos(), t.p95Nanos(), t.maxNanos(), t.queriesPerSecond()));
+                    t.minNanos(), t.medianNanos(), t.p95Nanos(), t.maxNanos(), t.queriesPerSecond()));
         }
         sb.append("Note: Standalone encode duration is measured separately as a diagnostic baseline;\n");
         sb.append("query latency is the full end-to-end resonance recall duration.\n\n");

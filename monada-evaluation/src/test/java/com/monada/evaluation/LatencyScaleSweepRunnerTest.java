@@ -118,6 +118,19 @@ class LatencyScaleSweepRunnerTest {
     }
 
     @Test
+    void skipsTimingPassWhenRepetitionCountIsZero(@TempDir Path tempDir) throws IOException {
+        var base = ExpandedTechnologyDataset.get();
+        var runner = new LatencyScaleSweepRunner("expanded-technology", base, List.of(33), List.of(1), 0, 0, 42L);
+
+        var report = runner.run(tempDir);
+
+        var timing = report.results().getFirst().timing();
+        assertEquals(0L, timing.avgNanos());
+        assertEquals(0L, timing.minNanos());
+        assertEquals(0L, timing.maxNanos());
+    }
+
+    @Test
     void rejectsDuplicateScalePoints() {
         var base = ExpandedTechnologyDataset.get();
 
