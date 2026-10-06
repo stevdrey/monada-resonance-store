@@ -63,7 +63,10 @@ length-prefixed vectors without a manifest, but that layout is not inferred for 
 
 ## Build and Test
 
+The project requires **JDK 27** (Gradle toolchain `27`) and builds with the versioned Gradle wrapper (Gradle 9.8.0, the minimum release that supports Java 27).
+
 ```bash
+./gradlew --version
 ./gradlew test
 ./gradlew :monada-storage:runIntegrityAudit -Dmonada.store.dir=/path/to/store
 ./gradlew :monada-evaluation:test
