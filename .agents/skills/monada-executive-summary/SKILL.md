@@ -34,4 +34,4 @@ Use this template to generate a high-level, business- and stakeholder-friendly e
 - [ ] Is the summary written entirely in English?
 - [ ] Is the tone professional, accessible, and free of unnecessary code jargon?
 - [ ] Are key concepts explained with intuitive metaphors or plain business value?
-- [ ] Did you verify that the target is a **GitHub Issue** (`gh issue comment <issue-number>`)?
+- [ ] Did you verify the destination? Use a **GitHub Issue** (`gh issue comment <issue-number>`) when one exists; for a milestone without an Issue, use the milestone description (`gh api`) or a document under `docs/`.

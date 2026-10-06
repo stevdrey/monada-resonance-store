@@ -118,6 +118,28 @@ class LatencyScaleSweepRunnerTest {
     }
 
     @Test
+    void rejectsDuplicateScalePoints() {
+        var base = ExpandedTechnologyDataset.get();
+
+        var exception = assertThrows(IllegalArgumentException.class, () -> new LatencyScaleSweepRunner(
+                "expanded-technology", base, List.of(33, 50, 50), List.of(1, 5), 0, 1, 42L));
+
+        assertTrue(exception.getMessage().contains("distinct"));
+    }
+
+    @Test
+    void rejectsTopKArmsWithoutMetricCutoffs() {
+        var base = ExpandedTechnologyDataset.get();
+
+        for (int unsupported : List.of(2, 10)) {
+            var exception = assertThrows(IllegalArgumentException.class, () -> new LatencyScaleSweepRunner(
+                    "expanded-technology", base, List.of(33), List.of(unsupported), 0, 1, 42L));
+
+            assertTrue(exception.getMessage().contains("metric cutoffs"));
+        }
+    }
+
+    @Test
     void rejectsDuplicateTopKArms() {
         var base = ExpandedTechnologyDataset.get();
 

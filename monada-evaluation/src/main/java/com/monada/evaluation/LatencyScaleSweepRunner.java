@@ -86,6 +86,10 @@ public final class LatencyScaleSweepRunner {
         if (topKs.isEmpty()) {
             throw new IllegalArgumentException("topKs must not be empty");
         }
+        if (new HashSet<>(scalePoints).size() != scalePoints.size()) {
+            throw new IllegalArgumentException(
+                    "scalePoints must contain distinct values; use repetitionCount for intentional replication");
+        }
         for (int sp : scalePoints) {
             if (sp < seedDataset.atoms().size()) {
                 throw new IllegalArgumentException(
@@ -95,6 +99,11 @@ public final class LatencyScaleSweepRunner {
         for (int k : topKs) {
             if (k <= 0) {
                 throw new IllegalArgumentException("topK must be > 0, got: " + k);
+            }
+            if (!EvaluationRunner.DEFAULT_KS.contains(k)) {
+                throw new IllegalArgumentException(
+                        "topK must be one of the evaluated metric cutoffs "
+                                + EvaluationRunner.DEFAULT_KS + ", got: " + k);
             }
         }
         if (new HashSet<>(topKs).size() != topKs.size()) {
