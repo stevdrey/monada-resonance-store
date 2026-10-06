@@ -7,6 +7,7 @@ dependencies {
     implementation(project(":monada-api"))
     implementation(project(":monada-encoder"))
     implementation(project(":monada-storage"))
+    implementation(project(":monada-index"))
     implementation(project(":monada-speech"))
 }
 
@@ -60,6 +61,13 @@ tasks.register<JavaExec>("runLatency") {
     description = "Run recall latency and scan diagnostics over the expanded dataset"
     group = "application"
     mainClass.set("com.monada.evaluation.LatencyProfileMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
+tasks.register<JavaExec>("runLatencyScaleSweep") {
+    description = "Run the scaled linear-scan latency benchmark and decision gate across multiple corpus sizes"
+    group = "application"
+    mainClass.set("com.monada.evaluation.LatencyScaleSweepMain")
     classpath = sourceSets["main"].runtimeClasspath
 }
 
