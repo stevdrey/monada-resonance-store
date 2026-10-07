@@ -183,7 +183,7 @@ Limits (validated before I/O; values recorded in the manifest):
 | --- | --- | --- |
 | `EXECUTION_STARTED` | Opens an execution | task summary, `sourceRevision`, `contextFingerprint`, `constraintsFingerprint`, `evaluationPolicy` (id, version, mandatory dimensions) |
 | `ATTEMPT_STARTED` | Opens an attempt | attempt ordinal, `previousAttemptId?`, reason (`INITIAL`, `REPAIR`, `RETRY`, `REVIEW_FOLLOW_UP`) |
-| `STAGE_RECORDED` | One stage of an attempt | stage name, `RouteDescriptor` (worker, provider, model, effort, billing mode), start/end, usage counters, artifact refs |
+| `STAGE_RECORDED` | One stage of an attempt | stage name, `RouteDescriptor` (worker, provider, model, effort, billing mode), start/end, `usageDeclaration` (section 9), usage counters, artifact refs |
 | `EVIDENCE_RECORDED` | Quality observations | `QualityObservation` list, artifact refs |
 | `ATTEMPT_FINISHED` | Closes an attempt | `COMPLETED`, `FAILED` or `CANCELLED`; solution and lesson summaries |
 | `OUTCOME_RECORDED` | Execution outcome | `Outcome` status + origin (section 8), accepted attempt if any |
@@ -330,8 +330,17 @@ carries at most one counter per kind.
 effective date, source, assumptions text, and price lines. Each `PriceLine` has a counter kind, a
 non-negative `BigDecimal` price, a positive integer `unitSize` (e.g. 1,000,000 tokens; zero or negative is
 rejected) and an optional `includedIn` kind that declares overlap (e.g. `CACHED_INPUT_TOKENS` included in
-`INPUT_TOKENS`). The billable kinds of a stage are exactly the kinds that have a price line in the
-snapshot matching the stage route's provider and model.
+`INPUT_TOKENS`). A snapshot must contain at least one price line and at most one line per kind; an
+empty or duplicate-kind snapshot is invalid input and is rejected before any calculation. The billable
+kinds of a stage are exactly the kinds that have a price line in the snapshot matching the stage route's
+provider and model, so a matched snapshot always yields a non-empty set of billable kinds.
+
+`STAGE_RECORDED.usageDeclaration` (validated before I/O):
+
+- `MEASURED` (default): the stage consumed resources that must be measured; coverage rules below apply.
+- `NO_BILLABLE_USAGE`: the caller explicitly declares that the stage consumed nothing billable (e.g. a
+  local deterministic check). It requires a justification and must carry no usage counters; a stage
+  with this declaration and any counter is rejected. Omitting counters never implies this declaration.
 
 Billable quantities (non-overlapping):
 
@@ -367,11 +376,16 @@ sequence are post-acceptance activity.
 Usage coverage is evaluated per `STAGE_RECORDED` event in the chain (after corrections), never per
 counter list:
 
-- A stage is **covered** when it has a matching price snapshot and, for every billable kind of that
-  snapshot, a counter with a value (known zero included) and no `INCONSISTENT_USAGE`.
+- A `MEASURED` stage is **covered** when it has a matching (non-empty) price snapshot and, for every
+  billable kind of that snapshot, a counter with a value (known zero included) and no
+  `INCONSISTENT_USAGE`.
+- A `NO_BILLABLE_USAGE` stage is covered with cost zero, needs no snapshot, and is always listed as
+  `DECLARED_NO_BILLABLE_USAGE(stage)` so the zero stays visibly declared rather than measured.
 - Otherwise each gap is a reason: `MISSING_PRICE(stage)`, `MISSING_USAGE(stage, kind)`,
   `UNKNOWN_USAGE(stage, kind)` or `INCONSISTENT_USAGE(stage, kind)`.
 - A chain with no `STAGE_RECORDED` events has no coverage at all (`NO_USAGE_RECORDED`).
+- No rule may be satisfied vacuously: coverage is never inferred from an empty snapshot, an empty
+  counter list or an empty stage list.
 
 | Status | Condition |
 | --- | --- |
@@ -387,6 +401,10 @@ Normative cases (validated accepted chain, snapshot pricing `INPUT_TOKENS` and `
 | Two stages; stage 2 has no counters | `PARTIAL` (`MISSING_USAGE(stage2, INPUT_TOKENS)`, `MISSING_USAGE(stage2, OUTPUT_TOKENS)`) | lower bound = stage 1 cost |
 | One stage; `OUTPUT_TOKENS` provenance `UNKNOWN` | `PARTIAL` (`UNKNOWN_USAGE(stage1, OUTPUT_TOKENS)`) | lower bound = input cost |
 | One stage; both counters `REPORTED` value 0 | `AVAILABLE` | 0.000000 (known zero) |
+| One `MEASURED` stage, no counters, no matching snapshot | `PARTIAL` (`MISSING_PRICE(stage1)`) | lower bound 0.000000, labelled lower bound |
+| Snapshot supplied with no price lines | Rejected as invalid input before calculation | none |
+| One stage declared `NO_BILLABLE_USAGE` with justification, no counters | `AVAILABLE` (`DECLARED_NO_BILLABLE_USAGE(stage1)`) | 0.000000 (declared zero) |
+| Stage declared `NO_BILLABLE_USAGE` but carrying a counter | Rejected at `record` before I/O | none |
 
 Low cost never substitutes for validated quality: cost is only reported next to, never instead of, the
 acceptance status and per-dimension evidence.
