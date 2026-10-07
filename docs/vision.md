@@ -21,6 +21,7 @@ The project exists to explore associative recall for intelligent modular systems
 - A cloud service.
 - A generic wrapper around external embeddings.
 - A production-grade storage engine yet.
+- An agent orchestrator, task executor, evidence judge, or billing system.
 
 ## Value Proposition
 
@@ -46,3 +47,9 @@ Monada Resonance Store lets an intelligent system:
 ## Strategic Direction
 
 The project is moving from a text-only associative store toward a broader memory substrate that can support both transcript-based and acoustic speech retrieval. Speech features should extend the memory model without contaminating the core text retrieval path.
+
+The next direction is execution-experience memory: an embedded, caller-owned history of agent
+executions, outcomes, quality evidence and usage that Monada Forge can record and recall, and that
+Monada Neuron can consume as neutral exported samples. Store keeps persistence, retrieval and
+deterministic calculations; Forge keeps execution and judgment; Neuron keeps adaptation and routing.
+See [ADR 0004](adr/0004-embedded-execution-memory.md). This is planned work, not implemented behavior.
