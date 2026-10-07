@@ -97,6 +97,38 @@ Non-goals:
 
 Improve scan efficiency only after a measurable baseline shows a real bottleneck.
 
+### Track — Forge Integration: embedded execution memory (#93–#102)
+
+Purpose: let Monada Forge record and recall agent execution experiences, and let Monada Neuron consume
+neutral samples, through an embedded library with traceable evidence and no orchestration in Store.
+Contract: [ADR 0004](adr/0004-embedded-execution-memory.md) and
+[execution memory contract v1](specs/execution-memory-contract-v1.md) (#93, documentation only).
+
+Expected scope and implementation order:
+
+- #94 consumable Java 27 library publications — depends on #93;
+- #95 immutable execution and evidence domain records — depends on #93;
+- #96 versioned append-only execution ledger with replay and integrity diagnostics — depends on #93, #95;
+- #97 caller-owned `ExecutionMemory` facade with idempotent recording and revisions — depends on #94, #95, #96;
+- #98 scoped ledger-derived projections and bounded recall — depends on #97;
+- #99 attempt-chain usage and hypothetical `CostToAcceptedOutcome` calculators (`monada-evaluation`) — depends on #95, #97;
+- #100 evidence-gated pairwise comparison and Pareto diagnostics — depends on #99;
+- #101 bounded provenance-preserving sample export — depends on #97, #98, #99, #100;
+- #102 reproducible end-to-end Forge experience evaluation and isolation gates — depends on #94, #96–#101.
+
+Numbering is roadmap order; independent items (for example #94 and #95) may proceed in parallel.
+
+Non-goals:
+
+- HTTP/MCP servers, network or provider calls, live price lookup;
+- automatic collection of repositories, logs, secrets or artifacts;
+- changes to legacy storage formats, defaults, protected baselines or existing API signatures;
+- a unified quality score or presenting subscription usage as API billing.
+
+Future cross-repository consumer work (not part of this track and not implemented): Forge adapters
+that record executions and use recall, and Neuron adapters that consume exported samples. Each needs its
+own Spec Context in that repository.
+
 ## Long-Term Research Options
 
 - approximate indexes;
@@ -114,3 +146,6 @@ A roadmap item is ready when it has a Spec Context with current state, measurabl
 Normalized feedback matching must not advance to a supported opt-in or protected contract from the
 current evidence. Any future attempt requires a separate design Issue that changes normalization
 semantics explicitly and re-runs both project-memory validation and adversarial stress evidence.
+
+Execution-memory features must follow the [execution memory contract v1](specs/execution-memory-contract-v1.md);
+semantic changes to it require updating that contract and ADR 0004 before implementation.

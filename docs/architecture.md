@@ -126,6 +126,43 @@ Speech work should preserve separation between transcript recall and acoustic re
 
 Speech retrieval quality is guarded by a two-mode benchmark in `com.monada.speech.evaluation`. The `PROTECTED` mode runs over deterministic generated WAV fixtures and pins a baseline that is enforced in CI, mirroring the text `monada-evaluation` regression policy. The `EXPLORATORY` mode runs the same pipeline over a local real corpus that stays outside git and is never enforced in CI; it is reached only through an explicit Gradle entrypoint or an environment-gated test. Reports label their mode prominently so protected and exploratory output are never confused.
 
+## Execution Memory Extension (Planned, Contract v1)
+
+Not implemented yet. [ADR 0004](adr/0004-embedded-execution-memory.md) and the
+[execution memory contract v1](specs/execution-memory-contract-v1.md) define how agent execution
+experiences recorded by Monada Forge become local memory for Forge and Monada Neuron. Store owns the
+ledger, projections, recall and export (plus evaluation-only calculators in `monada-evaluation`); Forge owns execution and evidence judgment; Neuron
+owns adaptation and routing. The memory engine performs no orchestration.
+
+```text
+caller-owned events (IDs, time, summaries, evidence, usage)
+  -> ExecutionMemory facade (single writer, AutoCloseable)
+  -> versioned append-only execution ledger   (authoritative)
+  -> per-scope text projection (existing MonadaMemory, exact-query defaults; derived, rebuildable)
+  -> bounded recall / snapshot history / sample export (exact ledger references)
+  -> evaluation-only usage/cost calculators and comparisons (monada-evaluation)
+```
+
+Execution memory uses its own root, separate from legacy text stores:
+
+```text
+<root>/
+├── execution-manifest.json
+├── write.lock
+└── scopes/
+    └── s-<sha256hex(scope ID)>/
+        ├── scope.id
+        ├── ledger/events-000001.log
+        └── projection/
+            ├── projection-checkpoint.log
+            └── memory/            # standard manifest 0.4 store
+```
+
+Planned packages: `com.monada.core.execution`, `com.monada.storage.execution`,
+`com.monada.api.execution`, and evaluation-only `com.monada.evaluation.execution`. The extension is
+additive: atom, vector, feedback and manifest formats, `KnowledgeAtom` identity, ranking and query-key
+defaults, and existing public signatures stay unchanged.
+
 ## Dependency Direction
 
 Preferred dependency direction:
@@ -139,7 +176,8 @@ monada-api
   -> monada-core
 ```
 
-`monada-evaluation` may depend on production modules for testing and reporting. `monada-speech` may depend on `monada-core` and selected storage patterns, but speech-specific concepts should not leak back into core APIs without explicit scope.
+`monada-evaluation` may depend on production modules for testing and reporting. `monada-speech` may depend on `monada-core` and selected storage patterns, but speech-specific concepts should not leak back into core APIs without explicit scope. Planned execution-memory
+packages follow the same direction; `monada-api` must never depend on `monada-evaluation`.
 
 ## Compatibility Boundary
 
@@ -149,5 +187,8 @@ Any change that affects persisted vectors must answer:
 - Are stored vectors comparable with newly encoded queries?
 - Does the manifest identify the format and semantic version?
 - Should the store be reused, rebuilt, or rejected?
+
+The planned execution ledger is additive: it has its own versioned manifest, never rewrites legacy
+files, and rejects unknown ledger versions instead of reinterpreting them.
 
 Silent semantic drift is treated as an architecture bug.
