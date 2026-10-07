@@ -131,7 +131,7 @@ Speech retrieval quality is guarded by a two-mode benchmark in `com.monada.speec
 Not implemented yet. [ADR 0004](adr/0004-embedded-execution-memory.md) and the
 [execution memory contract v1](specs/execution-memory-contract-v1.md) define how agent execution
 experiences recorded by Monada Forge become local memory for Forge and Monada Neuron. Store owns the
-ledger, projections, recall, calculators and export; Forge owns execution and evidence judgment; Neuron
+ledger, projections, recall and export (plus evaluation-only calculators in `monada-evaluation`); Forge owns execution and evidence judgment; Neuron
 owns adaptation and routing. The memory engine performs no orchestration.
 
 ```text
@@ -139,7 +139,8 @@ caller-owned events (IDs, time, summaries, evidence, usage)
   -> ExecutionMemory facade (single writer, AutoCloseable)
   -> versioned append-only execution ledger   (authoritative)
   -> per-scope text projection (existing MonadaMemory, exact-query defaults; derived, rebuildable)
-  -> bounded recall / history / summaries / sample export (exact ledger references)
+  -> bounded recall / snapshot history / sample export (exact ledger references)
+  -> evaluation-only usage/cost calculators and comparisons (monada-evaluation)
 ```
 
 Execution memory uses its own root, separate from legacy text stores:

@@ -60,8 +60,9 @@ Define, without implementing, the v1 semantics for:
 - `monada-storage`: yes (later) — `com.monada.storage.execution` ledger, codec, replay, audit (#96).
 - `monada-index`: no — projections reuse `LinearScanResonanceIndex` unchanged.
 - `monada-learning`: no.
-- `monada-api`: yes (later) — `com.monada.api.execution` facade, recall, calculators, export (#97–#99, #101).
-- `monada-evaluation`: yes (later) — `com.monada.evaluation.execution` comparison and end-to-end gates (#100, #102).
+- `monada-api`: yes (later) — `com.monada.api.execution` facade, derived acceptance, recall, export (#97, #98, #101).
+- `monada-evaluation`: yes (later) — `com.monada.evaluation.execution` usage/cost calculators, comparison,
+  export annotations and end-to-end gates (#99, #100, #101, #102).
 - `monada-speech`: no.
 
 `monada-api` must never depend on `monada-evaluation`. The documented dependency direction is unchanged.
@@ -261,39 +262,93 @@ Three separate concepts that never substitute for each other:
    `ARCHITECTURE`, `MAINTAINABILITY`, `COMPLEXITY`), `state` (`PASS`, `FAIL`, `UNKNOWN`,
    `NOT_APPLICABLE`), optional measured value + unit, evaluator id/version, policy version, source
    (`TOOL`, `HUMAN`, `MODEL_JUDGE`, `IMPORTED`), evidence artifact references. `NOT_APPLICABLE` requires
-   a justification.
+   a justification. Each observation carries `policyId` and `policyVersion`. One event may carry at most
+   one observation per dimension; a second one is a validation error before I/O.
 3. **Retrieval feedback** (`FeedbackEvent`): unchanged; usefulness of a recalled atom for a query. It is
    never written automatically from outcomes or evidence.
+
+Forge judges evidence; Store only applies the following structural selection rules (implemented with
+the facade in `monada-api`, #97).
+
+**Current outcome.** The `OUTCOME_RECORDED` event (after applying corrections) with the highest ledger
+sequence. An `ACCEPTED` outcome must name `acceptedAttemptId`, which must exist in the execution.
+
+**Applicable evidence.** For a dimension `d`, an observation is applicable only when:
+
+1. it belongs to an `EVIDENCE_RECORDED` event of the accepted attempt;
+2. its `policyId` and `policyVersion` equal the execution's evaluation policy from `EXECUTION_STARTED`
+   (after corrections);
+3. its event is the latest revision of its correction chain (a corrected event is replaced by its
+   correction, never counted alongside it).
+
+**Effective observation.** Among the applicable observations for `d`, the one whose effective event has
+the highest ledger sequence (for a corrected event, the sequence of the correction). A later applicable
+`FAIL` or `UNKNOWN` therefore overrides an earlier `PASS`, and a later `PASS` overrides an earlier `FAIL`.
+Observations from another policy or another attempt are ignored for acceptance (but remain history).
+Derivation uses every ledger event visible at the read point; there is no hidden cutoff.
 
 Derived acceptance (computed, never stored as a separate fact):
 
 | Derived status | Condition |
 | --- | --- |
-| `VALIDATED_ACCEPTED` | Latest outcome `ACCEPTED` + origin `VALIDATED` + every mandatory dimension of the policy has latest-revision `PASS` or justified `NOT_APPLICABLE` evidence on the accepted attempt |
-| `ACCEPTED_UNVALIDATED` | Latest outcome `ACCEPTED` but origin `IMPORTED_CLAIM`, or any mandatory dimension is `FAIL`, `UNKNOWN` or missing |
-| `NOT_ACCEPTED` | Latest outcome `REJECTED`, `FAILED` or `CANCELLED` |
-| `PENDING` | No outcome or latest outcome `PENDING` |
+| `VALIDATED_ACCEPTED` | Current outcome `ACCEPTED` + origin `VALIDATED` + every mandatory dimension has an effective observation that is `PASS` or justified `NOT_APPLICABLE` |
+| `ACCEPTED_UNVALIDATED` | Current outcome `ACCEPTED` but origin `IMPORTED_CLAIM`, or some mandatory dimension's effective observation is `FAIL` or `UNKNOWN`, or it has none; reasons list each dimension |
+| `NOT_ACCEPTED` | Current outcome `REJECTED`, `FAILED` or `CANCELLED` |
+| `PENDING` | No outcome or current outcome `PENDING` |
+
+Normative cases (policy `forge-gates` v`1`, mandatory `TESTS`; outcome `ACCEPTED`, `VALIDATED`,
+accepted attempt `a2`; sequences in brackets):
+
+| Evidence on the ledger | Effective `TESTS` | Derived status |
+| --- | --- | --- |
+| `a2` PASS v1 [5] | PASS [5] | `VALIDATED_ACCEPTED` |
+| `a2` PASS v1 [5], `a2` FAIL v1 [7] | FAIL [7] | `ACCEPTED_UNVALIDATED` (`TESTS`: FAIL) |
+| `a2` FAIL v1 [5], `a2` PASS v1 [7] | PASS [7] | `VALIDATED_ACCEPTED` |
+| `a2` PASS v1 [5], `a2` UNKNOWN v1 [7] | UNKNOWN [7] | `ACCEPTED_UNVALIDATED` (`TESTS`: UNKNOWN) |
+| `a2` PASS **v2** [5] | none | `ACCEPTED_UNVALIDATED` (`TESTS`: missing, policy mismatch) |
+| `a1` PASS v1 [3] only | none | `ACCEPTED_UNVALIDATED` (`TESTS`: missing on accepted attempt) |
+| `a2` PASS v1 [5] corrected to FAIL [9] | FAIL [9] | `ACCEPTED_UNVALIDATED` (`TESTS`: FAIL) |
+| `a2` NOT_APPLICABLE v1 with justification [5] | NOT_APPLICABLE [5] | `VALIDATED_ACCEPTED` |
 
 - `FAILED` and `CANCELLED` never imply acceptance.
 - Renewed evidence is a new event or revision; prior evidence remains history.
 - No unified quality score is computed; each dimension is reported individually with provenance.
 
-## 9. Usage and Hypothetical Cost
+Usage is recorded through the facade (`monada-api`, #97). The usage and cost calculators below are
+pure, evaluation-side code in `com.monada.evaluation.execution` (#99); the production facade exposes no
+calculator operation, and `monada-api` never depends on `monada-evaluation`.
 
 `UsageCounter`: `kind` (`INPUT_TOKENS`, `CACHED_INPUT_TOKENS`, `OUTPUT_TOKENS`, `REASONING_TOKENS`,
 `REQUESTS`, `TOOL_CALLS`), optional non-negative `long` value, provenance (`REPORTED`, `ESTIMATED`,
-`UNKNOWN`), source. `UNKNOWN` has no value and is never treated as zero. Overlap rules (for example
-whether cached input is included in input) are declared by the caller's price snapshot, not guessed.
+`UNKNOWN`), source. A counter with value `0` and provenance `REPORTED` or `ESTIMATED` is a **known zero**.
+`UNKNOWN` has no value; an absent counter is **not measured**. Neither is ever treated as zero. A stage
+carries at most one counter per kind.
 
 `RouteDescriptor.billingMode`: `API_METERED`, `SUBSCRIPTION`, `LOCAL`, `UNKNOWN`.
 
-`PriceSnapshot` (caller-supplied, versioned): provider, model, counter kind, currency (ISO 4217), price
-per unit as `BigDecimal`, unit size (e.g. 1,000,000 tokens), effective date, source, assumptions text.
+`PriceSnapshot` (caller-supplied, versioned): id + version, provider, model, currency (ISO 4217),
+effective date, source, assumptions text, and price lines. Each `PriceLine` has a counter kind, a
+non-negative `BigDecimal` price, a positive integer `unitSize` (e.g. 1,000,000 tokens; zero or negative is
+rejected) and an optional `includedIn` kind that declares overlap (e.g. `CACHED_INPUT_TOKENS` included in
+`INPUT_TOKENS`). The billable kinds of a stage are exactly the kinds that have a price line in the
+snapshot matching the stage route's provider and model.
 
-Rules:
+Billable quantities (non-overlapping):
 
-- Hypothetical API-equivalent cost = Σ (counter value × unit price), computed with exact `BigDecimal`
-  arithmetic; the final amount is rounded once with `HALF_EVEN` to the snapshot currency scale.
+- `billable(k) = value(k) − Σ value(j)` over priced kinds `j` declared `includedIn = k`.
+- A negative billable quantity is inconsistent usage and is reported as `INCONSISTENT_USAGE`, never
+  clamped to zero.
+
+Cost rules:
+
+- Line cost = `billable(k) × price(k) / unitSize(k)`. Multiplication is exact; the division uses
+  `BigDecimal.divide` with scale 18 and `HALF_EVEN` (exact whenever `unitSize` is a power of ten).
+- Totals sum unrounded line costs. The reported amount is rounded once, at the end, to scale 6 with
+  `HALF_EVEN`; the unrounded total is kept alongside it.
+- Worked example: 1,000 `INPUT_TOKENS` at USD 2 per 1,000,000 tokens → `1000 × 2 / 1000000` =
+  **USD 0.002** (reported `0.002000`), not USD 2,000.
+- Overlap example: `INPUT_TOKENS` 10,000 (USD 2 / 1M) and `CACHED_INPUT_TOKENS` 4,000 (USD 0.5 / 1M,
+  `includedIn = INPUT_TOKENS`) → `6000 × 2 / 1M + 4000 × 0.5 / 1M` = USD 0.012 + 0.002 = **USD 0.014**.
 - It is labelled hypothetical for every billing mode. **Subscription usage is never presented as API
   billing.** An actual billed amount is reported only when the caller records one, and separately.
 - Amounts in different currencies are never summed; each currency is reported on its own.
@@ -305,11 +360,33 @@ reviews, retries, QA) up to and including the `OUTCOME_RECORDED` event that esta
 `VALIDATED_ACCEPTED`. Later events are reported separately as post-acceptance activity. Events are
 deduplicated by `eventId`; a correction replaces its target, never adds to it.
 
+The acceptance cutoff is the highest ledger sequence among the current `ACCEPTED` outcome event and the
+effective mandatory observations that make it `VALIDATED_ACCEPTED`. `STAGE_RECORDED` events after that
+sequence are post-acceptance activity.
+
+Usage coverage is evaluated per `STAGE_RECORDED` event in the chain (after corrections), never per
+counter list:
+
+- A stage is **covered** when it has a matching price snapshot and, for every billable kind of that
+  snapshot, a counter with a value (known zero included) and no `INCONSISTENT_USAGE`.
+- Otherwise each gap is a reason: `MISSING_PRICE(stage)`, `MISSING_USAGE(stage, kind)`,
+  `UNKNOWN_USAGE(stage, kind)` or `INCONSISTENT_USAGE(stage, kind)`.
+- A chain with no `STAGE_RECORDED` events has no coverage at all (`NO_USAGE_RECORDED`).
+
 | Status | Condition |
 | --- | --- |
-| `AVAILABLE` | `VALIDATED_ACCEPTED` and every counter in the chain has a value and a matching price |
-| `PARTIAL` | `VALIDATED_ACCEPTED` but some usage or price is missing; reports a lower bound plus missing reasons |
-| `UNAVAILABLE` | No `VALIDATED_ACCEPTED` outcome (pending, rejected, failed, cancelled or unvalidated) |
+| `AVAILABLE` | `VALIDATED_ACCEPTED`, at least one stage in the chain, and every stage covered |
+| `PARTIAL` | `VALIDATED_ACCEPTED`, at least one stage, some stage not covered; reports the lower bound from covered lines plus every reason |
+| `UNAVAILABLE` | No `VALIDATED_ACCEPTED` outcome (pending, rejected, failed, cancelled or unvalidated), or `NO_USAGE_RECORDED` |
+
+Normative cases (validated accepted chain, snapshot pricing `INPUT_TOKENS` and `OUTPUT_TOKENS`):
+
+| Chain usage | Status | Amount |
+| --- | --- | --- |
+| No `STAGE_RECORDED` events | `UNAVAILABLE` (`NO_USAGE_RECORDED`) | none — never 0 |
+| Two stages; stage 2 has no counters | `PARTIAL` (`MISSING_USAGE(stage2, INPUT_TOKENS)`, `MISSING_USAGE(stage2, OUTPUT_TOKENS)`) | lower bound = stage 1 cost |
+| One stage; `OUTPUT_TOKENS` provenance `UNKNOWN` | `PARTIAL` (`UNKNOWN_USAGE(stage1, OUTPUT_TOKENS)`) | lower bound = input cost |
+| One stage; both counters `REPORTED` value 0 | `AVAILABLE` | 0.000000 (known zero) |
 
 Low cost never substitutes for validated quality: cost is only reported next to, never instead of, the
 acceptance status and per-dimension evidence.
@@ -348,8 +425,15 @@ version.
 
 - `limit` must be 1–50.
 - A blank query returns no hits.
-- Retrieve the top `limit` atoms from the scope's projection, expand each to its refs, sort by similarity
-  descending then by the canonical `ExperienceRef` string ascending, and truncate to `limit`.
+- Total experience order: similarity descending, then atom ID ascending (the existing ranker's tie
+  order), then canonical `ExperienceRef` string ascending.
+- Algorithm: run the existing `MonadaQuery` with `topK = limit` (unchanged ranker behavior), expand each
+  returned atom to its refs from the checkpoint, sort by the total order, and truncate to `limit`.
+  Because every projected atom maps to at least one ref and the order is atom-major, the first `limit`
+  experiences always come from the first `limit` atoms, so truncating atoms first never changes the
+  result. An atom without refs makes the projection `INCOMPATIBLE` and is reported, never skipped.
+- Validation cases: (a) atoms A and B tie, `A < B` by atom ID, A → ref `z`, B → ref `a`, `limit = 1`
+  → returns A/`z`; (b) one atom with refs `r1 < r2`, `limit = 1` → returns `r1`; `limit = 2` → `r1`, `r2`.
 - Each `ExperienceHit` carries the ref, similarity, projection version and covered ledger sequence.
 - Similarity is resonance similarity, never quality or confidence. Missing refs are reported, never
   silently dropped. Retrieval feedback on projection atoms remains the explicit `feedback(...)` path.
@@ -360,16 +444,28 @@ version.
 
 - `pageSize` must be 1–500.
 - Events are returned in ledger sequence order, including every revision.
-- The cursor is an opaque, stateless token (scope + last sequence + format version), so the same cursor
-  always returns the same page.
+- Snapshot pagination: a call without a cursor starts a new snapshot whose high-watermark is the scope's
+  last valid ledger sequence at that moment. Every page of that snapshot contains only events with
+  `sequence ≤ highWatermark`.
+- The cursor is an opaque, stateless token: format version, scope, high-watermark and last returned
+  sequence. The same cursor always returns the same page, even if events were appended meanwhile; a
+  cursor for another scope, or with a high-watermark beyond the ledger, is rejected.
+- `hasMore` is false when the last returned sequence equals the high-watermark. Events appended later are
+  read by starting a new snapshot (no cursor).
+- Example (`pageSize = 2`): ledger has 1–3 → first page `[1, 2]`, cursor `(hw=3, last=2)`. Event 4 is
+  appended. The cursor returns `[3]` with `hasMore = false`, and returns `[3]` again if reused. A new
+  call without a cursor returns `[1, 2]` with `hw=4`.
 
 `exportSamples(ExportRequest)` is read-only and versioned (`execution-sample/1`):
 
 - The request names an explicit scope, a cutoff (ledger sequence or `recordedAt`), page size (1–500),
   cursor, evidence policy, and view (`ADAPTER_READY` or `DIAGNOSTIC`).
 - One sample per execution at its latest revisions as of the cutoff. Each sample includes task/context
-  descriptors, route descriptors, outcome, derived acceptance, per-dimension evidence, full-chain usage
-  and cost status, exact refs and revisions, and the ledger checkpoint and projection version used.
+  descriptors, route descriptors, outcome, derived acceptance, per-dimension effective evidence, full-chain
+  usage counters with provenance, exact refs and revisions, and the ledger checkpoint and projection
+  version used. Cost and comparison annotations are added only by evaluation tooling in
+  `com.monada.evaluation.execution` (#99–#101), never by `monada-api`.
+- The export cursor follows the history snapshot rule, with the cutoff as the high-watermark.
 - Negative and incomplete executions are exported with eligibility and missing-evidence reasons. The
   `ADAPTER_READY` view never labels `UNKNOWN` mandatory gates as success.
 - Only caller-approved summaries, typed observations and artifact references are exported; no raw
@@ -407,9 +503,9 @@ version must be rejected by v1 readers rather than reinterpreted.
 | #96 | Versioned append-only ledger, replay, integrity diagnostics | `monada-storage` | #93, #95 |
 | #97 | `ExecutionMemory` facade: idempotent recording, revisions, history | `monada-api` | #94, #95, #96 |
 | #98 | Scoped projections and bounded recall | `monada-api` | #97 |
-| #99 | Attempt-chain usage and hypothetical `CostToAcceptedOutcome` | `monada-api` | #95, #97 |
+| #99 | Attempt-chain usage and hypothetical `CostToAcceptedOutcome` calculators | `monada-evaluation` | #95, #97 |
 | #100 | Evidence-gated pairwise comparison and Pareto diagnostics | `monada-evaluation` | #99 |
-| #101 | Bounded provenance-preserving sample export | `monada-api` | #97, #98, #99, #100 |
+| #101 | Bounded provenance-preserving sample export (+ evaluation annotations) | `monada-api`, `monada-evaluation` | #97, #98, #99, #100 |
 | #102 | Reproducible end-to-end Forge experience evaluation and isolation gates | `monada-evaluation` | #94, #96–#101 |
 
 Consumer integration inside Monada Forge and Monada Neuron is future cross-repository work and is not

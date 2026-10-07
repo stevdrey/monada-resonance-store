@@ -68,7 +68,9 @@ Monada Resonance Store owns:
 - the execution ledger format, its manifest, replay and integrity diagnostics;
 - identity, idempotency, conflict and revision rules for recorded facts;
 - ledger-derived projections, scoped bounded recall and their reconciliation;
-- deterministic calculators (attempt-chain usage, hypothetical `CostToAcceptedOutcome`);
+- derived acceptance from structural evidence-selection rules (in `monada-api`);
+- deterministic evaluation-side calculators (attempt-chain usage, hypothetical `CostToAcceptedOutcome`)
+  in `monada-evaluation`;
 - evaluation-only comparison and Pareto diagnostics;
 - read-only, versioned sample export.
 
@@ -99,11 +101,11 @@ records), #96 (ledger), #97 (facade), #98 (projections/recall), #99 (calculators
 | --- | --- | --- |
 | `com.monada.core.execution` | `monada-core` | Immutable IDs and domain records |
 | `com.monada.storage.execution` | `monada-storage` | Ledger manifest, record codec, replay, audit |
-| `com.monada.api.execution` | `monada-api` | `ExecutionMemory` facade, recall, calculators, export |
-| `com.monada.evaluation.execution` | `monada-evaluation` | Comparison/Pareto reports (evaluation only) |
+| `com.monada.api.execution` | `monada-api` | `ExecutionMemory` facade, derived acceptance, recall, export |
+| `com.monada.evaluation.execution` | `monada-evaluation` | Usage/cost calculators, comparison/Pareto reports, export annotations (evaluation only) |
 
 Core types (`com.monada.core.execution`): `ScopeId`, `TaskId`, `ExecutionId`, `AttemptId`, `EventId`,
-`ExecutionEvent` (sealed by event kind), `RouteDescriptor`, `Outcome`, `QualityObservation`,
+`ExecutionEvent` (sealed by event kind), `EvaluationPolicy`, `RouteDescriptor`, `Outcome`, `QualityObservation`,
 `UsageCounter`, `PriceSnapshot`, `ArtifactRef`, `ExperienceRef`.
 
 Facade operations (`com.monada.api.execution.ExecutionMemory`, `AutoCloseable`):
@@ -115,11 +117,14 @@ Facade operations (`com.monada.api.execution.ExecutionMemory`, `AutoCloseable`):
 | `record(ExecutionEvent event)` | `RecordResult` = `APPENDED`, `IDEMPOTENT` or `CONFLICT` |
 | `loadExecution(ScopeId, ExecutionId)` | `Optional<ExecutionView>` at latest revisions |
 | `loadAttempt(ScopeId, ExecutionId, AttemptId)` | `Optional<AttemptView>` |
-| `history(ScopeId, HistoryCursor, int pageSize)` | `HistoryPage` in ledger sequence order |
+| `history(ScopeId, HistoryCursor, int pageSize)` | `HistoryPage` in ledger sequence order, fixed snapshot high-watermark |
 | `recall(ScopeId, String query, int limit)` | `ExperienceRecall` of `ExperienceHit` |
 | `projectionStatus(ScopeId)` / `rebuildProjection(ScopeId)` | Explicit reconciliation |
-| `summarize(ScopeId, ExecutionId, PriceSnapshots)` | `ExecutionSummary` incl. `CostToAcceptedOutcome` |
 | `exportSamples(ExportRequest)` | `ExportPage` (read-only, versioned) |
+
+The facade has no cost or comparison operation. Evaluation-side code (`monada-evaluation`, #99/#100)
+reads facade views and computes `ExecutionSummary` / `CostToAcceptedOutcome` and comparisons;
+`monada-api` never depends on `monada-evaluation`.
 
 Example host usage (illustrative, not yet compilable):
 
@@ -132,14 +137,15 @@ try (ExecutionMemory memory = ExecutionMemory.open(root, ExecutionMemoryConfig.d
             EventId.of("evt-0001"), scope, TaskId.of("issue-93"), ExecutionId.of("exec-1"),
             new SourceProvenance("e823256e3da71f15a73e06e0ca6d54d7f6d6ac87",
                     "ctx-sha256:9b1c...", "constraints-sha256:41aa..."),
+            new EvaluationPolicy("forge-gates", "1", Set.of(QualityDimension.TESTS)),
             "Document execution-memory ownership and v1 contract", now));
 
     memory.record(ExecutionEvent.outcomeRecorded(
             EventId.of("evt-0009"), scope, TaskId.of("issue-93"), ExecutionId.of("exec-1"),
-            AttemptId.of("attempt-2"), Outcome.accepted(OutcomeOrigin.VALIDATED, "policy-v1"),
-            List.of(QualityObservation.pass(QualityDimension.TESTS, "gradle-test", "policy-v1",
-                    ArtifactRef.of("ci-run-123", ArtifactKind.TEST_REPORT))),
+            Outcome.accepted(OutcomeOrigin.VALIDATED, AttemptId.of("attempt-2")),
             hostClock.instant()));
+    // Acceptance is VALIDATED_ACCEPTED only if attempt-2 has an effective TESTS observation
+    // (EVIDENCE_RECORDED, policy "forge-gates" v"1") that is PASS or justified NOT_APPLICABLE.
 
     ExperienceRecall recall = memory.recall(scope, "versioned append-only ledger contract", 5);
     for (ExperienceHit hit : recall.hits()) {
