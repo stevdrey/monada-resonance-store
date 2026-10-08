@@ -84,11 +84,11 @@ Define, without implementing, the v1 semantics for:
 
 Identifier rules (`ScopeId`, `TaskId`, `ExecutionId`, `AttemptId`, `EventId`). Artifact `reference`
 values follow the same character rules (no control characters, no leading or trailing space character,
-NFC as supplied) but allow up to 512 code points; artifact `kind` and `digest` are opaque descriptors
+no Unicode normalization form required) but allow up to 512 code points; artifact `kind` and `digest` are opaque descriptors
 with the same 512 bound:
 
 - Caller-issued; the library never generates them.
-- 1–128 Unicode code points (512 for artifact `reference`), NFC as supplied (not re-normalized), no control
+- 1–128 Unicode code points (512 for artifact `reference`), preserved exactly as supplied (no normalization form is required and none is applied, so NFC and NFD spellings are distinct IDs), no control
   characters, no leading or trailing space character (below). Validation happens before any I/O.
 - Compared by exact `String.equals`; case-sensitive.
 - Never derived from text hashes and never used as filesystem path segments.

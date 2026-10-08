@@ -133,9 +133,13 @@ class ExecutionEventTest {
                     blank, at(0)));
             assertThrows(IllegalArgumentException.class, () -> new ExecutionEvent.AttemptFinished(
                     env("f", "x", "a1", 1, 1), AttemptResult.FAILED, Optional.of(blank), Optional.empty()));
-            assertThrows(IllegalArgumentException.class, () -> ExecutionEvent.StageRecorded.noBillableUsage(
-                    env("s", "x", "a1", 1, 1), "lint", Fixtures.route(), at(1), at(2), blank, List.of()));
+            var ex = assertThrows(IllegalArgumentException.class, () -> ExecutionEvent.StageRecorded.noBillableUsage(
+                    env("s", "x", "a1", 1, 2), "lint", Fixtures.route(), at(1), at(2), blank, List.of()));
+            assertTrue(ex.getMessage().contains("justification"), ex.getMessage());
         }
+        assertEquals(UsageDeclaration.NO_BILLABLE_USAGE, ExecutionEvent.StageRecorded.noBillableUsage(
+                env("s", "x", "a1", 1, 2), "lint", Fixtures.route(), at(1), at(2), "deterministic check",
+                List.of()).usageDeclaration(), "same timestamps are valid with a real justification");
         assertEquals("a\u00A0b", new ExecutionEvent.AttemptFinished(env("f", "x", "a1", 1, 1),
                 AttemptResult.FAILED, Optional.of("a\u00A0b"), Optional.empty()).solutionSummary().orElseThrow());
     }
