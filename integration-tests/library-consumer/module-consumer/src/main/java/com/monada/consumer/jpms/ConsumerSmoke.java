@@ -32,30 +32,41 @@ public final class ConsumerSmoke {
 
         Path root = Files.createTempDirectory("monada-consumer-jpms-");
         try {
-            String rememberedId;
-            double scoreBeforeFeedback;
-            {
-                MonadaMemory memory = MonadaMemory.open(root, MonadaMemoryOptions.defaults());
-                KnowledgeAtom graph = memory.remember(
-                        "OrientDB is a multi-model database that combines graph and document models.");
-                memory.remember("Redis is an in-memory data structure store often used as a cache.");
-                rememberedId = graph.id();
-
-                MonadaRecall recall = memory.resonate(QUERY).topK(3).threshold(0.0).execute();
-                scoreBeforeFeedback = expectTop(recall, rememberedId, "initial recall");
-
-                memory.feedback(QUERY, rememberedId, FeedbackSignal.POSITIVE);
-                expectInvalidTopKRejected(memory);
+            runSmoke(root);
+        } catch (Throwable failure) {
+            // Keep the smoke failure primary; a cleanup error is attached instead of masking it.
+            try {
+                deleteRecursively(root);
+            } catch (IOException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
             }
-
-            MonadaMemory reopened = MonadaMemory.open(root);
-            MonadaRecall recall = reopened.resonate(QUERY).topK(3).threshold(0.0).execute();
-            double scoreAfterReopen = expectTop(recall, rememberedId, "recall after reopen");
-            expectFeedbackPersisted(scoreBeforeFeedback, scoreAfterReopen);
-            System.out.println("[smoke] open -> remember -> recall -> feedback -> reopen: OK");
-        } finally {
-            deleteRecursively(root);
+            throw failure;
         }
+        deleteRecursively(root);
+    }
+
+    private static void runSmoke(Path root) {
+        String rememberedId;
+        double scoreBeforeFeedback;
+        {
+            MonadaMemory memory = MonadaMemory.open(root, MonadaMemoryOptions.defaults());
+            KnowledgeAtom graph = memory.remember(
+                    "OrientDB is a multi-model database that combines graph and document models.");
+            memory.remember("Redis is an in-memory data structure store often used as a cache.");
+            rememberedId = graph.id();
+
+            MonadaRecall recall = memory.resonate(QUERY).topK(3).threshold(0.0).execute();
+            scoreBeforeFeedback = expectTop(recall, rememberedId, "initial recall");
+
+            memory.feedback(QUERY, rememberedId, FeedbackSignal.POSITIVE);
+            expectInvalidTopKRejected(memory);
+        }
+
+        MonadaMemory reopened = MonadaMemory.open(root);
+        MonadaRecall recall = reopened.resonate(QUERY).topK(3).threshold(0.0).execute();
+        double scoreAfterReopen = expectTop(recall, rememberedId, "recall after reopen");
+        expectFeedbackPersisted(scoreBeforeFeedback, scoreAfterReopen);
+        System.out.println("[smoke] open -> remember -> recall -> feedback -> reopen: OK");
     }
 
     private static void printEvidence() {
