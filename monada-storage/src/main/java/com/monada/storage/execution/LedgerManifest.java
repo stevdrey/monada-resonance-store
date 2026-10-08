@@ -18,6 +18,7 @@ final class LedgerManifest {
     static final String FORMAT = "monada-execution-ledger";
     static final String VERSION = "1";
     static final String RECORD_CODEC = "MXL1";
+    static final int MAX_BYTES = 1024;
     static final String SCOPE_DIRECTORY_SCHEME = "sha256-hex-v1";
 
     private static final Pattern SHAPE = Pattern.compile(
@@ -38,7 +39,14 @@ final class LedgerManifest {
     static void validate(Path manifestFile) throws LedgerException {
         String text;
         try {
-            text = Files.readString(manifestFile, StandardCharsets.UTF_8);
+            var bytes = LedgerPaths.readBounded(manifestFile, MAX_BYTES);
+            if (bytes.isEmpty()) {
+                throw failure(LedgerDiagnosticCategory.MANIFEST_INVALID, manifestFile,
+                        "manifest is larger than " + MAX_BYTES + " bytes");
+            }
+            text = new String(bytes.get(), StandardCharsets.UTF_8);
+        } catch (LedgerException e) {
+            throw e;
         } catch (IOException | RuntimeException e) {
             throw failure(LedgerDiagnosticCategory.MANIFEST_INVALID, manifestFile, "unreadable manifest: " + e.getMessage());
         }

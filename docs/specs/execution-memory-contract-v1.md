@@ -619,7 +619,8 @@ explicit repair.
 | `LedgerException`, `LedgerLockedException`, `LedgerRejectedException` | Open/lock failures and invalid events (the latter is thrown before any I/O). |
 | `audit.ExecutionLedgerAuditor` | Read-only audit of a whole ledger root. |
 
-A ledger instance is bound to one scope. Appending an event of another scope is rejected
+A ledger instance is bound to one scope. A corrected `ATTEMPT_STARTED` keeps the effective attempt
+ordinals of the execution unique (a clash is a `CONFLICT`, and the ordinal it replaced becomes free). Appending an event of another scope is rejected
 (`SCOPE_ID_MISMATCH`). Opening writable creates the root, the manifest and that scope's directories only.
 
 ### 16.2 Payload codec (schema 1)
@@ -669,8 +670,14 @@ MXL1<TAB>1<TAB>187<TAB>2f1c...<TAB>1|EXECUTION_STARTED|e1|scope-1|task-1|exec-1|
 
 Scope directories are `s-<sha256hex(UTF-8 scope ID)>`; raw identifiers are never path segments. Every path
 is resolved through real paths and must stay inside the real ledger root; a symbolic link that leaves the
-root fails closed (`PATH_ESCAPE`). `scope.id` must equal the requested scope (`SCOPE_ID_MISMATCH`). A root
-that holds a legacy `manifest.json` but no `execution-manifest.json` is rejected on writable open. The check
+root fails closed (`PATH_ESCAPE`). `scope.id` must equal the requested scope (`SCOPE_ID_MISMATCH`). A new
+scope is built under `scopes/.staging-s-<hash>` (with `scope.id` and `ledger/`) and published with one atomic
+rename, so a concurrent reader never sees a partial scope; a scope directory without `scope.id` or `ledger/`
+is damage, reported by readers and the audit. A leftover staging directory is discarded by the next writer
+(it holds the lock). A root that holds a legacy `manifest.json` but no `execution-manifest.json` is rejected
+on writable open, and so is a root with `scopes/` but no manifest (`MANIFEST_MISSING`): a manifest is only
+created for a genuinely new root. `execution-manifest.json` (1 KiB) and `scope.id` (512 bytes) are read with a
+size bound; larger files are `MANIFEST_INVALID` / `SCOPE_ID_MISMATCH`. The check
 is not atomic with later use (no defence against a concurrent hostile local process).
 
 ### 16.6 Diagnostics and audit
@@ -680,8 +687,9 @@ Categories are those of section 6 plus `INVALID_ORDER` (ordering rule violated i
 returns the longest valid prefix; later lines are still examined for framing, digest, sequence and schema
 problems. Diagnostics are sorted (severity, file, line, category, message) and so are reproducible.
 
-The read-only audit (`ExecutionLedgerAuditor`, `audit` package) validates the manifest, every `s-<hash>`
-scope directory (name hash, `scope.id`, containment), and every record. It never creates, locks, truncates or
+The read-only audit (`ExecutionLedgerAuditor`, `audit` package) validates the manifest and every `s-<hash>`
+scope directory it discovers (containment is checked before any child is read, `scope.id` must hash to the
+directory name, `ledger/` must exist, and that same directory is scanned record by record). It never creates, locks, truncates or
 repairs anything, and reports a missing root or manifest as diagnostics. Unexpected entries under `scopes/`
 or `ledger/` (for example a reserved `events-000002.log`) are warnings.
 

@@ -81,47 +81,25 @@ public final class ExecutionLedgerAuditor {
         }
     }
 
-    private void auditScope(Path root, Path scopeDir, List<LedgerDiagnostic> findings, int[] scopes, long[] records)
-            throws IOException {
+    private void auditScope(Path root, Path scopeDir, List<LedgerDiagnostic> findings, int[] scopes, long[] records) {
         String name = scopeDir.getFileName().toString();
-        String shown = "scopes/" + name;
-        if (!SCOPE_DIR.matcher(name).matches() || !Files.isDirectory(scopeDir)) {
-            findings.add(LedgerDiagnostic.warning(LedgerDiagnosticCategory.MANIFEST_INVALID, shown, 0,
+        if (!SCOPE_DIR.matcher(name).matches()) {
+            findings.add(LedgerDiagnostic.warning(LedgerDiagnosticCategory.MANIFEST_INVALID, "scopes/" + name, 0,
                     OptionalLong.empty(), "unexpected entry in scopes/ (ignored)"));
             return;
         }
         scopes[0]++;
-        Path idFile = scopeDir.resolve("scope.id");
-        ScopeId scope;
+        // The reader checks containment before touching any child, ties scope.id to the directory name and
+        // scans this very directory.
         try {
-            scope = ScopeId.of(Files.readString(idFile));
-        } catch (IOException | RuntimeException e) {
-            findings.add(LedgerDiagnostic.error(LedgerDiagnosticCategory.SCOPE_ID_MISMATCH, shown + "/scope.id", 0,
-                    OptionalLong.empty(), "scope.id is missing, unreadable or not a valid scope id"));
-            return;
-        }
-        // The reader enforces the directory-name hash, scope.id, containment and every record rule.
-        try {
-            ExecutionLedgerReader reader = ExecutionLedgerReader.open(root, scope);
+            ExecutionLedgerReader reader = ExecutionLedgerReader.openScopeDirectory(root, name);
             findings.addAll(reader.diagnostics());
             records[0] += reader.replay().size();
-        } catch (LedgerException e) {
-            findings.addAll(e.diagnostics().isEmpty()
-                    ? List.of(LedgerDiagnostic.error(LedgerDiagnosticCategory.SCOPE_ID_MISMATCH, shown, 0,
-                    OptionalLong.empty(), e.getMessage()))
-                    : e.diagnostics());
-        }
-        Path ledgerDir = scopeDir.resolve("ledger");
-        if (Files.isDirectory(ledgerDir)) {
-            try (Stream<Path> list = Files.list(ledgerDir)) {
-                for (Path entry : list.sorted().toList()) {
-                    if (!entry.getFileName().toString().equals("events-000001.log")) {
-                        findings.add(LedgerDiagnostic.warning(LedgerDiagnosticCategory.UNSUPPORTED_VERSION,
-                                shown + "/ledger/" + entry.getFileName(), 0, OptionalLong.empty(),
-                                "unexpected file in ledger directory (v1 reads a single segment; ignored)"));
-                    }
-                }
-            }
+        } catch (IOException e) {
+            findings.addAll(e instanceof LedgerException le && !le.diagnostics().isEmpty()
+                    ? le.diagnostics()
+                    : List.of(LedgerDiagnostic.error(LedgerDiagnosticCategory.MALFORMED_RECORD, "scopes/" + name, 0,
+                    OptionalLong.empty(), "scope could not be read: " + e.getMessage())));
         }
     }
 }

@@ -12,11 +12,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 /**
  * Single-writer, append-only execution ledger for one scope (contract sections 2-7).
@@ -107,20 +109,51 @@ public final class ExecutionLedger implements AutoCloseable {
             LedgerManifest.validate(manifest);
             return;
         }
+        if (Files.exists(paths.root().resolve(LedgerPaths.SCOPES_DIR), LinkOption.NOFOLLOW_LINKS)) {
+            String message = "ledger data exists but " + LedgerManifest.FILE_NAME
+                    + " is missing; refusing to assert a format for it (no automatic repair)";
+            throw new LedgerException(message, List.of(LedgerDiagnostic.error(
+                    LedgerDiagnosticCategory.MANIFEST_MISSING, LedgerManifest.FILE_NAME, 0, OptionalLong.empty(),
+                    message)));
+        }
         writeDurably(manifest, LedgerManifest.render().getBytes(StandardCharsets.UTF_8));
     }
 
+    /**
+     * Returns the scope directory, publishing a new one atomically: it is built under a private staging name
+     * (scope.id and ledger/ included) and renamed into place, so a concurrent reader never sees a partial
+     * scope. A staging directory left by an earlier crash is only ever ours (we hold the write lock) and is
+     * discarded.
+     */
     private static Path prepareScope(LedgerPaths paths, ScopeId scope) throws IOException {
         Path scopeDir = paths.scopeDir(scope);
-        Files.createDirectories(scopeDir);
-        Files.createDirectories(paths.ledgerDir(scopeDir));
-        Path idFile = paths.scopeIdFile(scopeDir);
-        if (Files.exists(idFile, LinkOption.NOFOLLOW_LINKS)) {
+        if (Files.exists(scopeDir, LinkOption.NOFOLLOW_LINKS)) {
             ExecutionLedgerReader.verifyScopeId(paths, scopeDir, scope);
-        } else {
-            writeDurably(idFile, scope.value().getBytes(StandardCharsets.UTF_8));
+            if (!Files.isDirectory(paths.ledgerDir(scopeDir))) {
+                throw new LedgerException("required ledger directory is missing: "
+                        + paths.display(paths.ledgerDir(scopeDir)));
+            }
+            return scopeDir;
         }
-        return scopeDir;
+        Files.createDirectories(paths.scopesDir());
+        Path staging = paths.stagingScopeDir(scope);
+        deleteTree(staging);
+        Files.createDirectory(staging);
+        Files.createDirectory(staging.resolve(LedgerPaths.LEDGER_DIR));
+        writeDurably(staging.resolve(LedgerPaths.SCOPE_ID_FILE), scope.value().getBytes(StandardCharsets.UTF_8));
+        Files.move(staging, scopeDir, StandardCopyOption.ATOMIC_MOVE);
+        return paths.scopeDir(scope);
+    }
+
+    private static void deleteTree(Path dir) throws IOException {
+        if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        try (var walk = Files.walk(dir)) {
+            for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                Files.delete(p);
+            }
+        }
     }
 
     private static void writeDurably(Path file, byte[] content) throws IOException {

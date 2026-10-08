@@ -117,4 +117,17 @@ final class LedgerPaths {
         Path relative = root.relativize(path.toAbsolutePath().normalize());
         return relative.toString().replace(java.io.File.separatorChar, '/');
     }
+
+    /** Reads at most {@code max} bytes; returns empty when the file is larger (never loads it whole). */
+    static java.util.Optional<byte[]> readBounded(Path file, int max) throws IOException {
+        try (java.io.InputStream in = Files.newInputStream(file)) {
+            byte[] bytes = in.readNBytes(max + 1);
+            return bytes.length > max ? java.util.Optional.empty() : java.util.Optional.of(bytes);
+        }
+    }
+
+    /** Private staging directory used to publish a complete new scope atomically. */
+    Path stagingScopeDir(ScopeId scope) throws LedgerException {
+        return contained(root.resolve(SCOPES_DIR).resolve(".staging-" + scopeDirectoryName(scope)));
+    }
 }

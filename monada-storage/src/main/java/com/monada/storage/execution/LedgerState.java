@@ -46,7 +46,7 @@ final class LedgerState {
     }
 
     private static final class Attempt {
-        final int ordinal;
+        int ordinal;
         boolean finished;
 
         Attempt(int ordinal) {
@@ -191,9 +191,7 @@ final class LedgerState {
         }
         Execution execution = executions.get(env.executionId());
         return switch (correction.replacement()) {
-            case AttemptStarted e -> e.previousAttempt().filter(p -> !execution.attempts.containsKey(p))
-                    .map(p -> Violation.reject(LedgerDiagnosticCategory.DANGLING_REFERENCE,
-                            "previous attempt " + p + " does not exist in execution " + env.executionId()));
+            case AttemptStarted e -> checkCorrectedAttempt(execution, env, e);
             case OutcomeRecorded e -> e.outcome().acceptedAttempt()
                     .filter(a -> !execution.attempts.containsKey(a))
                     .map(a -> Violation.reject(LedgerDiagnosticCategory.DANGLING_REFERENCE,
@@ -202,13 +200,38 @@ final class LedgerState {
         };
     }
 
+    /** A corrected ATTEMPT_STARTED keeps the effective ordinals of the execution unique. */
+    private Optional<Violation> checkCorrectedAttempt(Execution execution, EventEnvelope env, AttemptStarted e) {
+        Optional<Violation> missing = e.previousAttempt().filter(p -> !execution.attempts.containsKey(p))
+                .map(p -> Violation.reject(LedgerDiagnosticCategory.DANGLING_REFERENCE,
+                        "previous attempt " + p + " does not exist in execution " + env.executionId()));
+        if (missing.isPresent()) {
+            return missing;
+        }
+        Attempt own = execution.attempts.get(env.attemptId().get());
+        if (own.ordinal != e.ordinal() && execution.ordinals.contains(e.ordinal())) {
+            return Optional.of(Violation.conflict(LedgerDiagnosticCategory.CONFLICTING_DUPLICATE_EVENT,
+                    "attempt ordinal " + e.ordinal() + " is already used in execution " + env.executionId()));
+        }
+        return Optional.empty();
+    }
+
     /** Records an event that passed {@link #check}. */
     void apply(long sequence, ExecutionEvent event, byte[] payload) {
         EventEnvelope env = event.envelope();
         events.put(env.eventId(), new Entry(sequence, event, payload));
         lastSequence = sequence;
         switch (event) {
-            case Correction c -> superseded.add(c.envelope().supersedes().get());
+            case Correction c -> {
+                superseded.add(c.envelope().supersedes().get());
+                if (c.replacement() instanceof AttemptStarted replaced) {
+                    Execution execution = executions.get(env.executionId());
+                    Attempt attempt = execution.attempts.get(env.attemptId().get());
+                    execution.ordinals.remove(attempt.ordinal);
+                    attempt.ordinal = replaced.ordinal();
+                    execution.ordinals.add(attempt.ordinal);
+                }
+            }
             case ExecutionStarted e -> executions.put(env.executionId(), new Execution(env.taskId()));
             case AttemptStarted e -> {
                 Execution execution = executions.get(env.executionId());
