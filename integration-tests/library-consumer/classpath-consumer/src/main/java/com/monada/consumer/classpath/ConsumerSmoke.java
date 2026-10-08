@@ -33,6 +33,7 @@ public final class ConsumerSmoke {
         Path root = Files.createTempDirectory("monada-consumer-classpath-");
         try {
             String rememberedId;
+            double scoreBeforeFeedback;
             {
                 MonadaMemory memory = MonadaMemory.open(root, MonadaMemoryOptions.defaults());
                 KnowledgeAtom graph = memory.remember(
@@ -41,7 +42,7 @@ public final class ConsumerSmoke {
                 rememberedId = graph.id();
 
                 MonadaRecall recall = memory.resonate(QUERY).topK(3).threshold(0.0).execute();
-                expectTop(recall, rememberedId, "initial recall");
+                scoreBeforeFeedback = expectTop(recall, rememberedId, "initial recall");
 
                 memory.feedback(QUERY, rememberedId, FeedbackSignal.POSITIVE);
                 expectInvalidTopKRejected(memory);
@@ -49,7 +50,8 @@ public final class ConsumerSmoke {
 
             MonadaMemory reopened = MonadaMemory.open(root);
             MonadaRecall recall = reopened.resonate(QUERY).topK(3).threshold(0.0).execute();
-            expectTop(recall, rememberedId, "recall after reopen");
+            double scoreAfterReopen = expectTop(recall, rememberedId, "recall after reopen");
+            expectFeedbackPersisted(scoreBeforeFeedback, scoreAfterReopen);
             System.out.println("[smoke] open -> remember -> recall -> feedback -> reopen: OK");
         } finally {
             deleteRecursively(root);
@@ -76,7 +78,7 @@ public final class ConsumerSmoke {
         }
     }
 
-    private static void expectTop(MonadaRecall recall, String expectedId, String label) {
+    private static double expectTop(MonadaRecall recall, String expectedId, String label) {
         if (recall.results().isEmpty()) {
             throw new IllegalStateException(label + ": no results");
         }
@@ -87,6 +89,18 @@ public final class ConsumerSmoke {
         System.out.println("[smoke] " + label + ": top=" + topId
                 + " score=" + recall.results().getFirst().score()
                 + " results=" + recall.results().size());
+        return recall.results().getFirst().score();
+    }
+
+    private static void expectFeedbackPersisted(double scoreBeforeFeedback, double scoreAfterReopen) {
+        // Feedback-aware ranking is the default, so the persisted POSITIVE event must
+        // raise the reopened score above the score observed before feedback was recorded.
+        if (!(scoreAfterReopen > scoreBeforeFeedback)) {
+            throw new IllegalStateException("feedback not persisted across reopen: score before feedback "
+                    + scoreBeforeFeedback + ", after reopen " + scoreAfterReopen);
+        }
+        System.out.println("[smoke] feedback persisted across reopen: score "
+                + scoreBeforeFeedback + " -> " + scoreAfterReopen);
     }
 
     private static void expectInvalidTopKRejected(MonadaMemory memory) {

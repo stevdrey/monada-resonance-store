@@ -98,7 +98,9 @@ The consumer build can also be run directly after publishing:
    `{api, core, encoder, storage}` and `runtimeClasspath` is exactly the six `com.monada` artifacts at the
    published version.
 2. `run`: open → remember → recall → feedback → reopen → recall in a temporary directory, plus an
-   invalid-argument error path (`topK(0)`). It prints `java.class.path` / `jdk.module.path` and the
+   invalid-argument error path (`topK(0)`). After reopen it asserts that the same atom is still top-1 and
+   that its score is strictly higher than before the POSITIVE feedback, proving the feedback event was
+   persisted and reloaded (without feedback the reopened score is identical). It prints `java.class.path` / `jdk.module.path` and the
    runtime module of each exposed type. The JPMS consumer asserts the named modules `com.monada.api`,
    `com.monada.core`, `com.monada.encoder`, `com.monada.storage` and that `com.monada.index` and
    `com.monada.learning` are resolved in the boot layer; the class-path consumer asserts the unnamed module.
