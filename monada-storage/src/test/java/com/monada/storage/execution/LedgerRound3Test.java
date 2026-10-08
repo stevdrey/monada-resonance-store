@@ -15,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
 import org.junit.jupiter.api.Test;
@@ -39,14 +40,15 @@ class LedgerRound3Test {
         return root.resolve("scopes").resolve(LedgerPaths.scopeDirectoryName(Events.SCOPE));
     }
 
+    /** Fixed absolute locations only: the test never resolves an executable through PATH. */
+    private static final List<Path> MKFIFO = List.of(Path.of("/usr/bin/mkfifo"), Path.of("/bin/mkfifo"));
+
     private static Path mkfifo(Path path) throws IOException, InterruptedException {
         Files.deleteIfExists(path);
-        try {
-            Process p = new ProcessBuilder("mkfifo", path.toString()).redirectErrorStream(true).start();
-            assumeTrue(p.waitFor() == 0, "mkfifo is not available");
-        } catch (IOException e) {
-            assumeTrue(false, "mkfifo is not available: " + e);
-        }
+        Path tool = MKFIFO.stream().filter(Files::isExecutable).findFirst().orElse(null);
+        assumeTrue(tool != null, "mkfifo is not available at a known absolute path");
+        Process p = new ProcessBuilder(tool.toString(), path.toString()).redirectErrorStream(true).start();
+        assumeTrue(p.waitFor() == 0, "mkfifo failed");
         return path;
     }
 
