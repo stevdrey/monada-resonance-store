@@ -63,10 +63,12 @@ class ExecutionEventTest {
                 Fixtures.attemptStarted("e", "x", "a2", 2, "a1").previousAttempt());
         assertThrows(IllegalArgumentException.class, () -> Fixtures.attemptStarted("e", "x", "a1", 0, null));
         assertThrows(IllegalArgumentException.class, () -> Fixtures.attemptStarted("e", "x", "a1", 2, "a1"));
+        assertThrows(IllegalArgumentException.class, () -> Fixtures.attemptStarted("e", "x", "a1", 5, null));
+        assertThrows(IllegalArgumentException.class, () -> Fixtures.attemptStarted("e", "x", "a2", 1, "a1"));
         assertThrows(IllegalArgumentException.class, () -> new ExecutionEvent.AttemptStarted(
                 env("e", "x", "a2", 1, 1), 2, Optional.empty(), AttemptReason.RETRY));
         assertThrows(IllegalArgumentException.class, () -> new ExecutionEvent.AttemptStarted(
-                env("e", "x", "a2", 1, 1), 2, Optional.of(AttemptId.of("a1")), AttemptReason.INITIAL));
+                env("e", "x", "a2", 1, 1), 1, Optional.of(AttemptId.of("a1")), AttemptReason.INITIAL));
     }
 
     @Test
@@ -74,6 +76,10 @@ class ExecutionEventTest {
         var counters = List.of(UsageCounter.reported(UsageKind.INPUT_TOKENS, 100, "provider"));
         var stage = Fixtures.stage("s1", "x", "a1", counters);
         assertEquals(UsageDeclaration.MEASURED, stage.usageDeclaration());
+
+        assertThrows(IllegalArgumentException.class, () -> ExecutionEvent.StageRecorded.measured(
+                env("late", "x", "a1", 2, 3), "plan", Fixtures.route(), at(2), at(4), List.of(), List.of()),
+                "a stage cannot end after it was recorded");
 
         var noCounters = Fixtures.stage("s2", "x", "a1", List.of());
         assertTrue(noCounters.usage().isEmpty(), "missing counters stay empty, not zero");

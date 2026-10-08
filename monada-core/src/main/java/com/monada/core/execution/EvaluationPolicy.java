@@ -10,8 +10,9 @@ public record EvaluationPolicy(String id, String version, Set<QualityDimension> 
         id = Validation.opaque(id, "policy id");
         version = Validation.opaque(version, "policy version");
         Objects.requireNonNull(mandatoryDimensions, "mandatoryDimensions");
-        mandatoryDimensions = mandatoryDimensions.isEmpty()
-                ? Set.of()
-                : Set.copyOf(EnumSet.copyOf(mandatoryDimensions));
+        if (mandatoryDimensions.isEmpty()) {
+            throw new IllegalArgumentException("a policy must declare at least one mandatory dimension");
+        }
+        mandatoryDimensions = Set.copyOf(EnumSet.copyOf(mandatoryDimensions));
     }
 }

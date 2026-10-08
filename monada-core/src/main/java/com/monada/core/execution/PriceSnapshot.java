@@ -24,6 +24,8 @@ public record PriceSnapshot(
         String assumptions,
         List<PriceLine> lines
 ) {
+    private static final int MAX_LINES = UsageKind.values().length;
+
     public PriceSnapshot {
         id = Validation.opaque(id, "snapshot id");
         version = Validation.opaque(version, "snapshot version");
@@ -33,7 +35,7 @@ public record PriceSnapshot(
         Objects.requireNonNull(effectiveDate, "effectiveDate");
         source = Validation.opaque(source, "source");
         assumptions = Validation.summary(assumptions, "assumptions");
-        lines = Validation.boundedList(lines, "lines", UsageKind.values().length);
+        lines = Validation.boundedList(lines, "lines", MAX_LINES);
         if (lines.isEmpty()) {
             throw new IllegalArgumentException("a price snapshot requires at least one price line");
         }

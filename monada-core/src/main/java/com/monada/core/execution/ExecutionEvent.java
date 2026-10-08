@@ -91,6 +91,9 @@ public sealed interface ExecutionEvent
             if (previousAttempt.isPresent() && previousAttempt.equals(envelope.attemptId())) {
                 throw new IllegalArgumentException("an attempt cannot follow itself");
             }
+            if ((reason == AttemptReason.INITIAL) != (ordinal == 1)) {
+                throw new IllegalArgumentException("ordinal 1 is exactly the INITIAL attempt");
+            }
             if (reason == AttemptReason.INITIAL && previousAttempt.isPresent()) {
                 throw new IllegalArgumentException("an INITIAL attempt has no previous attempt");
             }
@@ -123,6 +126,9 @@ public sealed interface ExecutionEvent
             artifacts = Validation.boundedList(artifacts, "artifacts", ExecutionLimits.MAX_ARTIFACT_REFS_PER_EVENT);
             if (endedAt.isBefore(startedAt)) {
                 throw new IllegalArgumentException("endedAt must not be before startedAt");
+            }
+            if (endedAt.isAfter(envelope.recordedAt())) {
+                throw new IllegalArgumentException("endedAt must not be after recordedAt");
             }
             Validation.requireUnique(usage, UsageCounter::kind, "usage counter kind");
             if (usageDeclaration == UsageDeclaration.NO_BILLABLE_USAGE) {

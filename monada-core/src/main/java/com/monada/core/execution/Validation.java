@@ -1,6 +1,5 @@
 package com.monada.core.execution;
 
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -59,8 +58,8 @@ final class Validation {
     }
 
     /**
-     * The full Unicode White_Space set: Java whitespace, Unicode space separators (e.g. U+00A0, U+202F,
-     * U+3000) and U+0085 NEXT LINE, which neither Java predicate covers.
+     * Space set of the contract (section 1): {@code Character.isWhitespace} or {@code Character.isSpaceChar}
+     * or U+0085 NEXT LINE, which neither Java predicate covers.
      */
     private static boolean isSpace(int cp) {
         return Character.isWhitespace(cp) || Character.isSpaceChar(cp) || cp == 0x0085;
@@ -85,14 +84,11 @@ final class Validation {
 
     static <T> List<T> boundedList(List<T> source, String field, int max) {
         Objects.requireNonNull(source, field);
-        List<T> copy = new ArrayList<>(source.size());
-        for (T item : source) {
-            copy.add(Objects.requireNonNull(item, field + " element"));
-        }
+        List<T> copy = List.copyOf(source);
         if (copy.size() > max) {
             throw new IllegalArgumentException(field + " exceeds " + max + " entries");
         }
-        return List.copyOf(copy);
+        return copy;
     }
 
     static <T, K> void requireUnique(List<T> items, Function<T, K> key, String field) {

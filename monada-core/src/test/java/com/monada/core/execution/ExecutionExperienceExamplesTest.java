@@ -44,25 +44,36 @@ class ExecutionExperienceExamplesTest {
         return events;
     }
 
+    private static <T extends ExecutionEvent> T only(List<ExecutionEvent> events, Class<T> type) {
+        return events.stream().filter(type::isInstance).map(type::cast).findFirst().orElseThrow();
+    }
+
+    private static long count(List<ExecutionEvent> events, Class<? extends ExecutionEvent> type) {
+        return events.stream().filter(type::isInstance).count();
+    }
+
     @Test
     void twoComparableAttemptsShareTaskAndProvenanceButHaveDistinctIdentities() {
         var direct = comparableExecution("exec-direct", false);
         var repaired = comparableExecution("exec-repaired", true);
 
-        var a = (ExecutionEvent.ExecutionStarted) direct.get(0);
-        var b = (ExecutionEvent.ExecutionStarted) repaired.get(0);
+        var a = only(direct, ExecutionEvent.ExecutionStarted.class);
+        var b = only(repaired, ExecutionEvent.ExecutionStarted.class);
         assertEquals(a.taskSummary(), b.taskSummary(), "identical task text");
         assertEquals(a.provenance(), b.provenance(), "comparable: same revision/context/constraints");
         assertEquals(a.policy(), b.policy());
         assertNotEquals(a.executionId(), b.executionId());
 
-        assertEquals(6, direct.size());
-        assertEquals(10, repaired.size());
-        assertEquals(2, repaired.stream().filter(e -> e instanceof ExecutionEvent.AttemptStarted).count());
-        assertEquals(1, direct.stream().filter(e -> e instanceof ExecutionEvent.AttemptStarted).count());
+        assertEquals(1, count(direct, ExecutionEvent.StageRecorded.class));
+        assertEquals(2, count(repaired, ExecutionEvent.StageRecorded.class));
+        assertEquals(2, count(repaired, ExecutionEvent.AttemptStarted.class));
+        assertEquals(1, count(direct, ExecutionEvent.AttemptStarted.class));
 
         // The repaired execution keeps a mixed-provenance usage trail: reported and estimated stay labelled.
-        var repairStage = (ExecutionEvent.StageRecorded) repaired.get(6);
+        var repairStage = repaired.stream().filter(e -> e instanceof ExecutionEvent.StageRecorded)
+                .map(e -> (ExecutionEvent.StageRecorded) e)
+                .filter(s -> s.envelope().attemptId().equals(Optional.of(AttemptId.of("exec-repaired-a2"))))
+                .findFirst().orElseThrow();
         assertEquals(List.of(UsageProvenance.REPORTED, UsageProvenance.ESTIMATED),
                 repairStage.usage().stream().map(UsageCounter::provenance).toList());
     }

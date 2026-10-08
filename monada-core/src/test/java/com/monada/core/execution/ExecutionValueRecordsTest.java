@@ -65,9 +65,9 @@ class ExecutionValueRecordsTest {
         for (double bad : new double[]{-0.1, Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY}) {
             assertThrows(IllegalArgumentException.class, () -> Fixtures.withValue(bad));
         }
-        assertThrows(IllegalArgumentException.class, () -> new QualityObservation(QualityDimension.COMPLEXITY,
+        assertEquals(OptionalDouble.of(1), new QualityObservation(QualityDimension.COMPLEXITY,
                 ObservationState.UNKNOWN, OptionalDouble.of(1), Optional.of("cc"), "t", "1", "p", "1",
-                ObservationSource.TOOL, List.of(), Optional.empty()));
+                ObservationSource.TOOL, List.of(), Optional.empty()).measuredValue());
         assertThrows(IllegalArgumentException.class, () -> new QualityObservation(QualityDimension.COMPLEXITY,
                 ObservationState.PASS, OptionalDouble.of(1), Optional.empty(), "t", "1", "p", "1",
                 ObservationSource.TOOL, List.of(), Optional.empty()));
@@ -166,6 +166,11 @@ class ExecutionValueRecordsTest {
 
         PriceLine root = PriceLine.of(UsageKind.REASONING_TOKENS, BigDecimal.ONE, 1);
         assertEquals(3, snapshot(List.of(a, b, root)).lines().size(), "a chain is not a cycle");
+    }
+
+    @Test
+    void policyRequiresAtLeastOneMandatoryDimension() {
+        assertThrows(IllegalArgumentException.class, () -> new EvaluationPolicy("p", "1", Set.of()));
     }
 
     @Test

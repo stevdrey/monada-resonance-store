@@ -9,8 +9,8 @@ import java.util.OptionalDouble;
  * One typed quality observation for a single dimension. Preserves evaluator, policy, source and
  * evidence references; it makes no acceptance or routing decision.
  *
- * <p>{@code measuredValue} is only allowed for {@code PASS} and {@code FAIL}; {@code UNKNOWN} and
- * {@code NOT_APPLICABLE} never carry a value. {@code NOT_APPLICABLE} requires a justification.
+ * <p>{@code measuredValue} is optional in any state, must be finite and non-negative, and requires a
+ * unit. {@code NOT_APPLICABLE} requires a justification.
  */
 public record QualityObservation(
         QualityDimension dimension,
@@ -41,9 +41,6 @@ public record QualityObservation(
         unit = unit.map(u -> Validation.opaque(u, "unit"));
         if (measuredValue.isPresent()) {
             Validation.finiteNonNegative(measuredValue.getAsDouble(), "measuredValue");
-            if (state != ObservationState.PASS && state != ObservationState.FAIL) {
-                throw new IllegalArgumentException("measuredValue is only allowed for PASS or FAIL");
-            }
             if (unit.isEmpty()) {
                 throw new IllegalArgumentException("measuredValue requires a unit");
             }
