@@ -29,10 +29,8 @@ jobs:
         uses: github/codeql-action/init@v4
         with:
           languages: java-kotlin
-          build-mode: manual
+          build-mode: none
           queries: security-extended
-      - name: Compile for CodeQL analysis
-        run: ./gradlew clean classes --no-daemon --no-build-cache --no-configuration-cache --rerun-tasks
       - name: Analyze
         uses: github/codeql-action/analyze@v4
         with:
