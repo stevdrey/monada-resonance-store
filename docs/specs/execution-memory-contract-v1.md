@@ -1,7 +1,8 @@
 # Execution Memory Contract v1
 
-Status: accepted contract. Only the immutable domain records (section 15, issue #95) are implemented;
-the ledger, facade, projections, calculators and export remain future work. Decision record:
+Status: accepted contract. The immutable domain records (section 15, issue #95) and the ledger with
+replay and read-only audit (section 16, issue #96) are implemented; the facade, projections, calculators
+and export remain future work. Decision record:
 [ADR 0004](../adr/0004-embedded-execution-memory.md). Issue: #93 (Forge Integration 1/10).
 
 This document is the normative v1 contract that issues #94–#102 implement. Later issues may refine
@@ -154,9 +155,8 @@ MXL1<TAB><sequence><TAB><payloadByteLength><TAB><sha256hex(payload)><TAB><payloa
 - `sequence`: per-scope ledger sequence, assigned by the ledger, starting at 1, strictly +1.
 - `payloadByteLength` and the SHA-256 digest detect torn tails and interior corruption.
 - `payload`: canonical, versioned encoding of the event with a fixed field order and no free-form maps.
-  It must not contain raw TAB or LF; text fields are escaped or Base64-encoded. The exact payload codec
-  (small tab-separated codec or canonical fixed-order JSON) is chosen in #96; a new serialization
-  dependency requires justification there.
+  It must not contain raw TAB or LF; text fields are escaped or Base64-encoded. #96 chose a small
+  hand-written token codec with no new dependency (section 16.2).
 
 Envelope fields carried by every event payload, in this order:
 
@@ -599,6 +599,119 @@ git diff --stat origin/main
 ~~~
 
 Future consumer integration in Monada Forge and Monada Neuron remains future cross-repository work.
+
+## 16. Execution Ledger (implemented in #96)
+
+Package `com.monada.storage.execution` (`monada-storage`). Scope: one writable ledger per scope with
+append, exact lookup, deterministic replay and read-only audit. Out of scope and still future work:
+the `ExecutionMemory` facade (#97), projections, recall, export, segment rollover, compaction and
+explicit repair.
+
+### 16.1 Public API
+
+| Type | Role |
+| --- | --- |
+| `ExecutionLedger.open(root, scope)` | Writable owner of one scope: `append(event)`, `find(eventId)`, `replay()`, `view()`, `close()`. |
+| `AppendResult` | `APPENDED` (+ sequence), `IDEMPOTENT` (+ original sequence) or `CONFLICT` (+ reason). |
+| `ExecutionLedgerReader.open(root, scope)` | Read-only snapshot: `replay()`, `find`, `view()`, `diagnostics()`, `hasTornTail()`. |
+| `ExecutionReplay` | Sequence-ordered view; execution without outcome is `pending`, attempt without finish is `in progress`. |
+| `LedgerDiagnostic` / `LedgerDiagnosticCategory` | File, 1-based line, sequence (if parseable), category, message. |
+| `LedgerException`, `LedgerLockedException`, `LedgerRejectedException` | Open/lock failures and invalid events (the latter is thrown before any I/O). |
+| `audit.ExecutionLedgerAuditor` | Read-only audit of a whole ledger root. |
+
+A ledger instance is bound to one scope. Appending an event of another scope is rejected
+(`SCOPE_ID_MISMATCH`). Opening writable creates the root, the manifest and that scope's directories only.
+
+### 16.2 Payload codec (schema 1)
+
+Tokens joined by `|`, in the field order of section 3 (envelope), followed by the kind payload. Text
+tokens escape `\\`, `|` (`\p`), TAB (`\t`), LF (`\n`), CR (`\r`) and other ISO control characters
+(`\xHHHH`); everything else is written as UTF-8. An optional value is the empty token when absent and `~` plus
+the escaped value when present. Lists are a count token followed by their elements; enum sets (mandatory
+dimensions) are written in ordinal order. `Instant` uses ISO-8601 (`Instant.toString`), numbers use
+`Long.toString` / `Double.toString`. A `CORRECTION` writes the outer envelope, its justification, the
+replacement kind and the replacement payload. Decoding is strict: missing, extra, unknown or
+non-canonical tokens are `MALFORMED_RECORD` (the decoder re-encodes and compares bytes), and a schema
+version other than `1` is `UNSUPPORTED_SCHEMA`. No JSON library or other dependency was added; the
+manifest is a fixed-shape JSON object checked by a strict pattern.
+
+Example (one line; `<TAB>` is a tab; length and digest are illustrative):
+
+```text
+MXL1<TAB>1<TAB>187<TAB>2f1c...<TAB>1|EXECUTION_STARTED|e1|scope-1|task-1|exec-1||1||2026-01-01T00:00:00Z|2026-01-01T00:00:00Z|Fix the bug|rev-1|ctx-1|constraints-1|policy|2|2|CORRECTNESS|TESTS
+```
+
+### 16.3 Limits
+
+- A whole line, including the LF, is at most 65,536 bytes. Larger appends are rejected before I/O
+  (`OVERSIZED_RECORD`); larger lines on disk are reported, never truncated. Lines are streamed, never loaded whole.
+- Field limits are those of section 3 and `ExecutionLimits` (enforced by the domain records).
+
+### 16.4 Write semantics, ownership and durability
+
+- `append` checks scope, encodes, then (in this order): identical payload for the same event ID is
+  `IDEMPOTENT` (file unchanged); a different payload for that ID, an identity clash (execution or attempt
+  started twice, reused attempt ordinal) or a correction of a non-latest revision is `CONFLICT`; a missing
+  reference, an event after `ATTEMPT_FINISHED` (other than a correction), a second finish, a correction
+  that changes the event kind, or an oversized record is rejected with `LedgerRejectedException`
+  (`DANGLING_REFERENCE`, `INVALID_ORDER`, `OVERSIZED_RECORD`). Nothing is written in any of these cases.
+- Exclusive ownership is an OS file lock on `<root>/write.lock`. A second writable open fails at once with
+  `LedgerLockedException`; it never waits. The lock is released by `close()` (idempotent) and when `open`
+  fails. After `close()` every operation throws `IllegalStateException`.
+- `APPENDED` is returned only after the full line is written and `FileChannel.force(true)` returned. This
+  survives a process crash. It is **not** a transactional guarantee against operating-system or hardware
+  failure, the parent directory is not fsynced, and network file systems are unsupported. If a write fails
+  the instance becomes unusable (a partial line may exist); the next writable open reports `TORN_TAIL`.
+- A writable open validates the whole segment and refuses any corruption or torn tail
+  (`LedgerException` with diagnostics). The ledger never truncates, skips or repairs.
+
+### 16.5 Paths
+
+Scope directories are `s-<sha256hex(UTF-8 scope ID)>`; raw identifiers are never path segments. Every path
+is resolved through real paths and must stay inside the real ledger root; a symbolic link that leaves the
+root fails closed (`PATH_ESCAPE`). `scope.id` must equal the requested scope (`SCOPE_ID_MISMATCH`). A root
+that holds a legacy `manifest.json` but no `execution-manifest.json` is rejected on writable open. The check
+is not atomic with later use (no defence against a concurrent hostile local process).
+
+### 16.6 Diagnostics and audit
+
+Categories are those of section 6 plus `INVALID_ORDER` (ordering rule violated inside the file) and
+`PATH_ESCAPE`. Within a scope, records are accepted only while every earlier line is valid, so replay
+returns the longest valid prefix; later lines are still examined for framing, digest, sequence and schema
+problems. Diagnostics are sorted (severity, file, line, category, message) and so are reproducible.
+
+The read-only audit (`ExecutionLedgerAuditor`, `audit` package) validates the manifest, every `s-<hash>`
+scope directory (name hash, `scope.id`, containment), and every record. It never creates, locks, truncates or
+repairs anything, and reports a missing root or manifest as diagnostics. Unexpected entries under `scopes/`
+or `ledger/` (for example a reserved `events-000002.log`) are warnings.
+
+```bash
+./gradlew :monada-storage:runExecutionLedgerAudit -Dmonada.execution.dir=/path/to/ledger
+```
+
+The task prints the report and exits 1 when any error exists (torn tails and unexpected entries are
+warnings). The task is registered in `monada-storage/build.gradle.kts`.
+
+### 16.7 Compatibility
+
+The ledger uses its own manifest and directory and does not read or write legacy atom, vector, feedback or
+`manifest.json` files. Unknown manifest format, version, record codec, scope directory scheme or payload
+schema is rejected, never reinterpreted (section 13).
+
+### 16.8 Verification (issue #96)
+
+~~~bash
+./gradlew :monada-storage:test
+./gradlew test
+./gradlew :monada-storage:runExecutionLedgerAudit -Dmonada.execution.dir=<ledger>
+~~~
+
+Tests live in `com.monada.storage.execution`: round trip across reopen, idempotency and conflicts, reference
+and order rules, locking and release, torn tail, interior corruption, unknown versions and schemas, size
+limits, Unicode and escapes, traversal and symlink escapes, and byte-identical files after audit.
+
+Observed limitations: single segment, whole-scope validation on every writable open (linear in ledger
+size), the in-memory event index grows with the scope, and no repair tool exists yet.
 
 ## Implementation Boundaries
 

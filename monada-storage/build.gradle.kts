@@ -16,3 +16,15 @@ tasks.register<JavaExec>("runIntegrityAudit") {
         .filter { it.startsWith("monada.store.") }
         .associateWith { System.getProperty(it) }
 }
+
+tasks.register<JavaExec>("runExecutionLedgerAudit") {
+    description = "Run a read-only integrity audit on a Monada execution ledger directory"
+    group = "application"
+    mainClass.set("com.monada.storage.execution.audit.ExecutionLedgerAuditMain")
+    classpath = sourceSets["main"].runtimeClasspath
+    workingDir = rootProject.projectDir
+    systemProperties = System.getProperties()
+        .stringPropertyNames()
+        .filter { it.startsWith("monada.execution.") }
+        .associateWith { System.getProperty(it) }
+}
