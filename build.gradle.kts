@@ -123,8 +123,11 @@ val publishLibrariesToVerificationRepository = tasks.register("publishLibrariesT
     dependsOn(publishedLibraries.keys.map { ":$it:publishAllPublicationsToVerificationRepository" })
 }
 
+// Order every concrete publication task (not just the aggregate) after cleanup so that
+// parallel execution cannot erase freshly published artifacts.
 publishedLibraries.keys.forEach { libraryName ->
-    project(":$libraryName").tasks.matching { it.name == "publishAllPublicationsToVerificationRepository" }
+    project(":$libraryName").tasks.withType<PublishToMavenRepository>()
+        .matching { it.name.endsWith("ToVerificationRepository") }
         .configureEach { mustRunAfter(cleanVerificationRepository) }
 }
 
