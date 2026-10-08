@@ -15,6 +15,7 @@ Monada Resonance Store is not a relational database clone, document database clo
 | [`docs/glossary.md`](docs/glossary.md) | Shared project vocabulary. |
 | [`docs/adr/`](docs/adr/) | Architecture Decision Records. |
 | [`docs/specs/`](docs/specs/) | Spec Context template and PR review checklist. |
+| [`docs/specs/library-consumption.md`](docs/specs/library-consumption.md) | Published Maven coordinates, JPMS module names and consumer verification. |
 | [`.agents/skills/`](.agents/skills/) | Canonical Devin-compatible Agent Skills. |
 | [`.windsurf/skills/`](.windsurf/skills/) | Mirror of project skills for Devin Desktop / Windsurf discovery. |
 | [`.windsurf/rules/`](.windsurf/rules/) | Local IDE/Cascade-compatible project rules. |
@@ -68,6 +69,8 @@ The project requires **JDK 27** (Gradle toolchain `27`) and builds with the vers
 ```bash
 ./gradlew --version
 ./gradlew test
+./gradlew publishLibrariesToVerificationRepository
+./gradlew verifyLibraryConsumer
 ./gradlew :monada-storage:runIntegrityAudit -Dmonada.store.dir=/path/to/store
 ./gradlew :monada-evaluation:test
 ./gradlew :monada-evaluation:run -q
@@ -86,6 +89,17 @@ The project requires **JDK 27** (Gradle toolchain `27`) and builds with the vers
 ./gradlew :monada-speech:runSpeechImport
 ./gradlew :monada-speech:runSpeechEvaluation
 ```
+
+## Library Consumption
+
+The six production modules (`monada-core`, `monada-encoder`, `monada-storage`, `monada-index`, `monada-learning`, `monada-api`) are published as Maven artifacts under `com.monada:<module>:0.1.0-SNAPSHOT`, with sources jars, POM + Gradle Module Metadata, Apache-2.0 license information and stable `Automatic-Module-Name` entries (`com.monada.core`, ..., `com.monada.api`). Consumers declare only `com.monada:monada-api`; `monada-evaluation` and `monada-speech` are not published.
+
+```bash
+./gradlew publishLibrariesToVerificationRepository
+./gradlew verifyLibraryConsumer
+```
+
+The first command publishes into the temporary local repository `build/verification-repo` (no remote registry or credentials). The second publishes and then runs the isolated class-path and JPMS consumer build in `integration-tests/library-consumer`, which resolves only from that repository and runs an open → remember → recall → reopen smoke test. See [`docs/specs/library-consumption.md`](docs/specs/library-consumption.md) for the dependency graph, limits and future work.
 
 ## Storage Integrity Audit and Diagnostics
 

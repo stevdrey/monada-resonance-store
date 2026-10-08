@@ -1,5 +1,8 @@
+description = "Monada Resonance Store manifest, append-only logs, vector files and feedback logs."
+
 dependencies {
-    implementation(project(":monada-core"))
+    // Public storage signatures expose core atoms and vectors.
+    api(project(":monada-core"))
 }
 
 tasks.register<JavaExec>("runIntegrityAudit") {

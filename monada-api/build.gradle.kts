@@ -2,10 +2,13 @@ plugins {
     application
 }
 
+description = "Monada Resonance Store developer-facing embedded memory API."
+
 dependencies {
-    implementation(project(":monada-core"))
-    implementation(project(":monada-encoder"))
-    implementation(project(":monada-storage"))
+    // MonadaMemory/MonadaMemoryOptions expose core, encoder and storage types in public signatures.
+    api(project(":monada-core"))
+    api(project(":monada-encoder"))
+    api(project(":monada-storage"))
     implementation(project(":monada-index"))
     implementation(project(":monada-learning"))
 }
