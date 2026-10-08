@@ -65,7 +65,11 @@ public final class ExecutionLedger implements AutoCloseable {
         rejectLegacyStore(root);
         Files.createDirectories(root);
         LedgerPaths paths = LedgerPaths.existing(root);
-        FileChannel channel = FileChannel.open(paths.lock(), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+        Path lockFile = paths.lock();
+        if (Files.exists(lockFile, LinkOption.NOFOLLOW_LINKS) && !Files.isRegularFile(lockFile)) {
+            throw new LedgerException("write.lock is not a regular file");
+        }
+        FileChannel channel = FileChannel.open(lockFile, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
         FileLock lock = null;
         try {
             try {
@@ -79,6 +83,9 @@ public final class ExecutionLedger implements AutoCloseable {
             ensureManifest(paths);
             Path scopeDir = prepareScope(paths, scope);
             Path segment = paths.segment(scopeDir);
+            if (Files.exists(segment, LinkOption.NOFOLLOW_LINKS) && !Files.isRegularFile(segment)) {
+                throw new LedgerException("ledger segment is not a regular file: " + paths.display(segment));
+            }
             LedgerScanner.Result loaded = Files.exists(segment, LinkOption.NOFOLLOW_LINKS)
                     ? LedgerScanner.scan(segment, paths.display(segment), scope)
                     : LedgerScanner.Result.empty();
@@ -116,7 +123,12 @@ public final class ExecutionLedger implements AutoCloseable {
                     LedgerDiagnosticCategory.MANIFEST_MISSING, LedgerManifest.FILE_NAME, 0, OptionalLong.empty(),
                     message)));
         }
-        writeDurably(manifest, LedgerManifest.render().getBytes(StandardCharsets.UTF_8));
+        // Publish atomically so a concurrent reader never sees an empty or partial manifest. A leftover
+        // temporary file can only be ours (we hold the write lock) and is discarded.
+        Path staging = paths.root().resolve("." + LedgerManifest.FILE_NAME + ".tmp");
+        deleteTree(staging);
+        writeDurably(paths.contained(staging), LedgerManifest.render().getBytes(StandardCharsets.UTF_8));
+        Files.move(staging, manifest, StandardCopyOption.ATOMIC_MOVE);
     }
 
     /**
@@ -185,6 +197,7 @@ public final class ExecutionLedger implements AutoCloseable {
     }
 
     public ScopeId scope() {
+        requireUsable();
         return scope;
     }
 

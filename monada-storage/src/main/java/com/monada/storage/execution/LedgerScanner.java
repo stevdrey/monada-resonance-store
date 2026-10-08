@@ -62,7 +62,7 @@ final class LedgerScanner {
                 }
             }
             if (contentBytes > 0) {
-                scan.tornTail();
+                scan.tornTail(line.toByteArray());
             }
         }
         Collections.sort(scan.diagnostics);
@@ -91,10 +91,10 @@ final class LedgerScanner {
             broken = true;
         }
 
-        void tornTail() {
+        void tornTail(byte[] prefix) {
             torn = true;
             diagnostics.add(LedgerDiagnostic.warning(LedgerDiagnosticCategory.TORN_TAIL, file, lineNo,
-                    OptionalLong.empty(), "incomplete final record (no terminating line feed); ignored, not repaired"));
+                    tornSequence(prefix), "incomplete final record (no terminating line feed); ignored, not repaired"));
         }
 
         void line(byte[] content, boolean oversized) {
@@ -199,6 +199,16 @@ final class LedgerScanner {
             expectedKnown = true;
             return true;
         }
+    }
+
+    /** Sequence of an incomplete record, only when its field is complete (terminated by a TAB) and canonical. */
+    private static OptionalLong tornSequence(byte[] prefix) {
+        List<byte[]> parts = splitTabs(prefix);
+        if (parts.size() < 3 || !RecordLine.MAGIC.equals(ascii(parts.get(0)))) {
+            return OptionalLong.empty();
+        }
+        OptionalLong sequence = canonicalLong(ascii(parts.get(1)));
+        return sequence.isPresent() && sequence.getAsLong() >= 1 ? sequence : OptionalLong.empty();
     }
 
     private static List<byte[]> splitTabs(byte[] content) {

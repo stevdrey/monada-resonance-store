@@ -120,6 +120,9 @@ final class LedgerPaths {
 
     /** Reads at most {@code max} bytes; returns empty when the file is larger (never loads it whole). */
     static java.util.Optional<byte[]> readBounded(Path file, int max) throws IOException {
+        if (!Files.isRegularFile(file)) {
+            throw new IOException(file.getFileName() + " is not a regular file");
+        }
         try (java.io.InputStream in = Files.newInputStream(file)) {
             byte[] bytes = in.readNBytes(max + 1);
             return bytes.length > max ? java.util.Optional.empty() : java.util.Optional.of(bytes);

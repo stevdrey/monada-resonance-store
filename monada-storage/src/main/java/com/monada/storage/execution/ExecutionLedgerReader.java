@@ -81,6 +81,26 @@ public final class ExecutionLedgerReader {
         readableRoot(Objects.requireNonNull(root, "root"));
     }
 
+    /**
+     * Names of the entries of {@code scopes/}, sorted. The directory is checked for containment before it
+     * is listed, so a symbolic link leaving the root fails with {@code PATH_ESCAPE} without reading outside.
+     * Returns an empty list when the ledger has no {@code scopes/} yet.
+     */
+    public static List<String> listScopeDirectories(Path root) throws IOException {
+        LedgerPaths paths = readableRoot(Objects.requireNonNull(root, "root"));
+        Path scopes = paths.scopesDir();
+        if (!Files.exists(scopes, LinkOption.NOFOLLOW_LINKS)) {
+            return List.of();
+        }
+        if (!Files.isDirectory(scopes)) {
+            throw failure(LedgerDiagnosticCategory.MANIFEST_INVALID, paths.display(scopes),
+                    "scopes is not a directory");
+        }
+        try (Stream<Path> entries = Files.list(scopes)) {
+            return entries.map(p -> p.getFileName().toString()).sorted().toList();
+        }
+    }
+
     private static LedgerPaths readableRoot(Path root) throws IOException {
         LedgerPaths paths = LedgerPaths.existing(root);
         Path manifest = paths.manifest();
@@ -99,6 +119,10 @@ public final class ExecutionLedgerReader {
                     "required ledger directory is missing or not a directory");
         }
         Path segment = paths.segment(scopeDir);
+        if (Files.exists(segment, LinkOption.NOFOLLOW_LINKS) && !Files.isRegularFile(segment)) {
+            throw failure(LedgerDiagnosticCategory.MALFORMED_RECORD, paths.display(segment),
+                    "ledger segment is not a regular file");
+        }
         LedgerScanner.Result scanned = Files.exists(segment, LinkOption.NOFOLLOW_LINKS)
                 ? LedgerScanner.scan(segment, paths.display(segment), scope)
                 : LedgerScanner.Result.empty();

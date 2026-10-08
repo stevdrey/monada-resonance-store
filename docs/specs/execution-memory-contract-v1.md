@@ -658,7 +658,7 @@ MXL1<TAB>1<TAB>187<TAB>2f1c...<TAB>1|EXECUTION_STARTED|e1|scope-1|task-1|exec-1|
   (`DANGLING_REFERENCE`, `INVALID_ORDER`, `OVERSIZED_RECORD`). Nothing is written in any of these cases.
 - Exclusive ownership is an OS file lock on `<root>/write.lock`. A second writable open fails at once with
   `LedgerLockedException`; it never waits. The lock is released by `close()` (idempotent) and when `open`
-  fails. After `close()` every operation throws `IllegalStateException`.
+  fails. After `close()` every operation, including `scope()`, throws `IllegalStateException`.
 - `APPENDED` is returned only after the full line is written and `FileChannel.force(true)` returned. This
   survives a process crash. It is **not** a transactional guarantee against operating-system or hardware
   failure, the parent directory is not fsynced, and network file systems are unsupported. If a write fails
@@ -669,8 +669,11 @@ MXL1<TAB>1<TAB>187<TAB>2f1c...<TAB>1|EXECUTION_STARTED|e1|scope-1|task-1|exec-1|
 ### 16.5 Paths
 
 Scope directories are `s-<sha256hex(UTF-8 scope ID)>`; raw identifiers are never path segments. Every path
-is resolved through real paths and must stay inside the real ledger root; a symbolic link that leaves the
-root fails closed (`PATH_ESCAPE`). `scope.id` must equal the requested scope (`SCOPE_ID_MISMATCH`). A new
+(including `scopes/` itself, before it is listed) is resolved through real paths and must stay inside the
+real ledger root; a symbolic link that leaves the
+root fails closed (`PATH_ESCAPE`). `scope.id` must equal the requested scope (`SCOPE_ID_MISMATCH`). The initial `execution-manifest.json` is likewise written to a temporary name and renamed atomically. Metadata,
+segment and lock files must be regular files (a named pipe is rejected without being opened, so nothing can
+hang). A new
 scope is built under `scopes/.staging-s-<hash>` (with `scope.id` and `ledger/`) and published with one atomic
 rename, so a concurrent reader never sees a partial scope; a scope directory without `scope.id` or `ledger/`
 is damage, reported by readers and the audit. A leftover staging directory is discarded by the next writer
@@ -685,7 +688,8 @@ is not atomic with later use (no defence against a concurrent hostile local proc
 Categories are those of section 6 plus `INVALID_ORDER` (ordering rule violated inside the file) and
 `PATH_ESCAPE`. Within a scope, records are accepted only while every earlier line is valid, so replay
 returns the longest valid prefix; later lines are still examined for framing, digest, sequence and schema
-problems. Diagnostics are sorted (severity, file, line, category, message) and so are reproducible.
+problems. A `TORN_TAIL` diagnostic carries the sequence when the incomplete record's sequence field is complete and
+canonical. Diagnostics are sorted (severity, file, line, category, message) and so are reproducible.
 
 The read-only audit (`ExecutionLedgerAuditor`, `audit` package) validates the manifest directly (it opens no scope, so no scope id is special) and every `s-<hash>`
 scope directory it discovers (containment is checked before any child is read, `scope.id` must hash to the

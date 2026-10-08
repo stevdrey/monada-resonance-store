@@ -12,7 +12,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalLong;
 import java.util.regex.Pattern;
-import java.util.stream.Stream;
 
 /**
  * Read-only integrity audit of an execution ledger root. It validates the manifest, every scope directory
@@ -60,21 +59,19 @@ public final class ExecutionLedgerAuditor {
                     : e.diagnostics());
             return;
         }
-        Path scopesDir = root.resolve("scopes");
-        if (!Files.exists(scopesDir, LinkOption.NOFOLLOW_LINKS)) {
+        List<String> names;
+        try {
+            names = ExecutionLedgerReader.listScopeDirectories(root);
+        } catch (LedgerException e) {
+            findings.addAll(e.diagnostics());
             return;
         }
-        List<Path> children;
-        try (Stream<Path> list = Files.list(scopesDir)) {
-            children = list.sorted().toList();
-        }
-        for (Path child : children) {
-            auditScope(root, child, findings, scopes, records);
+        for (String name : names) {
+            auditScope(root, name, findings, scopes, records);
         }
     }
 
-    private void auditScope(Path root, Path scopeDir, List<LedgerDiagnostic> findings, int[] scopes, long[] records) {
-        String name = scopeDir.getFileName().toString();
+    private void auditScope(Path root, String name, List<LedgerDiagnostic> findings, int[] scopes, long[] records) {
         if (!SCOPE_DIR.matcher(name).matches()) {
             findings.add(LedgerDiagnostic.warning(LedgerDiagnosticCategory.MANIFEST_INVALID, "scopes/" + name, 0,
                     OptionalLong.empty(), "unexpected entry in scopes/ (ignored)"));
