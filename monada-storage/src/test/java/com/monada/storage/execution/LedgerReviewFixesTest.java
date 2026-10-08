@@ -168,4 +168,50 @@ class LedgerReviewFixesTest {
                 () -> ExecutionLedgerReader.open(root, Events.SCOPE)).diagnostics().get(0).category());
         assertFalse(auditor.audit(root).isHealthy());
     }
+
+    @Test
+    void corruptScopeNamedAuditProbeDoesNotStopTheWholeAudit() throws IOException {
+        healthy();
+        com.monada.core.execution.ScopeId probe = com.monada.core.execution.ScopeId.of("audit-probe");
+        try (ExecutionLedger ledger = ExecutionLedger.open(root, probe)) {
+            ledger.append(Events.started("p1", probe, Events.EXEC, "probe scope"));
+        }
+        Path segment = root.resolve("scopes").resolve(LedgerPaths.scopeDirectoryName(probe))
+                .resolve("ledger").resolve("events-000001.log");
+        Files.write(segment, "garbage\n".getBytes(), java.nio.file.StandardOpenOption.APPEND);
+        ExecutionLedgerAuditReport report = auditor.audit(root);
+        assertEquals(2, report.scopesChecked(), report.render());
+        assertFalse(report.isHealthy());
+        assertEquals(6, report.recordsValidated(), "5 healthy records plus the valid probe prefix");
+    }
+
+    @Test
+    void malformedUtf8InScopeIdIsDetectedEvenForReplacementCharacterScopes() throws IOException {
+        com.monada.core.execution.ScopeId odd = com.monada.core.execution.ScopeId.of("s\uFFFD");
+        try (ExecutionLedger ledger = ExecutionLedger.open(root, odd)) {
+            ledger.append(Events.started("e1", odd, Events.EXEC, "odd scope"));
+        }
+        Path scopeId = root.resolve("scopes").resolve(LedgerPaths.scopeDirectoryName(odd)).resolve("scope.id");
+        Files.write(scopeId, new byte[] {'s', (byte) 0xFF}); // malformed: decodes to "s\uFFFD" if lenient
+        assertEquals(LedgerDiagnosticCategory.SCOPE_ID_MISMATCH, assertThrows(LedgerException.class,
+                () -> ExecutionLedgerReader.open(root, odd)).diagnostics().get(0).category());
+        assertEquals(LedgerDiagnosticCategory.SCOPE_ID_MISMATCH, assertThrows(LedgerException.class,
+                () -> ExecutionLedger.open(root, odd)).diagnostics().get(0).category());
+        assertFalse(auditor.audit(root).isHealthy());
+    }
+
+    @Test
+    void explicitPendingOutcomeReplaysAsPending() throws IOException {
+        try (ExecutionLedger ledger = ExecutionLedger.open(root, Events.SCOPE)) {
+            ledger.append(Events.started("e1"));
+            ledger.append(ExecutionEvent.outcomeRecorded(EventId.of("o1"), Events.SCOPE, Events.TASK, Events.EXEC,
+                    com.monada.core.execution.Outcome.pending(com.monada.core.execution.OutcomeOrigin.VALIDATED),
+                    Events.T1));
+            assertTrue(ledger.view().execution(Events.EXEC).orElseThrow().isPending());
+            ledger.append(ExecutionEvent.outcomeRecorded(EventId.of("o2"), Events.SCOPE, Events.TASK, Events.EXEC,
+                    com.monada.core.execution.Outcome.rejected(com.monada.core.execution.OutcomeOrigin.VALIDATED),
+                    Events.T2));
+            assertFalse(ledger.view().execution(Events.EXEC).orElseThrow().isPending());
+        }
+    }
 }

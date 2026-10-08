@@ -10,6 +10,7 @@ import com.monada.core.execution.ExecutionEvent.Correction;
 import com.monada.core.execution.ExecutionEvent.OutcomeRecorded;
 import com.monada.core.execution.ExecutionId;
 import com.monada.core.execution.Outcome;
+import com.monada.core.execution.OutcomeStatus;
 import com.monada.core.execution.ScopeId;
 import com.monada.core.execution.TaskId;
 import java.util.ArrayList;
@@ -45,8 +46,9 @@ public record ExecutionReplay(ScopeId scope, List<ExecutionView> executions) {
             history = List.copyOf(history);
         }
 
+        /** No outcome yet, or the current outcome is an explicit {@code PENDING} (contract section 8). */
         public boolean isPending() {
-            return currentOutcome.isEmpty();
+            return currentOutcome.isEmpty() || currentOutcome.get().status() == OutcomeStatus.PENDING;
         }
     }
 

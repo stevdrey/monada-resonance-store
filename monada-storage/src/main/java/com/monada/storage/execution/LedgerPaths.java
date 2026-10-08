@@ -130,4 +130,12 @@ final class LedgerPaths {
     Path stagingScopeDir(ScopeId scope) throws LedgerException {
         return contained(root.resolve(SCOPES_DIR).resolve(".staging-" + scopeDirectoryName(scope)));
     }
+
+    /** UTF-8 decoding that reports malformed input instead of substituting U+FFFD. */
+    static String decodeStrict(byte[] bytes) throws java.nio.charset.CharacterCodingException {
+        return StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                .decode(java.nio.ByteBuffer.wrap(bytes)).toString();
+    }
 }

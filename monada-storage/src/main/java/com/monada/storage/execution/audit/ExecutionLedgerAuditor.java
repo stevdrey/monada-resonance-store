@@ -1,6 +1,5 @@
 package com.monada.storage.execution.audit;
 
-import com.monada.core.execution.ScopeId;
 import com.monada.storage.execution.ExecutionLedgerReader;
 import com.monada.storage.execution.LedgerDiagnostic;
 import com.monada.storage.execution.LedgerDiagnosticCategory;
@@ -52,21 +51,14 @@ public final class ExecutionLedgerAuditor {
                     : "execution-manifest.json is missing"));
             return;
         }
-        // Reuse the reader's validation so manifest rules live in one place.
         try {
-            ExecutionLedgerReader.open(root, ScopeId.of("audit-probe"));
+            ExecutionLedgerReader.verifyManifest(root);
         } catch (LedgerException e) {
-            boolean manifestProblem = e.diagnostics().stream().anyMatch(d -> d.category()
-                    != LedgerDiagnosticCategory.SCOPE_ID_MISMATCH);
-            if (manifestProblem && !e.diagnostics().isEmpty()) {
-                findings.addAll(e.diagnostics());
-                return;
-            }
-            if (e.diagnostics().isEmpty()) {
-                findings.add(LedgerDiagnostic.error(LedgerDiagnosticCategory.MANIFEST_INVALID, ".", 0,
-                        OptionalLong.empty(), e.getMessage()));
-                return;
-            }
+            findings.addAll(e.diagnostics().isEmpty()
+                    ? List.of(LedgerDiagnostic.error(LedgerDiagnosticCategory.MANIFEST_INVALID, ".", 0,
+                    OptionalLong.empty(), e.getMessage()))
+                    : e.diagnostics());
+            return;
         }
         Path scopesDir = root.resolve("scopes");
         if (!Files.exists(scopesDir, LinkOption.NOFOLLOW_LINKS)) {

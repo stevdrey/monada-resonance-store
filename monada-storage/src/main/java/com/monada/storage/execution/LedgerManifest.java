@@ -44,7 +44,9 @@ final class LedgerManifest {
                 throw failure(LedgerDiagnosticCategory.MANIFEST_INVALID, manifestFile,
                         "manifest is larger than " + MAX_BYTES + " bytes");
             }
-            text = new String(bytes.get(), StandardCharsets.UTF_8);
+            text = LedgerPaths.decodeStrict(bytes.get());
+        } catch (java.nio.charset.CharacterCodingException e) {
+            throw failure(LedgerDiagnosticCategory.MANIFEST_INVALID, manifestFile, "manifest is not valid UTF-8");
         } catch (LedgerException e) {
             throw e;
         } catch (IOException | RuntimeException e) {

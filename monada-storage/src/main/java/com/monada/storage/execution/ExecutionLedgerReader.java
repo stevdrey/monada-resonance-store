@@ -4,7 +4,7 @@ import com.monada.core.execution.EventId;
 import com.monada.core.execution.ExecutionLimits;
 import com.monada.core.execution.ScopeId;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
+import java.nio.charset.CharacterCodingException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -76,6 +76,11 @@ public final class ExecutionLedgerReader {
         return load(paths, scopeDir, scope);
     }
 
+    /** Validates only the ledger manifest of {@code root}; opens no scope. Used by the audit. */
+    public static void verifyManifest(Path root) throws IOException {
+        readableRoot(Objects.requireNonNull(root, "root"));
+    }
+
     private static LedgerPaths readableRoot(Path root) throws IOException {
         LedgerPaths paths = LedgerPaths.existing(root);
         Path manifest = paths.manifest();
@@ -132,7 +137,11 @@ public final class ExecutionLedgerReader {
         if (bytes.isEmpty()) {
             throw failure(LedgerDiagnosticCategory.SCOPE_ID_MISMATCH, shown, "scope.id is larger than any valid scope id");
         }
-        return new String(bytes.get(), StandardCharsets.UTF_8);
+        try {
+            return LedgerPaths.decodeStrict(bytes.get());
+        } catch (CharacterCodingException e) {
+            throw failure(LedgerDiagnosticCategory.SCOPE_ID_MISMATCH, shown, "scope.id is not valid UTF-8");
+        }
     }
 
     private static LedgerException failure(LedgerDiagnosticCategory category, String file, String message) {

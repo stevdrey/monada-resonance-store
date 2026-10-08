@@ -614,7 +614,7 @@ explicit repair.
 | `ExecutionLedger.open(root, scope)` | Writable owner of one scope: `append(event)`, `find(eventId)`, `replay()`, `view()`, `close()`. |
 | `AppendResult` | `APPENDED` (+ sequence), `IDEMPOTENT` (+ original sequence) or `CONFLICT` (+ reason). |
 | `ExecutionLedgerReader.open(root, scope)` | Read-only snapshot: `replay()`, `find`, `view()`, `diagnostics()`, `hasTornTail()`. |
-| `ExecutionReplay` | Sequence-ordered view; execution without outcome is `pending`, attempt without finish is `in progress`. |
+| `ExecutionReplay` | Sequence-ordered view; an execution with no outcome or a current `PENDING` outcome is `pending`, an attempt without finish is `in progress`. |
 | `LedgerDiagnostic` / `LedgerDiagnosticCategory` | File, 1-based line, sequence (if parseable), category, message. |
 | `LedgerException`, `LedgerLockedException`, `LedgerRejectedException` | Open/lock failures and invalid events (the latter is thrown before any I/O). |
 | `audit.ExecutionLedgerAuditor` | Read-only audit of a whole ledger root. |
@@ -677,7 +677,7 @@ is damage, reported by readers and the audit. A leftover staging directory is di
 (it holds the lock). A root that holds a legacy `manifest.json` but no `execution-manifest.json` is rejected
 on writable open, and so is a root with `scopes/` but no manifest (`MANIFEST_MISSING`): a manifest is only
 created for a genuinely new root. `execution-manifest.json` (1 KiB) and `scope.id` (512 bytes) are read with a
-size bound; larger files are `MANIFEST_INVALID` / `SCOPE_ID_MISMATCH`. The check
+size bound and decoded as strict UTF-8 (malformed bytes are never replaced by U+FFFD); larger or malformed files are `MANIFEST_INVALID` / `SCOPE_ID_MISMATCH`. The check
 is not atomic with later use (no defence against a concurrent hostile local process).
 
 ### 16.6 Diagnostics and audit
@@ -687,7 +687,7 @@ Categories are those of section 6 plus `INVALID_ORDER` (ordering rule violated i
 returns the longest valid prefix; later lines are still examined for framing, digest, sequence and schema
 problems. Diagnostics are sorted (severity, file, line, category, message) and so are reproducible.
 
-The read-only audit (`ExecutionLedgerAuditor`, `audit` package) validates the manifest and every `s-<hash>`
+The read-only audit (`ExecutionLedgerAuditor`, `audit` package) validates the manifest directly (it opens no scope, so no scope id is special) and every `s-<hash>`
 scope directory it discovers (containment is checked before any child is read, `scope.id` must hash to the
 directory name, `ledger/` must exist, and that same directory is scanned record by record). It never creates, locks, truncates or
 repairs anything, and reports a missing root or manifest as diagnostics. Unexpected entries under `scopes/`
