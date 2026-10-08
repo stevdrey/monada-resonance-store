@@ -26,7 +26,7 @@ final class Validation {
     /** Caller-approved free text. Multi-line allowed; must be non-blank and losslessly encodable. */
     static String summary(String value, String field) {
         Objects.requireNonNull(value, field);
-        if (value.isBlank()) {
+        if (value.codePoints().allMatch(Validation::isSpace)) {
             throw new IllegalArgumentException(field + " must not be blank");
         }
         if (value.codePointCount(0, value.length()) > ExecutionLimits.MAX_SUMMARY_CODE_POINTS) {

@@ -120,6 +120,21 @@ class ExecutionEventTest {
     }
 
     @Test
+    void summariesAndJustificationsMadeOnlyOfUnicodeSpacesAreBlank() {
+        for (String blank : new String[]{"\u00A0", "\u202F\u202F", "\u3000 \t\n", "   "}) {
+            assertThrows(IllegalArgumentException.class, () -> ExecutionEvent.executionStarted(EventId.of("e"),
+                    Fixtures.SCOPE, Fixtures.TASK, ExecutionId.of("x"), Fixtures.provenance(), Fixtures.policy(),
+                    blank, at(0)));
+            assertThrows(IllegalArgumentException.class, () -> new ExecutionEvent.AttemptFinished(
+                    env("f", "x", "a1", 1, 1), AttemptResult.FAILED, Optional.of(blank), Optional.empty()));
+            assertThrows(IllegalArgumentException.class, () -> ExecutionEvent.StageRecorded.noBillableUsage(
+                    env("s", "x", "a1", 1, 1), "lint", Fixtures.route(), at(1), at(2), blank, List.of()));
+        }
+        assertEquals("a\u00A0b", new ExecutionEvent.AttemptFinished(env("f", "x", "a1", 1, 1),
+                AttemptResult.FAILED, Optional.of("a\u00A0b"), Optional.empty()).solutionSummary().orElseThrow());
+    }
+
+    @Test
     void evidenceCountsEventAndObservationReferencesTogether() {
         List<ArtifactRef> refs33 = IntStream.range(0, 33).mapToObj(i -> ArtifactRef.of("log", "r" + i)).toList();
         List<ArtifactRef> refs64 = IntStream.range(0, 64).mapToObj(i -> ArtifactRef.of("log", "r" + i)).toList();
