@@ -20,7 +20,7 @@ class ExecutionIdentifiersTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"\u00A0id", "id\u00A0", "\u202Fid", "id\u202F", "\u3000id", "id\u2003", "\u00A0"})
+    @ValueSource(strings = {"\u0085id", "id\u0085", "\u00A0id", "id\u00A0", "\u202Fid", "id\u202F", "\u3000id", "id\u2003", "\u00A0"})
     void rejectsUnicodeSpacesAtBoundaries(String value) {
         assertThrows(IllegalArgumentException.class, () -> ScopeId.of(value));
         assertThrows(IllegalArgumentException.class, () -> ArtifactRef.of("log", value));

@@ -121,7 +121,7 @@ class ExecutionEventTest {
 
     @Test
     void summariesAndJustificationsMadeOnlyOfUnicodeSpacesAreBlank() {
-        for (String blank : new String[]{"\u00A0", "\u202F\u202F", "\u3000 \t\n", "   "}) {
+        for (String blank : new String[]{"\u00A0", "\u202F\u202F", "\u3000 \t\n", "   ", "\u0085", "\u0085\u00A0"}) {
             assertThrows(IllegalArgumentException.class, () -> ExecutionEvent.executionStarted(EventId.of("e"),
                     Fixtures.SCOPE, Fixtures.TASK, ExecutionId.of("x"), Fixtures.provenance(), Fixtures.policy(),
                     blank, at(0)));

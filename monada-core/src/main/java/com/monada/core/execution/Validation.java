@@ -58,9 +58,12 @@ final class Validation {
         return value;
     }
 
-    /** ASCII/Java whitespace plus every Unicode space separator (e.g. U+00A0, U+202F, U+3000). */
+    /**
+     * The full Unicode White_Space set: Java whitespace, Unicode space separators (e.g. U+00A0, U+202F,
+     * U+3000) and U+0085 NEXT LINE, which neither Java predicate covers.
+     */
     private static boolean isSpace(int cp) {
-        return Character.isWhitespace(cp) || Character.isSpaceChar(cp);
+        return Character.isWhitespace(cp) || Character.isSpaceChar(cp) || cp == 0x0085;
     }
 
     private static void requireWellFormed(String value, String field) {
