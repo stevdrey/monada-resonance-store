@@ -2,8 +2,10 @@ package com.monada.core.execution;
 
 import java.time.LocalDate;
 import java.util.Currency;
+import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -42,6 +44,20 @@ public record PriceSnapshot(
             if (line.includedIn().isPresent() && !priced.contains(line.includedIn().get())) {
                 throw new IllegalArgumentException(line.kind() + " is included in unpriced kind "
                         + line.includedIn().get());
+            }
+        }
+        requireAcyclicInclusion(lines);
+    }
+
+    private static void requireAcyclicInclusion(List<PriceLine> lines) {
+        Map<UsageKind, UsageKind> parent = new EnumMap<>(UsageKind.class);
+        lines.forEach(line -> line.includedIn().ifPresent(p -> parent.put(line.kind(), p)));
+        for (UsageKind start : parent.keySet()) {
+            Set<UsageKind> visited = EnumSet.of(start);
+            for (UsageKind next = parent.get(start); next != null; next = parent.get(next)) {
+                if (!visited.add(next)) {
+                    throw new IllegalArgumentException("includedIn must not form a cycle (at " + next + ")");
+                }
             }
         }
     }

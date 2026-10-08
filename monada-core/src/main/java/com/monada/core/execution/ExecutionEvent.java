@@ -171,6 +171,12 @@ public sealed interface ExecutionEvent
             if (observations.isEmpty()) {
                 throw new IllegalArgumentException("EVIDENCE_RECORDED requires at least one observation");
             }
+            int references = artifacts.size()
+                    + observations.stream().mapToInt(o -> o.evidence().size()).sum();
+            if (references > ExecutionLimits.MAX_ARTIFACT_REFS_PER_EVENT) {
+                throw new IllegalArgumentException("artifact references (event-level plus observation evidence) "
+                        + "exceed " + ExecutionLimits.MAX_ARTIFACT_REFS_PER_EVENT + " per event");
+            }
             Validation.requireUnique(observations, QualityObservation::dimension, "observation dimension");
         }
 

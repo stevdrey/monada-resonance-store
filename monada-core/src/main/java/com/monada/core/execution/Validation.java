@@ -47,8 +47,7 @@ final class Validation {
             throw new IllegalArgumentException(field + " exceeds " + maxCodePoints + " code points");
         }
         requireWellFormed(value, field);
-        if (Character.isWhitespace(value.codePointAt(0))
-                || Character.isWhitespace(value.codePointBefore(value.length()))) {
+        if (isSpace(value.codePointAt(0)) || isSpace(value.codePointBefore(value.length()))) {
             throw new IllegalArgumentException(field + " must not have leading or trailing whitespace");
         }
         value.codePoints().forEach(cp -> {
@@ -57,6 +56,11 @@ final class Validation {
             }
         });
         return value;
+    }
+
+    /** ASCII/Java whitespace plus every Unicode space separator (e.g. U+00A0, U+202F, U+3000). */
+    private static boolean isSpace(int cp) {
+        return Character.isWhitespace(cp) || Character.isSpaceChar(cp);
     }
 
     private static void requireWellFormed(String value, String field) {

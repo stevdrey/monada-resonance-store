@@ -153,6 +153,27 @@ class ExecutionValueRecordsTest {
         assertThrows(IllegalArgumentException.class, () -> PriceSnapshot.currency("ZZZ9"));
     }
 
+    @Test
+    void priceSnapshotRejectsInclusionCycles() {
+        PriceLine in = new PriceLine(UsageKind.INPUT_TOKENS, BigDecimal.ONE, 1, Optional.of(UsageKind.CACHED_INPUT_TOKENS));
+        PriceLine cached = new PriceLine(UsageKind.CACHED_INPUT_TOKENS, BigDecimal.ONE, 1, Optional.of(UsageKind.INPUT_TOKENS));
+        assertThrows(IllegalArgumentException.class, () -> snapshot(List.of(in, cached)));
+
+        PriceLine a = new PriceLine(UsageKind.INPUT_TOKENS, BigDecimal.ONE, 1, Optional.of(UsageKind.OUTPUT_TOKENS));
+        PriceLine b = new PriceLine(UsageKind.OUTPUT_TOKENS, BigDecimal.ONE, 1, Optional.of(UsageKind.REASONING_TOKENS));
+        PriceLine c = new PriceLine(UsageKind.REASONING_TOKENS, BigDecimal.ONE, 1, Optional.of(UsageKind.INPUT_TOKENS));
+        assertThrows(IllegalArgumentException.class, () -> snapshot(List.of(a, b, c)));
+
+        PriceLine root = PriceLine.of(UsageKind.REASONING_TOKENS, BigDecimal.ONE, 1);
+        assertEquals(3, snapshot(List.of(a, b, root)).lines().size(), "a chain is not a cycle");
+    }
+
+    @Test
+    void artifactReferenceAllows512CodePointsAndRejects513() {
+        assertEquals(512, ArtifactRef.of("log", "r".repeat(512)).reference().length());
+        assertThrows(IllegalArgumentException.class, () -> ArtifactRef.of("log", "r".repeat(513)));
+    }
+
     // --- defensive copies ---
 
     @Test

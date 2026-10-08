@@ -120,6 +120,29 @@ class ExecutionEventTest {
     }
 
     @Test
+    void evidenceCountsEventAndObservationReferencesTogether() {
+        List<ArtifactRef> refs33 = IntStream.range(0, 33).mapToObj(i -> ArtifactRef.of("log", "r" + i)).toList();
+        List<ArtifactRef> refs64 = IntStream.range(0, 64).mapToObj(i -> ArtifactRef.of("log", "r" + i)).toList();
+        QualityObservation tests33 = withEvidence(QualityDimension.TESTS, refs33);
+        QualityObservation security33 = withEvidence(QualityDimension.SECURITY, refs33);
+        var envelope = env("v", "x", "a1", 1, 1);
+
+        assertThrows(IllegalArgumentException.class, () ->
+                new ExecutionEvent.EvidenceRecorded(envelope, List.of(tests33, security33), List.of()));
+        assertThrows(IllegalArgumentException.class, () -> new ExecutionEvent.EvidenceRecorded(envelope,
+                List.of(withEvidence(QualityDimension.TESTS, refs64)), List.of(ArtifactRef.of("log", "extra"))));
+        assertEquals(64, new ExecutionEvent.EvidenceRecorded(envelope,
+                List.of(withEvidence(QualityDimension.TESTS, refs64)), List.of()).observations().get(0).evidence().size());
+        assertEquals(33, new ExecutionEvent.EvidenceRecorded(envelope, List.of(tests33), refs33.subList(0, 31))
+                .observations().get(0).evidence().size());
+    }
+
+    private static QualityObservation withEvidence(QualityDimension dimension, List<ArtifactRef> evidence) {
+        return new QualityObservation(dimension, ObservationState.PASS, java.util.OptionalDouble.empty(),
+                Optional.empty(), "t", "1", "forge-gates", "1", ObservationSource.TOOL, evidence, Optional.empty());
+    }
+
+    @Test
     void attemptFinishedAllowsUnicodeSummariesAndRejectsBlankOrOversized() {
         var finished = new ExecutionEvent.AttemptFinished(env("f", "x", "a1", 80, 81), AttemptResult.COMPLETED,
                 Optional.of("Solución: 実装 🚀"), Optional.of("Lección\nlínea 2"));

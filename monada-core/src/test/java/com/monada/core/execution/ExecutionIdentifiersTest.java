@@ -19,6 +19,18 @@ class ExecutionIdentifiersTest {
         assertThrows(IllegalArgumentException.class, () -> EventId.of(value));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"\u00A0id", "id\u00A0", "\u202Fid", "id\u202F", "\u3000id", "id\u2003", "\u00A0"})
+    void rejectsUnicodeSpacesAtBoundaries(String value) {
+        assertThrows(IllegalArgumentException.class, () -> ScopeId.of(value));
+        assertThrows(IllegalArgumentException.class, () -> ArtifactRef.of("log", value));
+    }
+
+    @Test
+    void allowsInteriorNoBreakSpace() {
+        assertEquals("a\u00A0b", ScopeId.of("a\u00A0b").value());
+    }
+
     @Test
     void rejectsNull() {
         assertThrows(NullPointerException.class, () -> TaskId.of(null));
