@@ -84,11 +84,11 @@ public final class ExecutionLedgerAuditor {
         }
         scopes[0]++;
         // The reader checks containment before touching any child, ties scope.id to the directory name and
-        // scans this very directory.
+        // scans this very directory even when scope.id is damaged.
         try {
-            ExecutionLedgerReader reader = ExecutionLedgerReader.openScopeDirectory(root, name);
-            findings.addAll(reader.diagnostics());
-            records[0] += reader.replay().size();
+            ExecutionLedgerReader.ScopeAudit audit = ExecutionLedgerReader.auditScopeDirectory(root, name);
+            findings.addAll(audit.diagnostics());
+            records[0] += audit.recordsValidated();
         } catch (IOException e) {
             findings.addAll(e instanceof LedgerException le && !le.diagnostics().isEmpty()
                     ? le.diagnostics()

@@ -152,6 +152,7 @@ public final class ExecutionLedger implements AutoCloseable {
             }
             return scopeDir;
         }
+        ExecutionLedgerReader.rejectDisplacedScope(paths, scope);
         Files.createDirectories(paths.scopesDir());
         Path staging = paths.stagingScopeDir(scope);
         deleteTree(staging);

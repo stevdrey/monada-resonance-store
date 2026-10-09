@@ -43,6 +43,7 @@ final class LedgerScanner {
     private LedgerScanner() {
     }
 
+    /** {@code scope} may be null when the scope id is unknown: the per-record scope check is then skipped. */
     static Result scan(Path segment, String displayName, ScopeId scope) throws IOException {
         Scan scan = new Scan(displayName, scope);
         try (InputStream in = new BufferedInputStream(Files.newInputStream(segment), 1 << 16)) {
@@ -130,14 +131,15 @@ final class LedgerScanner {
             }
             OptionalLong sequence = canonicalLong(ascii(fields.get(1)));
             if (sequence.isEmpty() || sequence.getAsLong() < 1) {
+                // No usable sequence, but the rest of the line is still examined (it is independent evidence).
                 expectedKnown = false;
                 error(LedgerDiagnosticCategory.MALFORMED_RECORD, OptionalLong.empty(), "invalid sequence field");
-                return;
+                sequence = OptionalLong.empty();
+            } else {
+                // A sequence error ends the valid prefix (broken) but the line is still examined: framing,
+                // digest, encoding and schema defects are independent diagnostics.
+                checkSequence(sequence.getAsLong());
             }
-            long seq = sequence.getAsLong();
-            // A sequence error ends the valid prefix (broken) but the line is still examined: framing, digest,
-            // encoding and schema defects are independent diagnostics.
-            checkSequence(seq);
             byte[] payload = fields.get(4);
             OptionalLong length = canonicalLong(ascii(fields.get(2)));
             if (length.isEmpty() || length.getAsLong() != payload.length) {
@@ -165,7 +167,7 @@ final class LedgerScanner {
                 error(e.category(), sequence, e.getMessage());
                 return;
             }
-            if (!event.scopeId().equals(scope)) {
+            if (scope != null && !event.scopeId().equals(scope)) {
                 error(LedgerDiagnosticCategory.SCOPE_ID_MISMATCH, sequence,
                         "record belongs to scope '" + event.scopeId() + "', not '" + scope + "'");
                 return;
@@ -182,8 +184,8 @@ final class LedgerScanner {
                 error(violation.get().category(), sequence, violation.get().message());
                 return;
             }
-            state.apply(seq, event, payload);
-            records.add(new LedgerRecord(seq, event));
+            state.apply(sequence.getAsLong(), event, payload);
+            records.add(new LedgerRecord(sequence.getAsLong(), event));
         }
 
         /** Returns false (after reporting) when the sequence is not the expected next one. */

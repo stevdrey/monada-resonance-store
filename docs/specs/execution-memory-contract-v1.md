@@ -675,7 +675,10 @@ Scope directories are `s-<sha256hex(UTF-8 scope ID)>`; raw identifiers are never
 real ledger root; a symbolic link that leaves the
 root fails closed (`PATH_ESCAPE`). `scope.id` must equal the requested scope (`SCOPE_ID_MISMATCH`). The initial `execution-manifest.json` is likewise written to a temporary name and renamed atomically. Metadata,
 segment and lock files must be regular files (a named pipe is rejected without being opened, so nothing can
-hang). A new
+hang). A scope whose canonical directory is absent
+but whose `scope.id` is found in another `s-<hash>` directory (a renamed or displaced scope) is rejected by
+readers and by writable open (`SCOPE_ID_MISMATCH`); it is never treated as new, so sequences cannot restart
+and event ids cannot be reused over hidden history. A new
 scope is built under `scopes/.staging-s-<hash>` (with `scope.id`, `ledger/` and an empty `events-000001.log`) and published with one atomic
 rename, so a concurrent reader never sees a partial scope; a scope directory without `scope.id` or `ledger/`
 is damage, reported by readers and the audit; so is a scope whose segment file has disappeared (the ledger
@@ -691,15 +694,18 @@ is not atomic with later use (no defence against a concurrent hostile local proc
 Categories are those of section 6 plus `INVALID_ORDER` (ordering rule violated inside the file) and
 `PATH_ESCAPE`. Within a scope, records are accepted only while every earlier line is valid, so replay
 returns the longest valid prefix; later lines are still examined for framing, digest, sequence and schema
-problems, and a line with a sequence error is still checked for its other defects (all are reported, none
-enters replay). A `scopes` path that is not a directory is structural damage for readers too, never an
+problems, and a line with a sequence error, including a malformed or non-canonical sequence field, is still checked
+for its other defects (all are reported, none enters replay); only unusable framing (field count, codec
+marker, oversized line) ends the examination of that line. A `scopes` path that is not a directory is structural damage for readers too, never an
 empty ledger; `diagnostics()` is an immutable view. A `TORN_TAIL` diagnostic carries the sequence when the incomplete record's sequence field is complete and
 canonical. Diagnostics are sorted (severity, file, line, category, message) and so are reproducible.
 
 The read-only audit (`ExecutionLedgerAuditor`, `audit` package) validates the manifest directly (it opens no scope, so no scope id is special) and every `s-<hash>`
 scope directory it discovers (containment is checked before any child is read, `scope.id` must hash to the
 directory name, `ledger/` must exist, and that same directory is scanned record by record, even when its name does not match the hash: the
-`SCOPE_ID_MISMATCH` is reported together with every other defect found). The audit also checks that
+`SCOPE_ID_MISMATCH` is reported together with every other defect found). A damaged `scope.id` (missing,
+oversized, malformed, invalid) is reported the same way and the ledger is still scanned, with only the
+per-record scope comparison skipped. The audit also checks that
 `write.lock`, when present, is a contained regular file, without creating or acquiring it. It never creates, locks, truncates or
 repairs anything, and reports a missing root or manifest as diagnostics. Unexpected entries under `scopes/`
 or `ledger/` (for example a reserved `events-000002.log`) are warnings.
