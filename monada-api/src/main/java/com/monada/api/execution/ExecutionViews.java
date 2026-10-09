@@ -15,10 +15,12 @@ import com.monada.core.execution.ExecutionId;
 import com.monada.core.execution.ObservationState;
 import com.monada.core.execution.Outcome;
 import com.monada.core.execution.OutcomeOrigin;
+import com.monada.core.execution.OutcomeStatus;
+import com.monada.core.execution.AttemptResult;
 import com.monada.core.execution.QualityDimension;
 import com.monada.core.execution.QualityObservation;
-import com.monada.storage.execution.LedgerRecord;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -33,13 +35,13 @@ final class ExecutionViews {
     private ExecutionViews() {
     }
 
-    static Optional<ExecutionView> execution(List<LedgerRecord> all, ExecutionId id) {
-        List<LedgerRecord> history = all.stream().filter(r -> r.event().executionId().equals(id)).toList();
+    /** {@code history} holds every entry of execution {@code id} in sequence order. */
+    static Optional<ExecutionView> execution(List<HistoryEntry> history, ExecutionId id) {
         if (history.isEmpty()) {
             return Optional.empty();
         }
         Set<EventId> superseded = new HashSet<>();
-        for (LedgerRecord r : history) {
+        for (HistoryEntry r : history) {
             if (r.event() instanceof Correction c) {
                 superseded.add(c.envelope().supersedes().get());
             }
@@ -50,7 +52,7 @@ final class ExecutionViews {
         Map<AttemptId, AttemptFinished> finishes = new LinkedHashMap<>();
         Map<AttemptId, List<StageRecorded>> stages = new LinkedHashMap<>();
         Map<AttemptId, List<EvidenceRecorded>> evidence = new LinkedHashMap<>();
-        for (LedgerRecord r : history) {
+        for (HistoryEntry r : history) {
             if (superseded.contains(r.event().eventId())) {
                 continue; // an older revision: kept in history, replaced here by its latest revision
             }
@@ -70,37 +72,33 @@ final class ExecutionViews {
         if (started == null) {
             throw new IllegalStateException("execution " + id + " has no EXECUTION_STARTED event");
         }
-        List<AttemptView> attempts = new ArrayList<>();
         // Effective ordinal order, not ledger order: a corrected ATTEMPT_STARTED sits at the correction's position.
-        starts.entrySet().stream().sorted(Map.Entry.comparingByValue(
-                java.util.Comparator.comparingInt(AttemptStarted::ordinal))).forEach(entry -> {
-            AttemptId attempt = entry.getKey();
-            AttemptStarted s = entry.getValue();
+        List<AttemptStarted> ordered = starts.values().stream()
+                .sorted(Comparator.comparingInt(AttemptStarted::ordinal)).toList();
+        List<AttemptView> attempts = new ArrayList<>();
+        for (AttemptStarted s : ordered) {
+            AttemptId attempt = s.envelope().attemptId().get();
             Optional<AttemptFinished> f = Optional.ofNullable(finishes.get(attempt));
             attempts.add(new AttemptView(attempt, s.ordinal(), s.reason(), s.previousAttempt(),
                     f.map(AttemptFinished::result), f.flatMap(AttemptFinished::solutionSummary),
                     f.flatMap(AttemptFinished::lessonSummary), stages.getOrDefault(attempt, List.of()),
                     evidence.getOrDefault(attempt, List.of())));
-        });
-        DerivedAcceptance acceptance = derive(started.policy(), outcome, evidence);
+        }
+        DerivedAcceptance acceptance = derive(started.policy(), outcome, finishes, evidence);
         return Optional.of(new ExecutionView(id, started.envelope().taskId(), started.taskSummary(),
                 started.provenance(), started.policy(), outcome, acceptance, attempts, history));
     }
 
     /** Contract section 8: only the accepted attempt's evidence under the execution's own policy counts. */
     private static DerivedAcceptance derive(EvaluationPolicy policy, Optional<Outcome> outcome,
+                                            Map<AttemptId, AttemptFinished> finishes,
                                             Map<AttemptId, List<EvidenceRecorded>> evidence) {
-        if (outcome.isEmpty() || outcome.get().status() == com.monada.core.execution.OutcomeStatus.PENDING) {
+        if (outcome.isEmpty() || outcome.get().status() == OutcomeStatus.PENDING) {
             return new DerivedAcceptance(DerivedAcceptance.Status.PENDING, List.of());
         }
         Outcome o = outcome.get();
-        switch (o.status()) {
-            case REJECTED, FAILED, CANCELLED -> {
-                return new DerivedAcceptance(DerivedAcceptance.Status.NOT_ACCEPTED,
-                        List.of("outcome is " + o.status()));
-            }
-            default -> {
-            }
+        if (o.status() != OutcomeStatus.ACCEPTED) { // REJECTED, FAILED, CANCELLED
+            return new DerivedAcceptance(DerivedAcceptance.Status.NOT_ACCEPTED, List.of("outcome is " + o.status()));
         }
         Map<QualityDimension, QualityObservation> effective = new EnumMap<>(QualityDimension.class);
         for (EvidenceRecorded e : evidence.getOrDefault(o.acceptedAttempt().get(), List.of())) {
@@ -111,6 +109,12 @@ final class ExecutionViews {
             }
         }
         List<String> reasons = new ArrayList<>();
+        AttemptFinished finish = finishes.get(o.acceptedAttempt().get());
+        if (finish == null) {
+            reasons.add("accepted attempt is not finished");
+        } else if (finish.result() != AttemptResult.COMPLETED) {
+            reasons.add("accepted attempt is " + finish.result());
+        }
         if (o.origin() == OutcomeOrigin.IMPORTED_CLAIM) {
             reasons.add("outcome is an imported claim, not a validated outcome");
         }

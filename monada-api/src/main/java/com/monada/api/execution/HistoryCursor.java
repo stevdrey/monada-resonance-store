@@ -39,7 +39,12 @@ public record HistoryCursor(ScopeId scope, long highWatermark, long lastSequence
             if (parts.length != 4 || !VERSION.equals(parts[0])) {
                 throw new IllegalArgumentException("unsupported history cursor");
             }
-            return new HistoryCursor(ScopeId.of(parts[3]), Long.parseLong(parts[1]), Long.parseLong(parts[2]));
+            HistoryCursor cursor = new HistoryCursor(ScopeId.of(parts[3]), Long.parseLong(parts[1]),
+                    Long.parseLong(parts[2]));
+            if (!cursor.token().equals(token)) {
+                throw new IllegalArgumentException("non-canonical history cursor");
+            }
+            return cursor;
         } catch (IllegalArgumentException | CharacterCodingException e) {
             throw new IllegalArgumentException("malformed history cursor", e);
         }

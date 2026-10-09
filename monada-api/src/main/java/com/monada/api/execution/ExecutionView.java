@@ -1,11 +1,11 @@
 package com.monada.api.execution;
 
+import com.monada.core.execution.AttemptId;
 import com.monada.core.execution.EvaluationPolicy;
 import com.monada.core.execution.ExecutionId;
 import com.monada.core.execution.Outcome;
 import com.monada.core.execution.SourceProvenance;
 import com.monada.core.execution.TaskId;
-import com.monada.storage.execution.LedgerRecord;
 import java.util.List;
 import java.util.Optional;
 
@@ -16,13 +16,13 @@ import java.util.Optional;
  */
 public record ExecutionView(ExecutionId id, TaskId task, String taskSummary, SourceProvenance provenance,
                             EvaluationPolicy policy, Optional<Outcome> currentOutcome, DerivedAcceptance acceptance,
-                            List<AttemptView> attempts, List<LedgerRecord> history) {
+                            List<AttemptView> attempts, List<HistoryEntry> history) {
     public ExecutionView {
         attempts = List.copyOf(attempts);
         history = List.copyOf(history);
     }
 
-    public Optional<AttemptView> attempt(com.monada.core.execution.AttemptId attemptId) {
+    public Optional<AttemptView> attempt(AttemptId attemptId) {
         return attempts.stream().filter(a -> a.id().equals(attemptId)).findFirst();
     }
 }

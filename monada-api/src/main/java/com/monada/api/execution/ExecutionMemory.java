@@ -8,14 +8,13 @@ import com.monada.core.execution.ScopeId;
 import com.monada.storage.execution.AppendResult;
 import com.monada.storage.execution.ExecutionLedger;
 import com.monada.storage.execution.ExecutionLedgerReader;
+import com.monada.storage.execution.LedgerDiagnostic;
+import com.monada.storage.execution.LedgerException;
 import com.monada.storage.execution.LedgerLockedException;
-import com.monada.storage.execution.LedgerRecord;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -38,15 +37,17 @@ import java.util.Optional;
  */
 public final class ExecutionMemory implements AutoCloseable {
     private final ExecutionLedger ledger; // null for a read-only instance
-    private final ExecutionLedgerReader reader; // null for a writable instance
+    private final HistoryIndex index;
+    private final boolean tornTail;
     private final ScopeId scope;
     private final ExecutionMemoryConfig config;
     private boolean closed;
 
-    private ExecutionMemory(ExecutionLedger ledger, ExecutionLedgerReader reader, ScopeId scope,
+    private ExecutionMemory(ExecutionLedger ledger, HistoryIndex index, boolean tornTail, ScopeId scope,
                             ExecutionMemoryConfig config) {
         this.ledger = ledger;
-        this.reader = reader;
+        this.index = index;
+        this.tornTail = tornTail;
         this.scope = scope;
         this.config = config;
     }
@@ -56,7 +57,8 @@ public final class ExecutionMemory implements AutoCloseable {
         Objects.requireNonNull(scope, "scope");
         Objects.requireNonNull(config, "config");
         try {
-            return new ExecutionMemory(ExecutionLedger.open(root, scope), null, scope, config);
+            ExecutionLedger opened = ExecutionLedger.open(root, scope);
+            return new ExecutionMemory(opened, HistoryIndex.of(opened.replay()), false, scope, config);
         } catch (LedgerLockedException e) {
             throw new ExecutionMemoryLockedException("execution memory " + root + " is owned by another writer", e);
         } catch (IOException e) {
@@ -72,14 +74,23 @@ public final class ExecutionMemory implements AutoCloseable {
      * Opens a read-only <b>snapshot</b> of the scope: it takes no lock, creates nothing and may run next to a
      * live writer, seeing the valid prefix of the ledger at the moment of opening. Later appends are not
      * visible; open a new read-only instance to see them. {@link #record} is unsupported. A missing root or
-     * manifest fails with {@link UncheckedIOException}; a missing scope is an empty history.
+     * manifest fails with {@link UncheckedIOException}, and so does a ledger with integrity errors (the
+     * writable open refuses it too); a missing scope is an empty history. A torn tail (possibly a writer
+     * mid-append) is tolerated and reported by {@link #hasTornTail()}.
      */
     public static ExecutionMemory openReadOnly(Path root, ScopeId scope, ExecutionMemoryConfig config) {
         Objects.requireNonNull(root, "root");
         Objects.requireNonNull(scope, "scope");
         Objects.requireNonNull(config, "config");
         try {
-            return new ExecutionMemory(null, ExecutionLedgerReader.open(root, scope), scope, config);
+            ExecutionLedgerReader reader = ExecutionLedgerReader.open(root, scope);
+            List<LedgerDiagnostic> errors = reader.diagnostics().stream()
+                    .filter(d -> d.severity() == LedgerDiagnostic.Severity.ERROR).toList();
+            if (!errors.isEmpty()) {
+                throw new UncheckedIOException(new LedgerException("execution memory " + root + " is not healthy; "
+                        + "refusing a read-only open: " + errors.get(0).message(), errors));
+            }
+            return new ExecutionMemory(null, HistoryIndex.of(reader.replay()), reader.hasTornTail(), scope, config);
         } catch (IOException e) {
             throw new UncheckedIOException("cannot open execution memory " + root + " read-only", e);
         }
@@ -87,6 +98,12 @@ public final class ExecutionMemory implements AutoCloseable {
 
     public static ExecutionMemory openReadOnly(Path root, ScopeId scope) {
         return openReadOnly(root, scope, ExecutionMemoryConfig.defaults());
+    }
+
+    /** True when this read-only snapshot ended at an incomplete final record; always false when writable. */
+    public boolean hasTornTail() {
+        requireOpen();
+        return tornTail;
     }
 
     public ScopeId scope() {
@@ -107,7 +124,15 @@ public final class ExecutionMemory implements AutoCloseable {
         }
         try {
             AppendResult r = ledger.append(event);
-            return new RecordResult(RecordResult.Status.valueOf(r.status().name()), r.sequence(), r.reason());
+            if (r.status() == AppendResult.Status.APPENDED) {
+                index.add(r.sequence(), event);
+            }
+            RecordResult.Status status = switch (r.status()) {
+                case APPENDED -> RecordResult.Status.APPENDED;
+                case IDEMPOTENT -> RecordResult.Status.IDEMPOTENT;
+                case CONFLICT -> RecordResult.Status.CONFLICT;
+            };
+            return new RecordResult(status, r.sequence(), r.reason());
         } catch (IOException e) {
             throw new UncheckedIOException("cannot record event " + event.eventId(), e);
         }
@@ -116,7 +141,7 @@ public final class ExecutionMemory implements AutoCloseable {
     public Optional<ExecutionView> loadExecution(ScopeId scope, ExecutionId execution) {
         requireOpen(scope);
         Objects.requireNonNull(execution, "execution");
-        return ExecutionViews.execution(records(), execution);
+        return ExecutionViews.execution(index.execution(execution), execution);
     }
 
     public Optional<AttemptView> loadAttempt(ScopeId scope, ExecutionId execution, AttemptId attempt) {
@@ -129,38 +154,34 @@ public final class ExecutionMemory implements AutoCloseable {
      * Exact revision lookup: {@code eventId} may name any event of a correction chain; the record of that
      * chain with the given revision is returned (1 = the original).
      */
-    public Optional<LedgerRecord> loadEvent(ScopeId scope, EventId eventId, int revision) {
+    public Optional<HistoryEntry> loadEvent(ScopeId scope, EventId eventId, int revision) {
         requireOpen(scope);
         Objects.requireNonNull(eventId, "eventId");
         return walk(eventId, false, revision);
     }
 
     /** Latest revision of the event chain that contains {@code eventId}. */
-    public Optional<LedgerRecord> loadEvent(ScopeId scope, EventId eventId) {
+    public Optional<HistoryEntry> loadEvent(ScopeId scope, EventId eventId) {
         requireOpen(scope);
         Objects.requireNonNull(eventId, "eventId");
         return walk(eventId, true, 0);
     }
 
-    /** One pass builds the successor index; walking the chain is then O(revisions). */
-    private Optional<LedgerRecord> walk(EventId eventId, boolean latest, int revision) {
-        Optional<LedgerRecord> current = find(eventId);
+    /** Walks back to revision 1, then forward through the correction successors. */
+    private Optional<HistoryEntry> walk(EventId eventId, boolean latest, int revision) {
+        Optional<HistoryEntry> current = index.find(eventId);
         if (current.isEmpty()) {
             return Optional.empty();
         }
-        while (current.get().event().envelope().supersedes().isPresent()) { // back to revision 1
-            current = find(current.get().event().envelope().supersedes().get());
+        while (current.get().event().envelope().supersedes().isPresent()) {
+            current = index.find(current.get().event().envelope().supersedes().get());
         }
-        Map<EventId, LedgerRecord> successor = new HashMap<>();
-        for (LedgerRecord r : records()) {
-            r.event().envelope().supersedes().ifPresent(target -> successor.put(target, r));
-        }
-        while (latest || current.get().event().envelope().revision() < revision) { // forward
-            LedgerRecord next = successor.get(current.get().event().eventId());
-            if (next == null) {
+        while (latest || current.get().event().envelope().revision() < revision) {
+            Optional<HistoryEntry> next = index.successorOf(current.get().event().eventId());
+            if (next.isEmpty()) {
                 break;
             }
-            current = Optional.of(next);
+            current = next;
         }
         return latest ? current : current.filter(r -> r.event().envelope().revision() == revision);
     }
@@ -176,7 +197,7 @@ public final class ExecutionMemory implements AutoCloseable {
         if (pageSize < 1 || pageSize > config.maxPageSize()) {
             throw new IllegalArgumentException("pageSize must be between 1 and " + config.maxPageSize());
         }
-        List<LedgerRecord> all = records(); // sequences are contiguous from 1
+        List<HistoryEntry> all = index.all(); // sequences are contiguous from 1
         long last = all.size();
         long highWatermark = last;
         long after = 0;
@@ -191,7 +212,7 @@ public final class ExecutionMemory implements AutoCloseable {
             after = cursor.lastSequence();
         }
         int to = (int) Math.min(highWatermark, after + pageSize);
-        List<LedgerRecord> page = after >= to ? List.of() : all.subList((int) after, to);
+        List<HistoryEntry> page = after >= to ? List.of() : all.subList((int) after, to);
         long lastReturned = page.isEmpty() ? after : page.get(page.size() - 1).sequence();
         boolean hasMore = lastReturned < highWatermark;
         return new HistoryPage(page, highWatermark, hasMore,
@@ -208,14 +229,6 @@ public final class ExecutionMemory implements AutoCloseable {
         if (ledger != null) {
             ledger.close();
         }
-    }
-
-    private List<LedgerRecord> records() {
-        return ledger != null ? ledger.replay() : reader.replay();
-    }
-
-    private Optional<LedgerRecord> find(EventId eventId) {
-        return ledger != null ? ledger.find(eventId) : reader.find(eventId);
     }
 
     private void requireOpen() {

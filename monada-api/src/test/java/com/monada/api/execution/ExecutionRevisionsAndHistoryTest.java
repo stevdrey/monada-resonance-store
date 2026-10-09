@@ -7,7 +7,7 @@ import com.monada.core.execution.AttemptResult;
 import com.monada.core.execution.EventId;
 import com.monada.core.execution.ObservationState;
 import com.monada.core.execution.ScopeId;
-import com.monada.storage.execution.LedgerRecord;
+
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -79,7 +79,7 @@ class ExecutionRevisionsAndHistoryTest {
     void invalidCursorsAreRejectedAndEmptyHistoryIsEmpty() {
         try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
             HistoryPage empty = m.history(SCOPE);
-            assertTrue(empty.records().isEmpty());
+            assertTrue(empty.entries().isEmpty());
             assertFalse(empty.hasMore());
             m.record(started("e1"));
             assertThrows(IllegalArgumentException.class,
@@ -91,6 +91,14 @@ class ExecutionRevisionsAndHistoryTest {
             String malformedUtf8 = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bad);
             assertThrows(IllegalArgumentException.class, () -> HistoryCursor.parse(malformedUtf8));
             assertThrows(IllegalArgumentException.class, () -> new HistoryCursor(SCOPE, 1, 2));
+            // a different Base64 spelling of the same bytes (unused trailing bits changed) is not accepted
+            String token = new HistoryCursor(SCOPE, 1, 0).token();
+            String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+            int lastIndex = alphabet.indexOf(token.charAt(token.length() - 1));
+            assertEquals(0, lastIndex & 1, "fixture assumes the last character has unused low bits");
+            String alias = token.substring(0, token.length() - 1) + alphabet.charAt(lastIndex | 1);
+            assertThrows(IllegalArgumentException.class, () -> HistoryCursor.parse(alias));
+            assertEquals(new HistoryCursor(SCOPE, 1, 0), HistoryCursor.parse(token));
         }
     }
 
@@ -132,6 +140,6 @@ class ExecutionRevisionsAndHistoryTest {
     }
 
     private static List<Long> seqs(HistoryPage p) {
-        return p.records().stream().map(LedgerRecord::sequence).toList();
+        return p.entries().stream().map(HistoryEntry::sequence).toList();
     }
 }

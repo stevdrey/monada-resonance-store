@@ -93,7 +93,7 @@ public final class ConsumerSmoke {
         try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
             expect(memory.record(started).status() == RecordResult.Status.APPENDED, "execution append");
             expect(memory.record(started).status() == RecordResult.Status.IDEMPOTENT, "execution retry");
-            expect(memory.history(scope).records().size() == 1, "execution history before close");
+            expect(memory.history(scope).entries().size() == 1, "execution history before close");
         }
         try (ExecutionMemory reopened = ExecutionMemory.open(root, scope)) {
             expect(reopened.loadExecution(scope, execution).isPresent(), "execution load after reopen");

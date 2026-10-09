@@ -57,12 +57,12 @@ Define, without implementing, the v1 semantics for:
 
 ## Affected Modules
 
-- `monada-core`: yes (later) — `com.monada.core.execution` immutable records (#95).
+- `monada-core`: yes — `com.monada.core.execution` immutable records (#95, implemented).
 - `monada-encoder`: no — projections reuse the existing encoding unchanged.
-- `monada-storage`: yes (later) — `com.monada.storage.execution` ledger, codec, replay, audit (#96).
+- `monada-storage`: yes — `com.monada.storage.execution` ledger, codec, replay, audit (#96, implemented).
 - `monada-index`: no — projections reuse `LinearScanResonanceIndex` unchanged.
 - `monada-learning`: no.
-- `monada-api`: yes (later) — `com.monada.api.execution` facade, derived acceptance, recall, export (#97, #98, #101).
+- `monada-api`: yes — `com.monada.api.execution` facade, derived acceptance and history (#97, implemented); recall, export (#98, #101, later).
 - `monada-evaluation`: yes (later) — `com.monada.evaluation.execution` usage/cost calculators, comparison,
   export annotations and end-to-end gates (#99, #100, #101, #102).
 - `monada-speech`: no.
@@ -770,8 +770,10 @@ cost calculators, comparison or export, and no mapping of outcomes to ranking fe
 - `ExecutionMemory.openReadOnly(root, scope[, config])` returns a **snapshot** of the valid ledger prefix at
   open time: no lock, nothing created, usable next to a live writer. Later appends are not visible; the host
   opens a new read-only instance to see them. `record` throws `UnsupportedOperationException`. A missing root
-  or manifest fails with `UncheckedIOException`; a missing scope is an empty history. Lifecycle rules are the
-  same as for the writable instance.
+  or manifest fails with `UncheckedIOException`, and so does a ledger with integrity errors (the writable
+  open refuses it too), so a damaged history is never served silently truncated. A torn tail (possibly a
+  writer mid-append) is tolerated and reported by `hasTornTail()`. A missing scope is an empty history.
+  Lifecycle rules are the same as for the writable instance.
 - Operations keep the contract's `ScopeId` parameter; a scope other than the opened one throws
   `IllegalArgumentException`.
 - Single writer, **not thread-safe**: the host serializes calls. `close()` is idempotent and releases the
@@ -785,8 +787,9 @@ cost calculators, comparison or export, and no mapping of outcomes to ranking fe
 | `record(ExecutionEvent)` | `RecordResult(APPENDED \| IDEMPOTENT \| CONFLICT, sequence, reason)` |
 | `loadExecution(scope, execution)` | `Optional<ExecutionView>` (provenance, policy, current outcome with origin, `DerivedAcceptance`, attempts, full history) |
 | `loadAttempt(scope, execution, attempt)` | `Optional<AttemptView>` (route, usage, evidence exactly as recorded) |
-| `loadEvent(scope, eventId[, revision])` | `Optional<LedgerRecord>`; `eventId` may name any member of a correction chain; revision 1 is the original |
-| `history(scope[, cursor], pageSize)` | `HistoryPage(records, highWatermark, hasMore, next)` |
+| `loadEvent(scope, eventId[, revision])` | `Optional<HistoryEntry>` (sequence + event); `eventId` may name any member of a correction chain; revision 1 is the original |
+| `history(scope[, cursor], pageSize)` | `HistoryPage(entries, highWatermark, hasMore, next)` |
+| `openReadOnly(root, scope[, config])` | Lock-free snapshot instance; `record` is unsupported; `hasTornTail()` |
 
 Outcomes of `record`: identical retry -> `IDEMPOTENT` (nothing written); same id with a different payload,
 duplicate execution/attempt start, reused ordinal, or a correction that is not target revision + 1 or not of
@@ -798,7 +801,7 @@ instance throws `NullPointerException`.
 ### 17.3 Acceptance, revisions, history
 
 - `ExecutionView.acceptance()` is derived on every read (section 8), never stored. `VALIDATED_ACCEPTED`
-  requires a `VALIDATED` accepted outcome and passing (or justified not-applicable) evidence of the accepted
+  requires a `VALIDATED` accepted outcome whose accepted attempt finished `COMPLETED`, and passing (or justified not-applicable) evidence of the accepted
   attempt under the execution's own policy id and version for every mandatory dimension. An
   `IMPORTED_CLAIM` outcome stays visible as such and is never validated. `FAILED`, `REJECTED` and `CANCELLED`
   are `NOT_ACCEPTED`.

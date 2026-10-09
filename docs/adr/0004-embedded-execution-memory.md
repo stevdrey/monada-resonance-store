@@ -119,7 +119,7 @@ Facade operations (`com.monada.api.execution.ExecutionMemory`, `AutoCloseable`):
 | `record(ExecutionEvent event)` | `RecordResult` = `APPENDED`, `IDEMPOTENT` or `CONFLICT` |
 | `loadExecution(ScopeId, ExecutionId)` | `Optional<ExecutionView>` at latest revisions |
 | `loadAttempt(ScopeId, ExecutionId, AttemptId)` | `Optional<AttemptView>` |
-| `loadEvent(ScopeId, EventId[, int revision])` | `Optional<LedgerRecord>`, exact revision or latest |
+| `loadEvent(ScopeId, EventId[, int revision])` | `Optional<HistoryEntry>`, exact revision or latest |
 | `history(ScopeId[, HistoryCursor], int pageSize)` | `HistoryPage` in ledger sequence order, fixed snapshot high-watermark |
 | `recall(ScopeId, String query, int limit)` | `ExperienceRecall` of `ExperienceHit` (planned, #98) |
 | `projectionStatus(ScopeId)` / `rebuildProjection(ScopeId)` | Explicit reconciliation (planned, #98) |

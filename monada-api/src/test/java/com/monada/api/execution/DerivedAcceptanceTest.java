@@ -75,8 +75,72 @@ class DerivedAcceptanceTest {
     }
 
     @Test
-    void failureCancellationAndPendingNeverImplyAcceptance() {
+    void failedRejectedAndCancelledOutcomesNeverImplyAcceptance() {
         assertEquals(Status.NOT_ACCEPTED, statusWith(ObservationState.PASS, Outcome.failed(OutcomeOrigin.VALIDATED)));
+    }
+
+    @Test
+    void rejectedAndCancelledAreNotAccepted(@TempDir Path a, @TempDir Path b) {
+        for (Path dir : new Path[] {a, b}) {
+            try (ExecutionMemory m = ExecutionMemory.open(dir, SCOPE)) {
+                baseRun(m, ObservationState.PASS);
+                m.record(outcome("e6", dir == a ? Outcome.rejected(OutcomeOrigin.VALIDATED)
+                        : Outcome.cancelled(OutcomeOrigin.VALIDATED)));
+                assertEquals(Status.NOT_ACCEPTED, m.loadExecution(SCOPE, EXEC).orElseThrow().acceptance().status());
+            }
+        }
+    }
+
+    @Test
+    void acceptedOutcomeOnAFailedAttemptIsNotValidated() {
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            baseRun(m, ObservationState.PASS);
+            m.record(correctFinish("e6", "e5", 2, A1)); // finish becomes FAILED
+            m.record(outcome("e7", Outcome.accepted(OutcomeOrigin.VALIDATED, A1)));
+            DerivedAcceptance a = m.loadExecution(SCOPE, EXEC).orElseThrow().acceptance();
+            assertEquals(Status.ACCEPTED_UNVALIDATED, a.status());
+            assertTrue(a.reasons().get(0).contains("FAILED"));
+        }
+    }
+
+    @Test
+    void acceptedOutcomeOnAnUnfinishedAttemptIsNotValidated() {
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            m.record(started("e1"));
+            m.record(attempt("e2", A1, 1));
+            m.record(evidence("e3", A1, ObservationState.PASS, "2"));
+            m.record(outcome("e4", Outcome.accepted(OutcomeOrigin.VALIDATED, A1)));
+            DerivedAcceptance a = m.loadExecution(SCOPE, EXEC).orElseThrow().acceptance();
+            assertEquals(Status.ACCEPTED_UNVALIDATED, a.status());
+            assertTrue(a.reasons().get(0).contains("not finished"));
+        }
+    }
+
+    @Test
+    void laterPassOverridesEarlierFailInTheSameAttempt() {
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            m.record(started("e1"));
+            m.record(attempt("e2", A1, 1));
+            m.record(evidence("e3", A1, ObservationState.FAIL, "2"));
+            m.record(evidence("e4", A1, ObservationState.PASS, "2"));
+            m.record(finished("e5", A1));
+            m.record(outcome("e6", Outcome.accepted(OutcomeOrigin.VALIDATED, A1)));
+            assertEquals(Status.VALIDATED_ACCEPTED, m.loadExecution(SCOPE, EXEC).orElseThrow().acceptance().status());
+        }
+    }
+
+    @Test
+    void evidenceOnlyOnAnotherAttemptDoesNotValidateTheAcceptedOne() {
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            m.record(started("e1"));
+            m.record(attempt("e2", A1, 1));
+            m.record(evidence("e3", A1, ObservationState.PASS, "2"));
+            m.record(finished("e4", A1));
+            m.record(attempt("e5", A2, 2));
+            m.record(finished("e6", A2));
+            m.record(outcome("e7", Outcome.accepted(OutcomeOrigin.VALIDATED, A2)));
+            assertEquals(Status.ACCEPTED_UNVALIDATED, m.loadExecution(SCOPE, EXEC).orElseThrow().acceptance().status());
+        }
     }
 
     @Test

@@ -102,7 +102,7 @@ try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
 }
 ```
 
-`ExecutionMemory.openReadOnly(root, scope)` gives a lock-free snapshot that can be read next to a live writer. One scope per writable instance; a second writable open of the same root fails with `ExecutionMemoryLockedException`. Contract and limits: [`docs/specs/execution-memory-contract-v1.md`](docs/specs/execution-memory-contract-v1.md) section 17. Projections, recall and export are future work; `MonadaMemory` is unchanged.
+`ExecutionMemory.openReadOnly(root, scope)` gives a lock-free snapshot that can be read next to a live writer (it refuses a damaged ledger instead of serving a truncated history). One scope per writable instance; a second writable open of the same root fails with `ExecutionMemoryLockedException`. Contract and limits: [`docs/specs/execution-memory-contract-v1.md`](docs/specs/execution-memory-contract-v1.md) section 17. Projections, recall and export are future work; `MonadaMemory` is unchanged.
 
 ```bash
 ./gradlew :monada-api:test
