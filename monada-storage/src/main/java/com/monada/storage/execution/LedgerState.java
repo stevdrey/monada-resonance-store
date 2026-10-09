@@ -47,6 +47,7 @@ final class LedgerState {
 
     private static final class Attempt {
         int ordinal;
+        AttemptId previous;
         boolean finished;
 
         Attempt(int ordinal) {
@@ -208,7 +209,17 @@ final class LedgerState {
         if (missing.isPresent()) {
             return missing;
         }
-        Attempt own = execution.attempts.get(env.attemptId().get());
+        AttemptId self = env.attemptId().get();
+        AttemptId cursor = e.previousAttempt().orElse(null);
+        for (int steps = 0; cursor != null && steps <= execution.attempts.size(); steps++) {
+            if (cursor.equals(self)) {
+                return Optional.of(Violation.reject(LedgerDiagnosticCategory.INVALID_ORDER,
+                        "previous-attempt link of " + self + " would create a cycle in execution "
+                                + env.executionId()));
+            }
+            cursor = execution.attempts.get(cursor).previous;
+        }
+        Attempt own = execution.attempts.get(self);
         if (own.ordinal != e.ordinal() && execution.ordinals.contains(e.ordinal())) {
             return Optional.of(Violation.conflict(LedgerDiagnosticCategory.CONFLICTING_DUPLICATE_EVENT,
                     "attempt ordinal " + e.ordinal() + " is already used in execution " + env.executionId()));
@@ -229,13 +240,16 @@ final class LedgerState {
                     Attempt attempt = execution.attempts.get(env.attemptId().get());
                     execution.ordinals.remove(attempt.ordinal);
                     attempt.ordinal = replaced.ordinal();
+                    attempt.previous = replaced.previousAttempt().orElse(null);
                     execution.ordinals.add(attempt.ordinal);
                 }
             }
             case ExecutionStarted e -> executions.put(env.executionId(), new Execution(env.taskId()));
             case AttemptStarted e -> {
                 Execution execution = executions.get(env.executionId());
-                execution.attempts.put(env.attemptId().get(), new Attempt(e.ordinal()));
+                Attempt attempt = new Attempt(e.ordinal());
+                attempt.previous = e.previousAttempt().orElse(null);
+                execution.attempts.put(env.attemptId().get(), attempt);
                 execution.ordinals.add(e.ordinal());
             }
             case AttemptFinished e -> executions.get(env.executionId()).attempts.get(env.attemptId().get()).finished = true;

@@ -47,7 +47,7 @@ public final class ExecutionLedgerReader {
             return new ExecutionLedgerReader(scope, LedgerScanner.Result.empty());
         }
         verifyScopeId(paths, scopeDir, scope);
-        return load(paths, scopeDir, scope);
+        return load(paths, scopeDir, scope, List.of());
     }
 
     /**
@@ -73,11 +73,25 @@ public final class ExecutionLedgerReader {
             throw failure(LedgerDiagnosticCategory.SCOPE_ID_MISMATCH, paths.display(paths.scopeIdFile(scopeDir)),
                     "scope.id is not a valid scope id");
         }
-        if (!LedgerPaths.scopeDirectoryName(scope).equals(directoryName)) {
-            throw failure(LedgerDiagnosticCategory.SCOPE_ID_MISMATCH, shown,
-                    "directory name does not match the SHA-256 of its scope.id");
+        // A renamed directory is reported, but its records are still scanned so no other damage is hidden.
+        List<LedgerDiagnostic> extra = LedgerPaths.scopeDirectoryName(scope).equals(directoryName)
+                ? List.of()
+                : List.of(LedgerDiagnostic.error(LedgerDiagnosticCategory.SCOPE_ID_MISMATCH, shown, 0,
+                OptionalLong.empty(), "directory name does not match the SHA-256 of its scope.id"));
+        return load(paths, scopeDir, scope, extra);
+    }
+
+    /**
+     * Checks that {@code write.lock}, if present, is a contained regular file, so an audit does not certify
+     * a ledger that cannot accept a writer. The lock is neither created nor acquired.
+     */
+    public static void verifyWriterLockPath(Path root) throws IOException {
+        LedgerPaths paths = readableRoot(Objects.requireNonNull(root, "root"));
+        Path lock = paths.lock();
+        if (Files.exists(lock, LinkOption.NOFOLLOW_LINKS) && !Files.isRegularFile(lock)) {
+            throw failure(LedgerDiagnosticCategory.MANIFEST_INVALID, paths.display(lock),
+                    "write.lock is not a regular file; a writer cannot open this ledger");
         }
-        return load(paths, scopeDir, scope);
     }
 
     /** Validates only the ledger manifest of {@code root}; opens no scope. Used by the audit. */
@@ -127,7 +141,8 @@ public final class ExecutionLedgerReader {
         return paths;
     }
 
-    private static ExecutionLedgerReader load(LedgerPaths paths, Path scopeDir, ScopeId scope) throws IOException {
+    private static ExecutionLedgerReader load(LedgerPaths paths, Path scopeDir, ScopeId scope,
+                                              List<LedgerDiagnostic> extra) throws IOException {
         Path ledgerDir = paths.ledgerDir(scopeDir);
         if (!Files.isDirectory(ledgerDir)) {
             throw failure(LedgerDiagnosticCategory.MANIFEST_INVALID, paths.display(ledgerDir),
@@ -138,10 +153,13 @@ public final class ExecutionLedgerReader {
             throw failure(LedgerDiagnosticCategory.MALFORMED_RECORD, paths.display(segment),
                     "ledger segment is not a regular file");
         }
-        LedgerScanner.Result scanned = Files.exists(segment, LinkOption.NOFOLLOW_LINKS)
-                ? LedgerScanner.scan(segment, paths.display(segment), scope)
-                : LedgerScanner.Result.empty();
+        if (!Files.exists(segment, LinkOption.NOFOLLOW_LINKS)) {
+            throw failure(LedgerDiagnosticCategory.MANIFEST_INVALID, paths.display(segment),
+                    "ledger segment is missing from an existing scope");
+        }
+        LedgerScanner.Result scanned = LedgerScanner.scan(segment, paths.display(segment), scope);
         List<LedgerDiagnostic> diagnostics = new ArrayList<>(scanned.diagnostics());
+        diagnostics.addAll(extra);
         try (Stream<Path> entries = Files.list(ledgerDir)) {
             for (Path entry : entries.sorted().toList()) {
                 if (!entry.getFileName().toString().equals(LedgerPaths.SEGMENT_FILE)) {

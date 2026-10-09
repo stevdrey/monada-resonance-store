@@ -59,6 +59,11 @@ public final class ExecutionLedgerAuditor {
                     : e.diagnostics());
             return;
         }
+        try {
+            ExecutionLedgerReader.verifyWriterLockPath(root);
+        } catch (LedgerException e) {
+            findings.addAll(e.diagnostics());
+        }
         List<String> names;
         try {
             names = ExecutionLedgerReader.listScopeDirectories(root);

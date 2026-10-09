@@ -620,7 +620,8 @@ explicit repair.
 | `audit.ExecutionLedgerAuditor` | Read-only audit of a whole ledger root. |
 
 A ledger instance is bound to one scope. A corrected `ATTEMPT_STARTED` keeps the effective attempt
-ordinals of the execution unique (a clash is a `CONFLICT`, and the ordinal it replaced becomes free). Appending an event of another scope is rejected
+ordinals of the execution unique and its `previousAttempt` chain acyclic (a link that would close a loop is
+rejected as `INVALID_ORDER`) (a clash is a `CONFLICT`, and the ordinal it replaced becomes free). Appending an event of another scope is rejected
 (`SCOPE_ID_MISMATCH`). Opening writable creates the root, the manifest and that scope's directories only.
 
 ### 16.2 Payload codec (schema 1)
@@ -675,9 +676,10 @@ real ledger root; a symbolic link that leaves the
 root fails closed (`PATH_ESCAPE`). `scope.id` must equal the requested scope (`SCOPE_ID_MISMATCH`). The initial `execution-manifest.json` is likewise written to a temporary name and renamed atomically. Metadata,
 segment and lock files must be regular files (a named pipe is rejected without being opened, so nothing can
 hang). A new
-scope is built under `scopes/.staging-s-<hash>` (with `scope.id` and `ledger/`) and published with one atomic
+scope is built under `scopes/.staging-s-<hash>` (with `scope.id`, `ledger/` and an empty `events-000001.log`) and published with one atomic
 rename, so a concurrent reader never sees a partial scope; a scope directory without `scope.id` or `ledger/`
-is damage, reported by readers and the audit. A leftover staging directory is discarded by the next writer
+is damage, reported by readers and the audit; so is a scope whose segment file has disappeared (the ledger
+never restarts a history over it, and writable open refuses it). A leftover staging directory is discarded by the next writer
 (it holds the lock). A root that holds a legacy `manifest.json` but no `execution-manifest.json` is rejected
 on writable open, and so is a root with `scopes/` but no manifest (`MANIFEST_MISSING`): a manifest is only
 created for a genuinely new root. `execution-manifest.json` (1 KiB) and `scope.id` (512 bytes) are read with a
@@ -696,7 +698,9 @@ canonical. Diagnostics are sorted (severity, file, line, category, message) and 
 
 The read-only audit (`ExecutionLedgerAuditor`, `audit` package) validates the manifest directly (it opens no scope, so no scope id is special) and every `s-<hash>`
 scope directory it discovers (containment is checked before any child is read, `scope.id` must hash to the
-directory name, `ledger/` must exist, and that same directory is scanned record by record). It never creates, locks, truncates or
+directory name, `ledger/` must exist, and that same directory is scanned record by record, even when its name does not match the hash: the
+`SCOPE_ID_MISMATCH` is reported together with every other defect found). The audit also checks that
+`write.lock`, when present, is a contained regular file, without creating or acquiring it. It never creates, locks, truncates or
 repairs anything, and reports a missing root or manifest as diagnostics. Unexpected entries under `scopes/`
 or `ledger/` (for example a reserved `events-000002.log`) are warnings.
 

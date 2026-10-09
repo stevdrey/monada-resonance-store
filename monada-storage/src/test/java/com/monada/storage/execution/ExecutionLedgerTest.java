@@ -115,7 +115,7 @@ class ExecutionLedgerTest {
                     Events.started("e1", ScopeId.of("other"), Events.EXEC, "x")));
             assertEquals(LedgerDiagnosticCategory.SCOPE_ID_MISMATCH, e.category());
         }
-        assertFalse(Files.exists(segment()));
+        assertEquals(0, Files.size(segment()), "nothing was appended");
     }
 
     @Test

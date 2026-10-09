@@ -86,9 +86,14 @@ public final class ExecutionLedger implements AutoCloseable {
             if (Files.exists(segment, LinkOption.NOFOLLOW_LINKS) && !Files.isRegularFile(segment)) {
                 throw new LedgerException("ledger segment is not a regular file: " + paths.display(segment));
             }
-            LedgerScanner.Result loaded = Files.exists(segment, LinkOption.NOFOLLOW_LINKS)
-                    ? LedgerScanner.scan(segment, paths.display(segment), scope)
-                    : LedgerScanner.Result.empty();
+            if (!Files.exists(segment, LinkOption.NOFOLLOW_LINKS)) {
+                String message = "ledger segment " + paths.display(segment) + " is missing from an existing scope; "
+                        + "refusing to start a new history over it (no automatic repair)";
+                throw new LedgerException(message, List.of(LedgerDiagnostic.error(
+                        LedgerDiagnosticCategory.MANIFEST_INVALID, paths.display(segment), 0, OptionalLong.empty(),
+                        message)));
+            }
+            LedgerScanner.Result loaded = LedgerScanner.scan(segment, paths.display(segment), scope);
             if (loaded.hasErrors() || loaded.tornTail()) {
                 throw new LedgerException("execution ledger scope " + scope + " is not healthy; refusing a "
                         + "writable open (no automatic repair): " + loaded.diagnostics().get(0).message(),
@@ -153,6 +158,8 @@ public final class ExecutionLedger implements AutoCloseable {
         Files.createDirectory(staging);
         Files.createDirectory(staging.resolve(LedgerPaths.LEDGER_DIR));
         writeDurably(staging.resolve(LedgerPaths.SCOPE_ID_FILE), scope.value().getBytes(StandardCharsets.UTF_8));
+        // The (empty) segment is part of the published scope, so its absence later means data loss.
+        writeDurably(staging.resolve(LedgerPaths.LEDGER_DIR).resolve(LedgerPaths.SEGMENT_FILE), new byte[0]);
         Files.move(staging, scopeDir, StandardCopyOption.ATOMIC_MOVE);
         return paths.scopeDir(scope);
     }

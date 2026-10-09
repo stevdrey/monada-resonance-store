@@ -43,7 +43,7 @@ class LedgerRound3Test {
     /** Fixed absolute locations only: the test never resolves an executable through PATH. */
     private static final List<Path> MKFIFO = List.of(Path.of("/usr/bin/mkfifo"), Path.of("/bin/mkfifo"));
 
-    private static Path mkfifo(Path path) throws IOException, InterruptedException {
+    static Path mkfifo(Path path) throws IOException, InterruptedException {
         Files.deleteIfExists(path);
         Path tool = MKFIFO.stream().filter(Files::isExecutable).findFirst().orElse(null);
         assumeTrue(tool != null, "mkfifo is not available at a known absolute path");
