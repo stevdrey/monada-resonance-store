@@ -18,12 +18,12 @@ contains the binary jar, a `-sources.jar`, a Maven POM and Gradle Module Metadat
 
 | Artifact | Automatic-Module-Name | Packages | Depends on (`api` = exposed to consumers) |
 | --- | --- | --- | --- |
-| `com.monada:monada-core` | `com.monada.core` | `com.monada.core` | — |
+| `com.monada:monada-core` | `com.monada.core` | `com.monada.core`, `.execution` | — |
 | `com.monada:monada-encoder` | `com.monada.encoder` | `com.monada.encoder` (+ `lexical/en` resources) | `api` core |
-| `com.monada:monada-storage` | `com.monada.storage` | `com.monada.storage`, `.audit`, `.feedback` | `api` core |
+| `com.monada:monada-storage` | `com.monada.storage` | `com.monada.storage`, `.audit`, `.feedback`, `.execution` | `api` core |
 | `com.monada:monada-index` | `com.monada.index` | `com.monada.index` | `api` core, storage |
 | `com.monada:monada-learning` | `com.monada.learning` | none yet (placeholder jar) | `implementation` core |
-| `com.monada:monada-api` | `com.monada.api` | `com.monada.api` | `api` core, encoder, storage; `implementation` index, learning |
+| `com.monada:monada-api` | `com.monada.api` | `com.monada.api`, `.execution` | `api` core, encoder, storage; `implementation` index, learning |
 
 `api` vs `implementation` follows an audit of public signatures:
 
@@ -104,6 +104,9 @@ The consumer build can also be run directly after publishing:
    runtime module of each exposed type. The JPMS consumer asserts the named modules `com.monada.api`,
    `com.monada.core`, `com.monada.encoder`, `com.monada.storage` and that `com.monada.index` and
    `com.monada.learning` are resolved in the boot layer; the class-path consumer asserts the unnamed module.
+3. Execution history (Issue #97): in a separate directory, `ExecutionMemory` open → record → identical retry
+   (`IDEMPOTENT`) → history → close → reopen → load execution. It uses only `monada-api`, `monada-core` and
+   `monada-storage` types, so the compile classpath above is unchanged.
 
 ## Reproducibility
 
@@ -129,6 +132,8 @@ byte-identical jars and sources jars; only the Maven SNAPSHOT timestamp in file 
   name stable.
 - The `monada-api` jar still contains the demo `com.monada.api.Main` entry point.
 - `MonadaMemory` has no `close()`; lifecycle remains caller-owned through the store directory.
+- `ExecutionMemory` (`com.monada.api.execution`) is `AutoCloseable` and holds an exclusive writer lock on its
+  root until closed (single writer, one scope per instance; see section 17 of the execution memory contract).
 - No Javadoc jar is published.
 
 ## Future Work
