@@ -695,7 +695,8 @@ Categories are those of section 6 plus `INVALID_ORDER` (ordering rule violated i
 `PATH_ESCAPE`. Within a scope, records are accepted only while every earlier line is valid, so replay
 returns the longest valid prefix; later lines are still examined for framing, digest, sequence and schema
 problems, and a line with a sequence error, including a malformed or non-canonical sequence field, is still checked
-for its other defects (all are reported, none enters replay); only unusable framing (field count, codec
+for its other defects, as is a line with a wrong payload length or digest (all are reported, none enters
+replay); only unusable framing (field count, codec
 marker, oversized line) ends the examination of that line. A `scopes` path that is not a directory is structural damage for readers too, never an
 empty ledger; `diagnostics()` is an immutable view. A `TORN_TAIL` diagnostic carries the sequence when the incomplete record's sequence field is complete and
 canonical. Diagnostics are sorted (severity, file, line, category, message) and so are reproducible.

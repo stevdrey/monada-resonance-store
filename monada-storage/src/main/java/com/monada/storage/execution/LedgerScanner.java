@@ -145,12 +145,10 @@ final class LedgerScanner {
             if (length.isEmpty() || length.getAsLong() != payload.length) {
                 error(LedgerDiagnosticCategory.MALFORMED_RECORD, sequence,
                         "payload length field does not match the payload (" + payload.length + " bytes present)");
-                return;
             }
             String digest = ascii(fields.get(3));
             if (!HEX64.matcher(digest).matches() || !digest.equals(RecordLine.sha256Hex(payload))) {
                 error(LedgerDiagnosticCategory.DIGEST_MISMATCH, sequence, "payload SHA-256 does not match the record");
-                return;
             }
             String text;
             try {
@@ -170,7 +168,6 @@ final class LedgerScanner {
             if (scope != null && !event.scopeId().equals(scope)) {
                 error(LedgerDiagnosticCategory.SCOPE_ID_MISMATCH, sequence,
                         "record belongs to scope '" + event.scopeId() + "', not '" + scope + "'");
-                return;
             }
             if (!Arrays.equals(EventPayloadCodec.encode(event), payload)) {
                 error(LedgerDiagnosticCategory.MALFORMED_RECORD, sequence, "payload is not in canonical form");

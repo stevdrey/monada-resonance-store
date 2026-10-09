@@ -59,7 +59,8 @@ class LedgerRound6Test {
 
         ExecutionLedgerReader reader = ExecutionLedgerReader.open(root, Events.SCOPE);
         List<LedgerDiagnosticCategory> found = reader.diagnostics().stream().map(LedgerDiagnostic::category).toList();
-        assertEquals(2, found.stream().filter(c -> c == LedgerDiagnosticCategory.MALFORMED_RECORD).count(), found.toString());
+        // two invalid sequence fields, plus the truncated schema-1 payload of the second line
+        assertEquals(3, found.stream().filter(c -> c == LedgerDiagnosticCategory.MALFORMED_RECORD).count(), found.toString());
         assertTrue(found.contains(LedgerDiagnosticCategory.UNSUPPORTED_SCHEMA), found.toString());
         assertTrue(found.contains(LedgerDiagnosticCategory.DIGEST_MISMATCH), found.toString());
         assertEquals(valid, reader.replay().size());
