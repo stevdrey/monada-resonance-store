@@ -128,6 +128,8 @@ public final class ExecutionLedgerReader {
                         displaced = paths.display(dir);
                         break;
                     }
+                } catch (LedgerException containment) {
+                    throw containment; // an escaping entry could be hiding this scope's history
                 } catch (IOException | RuntimeException unreadable) {
                     // metadata of other scopes is audited elsewhere; it cannot prove anything about this one
                 }
@@ -192,10 +194,11 @@ public final class ExecutionLedgerReader {
     private static LedgerPaths readableRoot(Path root) throws IOException {
         LedgerPaths paths = LedgerPaths.existing(root);
         Path manifest = paths.manifest();
-        if (!Files.isRegularFile(manifest)) {
+        if (!Files.exists(manifest, LinkOption.NOFOLLOW_LINKS)) {
             throw failure(LedgerDiagnosticCategory.MANIFEST_MISSING, LedgerManifest.FILE_NAME,
                     "execution ledger manifest " + LedgerManifest.FILE_NAME + " is missing");
         }
+        // Present but not a regular file (directory, FIFO, dangling link) is corruption, not absence.
         LedgerManifest.validate(manifest);
         return paths;
     }

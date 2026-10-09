@@ -63,6 +63,7 @@ public final class ExecutionLedger implements AutoCloseable {
         Objects.requireNonNull(root, "root");
         Objects.requireNonNull(scope, "scope");
         rejectLegacyStore(root);
+        publishNewRoot(root);
         Files.createDirectories(root);
         LedgerPaths paths = LedgerPaths.existing(root);
         Path lockFile = paths.lock();
@@ -103,6 +104,41 @@ public final class ExecutionLedger implements AutoCloseable {
         } catch (IOException | RuntimeException e) {
             release(lock, channel);
             throw e;
+        }
+    }
+
+    /**
+     * When the root does not exist yet, builds it (with its manifest) under a private sibling name and renames
+     * it into place, so a concurrent reader never sees a root without a manifest. If another writer wins the
+     * race, or atomic publication is impossible, the normal path below takes over. An already existing (for
+     * example empty) directory cannot be published atomically and keeps the regular behaviour.
+     */
+    private static void publishNewRoot(Path root) throws IOException {
+        if (Files.exists(root, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        Path absolute = root.toAbsolutePath().normalize();
+        Path parent = absolute.getParent();
+        if (parent == null) {
+            return;
+        }
+        Files.createDirectories(parent);
+        Path staging = Files.createTempDirectory(parent, "." + absolute.getFileName() + ".init-");
+        try {
+            writeDurably(staging.resolve(LedgerManifest.FILE_NAME),
+                    LedgerManifest.render().getBytes(StandardCharsets.UTF_8));
+            Files.move(staging, absolute, StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException e) {
+            // lost the race or no atomic rename here: fall back to the regular creation path
+            if (!Files.isDirectory(absolute)) {
+                deleteTree(staging);
+                if (e instanceof java.nio.file.AtomicMoveNotSupportedException) {
+                    return;
+                }
+                throw e;
+            }
+        } finally {
+            deleteTree(staging);
         }
     }
 

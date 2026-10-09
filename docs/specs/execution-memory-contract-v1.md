@@ -673,7 +673,12 @@ MXL1<TAB>1<TAB>187<TAB>2f1c...<TAB>1|EXECUTION_STARTED|e1|scope-1|task-1|exec-1|
 Scope directories are `s-<sha256hex(UTF-8 scope ID)>`; raw identifiers are never path segments. Every path
 (including `scopes/` itself, before it is listed) is resolved through real paths and must stay inside the
 real ledger root; a symbolic link that leaves the
-root fails closed (`PATH_ESCAPE`). `scope.id` must equal the requested scope (`SCOPE_ID_MISMATCH`). The initial `execution-manifest.json` is likewise written to a temporary name and renamed atomically. Metadata,
+root fails closed (`PATH_ESCAPE`). `scope.id` must equal the requested scope (`SCOPE_ID_MISMATCH`). A root that does not exist yet is built under a private sibling name (with its manifest) and renamed into
+place, so a concurrent reader never sees a root without a manifest (an already existing directory cannot be
+published atomically and keeps the regular path). A manifest that is present but not a regular file is
+`MANIFEST_INVALID`, never `MANIFEST_MISSING`. While checking for a displaced scope, an entry that escapes
+the root fails closed (`PATH_ESCAPE`) instead of being ignored. The initial `execution-manifest.json` of an
+existing empty root is likewise written to a temporary name and renamed atomically. Metadata,
 segment and lock files must be regular files (a named pipe is rejected without being opened, so nothing can
 hang). A scope whose canonical directory is absent
 but whose `scope.id` is found in another `s-<hash>` directory (a renamed or displaced scope) is rejected by

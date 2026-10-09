@@ -42,7 +42,7 @@ public final class ExecutionLedgerAuditor {
             return;
         }
         Path manifest = root.resolve("execution-manifest.json");
-        if (!Files.isRegularFile(manifest)) {
+        if (!Files.exists(manifest, LinkOption.NOFOLLOW_LINKS)) {
             boolean legacy = Files.exists(root.resolve("manifest.json"), LinkOption.NOFOLLOW_LINKS);
             findings.add(LedgerDiagnostic.error(LedgerDiagnosticCategory.MANIFEST_MISSING, "execution-manifest.json",
                     0, OptionalLong.empty(), legacy
