@@ -52,7 +52,7 @@ public final class ExecutionLedgerReader {
     }
 
     /** Result of auditing one discovered scope directory. */
-    public record ScopeAudit(List<LedgerDiagnostic> diagnostics, long recordsValidated) {
+    record ScopeAudit(List<LedgerDiagnostic> diagnostics, long recordsValidated) {
         public ScopeAudit {
             diagnostics = List.copyOf(diagnostics);
         }
@@ -65,10 +65,11 @@ public final class ExecutionLedgerReader {
      * continues, so independent defects are never hidden; without a trustworthy scope id only the per-record
      * scope comparison is skipped.
      */
-    public static ScopeAudit auditScopeDirectory(Path root, String directoryName) throws IOException {
-        Objects.requireNonNull(root, "root");
+    static ScopeAudit auditScopeDirectory(LedgerPaths paths, String directoryName) throws IOException {
         Objects.requireNonNull(directoryName, "directoryName");
-        LedgerPaths paths = readableRoot(root);
+        if (!LedgerPaths.SCOPE_DIR_NAME.matcher(directoryName).matches()) {
+            throw new IllegalArgumentException("not a scope directory name (s-<64 hex>): " + directoryName);
+        }
         scopesDirectoryExists(paths);
         Path scopeDir = paths.contained(paths.scopesDir().resolve(directoryName));
         String shown = paths.display(scopeDir);
@@ -115,7 +116,7 @@ public final class ExecutionLedgerReader {
         try (Stream<Path> entries = Files.list(paths.scopesDir())) {
             for (Path entry : entries.sorted().toList()) {
                 String name = entry.getFileName().toString();
-                if (name.equals(canonical) || !name.matches("s-[0-9a-f]{64}")) {
+                if (name.equals(canonical) || !LedgerPaths.SCOPE_DIR_NAME.matcher(name).matches()) {
                     continue;
                 }
                 try {
@@ -146,8 +147,7 @@ public final class ExecutionLedgerReader {
      * Checks that {@code write.lock}, if present, is a contained regular file, so an audit does not certify
      * a ledger that cannot accept a writer. The lock is neither created nor acquired.
      */
-    public static void verifyWriterLockPath(Path root) throws IOException {
-        LedgerPaths paths = readableRoot(Objects.requireNonNull(root, "root"));
+    static void verifyWriterLockPath(LedgerPaths paths) throws IOException {
         Path lock = paths.lock();
         if (Files.exists(lock, LinkOption.NOFOLLOW_LINKS) && !Files.isRegularFile(lock)) {
             throw failure(LedgerDiagnosticCategory.MANIFEST_INVALID, paths.display(lock),
@@ -155,9 +155,12 @@ public final class ExecutionLedgerReader {
         }
     }
 
-    /** Validates only the ledger manifest of {@code root}; opens no scope. Used by the audit. */
-    public static void verifyManifest(Path root) throws IOException {
-        readableRoot(Objects.requireNonNull(root, "root"));
+    /**
+     * Resolves {@code root} and validates its manifest once; the returned handle is reused by the audit for
+     * every later step so the manifest is not re-read per scope.
+     */
+    static LedgerPaths openRoot(Path root) throws IOException {
+        return readableRoot(Objects.requireNonNull(root, "root"));
     }
 
     /**
@@ -165,8 +168,7 @@ public final class ExecutionLedgerReader {
      * is listed, so a symbolic link leaving the root fails with {@code PATH_ESCAPE} without reading outside.
      * Returns an empty list when the ledger has no {@code scopes/} yet.
      */
-    public static List<String> listScopeDirectories(Path root) throws IOException {
-        LedgerPaths paths = readableRoot(Objects.requireNonNull(root, "root"));
+    static List<String> listScopeDirectories(LedgerPaths paths) throws IOException {
         if (!scopesDirectoryExists(paths)) {
             return List.of();
         }

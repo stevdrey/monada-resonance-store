@@ -20,7 +20,7 @@ tasks.register<JavaExec>("runIntegrityAudit") {
 tasks.register<JavaExec>("runExecutionLedgerAudit") {
     description = "Run a read-only integrity audit on a Monada execution ledger directory"
     group = "application"
-    mainClass.set("com.monada.storage.execution.audit.ExecutionLedgerAuditMain")
+    mainClass.set("com.monada.storage.execution.ExecutionLedgerAuditMain")
     classpath = sourceSets["main"].runtimeClasspath
     workingDir = rootProject.projectDir
     systemProperties = System.getProperties()

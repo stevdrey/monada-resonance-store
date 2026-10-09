@@ -617,7 +617,7 @@ explicit repair.
 | `ExecutionReplay` | Sequence-ordered view; an execution with no outcome or a current `PENDING` outcome is `pending`, an attempt without finish is `in progress`. |
 | `LedgerDiagnostic` / `LedgerDiagnosticCategory` | File, 1-based line, sequence (if parseable), category, message. |
 | `LedgerException`, `LedgerLockedException`, `LedgerRejectedException` | Open/lock failures and invalid events (the latter is thrown before any I/O). |
-| `audit.ExecutionLedgerAuditor` | Read-only audit of a whole ledger root. |
+| `ExecutionLedgerAuditor` | Read-only audit of a whole ledger root (`ExecutionLedgerAuditReport`, `ExecutionLedgerAuditMain`). The reader's audit helpers are package-private. |
 
 A ledger instance is bound to one scope. A corrected `ATTEMPT_STARTED` keeps the effective attempt
 ordinals of the execution unique and its `previousAttempt` chain acyclic (a link that would close a loop is
@@ -706,7 +706,7 @@ marker, oversized line) ends the examination of that line. A `scopes` path that 
 empty ledger; `diagnostics()` is an immutable view. A `TORN_TAIL` diagnostic carries the sequence when the incomplete record's sequence field is complete and
 canonical. Diagnostics are sorted (severity, file, line, category, message) and so are reproducible.
 
-The read-only audit (`ExecutionLedgerAuditor`, `audit` package) validates the manifest directly (it opens no scope, so no scope id is special) and every `s-<hash>`
+The read-only audit (`ExecutionLedgerAuditor`) validates the manifest directly (it opens no scope, so no scope id is special) and every `s-<hash>`
 scope directory it discovers (containment is checked before any child is read, `scope.id` must hash to the
 directory name, `ledger/` must exist, and that same directory is scanned record by record, even when its name does not match the hash: the
 `SCOPE_ID_MISMATCH` is reported together with every other defect found). A damaged `scope.id` (missing,
@@ -741,7 +741,11 @@ Tests live in `com.monada.storage.execution`: round trip across reopen, idempote
 and order rules, locking and release, torn tail, interior corruption, unknown versions and schemas, size
 limits, Unicode and escapes, traversal and symlink escapes, and byte-identical files after audit.
 
-Observed limitations: single segment, whole-scope validation on every writable open (linear in ledger
+Observed limitations: checking whether a scope was displaced (renamed) reads the `scope.id` of every other scope
+each time a scope is treated as new or absent, so it is linear in the number of scopes per open (not per append);
+the held segment file is compared with the path on every append, and a vanished or replaced segment fails the
+writer instead of being recreated; a root created by `open` gets the default directory permissions; manifests
+of a newer version are reported as `UNSUPPORTED_VERSION` whatever their shape; single segment, whole-scope validation on every writable open (linear in ledger
 size), the in-memory event index grows with the scope, and no repair tool exists yet.
 
 ## Implementation Boundaries

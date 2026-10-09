@@ -208,13 +208,14 @@ class LedgerCorruptionTest {
             assumeTrue(false, "symbolic links are not available: " + e);
         }
         Map<String, String> outsideBefore = LedgerFiles.digests(outside);
+        Map<String, String> rootBefore = LedgerFiles.digests(root);
 
         assertEquals(LedgerDiagnosticCategory.PATH_ESCAPE, assertThrows(LedgerException.class,
                 () -> ExecutionLedgerReader.open(root, Events.SCOPE)).diagnostics().get(0).category());
         assertEquals(LedgerDiagnosticCategory.PATH_ESCAPE, assertThrows(LedgerException.class,
                 () -> ExecutionLedger.open(root, Events.SCOPE)).diagnostics().get(0).category());
         assertEquals(outsideBefore, LedgerFiles.digests(outside));
-        assertFalse(Files.exists(root.resolve("write.lock")) && Files.size(root.resolve("write.lock")) > 0);
+        assertEquals(rootBefore, LedgerFiles.digests(root), "the failed opens changed nothing inside the root");
     }
 
     @Test

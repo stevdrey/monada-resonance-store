@@ -9,11 +9,14 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -41,16 +44,19 @@ public final class ExecutionLedger implements AutoCloseable {
     private final Path segment;
     private final LedgerState state;
     private final List<LedgerRecord> records;
-    private FileChannel segmentChannel;
+    private final FileChannel segmentChannel;
+    private final Object segmentKey;
     private boolean closed;
     private boolean failed;
 
     private ExecutionLedger(ScopeId scope, FileChannel lockChannel, FileLock lock, Path segment,
-                            LedgerScanner.Result loaded) {
+                            FileChannel segmentChannel, Object segmentKey, LedgerScanner.Result loaded) {
         this.scope = scope;
         this.lockChannel = lockChannel;
         this.lock = lock;
         this.segment = segment;
+        this.segmentChannel = segmentChannel;
+        this.segmentKey = segmentKey;
         this.state = loaded.state();
         this.records = new ArrayList<>(loaded.records());
     }
@@ -72,6 +78,7 @@ public final class ExecutionLedger implements AutoCloseable {
         }
         FileChannel channel = FileChannel.open(lockFile, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
         FileLock lock = null;
+        FileChannel segmentChannel = null;
         try {
             try {
                 lock = channel.tryLock();
@@ -94,14 +101,24 @@ public final class ExecutionLedger implements AutoCloseable {
                         LedgerDiagnosticCategory.MANIFEST_INVALID, paths.display(segment), 0, OptionalLong.empty(),
                         message)));
             }
+            // Hold the validated file for the whole session (never CREATE: a vanished segment is data loss).
+            segmentChannel = FileChannel.open(segment, StandardOpenOption.WRITE, StandardOpenOption.APPEND);
+            Object segmentKey = Files.readAttributes(segment, BasicFileAttributes.class).fileKey();
             LedgerScanner.Result loaded = LedgerScanner.scan(segment, paths.display(segment), scope);
             if (loaded.hasErrors() || loaded.tornTail()) {
                 throw new LedgerException("execution ledger scope " + scope + " is not healthy; refusing a "
                         + "writable open (no automatic repair): " + loaded.diagnostics().get(0).message(),
                         loaded.diagnostics());
             }
-            return new ExecutionLedger(scope, channel, lock, segment, loaded);
+            return new ExecutionLedger(scope, channel, lock, segment, segmentChannel, segmentKey, loaded);
         } catch (IOException | RuntimeException e) {
+            if (segmentChannel != null) {
+                try {
+                    segmentChannel.close();
+                } catch (IOException ignored) {
+                    // the lock below must still be released
+                }
+            }
             release(lock, channel);
             throw e;
         }
@@ -123,7 +140,8 @@ public final class ExecutionLedger implements AutoCloseable {
             return;
         }
         Files.createDirectories(parent);
-        Path staging = Files.createTempDirectory(parent, "." + absolute.getFileName() + ".init-");
+        // Not createTempDirectory: it would give the future root owner-only (0700) permissions.
+        Path staging = createStagingDirectory(parent, "." + absolute.getFileName() + ".init-");
         try {
             writeDurably(staging.resolve(LedgerManifest.FILE_NAME),
                     LedgerManifest.render().getBytes(StandardCharsets.UTF_8));
@@ -139,6 +157,19 @@ public final class ExecutionLedger implements AutoCloseable {
             }
         } finally {
             deleteTree(staging);
+        }
+    }
+
+    private static Path createStagingDirectory(Path parent, String prefix) throws IOException {
+        for (int attempt = 0; ; attempt++) {
+            Path candidate = parent.resolve(prefix + ProcessHandle.current().pid() + "-" + System.nanoTime());
+            try {
+                return Files.createDirectory(candidate);
+            } catch (FileAlreadyExistsException e) {
+                if (attempt >= 8) {
+                    throw e;
+                }
+            }
         }
     }
 
@@ -283,10 +314,7 @@ public final class ExecutionLedger implements AutoCloseable {
                     "encoded record is " + line.length + " bytes; the limit is " + RecordLine.MAX_LINE_BYTES);
         }
         try {
-            if (segmentChannel == null) {
-                segmentChannel = FileChannel.open(segment, StandardOpenOption.CREATE, StandardOpenOption.WRITE,
-                        StandardOpenOption.APPEND);
-            }
+            requireSegmentUnchanged();
             writeFully(segmentChannel, ByteBuffer.wrap(line));
             segmentChannel.force(true);
         } catch (IOException | RuntimeException e) {
@@ -296,6 +324,27 @@ public final class ExecutionLedger implements AutoCloseable {
         state.apply(sequence, event, payload);
         records.add(new LedgerRecord(sequence, event));
         return AppendResult.appended(sequence);
+    }
+
+    /**
+     * The held channel must still be the file at the segment path: if it was deleted or replaced, bytes
+     * written through the channel would go to a file nobody reads, so the append is refused instead.
+     */
+    private void requireSegmentUnchanged() throws IOException {
+        if (segmentKey == null) {
+            return; // platform without file keys: nothing to compare
+        }
+        Object current;
+        try {
+            current = Files.readAttributes(segment, BasicFileAttributes.class).fileKey();
+        } catch (NoSuchFileException e) {
+            throw new LedgerException("ledger segment " + segment.getFileName() + " disappeared while the "
+                    + "ledger was open; refusing to write");
+        }
+        if (!segmentKey.equals(current)) {
+            throw new LedgerException("ledger segment " + segment.getFileName() + " was replaced while the "
+                    + "ledger was open; refusing to write");
+        }
     }
 
     /** Exact lookup by event id. */
@@ -332,12 +381,10 @@ public final class ExecutionLedger implements AutoCloseable {
             return;
         }
         closed = true;
-        if (segmentChannel != null) {
-            try {
-                segmentChannel.close();
-            } catch (IOException ignored) {
-                // the lock below must still be released
-            }
+        try {
+            segmentChannel.close();
+        } catch (IOException ignored) {
+            // the lock below must still be released
         }
         release(lock, lockChannel);
     }

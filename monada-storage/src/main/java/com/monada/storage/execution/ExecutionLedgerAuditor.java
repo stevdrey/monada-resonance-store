@@ -1,9 +1,5 @@
-package com.monada.storage.execution.audit;
+package com.monada.storage.execution;
 
-import com.monada.storage.execution.ExecutionLedgerReader;
-import com.monada.storage.execution.LedgerDiagnostic;
-import com.monada.storage.execution.LedgerDiagnosticCategory;
-import com.monada.storage.execution.LedgerException;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -11,7 +7,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalLong;
-import java.util.regex.Pattern;
 
 /**
  * Read-only integrity audit of an execution ledger root. It validates the manifest, every scope directory
@@ -19,7 +14,6 @@ import java.util.regex.Pattern;
  * truncates or repairs anything: a missing root yields diagnostics, not directories.
  */
 public final class ExecutionLedgerAuditor {
-    private static final Pattern SCOPE_DIR = Pattern.compile("s-[0-9a-f]{64}");
 
     public ExecutionLedgerAuditReport audit(Path root) {
         List<LedgerDiagnostic> findings = new ArrayList<>();
@@ -50,8 +44,9 @@ public final class ExecutionLedgerAuditor {
                     : "execution-manifest.json is missing"));
             return;
         }
+        LedgerPaths paths;
         try {
-            ExecutionLedgerReader.verifyManifest(root);
+            paths = ExecutionLedgerReader.openRoot(root); // resolves the root and validates the manifest once
         } catch (LedgerException e) {
             findings.addAll(e.diagnostics().isEmpty()
                     ? List.of(LedgerDiagnostic.error(LedgerDiagnosticCategory.MANIFEST_INVALID, ".", 0,
@@ -60,33 +55,34 @@ public final class ExecutionLedgerAuditor {
             return;
         }
         try {
-            ExecutionLedgerReader.verifyWriterLockPath(root);
+            ExecutionLedgerReader.verifyWriterLockPath(paths);
         } catch (LedgerException e) {
             findings.addAll(e.diagnostics());
         }
         List<String> names;
         try {
-            names = ExecutionLedgerReader.listScopeDirectories(root);
+            names = ExecutionLedgerReader.listScopeDirectories(paths);
         } catch (LedgerException e) {
             findings.addAll(e.diagnostics());
             return;
         }
         for (String name : names) {
-            auditScope(root, name, findings, scopes, records);
+            auditScope(paths, name, findings, scopes, records);
         }
     }
 
-    private void auditScope(Path root, String name, List<LedgerDiagnostic> findings, int[] scopes, long[] records) {
-        if (!SCOPE_DIR.matcher(name).matches()) {
+    private void auditScope(LedgerPaths paths, String name, List<LedgerDiagnostic> findings, int[] scopes,
+                            long[] records) {
+        if (!LedgerPaths.SCOPE_DIR_NAME.matcher(name).matches()) {
             findings.add(LedgerDiagnostic.warning(LedgerDiagnosticCategory.MANIFEST_INVALID, "scopes/" + name, 0,
                     OptionalLong.empty(), "unexpected entry in scopes/ (ignored)"));
             return;
         }
         scopes[0]++;
-        // The reader checks containment before touching any child, ties scope.id to the directory name and
-        // scans this very directory even when scope.id is damaged.
+        // Containment is checked before any child is read; scope.id is tied to the directory name and this
+        // very directory is scanned even when scope.id is damaged.
         try {
-            ExecutionLedgerReader.ScopeAudit audit = ExecutionLedgerReader.auditScopeDirectory(root, name);
+            ExecutionLedgerReader.ScopeAudit audit = ExecutionLedgerReader.auditScopeDirectory(paths, name);
             findings.addAll(audit.diagnostics());
             records[0] += audit.recordsValidated();
         } catch (IOException e) {

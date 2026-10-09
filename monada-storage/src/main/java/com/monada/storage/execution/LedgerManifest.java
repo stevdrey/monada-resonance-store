@@ -21,6 +21,8 @@ final class LedgerManifest {
     static final int MAX_BYTES = 1024;
     static final String SCOPE_DIRECTORY_SCHEME = "sha256-hex-v1";
 
+    private static final Pattern FORMAT_FIELD = Pattern.compile("\"format\"\\s*:\\s*\"([^\"\\\\]*)\"");
+    private static final Pattern VERSION_FIELD = Pattern.compile("\"version\"\\s*:\\s*\"([^\"\\\\]*)\"");
     private static final Pattern SHAPE = Pattern.compile(
             "\\s*\\{\\s*\"format\"\\s*:\\s*\"([^\"\\\\]*)\"\\s*,\\s*\"version\"\\s*:\\s*\"([^\"\\\\]*)\"\\s*,"
                     + "\\s*\"recordCodec\"\\s*:\\s*\"([^\"\\\\]*)\"\\s*,\\s*\"maxRecordBytes\"\\s*:\\s*(\\d{1,9})\\s*,"
@@ -52,18 +54,29 @@ final class LedgerManifest {
         } catch (IOException | RuntimeException e) {
             throw failure(LedgerDiagnosticCategory.MANIFEST_INVALID, manifestFile, "unreadable manifest: " + e.getMessage());
         }
+        // Classify format and version first, with tolerant patterns, so a manifest written by a newer
+        // version (different shape) is reported as unsupported rather than as corrupt.
+        Matcher format = FORMAT_FIELD.matcher(text);
+        Matcher version = VERSION_FIELD.matcher(text);
+        if (!text.stripLeading().startsWith("{") || !format.find()) {
+            throw failure(LedgerDiagnosticCategory.MANIFEST_INVALID, manifestFile,
+                    "manifest is not an execution ledger manifest");
+        }
+        if (!FORMAT.equals(format.group(1))) {
+            throw failure(LedgerDiagnosticCategory.MANIFEST_INVALID, manifestFile,
+                    "unknown manifest format '" + format.group(1) + "'");
+        }
+        if (!version.find()) {
+            throw failure(LedgerDiagnosticCategory.MANIFEST_INVALID, manifestFile, "manifest has no version");
+        }
+        if (!VERSION.equals(version.group(1))) {
+            throw failure(LedgerDiagnosticCategory.UNSUPPORTED_VERSION, manifestFile,
+                    "unsupported ledger version '" + version.group(1) + "' (this reader supports " + VERSION + ")");
+        }
         Matcher m = SHAPE.matcher(text);
         if (!m.matches()) {
             throw failure(LedgerDiagnosticCategory.MANIFEST_INVALID, manifestFile,
                     "manifest is not a version-1 execution ledger manifest");
-        }
-        if (!FORMAT.equals(m.group(1))) {
-            throw failure(LedgerDiagnosticCategory.MANIFEST_INVALID, manifestFile,
-                    "unknown manifest format '" + m.group(1) + "'");
-        }
-        if (!VERSION.equals(m.group(2))) {
-            throw failure(LedgerDiagnosticCategory.UNSUPPORTED_VERSION, manifestFile,
-                    "unsupported ledger version '" + m.group(2) + "' (this reader supports " + VERSION + ")");
         }
         if (!RECORD_CODEC.equals(m.group(3))) {
             throw failure(LedgerDiagnosticCategory.UNSUPPORTED_VERSION, manifestFile,

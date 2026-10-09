@@ -14,6 +14,8 @@ import java.util.OptionalLong;
  * touched must resolve (following symbolic links) to a location inside the real root.
  */
 final class LedgerPaths {
+    /** Name of a scope directory: {@code s-} plus the SHA-256 hex of the scope id. */
+    static final java.util.regex.Pattern SCOPE_DIR_NAME = java.util.regex.Pattern.compile("s-[0-9a-f]{64}");
     static final String SCOPES_DIR = "scopes";
     static final String LOCK_FILE = "write.lock";
     static final String SCOPE_ID_FILE = "scope.id";

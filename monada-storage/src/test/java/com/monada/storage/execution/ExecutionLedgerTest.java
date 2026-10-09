@@ -1,5 +1,6 @@
 package com.monada.storage.execution;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -105,7 +106,7 @@ class ExecutionLedgerTest {
             // same execution started again under a new event id is also a clash
             assertEquals(AppendResult.Status.CONFLICT, ledger.append(Events.started("e-other")).status());
         }
-        assertEquals(List.of(before.length), List.of(Files.readAllBytes(segment()).length));
+        assertArrayEquals(before, Files.readAllBytes(segment()), "the conflict must not touch the file");
     }
 
     @Test

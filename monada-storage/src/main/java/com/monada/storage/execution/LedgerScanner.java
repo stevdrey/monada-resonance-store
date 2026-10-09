@@ -2,8 +2,6 @@ package com.monada.storage.execution;
 
 import com.monada.core.execution.ExecutionEvent;
 import com.monada.core.execution.ScopeId;
-import java.io.BufferedInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -43,31 +41,49 @@ final class LedgerScanner {
     private LedgerScanner() {
     }
 
+    /** Copies as much of {@code source[from, from+length)} as still fits into {@code line}; returns the new size. */
+    private static int append(byte[] line, int stored, byte[] source, int from, int length) {
+        int room = Math.min(length, line.length - stored);
+        if (room > 0) {
+            System.arraycopy(source, from, line, stored, room);
+        }
+        return stored + Math.max(room, 0);
+    }
+
     /** {@code scope} may be null when the scope id is unknown: the per-record scope check is then skipped. */
     static Result scan(Path segment, String displayName, ScopeId scope) throws IOException {
         Scan scan = new Scan(displayName, scope);
-        try (InputStream in = new BufferedInputStream(Files.newInputStream(segment), 1 << 16)) {
-            ByteArrayOutputStream line = new ByteArrayOutputStream();
+        try (InputStream in = Files.newInputStream(segment)) {
+            byte[] chunk = new byte[1 << 16];
+            // Only the first MAX_LINE_BYTES - 1 bytes of a line are kept; the rest is counted, not stored.
+            byte[] line = new byte[RecordLine.MAX_LINE_BYTES - 1];
+            int stored = 0;
             long contentBytes = 0;
-            int b;
-            while ((b = in.read()) != -1) {
-                if (b == '\n') {
-                    scan.line(line.toByteArray(), contentBytes + 1 > RecordLine.MAX_LINE_BYTES);
-                    line.reset();
-                    contentBytes = 0;
-                } else {
-                    contentBytes++;
-                    if (contentBytes + 1 <= RecordLine.MAX_LINE_BYTES) {
-                        line.write(b);
+            int read;
+            while ((read = in.read(chunk)) != -1) {
+                int start = 0;
+                for (int i = 0; i < read; i++) {
+                    if (chunk[i] != '\n') {
+                        continue;
                     }
+                    int segmentLength = i - start;
+                    stored = append(line, stored, chunk, start, segmentLength);
+                    contentBytes += segmentLength;
+                    scan.line(Arrays.copyOf(line, stored), contentBytes + 1 > RecordLine.MAX_LINE_BYTES);
+                    stored = 0;
+                    contentBytes = 0;
+                    start = i + 1;
                 }
+                int tail = read - start;
+                stored = append(line, stored, chunk, start, tail);
+                contentBytes += tail;
             }
             if (contentBytes > 0) {
                 if (contentBytes + 1 > RecordLine.MAX_LINE_BYTES) {
                     scan.error(LedgerDiagnosticCategory.OVERSIZED_RECORD, OptionalLong.empty(),
                             "final record already exceeds " + RecordLine.MAX_LINE_BYTES + " bytes");
                 }
-                scan.tornTail(line.toByteArray());
+                scan.tornTail(Arrays.copyOf(line, stored));
             }
         }
         Collections.sort(scan.diagnostics);
@@ -185,22 +201,21 @@ final class LedgerScanner {
             records.add(new LedgerRecord(sequence.getAsLong(), event));
         }
 
-        /** Returns false (after reporting) when the sequence is not the expected next one. */
-        private boolean checkSequence(long seq) {
+        /** Reports a duplicate or gapped sequence and re-synchronises the expected next sequence. */
+        private void checkSequence(long seq) {
             if (expectedKnown && seq < expected) {
                 error(LedgerDiagnosticCategory.DUPLICATE_SEQUENCE, OptionalLong.of(seq),
                         "sequence " + seq + " repeats or goes backwards (expected " + expected + ")");
-                return false;
+                return;
             }
             if (expectedKnown && seq > expected) {
                 error(LedgerDiagnosticCategory.SEQUENCE_GAP, OptionalLong.of(seq),
                         "sequence jumps from " + (expected - 1) + " to " + seq);
                 expected = seq + 1;
-                return false;
+                return;
             }
             expected = seq + 1;
             expectedKnown = true;
-            return true;
         }
     }
 
