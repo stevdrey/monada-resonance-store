@@ -9,6 +9,7 @@ Devin discovers skills from `.agents/skills/<skill-name>/SKILL.md` automatically
 | Skill | Use when |
 | --- | --- |
 | `monada-agent-task-workflow` | Creating Issues, PR plans, or review feedback with Spec Context. |
+| `monada-pr-authoring` | Creating and updating evidence-based PRs with a linked Issue and the Dokene #161 format. |
 | `monada-resonance-algorithm-design` | Changing encoding, lexical enrichment, query keys, scoring, or ranking. |
 | `monada-storage-io-design` | Changing persistence, manifests, logs, vectors, indexes, or compatibility. |
 | `monada-evaluation-statistics` | Adding metrics, datasets, diagnostics, A/B reports, or regression checks. |
