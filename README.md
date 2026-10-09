@@ -58,7 +58,7 @@ length-prefixed vectors without a manifest, but that layout is not inferred for 
 | `monada-storage` | Local persistence: manifest, atom log, vector files, indexes, feedback logs. |
 | `monada-index` | Resonance search, similarity ranking, and index implementations. |
 | `monada-learning` | Feedback processing, query-key strategies, and ranking reinforcement support. |
-| `monada-api` | Developer-facing API and options such as `MonadaMemory`. |
+| `monada-api` | Developer-facing API and options such as `MonadaMemory`, and the `ExecutionMemory` execution-history facade. |
 | `monada-evaluation` | Datasets, reports, metrics, A/B comparison, diagnostics, and regression tests. |
 | `monada-speech` | Speech sample storage, TORGO-style import, acoustic encoding, and speech retrieval experiments. |
 
@@ -90,6 +90,24 @@ The project requires **JDK 27** (Gradle toolchain `27`) and builds with the vers
 ./gradlew :monada-speech:runSpeechEvaluation
 ```
 
+## Execution History
+
+`ExecutionMemory` (`com.monada.api.execution`) is a caller-owned, `AutoCloseable`, single-writer facade over the append-only execution ledger. The host supplies root, scope, IDs, timestamps and evidence; the facade records events (`APPENDED` / `IDEMPOTENT` / `CONFLICT`), loads executions, attempts and exact revisions, derives acceptance (never stored) and pages history with opaque cursors.
+
+```java
+try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
+    RecordResult result = memory.record(event);
+    ExecutionView view = memory.loadExecution(scope, executionId).orElseThrow();
+    HistoryPage page = memory.history(scope, null, 50);
+}
+```
+
+One scope per instance; a second open of the same root fails with `ExecutionMemoryLockedException`. Contract and limits: [`docs/specs/execution-memory-contract-v1.md`](docs/specs/execution-memory-contract-v1.md) section 17. Projections, recall and export are future work; `MonadaMemory` is unchanged.
+
+```bash
+./gradlew :monada-api:test
+```
+
 ## Library Consumption
 
 The six production modules (`monada-core`, `monada-encoder`, `monada-storage`, `monada-index`, `monada-learning`, `monada-api`) are published as Maven artifacts under `com.monada:<module>:0.1.0-SNAPSHOT`, with sources jars, POM + Gradle Module Metadata, Apache-2.0 license information and stable `Automatic-Module-Name` entries (`com.monada.core`, ..., `com.monada.api`). Consumers declare only `com.monada:monada-api`; `monada-evaluation` and `monada-speech` are not published.
@@ -99,7 +117,7 @@ The six production modules (`monada-core`, `monada-encoder`, `monada-storage`, `
 ./gradlew verifyLibraryConsumer
 ```
 
-The first command publishes into the temporary local repository `build/verification-repo` (no remote registry or credentials). The second publishes and then runs the isolated class-path and JPMS consumer build in `integration-tests/library-consumer`, which resolves only from that repository and runs an open → remember → recall → reopen smoke test. See [`docs/specs/library-consumption.md`](docs/specs/library-consumption.md) for the dependency graph, limits and future work.
+The first command publishes into the temporary local repository `build/verification-repo` (no remote registry or credentials). The second publishes and then runs the isolated class-path and JPMS consumer build in `integration-tests/library-consumer`, which resolves only from that repository and runs an open → remember → recall → reopen smoke test plus an `ExecutionMemory` record → retry → history → close → reopen → load smoke test. See [`docs/specs/library-consumption.md`](docs/specs/library-consumption.md) for the dependency graph, limits and future work.
 
 ## Storage Integrity Audit and Diagnostics
 

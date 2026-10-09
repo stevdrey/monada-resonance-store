@@ -1,8 +1,8 @@
 # Execution Memory Contract v1
 
 Status: accepted contract. The immutable domain records (section 15, issue #95) and the ledger with
-replay and read-only audit (section 16, issue #96) are implemented; the facade, projections, calculators
-and export remain future work. Decision record:
+replay and read-only audit (section 16, issue #96) and the `ExecutionMemory` facade (section 17,
+issue #97) are implemented; projections, calculators and export remain future work. Decision record:
 [ADR 0004](../adr/0004-embedded-execution-memory.md). Issue: #93 (Forge Integration 1/10).
 
 This document is the normative v1 contract that issues #94–#102 implement. Later issues may refine
@@ -754,6 +754,72 @@ size), the in-memory event index grows with the scope, and no repair tool exists
 - Experimental behavior stays behind explicit options; quality evidence stays separate from protected
   correctness gates.
 - Stable Java 27 features only; no preview or incubator flags; no incidental dependency upgrades.
+
+## 17. ExecutionMemory Facade (issue #97)
+
+Package `com.monada.api.execution` in `monada-api`. It is ledger-backed only: no projections, recall,
+cost calculators, comparison or export, and no mapping of outcomes to ranking feedback.
+`MonadaMemory` and its lifecycle are unchanged.
+
+### 17.1 Ownership and threading
+
+- `ExecutionMemory.open(root, scope[, config])` binds **one scope per instance** and takes the exclusive
+  writer lock of `root` (the ledger lock is per root). A second open fails immediately with the unchecked
+  `ExecutionMemoryLockedException`. Reading other scopes of the same root needs a separate instance after
+  close; a multi-scope writer is future work.
+- Operations keep the contract's `ScopeId` parameter; a scope other than the opened one throws
+  `IllegalArgumentException`.
+- Single writer, **not thread-safe**: the host serializes calls. `close()` is idempotent and releases the
+  lock; every other call afterwards throws `IllegalStateException`. No hidden globals, threads or clock reads.
+- I/O and corruption failures throw `UncheckedIOException`.
+
+### 17.2 Operations
+
+| Operation | Result |
+| --- | --- |
+| `record(ExecutionEvent)` | `RecordResult(APPENDED \| IDEMPOTENT \| CONFLICT, sequence, reason)` |
+| `loadExecution(scope, execution)` | `Optional<ExecutionView>` (provenance, policy, current outcome with origin, `DerivedAcceptance`, attempts, full history) |
+| `loadAttempt(scope, execution, attempt)` | `Optional<AttemptView>` (route, usage, evidence exactly as recorded) |
+| `loadEvent(scope, eventId[, revision])` | `Optional<LedgerRecord>`; `eventId` may name any member of a correction chain; revision 1 is the original |
+| `history(scope[, cursor], pageSize)` | `HistoryPage(records, highWatermark, hasMore, next)` |
+
+Outcomes of `record`: identical retry -> `IDEMPOTENT` (nothing written); same id with a different payload,
+duplicate execution/attempt start, reused ordinal, or a correction that is not target revision + 1 or not of
+the latest revision -> `CONFLICT` (nothing written). Wrong scope, null, missing references, events after
+`ATTEMPT_FINISHED`, and oversized records throw `IllegalArgumentException` before any I/O.
+
+### 17.3 Acceptance, revisions, history
+
+- `ExecutionView.acceptance()` is derived on every read (section 8), never stored. `VALIDATED_ACCEPTED`
+  requires a `VALIDATED` accepted outcome and passing (or justified not-applicable) evidence of the accepted
+  attempt under the execution's own policy id and version for every mandatory dimension. An
+  `IMPORTED_CLAIM` outcome stays visible as such and is never validated. `FAILED`, `REJECTED` and `CANCELLED`
+  are `NOT_ACCEPTED`.
+- A correction appends a new revision; earlier lines are never rewritten and stay in `history`. Views show
+  the latest revision; usage is exposed as recorded and each fact is replayed once, so a revision replay
+  never charges cost a second time.
+- `history` pages are 1..`maxPageSize` (default max 500, default page 100; there is no unbounded read), in
+  ascending sequence including every revision. `HistoryCursor` is an opaque token (version, scope,
+  high-watermark, last sequence): the same cursor always returns the same page even after later appends;
+  a foreign-scope or beyond-ledger cursor is rejected.
+
+### 17.4 Usage
+
+```java
+ScopeId scope = ScopeId.of("project-a");
+try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
+    RecordResult r = memory.record(ExecutionEvent.executionStarted(EventId.of("ev-1"), scope, taskId,
+            executionId, provenance, policy, "Fix the bug", Instant.parse("2026-01-01T00:00:00Z")));
+    ExecutionView view = memory.loadExecution(scope, executionId).orElseThrow();
+    HistoryPage page = memory.history(scope, null, 50);
+}
+```
+
+### 17.5 Compatibility and verification
+
+No persisted format change and no change to existing API signatures or defaults. Verification:
+`./gradlew :monada-api:test`, `./gradlew test`, `./gradlew verifyLibraryConsumer` (class-path and JPMS
+consumers record, retry, close, reopen and load execution history).
 
 ## Acceptance Criteria
 

@@ -2,6 +2,17 @@ package com.monada.consumer.classpath;
 
 import com.monada.api.MonadaMemory;
 import com.monada.api.MonadaMemoryOptions;
+import com.monada.api.execution.ExecutionMemory;
+import com.monada.api.execution.RecordResult;
+import com.monada.core.execution.AttemptId;
+import com.monada.core.execution.EvaluationPolicy;
+import com.monada.core.execution.EventId;
+import com.monada.core.execution.ExecutionEvent;
+import com.monada.core.execution.ExecutionId;
+import com.monada.core.execution.QualityDimension;
+import com.monada.core.execution.ScopeId;
+import com.monada.core.execution.SourceProvenance;
+import com.monada.core.execution.TaskId;
 import com.monada.core.KnowledgeAtom;
 import com.monada.core.MonadaRecall;
 import com.monada.encoder.TextNormalizer;
@@ -10,6 +21,8 @@ import com.monada.storage.feedback.FeedbackSignal;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.util.Set;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Stream;
@@ -33,6 +46,7 @@ public final class ConsumerSmoke {
         Path root = Files.createTempDirectory("monada-consumer-classpath-");
         try {
             runSmoke(root);
+            runExecutionSmoke(root.resolve("execution"));
         } catch (Throwable failure) {
             // Keep the smoke failure primary; a cleanup error is attached instead of masking it.
             try {
@@ -67,6 +81,31 @@ public final class ConsumerSmoke {
         double scoreAfterReopen = expectTop(recall, rememberedId, "recall after reopen");
         expectFeedbackPersisted(scoreBeforeFeedback, scoreAfterReopen);
         System.out.println("[smoke] open -> remember -> recall -> feedback -> reopen: OK");
+    }
+
+    private static void runExecutionSmoke(Path root) {
+        ScopeId scope = ScopeId.of("consumer-scope");
+        ExecutionId execution = ExecutionId.of("consumer-exec");
+        ExecutionEvent started = ExecutionEvent.executionStarted(EventId.of("ev-1"), scope, TaskId.of("task-1"),
+                execution, new SourceProvenance("rev-1", "ctx-1", "constraints-1"),
+                new EvaluationPolicy("policy", "1", Set.of(QualityDimension.TESTS)), "consumer smoke",
+                Instant.parse("2026-01-01T00:00:00Z"));
+        try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
+            expect(memory.record(started).status() == RecordResult.Status.APPENDED, "execution append");
+            expect(memory.record(started).status() == RecordResult.Status.IDEMPOTENT, "execution retry");
+            expect(memory.history(scope).records().size() == 1, "execution history before close");
+        }
+        try (ExecutionMemory reopened = ExecutionMemory.open(root, scope)) {
+            expect(reopened.loadExecution(scope, execution).isPresent(), "execution load after reopen");
+            expect(reopened.loadAttempt(scope, execution, AttemptId.of("none")).isEmpty(), "unknown attempt");
+        }
+        System.out.println("[smoke] execution record -> idempotent retry -> history -> close -> reopen -> load: OK");
+    }
+
+    private static void expect(boolean condition, String label) {
+        if (!condition) {
+            throw new IllegalStateException("execution smoke failed: " + label);
+        }
     }
 
     private static void printEvidence() {
