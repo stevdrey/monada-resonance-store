@@ -4,10 +4,12 @@
 
 Accepted
 
-This ADR fixes ownership and contracts only. Nothing described here is implemented yet; the
-implementation sequence is tracked in [`docs/roadmap.md`](../roadmap.md) (Forge Integration track,
-issues #93–#102) and the normative v1 contract lives in
-[`docs/specs/execution-memory-contract-v1.md`](../specs/execution-memory-contract-v1.md).
+This ADR fixes ownership and contracts. Implemented so far: the domain records (#95), the append-only
+ledger (#96) and the `ExecutionMemory` facade for recording, loading and history (#97). Projections, recall,
+cost calculators, comparison and export are still planned; the implementation sequence is tracked in
+[`docs/roadmap.md`](../roadmap.md) (Forge Integration track, issues #93–#102) and the normative v1 contract
+lives in [`docs/specs/execution-memory-contract-v1.md`](../specs/execution-memory-contract-v1.md) (section 17
+describes the shipped facade).
 
 ## Context
 
@@ -101,7 +103,7 @@ records), #96 (ledger), #97 (facade), #98 (projections/recall), #99 (calculators
 | --- | --- | --- |
 | `com.monada.core.execution` | `monada-core` | Immutable IDs and domain records |
 | `com.monada.storage.execution` | `monada-storage` | Ledger manifest, record codec, replay, audit |
-| `com.monada.api.execution` | `monada-api` | `ExecutionMemory` facade, derived acceptance, recall, export |
+| `com.monada.api.execution` | `monada-api` | `ExecutionMemory` facade, derived acceptance, history (implemented, #97); recall, export (planned) |
 | `com.monada.evaluation.execution` | `monada-evaluation` | Usage/cost calculators, comparison/Pareto reports, export annotations (evaluation only) |
 
 Core types (`com.monada.core.execution`): `ScopeId`, `TaskId`, `ExecutionId`, `AttemptId`, `EventId`,
@@ -112,25 +114,27 @@ Facade operations (`com.monada.api.execution.ExecutionMemory`, `AutoCloseable`):
 
 | Operation | Result |
 | --- | --- |
-| `open(Path root, ExecutionMemoryConfig config)` | Exclusive writable instance |
-| `openReadOnly(Path root, ExecutionMemoryConfig config)` | Read-only instance; creates nothing |
+| `open(Path root, ScopeId scope, ExecutionMemoryConfig config)` | Exclusive writable instance for one scope (implemented) |
+| `openReadOnly(Path root, ScopeId scope, ExecutionMemoryConfig config)` | Lock-free read-only snapshot of one scope; creates nothing (implemented) |
 | `record(ExecutionEvent event)` | `RecordResult` = `APPENDED`, `IDEMPOTENT` or `CONFLICT` |
 | `loadExecution(ScopeId, ExecutionId)` | `Optional<ExecutionView>` at latest revisions |
 | `loadAttempt(ScopeId, ExecutionId, AttemptId)` | `Optional<AttemptView>` |
-| `history(ScopeId, HistoryCursor, int pageSize)` | `HistoryPage` in ledger sequence order, fixed snapshot high-watermark |
-| `recall(ScopeId, String query, int limit)` | `ExperienceRecall` of `ExperienceHit` |
-| `projectionStatus(ScopeId)` / `rebuildProjection(ScopeId)` | Explicit reconciliation |
-| `exportSamples(ExportRequest)` | `ExportPage` (read-only, versioned) |
+| `loadEvent(ScopeId, EventId[, int revision])` | `Optional<LedgerRecord>`, exact revision or latest |
+| `history(ScopeId[, HistoryCursor], int pageSize)` | `HistoryPage` in ledger sequence order, fixed snapshot high-watermark |
+| `recall(ScopeId, String query, int limit)` | `ExperienceRecall` of `ExperienceHit` (planned, #98) |
+| `projectionStatus(ScopeId)` / `rebuildProjection(ScopeId)` | Explicit reconciliation (planned, #98) |
+| `exportSamples(ExportRequest)` | `ExportPage` (read-only, versioned) (planned, #101) |
 
 The facade has no cost or comparison operation. Evaluation-side code (`monada-evaluation`, #99/#100)
 reads facade views and computes `ExecutionSummary` / `CostToAcceptedOutcome` and comparisons;
 `monada-api` never depends on `monada-evaluation`.
 
-Example host usage (illustrative, not yet compilable):
+Example host usage (compiles against the shipped #97 surface; `recall` and `exportSamples` are planned
+and therefore not shown):
 
 ```java
-try (ExecutionMemory memory = ExecutionMemory.open(root, ExecutionMemoryConfig.defaults())) {
-    ScopeId scope = ScopeId.of("forge-workspace-7f3a");          // opaque, caller-issued
+ScopeId scope = ScopeId.of("forge-workspace-7f3a");              // opaque, caller-issued
+try (ExecutionMemory memory = ExecutionMemory.open(root, scope, ExecutionMemoryConfig.defaults())) {
     Instant now = hostClock.instant();                           // caller-owned time
 
     RecordResult started = memory.record(ExecutionEvent.executionStarted(
@@ -140,18 +144,23 @@ try (ExecutionMemory memory = ExecutionMemory.open(root, ExecutionMemoryConfig.d
             new EvaluationPolicy("forge-gates", "1", Set.of(QualityDimension.TESTS)),
             "Document execution-memory ownership and v1 contract", now));
 
+    // ... attempt, stage and evidence events recorded the same way ...
+
     memory.record(ExecutionEvent.outcomeRecorded(
             EventId.of("evt-0009"), scope, TaskId.of("issue-93"), ExecutionId.of("exec-1"),
             Outcome.accepted(OutcomeOrigin.VALIDATED, AttemptId.of("attempt-2")),
             hostClock.instant()));
+
     // Acceptance is VALIDATED_ACCEPTED only if attempt-2 has an effective TESTS observation
     // (EVIDENCE_RECORDED, policy "forge-gates" v"1") that is PASS or justified NOT_APPLICABLE.
+    ExecutionView view = memory.loadExecution(scope, ExecutionId.of("exec-1")).orElseThrow();
+    DerivedAcceptance acceptance = view.acceptance();
+    HistoryPage page = memory.history(scope, null, 50);
+}
 
-    ExperienceRecall recall = memory.recall(scope, "versioned append-only ledger contract", 5);
-    for (ExperienceHit hit : recall.hits()) {
-        // hit.similarity() is resonance similarity, never quality or confidence.
-        memory.loadAttempt(scope, hit.ref().executionId(), hit.ref().attemptId());
-    }
+// Another component can inspect the same scope while the writer is open (snapshot at open):
+try (ExecutionMemory reader = ExecutionMemory.openReadOnly(root, scope)) {
+    reader.loadAttempt(scope, ExecutionId.of("exec-1"), AttemptId.of("attempt-2"));
 }
 ```
 

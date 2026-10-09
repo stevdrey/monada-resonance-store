@@ -767,6 +767,11 @@ cost calculators, comparison or export, and no mapping of outcomes to ranking fe
   writer lock of `root` (the ledger lock is per root). A second open fails immediately with the unchecked
   `ExecutionMemoryLockedException`. Reading other scopes of the same root needs a separate instance after
   close; a multi-scope writer is future work.
+- `ExecutionMemory.openReadOnly(root, scope[, config])` returns a **snapshot** of the valid ledger prefix at
+  open time: no lock, nothing created, usable next to a live writer. Later appends are not visible; the host
+  opens a new read-only instance to see them. `record` throws `UnsupportedOperationException`. A missing root
+  or manifest fails with `UncheckedIOException`; a missing scope is an empty history. Lifecycle rules are the
+  same as for the writable instance.
 - Operations keep the contract's `ScopeId` parameter; a scope other than the opened one throws
   `IllegalArgumentException`.
 - Single writer, **not thread-safe**: the host serializes calls. `close()` is idempotent and releases the
