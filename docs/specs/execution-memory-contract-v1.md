@@ -141,7 +141,8 @@ Rules:
 - A root containing a legacy `manifest.json` but no `execution-manifest.json` is rejected.
 - An unknown `format`/`version`/`recordCodec` is rejected; there is no automatic upgrade.
 - Writable open creates missing directories only for the scope being written. Read-only open creates
-  nothing and fails cleanly when the root or scope does not exist.
+  nothing: a missing root or manifest fails cleanly, while a missing scope of an existing root is an empty
+  history (no files are created).
 - Segment rollover (`events-000002.log`) is reserved; v1 writes a single segment.
 
 ## 3. Record Envelope
@@ -301,8 +302,8 @@ Derived acceptance (computed, never stored as a separate fact):
 
 | Derived status | Condition |
 | --- | --- |
-| `VALIDATED_ACCEPTED` | Current outcome `ACCEPTED` + origin `VALIDATED` + every mandatory dimension has an effective observation that is `PASS` or justified `NOT_APPLICABLE` |
-| `ACCEPTED_UNVALIDATED` | Current outcome `ACCEPTED` but origin `IMPORTED_CLAIM`, or some mandatory dimension's effective observation is `FAIL` or `UNKNOWN`, or it has none; reasons list each dimension |
+| `VALIDATED_ACCEPTED` | Current outcome `ACCEPTED` + origin `VALIDATED` + the accepted attempt finished `COMPLETED` + every mandatory dimension has an effective observation that is `PASS` or justified `NOT_APPLICABLE` |
+| `ACCEPTED_UNVALIDATED` | Current outcome `ACCEPTED` but origin `IMPORTED_CLAIM`, or the accepted attempt is unfinished, `FAILED` or `CANCELLED` (even when mandatory evidence passes), or some mandatory dimension's effective observation is `FAIL` or `UNKNOWN`, or it has none; reasons list each dimension |
 | `NOT_ACCEPTED` | Current outcome `REJECTED`, `FAILED` or `CANCELLED` |
 | `PENDING` | No outcome or current outcome `PENDING` |
 
