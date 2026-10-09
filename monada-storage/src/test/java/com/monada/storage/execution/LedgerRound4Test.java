@@ -114,4 +114,25 @@ class LedgerRound4Test {
         assertTrue(categories.contains(LedgerDiagnosticCategory.UNSUPPORTED_SCHEMA), categories.toString());
         assertEquals(valid, reader.replay().size(), "the valid prefix is unchanged");
     }
+
+    @Test
+    void oversizedUnterminatedTailIsAnErrorNotJustAWarning() throws IOException {
+        healthy();
+        Path segment = LedgerFiles.segment(root);
+        // exactly at the limit once the LF is added: only a torn tail
+        Files.write(segment, "x".repeat(RecordLine.MAX_LINE_BYTES - 1).getBytes(StandardCharsets.UTF_8),
+                StandardOpenOption.APPEND);
+        List<LedgerDiagnosticCategory> atLimit = ExecutionLedgerReader.open(root, Events.SCOPE).diagnostics().stream()
+                .map(LedgerDiagnostic::category).toList();
+        assertEquals(List.of(LedgerDiagnosticCategory.TORN_TAIL), atLimit);
+
+        Files.write(segment, "y".getBytes(StandardCharsets.UTF_8), StandardOpenOption.APPEND);
+        ExecutionLedgerReader reader = ExecutionLedgerReader.open(root, Events.SCOPE);
+        List<LedgerDiagnosticCategory> categories = reader.diagnostics().stream().map(LedgerDiagnostic::category).toList();
+        assertTrue(categories.contains(LedgerDiagnosticCategory.OVERSIZED_RECORD), categories.toString());
+        assertTrue(categories.contains(LedgerDiagnosticCategory.TORN_TAIL), categories.toString());
+        assertEquals(Events.fullRun().size(), reader.replay().size());
+        assertFalse(new ExecutionLedgerAuditor().audit(root).isHealthy());
+        assertThrows(LedgerException.class, () -> ExecutionLedger.open(root, Events.SCOPE));
+    }
 }

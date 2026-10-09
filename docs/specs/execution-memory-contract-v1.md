@@ -645,7 +645,8 @@ MXL1<TAB>1<TAB>187<TAB>2f1c...<TAB>1|EXECUTION_STARTED|e1|scope-1|task-1|exec-1|
 ### 16.3 Limits
 
 - A whole line, including the LF, is at most 65,536 bytes. Larger appends are rejected before I/O
-  (`OVERSIZED_RECORD`); larger lines on disk are reported, never truncated. Lines are streamed, never loaded whole.
+  (`OVERSIZED_RECORD`); larger lines on disk are reported, never truncated; an unterminated final record already beyond the limit is
+  reported as `OVERSIZED_RECORD` (error) in addition to `TORN_TAIL` (warning). Lines are streamed, never loaded whole.
 - Field limits are those of section 3 and `ExecutionLimits` (enforced by the domain records).
 
 ### 16.4 Write semantics, ownership and durability

@@ -62,6 +62,10 @@ final class LedgerScanner {
                 }
             }
             if (contentBytes > 0) {
+                if (contentBytes + 1 > RecordLine.MAX_LINE_BYTES) {
+                    scan.error(LedgerDiagnosticCategory.OVERSIZED_RECORD, OptionalLong.empty(),
+                            "final record already exceeds " + RecordLine.MAX_LINE_BYTES + " bytes");
+                }
                 scan.tornTail(line.toByteArray());
             }
         }
