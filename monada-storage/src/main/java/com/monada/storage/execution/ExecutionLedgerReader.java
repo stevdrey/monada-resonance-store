@@ -39,6 +39,9 @@ public final class ExecutionLedgerReader {
         Objects.requireNonNull(root, "root");
         Objects.requireNonNull(scope, "scope");
         LedgerPaths paths = readableRoot(root);
+        if (!scopesDirectoryExists(paths)) {
+            return new ExecutionLedgerReader(scope, LedgerScanner.Result.empty());
+        }
         Path scopeDir = paths.scopeDir(scope);
         if (!Files.exists(scopeDir, LinkOption.NOFOLLOW_LINKS)) {
             return new ExecutionLedgerReader(scope, LedgerScanner.Result.empty());
@@ -56,6 +59,7 @@ public final class ExecutionLedgerReader {
         Objects.requireNonNull(root, "root");
         Objects.requireNonNull(directoryName, "directoryName");
         LedgerPaths paths = readableRoot(root);
+        scopesDirectoryExists(paths);
         Path scopeDir = paths.contained(paths.scopesDir().resolve(directoryName));
         String shown = paths.display(scopeDir);
         if (!Files.isDirectory(scopeDir)) {
@@ -88,17 +92,28 @@ public final class ExecutionLedgerReader {
      */
     public static List<String> listScopeDirectories(Path root) throws IOException {
         LedgerPaths paths = readableRoot(Objects.requireNonNull(root, "root"));
+        if (!scopesDirectoryExists(paths)) {
+            return List.of();
+        }
+        try (Stream<Path> entries = Files.list(paths.scopesDir())) {
+            return entries.map(p -> p.getFileName().toString()).sorted().toList();
+        }
+    }
+
+    /**
+     * True when {@code scopes/} exists and is a directory; false when it is absent (no scope was ever
+     * written). Anything else at that path is structural damage, never an empty ledger.
+     */
+    private static boolean scopesDirectoryExists(LedgerPaths paths) throws IOException {
         Path scopes = paths.scopesDir();
         if (!Files.exists(scopes, LinkOption.NOFOLLOW_LINKS)) {
-            return List.of();
+            return false;
         }
         if (!Files.isDirectory(scopes)) {
             throw failure(LedgerDiagnosticCategory.MANIFEST_INVALID, paths.display(scopes),
                     "scopes is not a directory");
         }
-        try (Stream<Path> entries = Files.list(scopes)) {
-            return entries.map(p -> p.getFileName().toString()).sorted().toList();
-        }
+        return true;
     }
 
     private static LedgerPaths readableRoot(Path root) throws IOException {
@@ -137,7 +152,7 @@ public final class ExecutionLedgerReader {
             }
         }
         Collections.sort(diagnostics);
-        return new ExecutionLedgerReader(scope, new LedgerScanner.Result(scanned.records(), diagnostics,
+        return new ExecutionLedgerReader(scope, new LedgerScanner.Result(scanned.records(), List.copyOf(diagnostics),
                 scanned.state(), scanned.tornTail()));
     }
 

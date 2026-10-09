@@ -131,9 +131,9 @@ final class LedgerScanner {
                 return;
             }
             long seq = sequence.getAsLong();
-            if (!checkSequence(seq)) {
-                return;
-            }
+            // A sequence error ends the valid prefix (broken) but the line is still examined: framing, digest,
+            // encoding and schema defects are independent diagnostics.
+            checkSequence(seq);
             byte[] payload = fields.get(4);
             OptionalLong length = canonicalLong(ascii(fields.get(2)));
             if (length.isEmpty() || length.getAsLong() != payload.length) {

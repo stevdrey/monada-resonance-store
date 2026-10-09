@@ -688,7 +688,9 @@ is not atomic with later use (no defence against a concurrent hostile local proc
 Categories are those of section 6 plus `INVALID_ORDER` (ordering rule violated inside the file) and
 `PATH_ESCAPE`. Within a scope, records are accepted only while every earlier line is valid, so replay
 returns the longest valid prefix; later lines are still examined for framing, digest, sequence and schema
-problems. A `TORN_TAIL` diagnostic carries the sequence when the incomplete record's sequence field is complete and
+problems, and a line with a sequence error is still checked for its other defects (all are reported, none
+enters replay). A `scopes` path that is not a directory is structural damage for readers too, never an
+empty ledger; `diagnostics()` is an immutable view. A `TORN_TAIL` diagnostic carries the sequence when the incomplete record's sequence field is complete and
 canonical. Diagnostics are sorted (severity, file, line, category, message) and so are reproducible.
 
 The read-only audit (`ExecutionLedgerAuditor`, `audit` package) validates the manifest directly (it opens no scope, so no scope id is special) and every `s-<hash>`
