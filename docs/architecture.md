@@ -126,9 +126,11 @@ Speech work should preserve separation between transcript recall and acoustic re
 
 Speech retrieval quality is guarded by a two-mode benchmark in `com.monada.speech.evaluation`. The `PROTECTED` mode runs over deterministic generated WAV fixtures and pins a baseline that is enforced in CI, mirroring the text `monada-evaluation` regression policy. The `EXPLORATORY` mode runs the same pipeline over a local real corpus that stays outside git and is never enforced in CI; it is reached only through an explicit Gradle entrypoint or an environment-gated test. Reports label their mode prominently so protected and exploratory output are never confused.
 
-## Execution Memory Extension (Planned, Contract v1)
+## Execution Memory Extension (Contract v1; ledger implemented)
 
-Not implemented yet. [ADR 0004](adr/0004-embedded-execution-memory.md) and the
+Implemented so far: the domain records (`com.monada.core.execution`, #95) and the append-only ledger with
+replay and read-only audit (`com.monada.storage.execution`, #96; see section 16 of the contract). The
+facade, projections, recall and export below are still planned. [ADR 0004](adr/0004-embedded-execution-memory.md) and the
 [execution memory contract v1](specs/execution-memory-contract-v1.md) define how agent execution
 experiences recorded by Monada Forge become local memory for Forge and Monada Neuron. Store owns the
 ledger, projections, recall and export (plus evaluation-only calculators in `monada-evaluation`); Forge owns execution and evidence judgment; Neuron
@@ -158,10 +160,19 @@ Execution memory uses its own root, separate from legacy text stores:
             └── memory/            # standard manifest 0.4 store
 ```
 
-Planned packages: `com.monada.core.execution`, `com.monada.storage.execution`,
-`com.monada.api.execution`, and evaluation-only `com.monada.evaluation.execution`. The extension is
+Packages: `com.monada.core.execution` and `com.monada.storage.execution` (implemented), planned
+`com.monada.api.execution` and evaluation-only `com.monada.evaluation.execution`. The extension is
 additive: atom, vector, feedback and manifest formats, `KnowledgeAtom` identity, ranking and query-key
 defaults, and existing public signatures stay unchanged.
+
+### Execution Ledger Audit
+
+`ExecutionLedgerAuditor` audits an execution ledger root without side effects: it never creates, locks,
+truncates or repairs files, and a missing root yields diagnostics instead of directories. It validates the
+manifest, scope directories and every record, reporting file, line, sequence and a category
+(`TORN_TAIL`, `DIGEST_MISMATCH`, `UNSUPPORTED_SCHEMA`, `SEQUENCE_GAP`, `DANGLING_REFERENCE`, `PATH_ESCAPE`, ...).
+Run it with `./gradlew :monada-storage:runExecutionLedgerAudit -Dmonada.execution.dir=/path`. It is
+independent of the legacy `runIntegrityAudit`.
 
 ## Dependency Direction
 
