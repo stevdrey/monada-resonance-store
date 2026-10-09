@@ -603,9 +603,9 @@ Future consumer integration in Monada Forge and Monada Neuron remains future cro
 ## 16. Execution Ledger (implemented in #96)
 
 Package `com.monada.storage.execution` (`monada-storage`). Scope: one writable ledger per scope with
-append, exact lookup, deterministic replay and read-only audit. Out of scope and still future work:
-the `ExecutionMemory` facade (#97), projections, recall, export, segment rollover, compaction and
-explicit repair.
+append, exact lookup, deterministic replay and read-only audit. The `ExecutionMemory` facade was added
+afterwards by #97 (section 17). Out of scope and still future work: projections, recall, export, segment
+rollover, compaction and explicit repair.
 
 ### 16.1 Public API
 

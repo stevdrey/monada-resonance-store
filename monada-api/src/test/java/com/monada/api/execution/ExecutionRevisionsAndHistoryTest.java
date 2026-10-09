@@ -87,6 +87,9 @@ class ExecutionRevisionsAndHistoryTest {
             assertThrows(IllegalArgumentException.class,
                     () -> m.history(SCOPE, new HistoryCursor(ScopeId.of("other"), 1, 0), 2));
             assertThrows(IllegalArgumentException.class, () -> HistoryCursor.parse("not a cursor"));
+            byte[] bad = new byte[] {'h', '1', '|', '1', '|', '0', '|', (byte) 0xC3, (byte) 0x28};
+            String malformedUtf8 = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bad);
+            assertThrows(IllegalArgumentException.class, () -> HistoryCursor.parse(malformedUtf8));
             assertThrows(IllegalArgumentException.class, () -> new HistoryCursor(SCOPE, 1, 2));
         }
     }
@@ -123,6 +126,7 @@ class ExecutionRevisionsAndHistoryTest {
             }
             assertEquals(EventId.of("c51"), m.loadEvent(SCOPE, EventId.of("e5")).orElseThrow().event().eventId());
             assertTrue(m.loadEvent(SCOPE, EventId.of("e5"), 52).isEmpty());
+            assertTrue(m.loadEvent(SCOPE, EventId.of("e5"), Integer.MAX_VALUE).isEmpty());
             assertTrue(m.loadEvent(SCOPE, EventId.of("missing")).isEmpty());
         }
     }

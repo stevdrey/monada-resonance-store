@@ -102,18 +102,18 @@ public final class ExecutionMemory implements AutoCloseable {
     public Optional<LedgerRecord> loadEvent(ScopeId scope, EventId eventId, int revision) {
         requireOpen(scope);
         Objects.requireNonNull(eventId, "eventId");
-        return walk(eventId, revision);
+        return walk(eventId, false, revision);
     }
 
     /** Latest revision of the event chain that contains {@code eventId}. */
     public Optional<LedgerRecord> loadEvent(ScopeId scope, EventId eventId) {
         requireOpen(scope);
         Objects.requireNonNull(eventId, "eventId");
-        return walk(eventId, Integer.MAX_VALUE);
+        return walk(eventId, true, 0);
     }
 
     /** One pass builds the successor index; walking the chain is then O(revisions). */
-    private Optional<LedgerRecord> walk(EventId eventId, int revision) {
+    private Optional<LedgerRecord> walk(EventId eventId, boolean latest, int revision) {
         Optional<LedgerRecord> current = ledger.find(eventId);
         if (current.isEmpty()) {
             return Optional.empty();
@@ -125,14 +125,14 @@ public final class ExecutionMemory implements AutoCloseable {
         for (LedgerRecord r : ledger.replay()) {
             r.event().envelope().supersedes().ifPresent(target -> successor.put(target, r));
         }
-        while (current.get().event().envelope().revision() < revision) { // forward
+        while (latest || current.get().event().envelope().revision() < revision) { // forward
             LedgerRecord next = successor.get(current.get().event().eventId());
             if (next == null) {
                 break;
             }
             current = Optional.of(next);
         }
-        return current.filter(r -> revision == Integer.MAX_VALUE || r.event().envelope().revision() == revision);
+        return latest ? current : current.filter(r -> r.event().envelope().revision() == revision);
     }
 
     /** First page of a new snapshot with the configured default page size. */

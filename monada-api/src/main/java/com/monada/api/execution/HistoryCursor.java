@@ -1,6 +1,9 @@
 package com.monada.api.execution;
 
 import com.monada.core.execution.ScopeId;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Objects;
@@ -28,13 +31,16 @@ public record HistoryCursor(ScopeId scope, long highWatermark, long lastSequence
     public static HistoryCursor parse(String token) {
         Objects.requireNonNull(token, "token");
         try {
-            String raw = new String(Base64.getUrlDecoder().decode(token), StandardCharsets.UTF_8);
+            String raw = StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(Base64.getUrlDecoder().decode(token))).toString();
             String[] parts = raw.split("\\|", 4);
             if (parts.length != 4 || !VERSION.equals(parts[0])) {
                 throw new IllegalArgumentException("unsupported history cursor");
             }
             return new HistoryCursor(ScopeId.of(parts[3]), Long.parseLong(parts[1]), Long.parseLong(parts[2]));
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException | CharacterCodingException e) {
             throw new IllegalArgumentException("malformed history cursor", e);
         }
     }
