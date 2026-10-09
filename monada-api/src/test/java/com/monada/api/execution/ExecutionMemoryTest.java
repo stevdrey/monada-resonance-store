@@ -46,6 +46,19 @@ class ExecutionMemoryTest {
     }
 
     @Test
+    void lifecycleIsCheckedBeforeNullArguments() {
+        ExecutionMemory m = ExecutionMemory.open(root, SCOPE);
+        assertThrows(NullPointerException.class, () -> m.record(null));
+        assertThrows(NullPointerException.class, () -> m.loadExecution(SCOPE, null));
+        assertThrows(NullPointerException.class, () -> m.loadEvent(SCOPE, null));
+        m.close();
+        assertThrows(IllegalStateException.class, () -> m.record(null));
+        assertThrows(IllegalStateException.class, () -> m.loadExecution(SCOPE, null));
+        assertThrows(IllegalStateException.class, () -> m.loadAttempt(SCOPE, EXEC, null));
+        assertThrows(IllegalStateException.class, () -> m.loadEvent(SCOPE, null, 1));
+    }
+
+    @Test
     void secondOwnerFailsFastAndOwnershipIsReleasedOnClose() {
         ExecutionMemory first = ExecutionMemory.open(root, SCOPE);
         assertThrows(ExecutionMemoryLockedException.class, () -> ExecutionMemory.open(root, SCOPE));

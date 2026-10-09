@@ -91,6 +91,42 @@ class ExecutionRevisionsAndHistoryTest {
         }
     }
 
+    @Test
+    void correctedAttemptStartKeepsEffectiveOrdinalOrder() {
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            m.record(started("e1"));
+            m.record(attempt("e2", A1, 1));
+            m.record(attempt("e3", A2, 2));
+            assertEquals(RecordResult.Status.APPENDED,
+                    m.record(correctAttemptStart("e4", "e2", 2, A1, 1)).status());
+            ExecutionView v = m.loadExecution(SCOPE, EXEC).orElseThrow();
+            assertEquals(List.of(A1, A2), v.attempts().stream().map(AttemptView::id).toList());
+            assertEquals(4, v.history().size());
+        }
+    }
+
+    @Test
+    void longCorrectionChainResolvesEveryRevision() {
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            baseRun(m, ObservationState.PASS);
+            String previous = "e5";
+            for (int rev = 2; rev <= 51; rev++) {
+                String id = "c" + rev;
+                assertEquals(RecordResult.Status.APPENDED,
+                        m.record(correctFinish(id, previous, rev, A1)).status());
+                previous = id;
+            }
+            for (int rev = 1; rev <= 51; rev++) {
+                String expected = rev == 1 ? "e5" : "c" + rev;
+                assertEquals(EventId.of(expected),
+                        m.loadEvent(SCOPE, EventId.of("c30"), rev).orElseThrow().event().eventId());
+            }
+            assertEquals(EventId.of("c51"), m.loadEvent(SCOPE, EventId.of("e5")).orElseThrow().event().eventId());
+            assertTrue(m.loadEvent(SCOPE, EventId.of("e5"), 52).isEmpty());
+            assertTrue(m.loadEvent(SCOPE, EventId.of("missing")).isEmpty());
+        }
+    }
+
     private static List<Long> seqs(HistoryPage p) {
         return p.records().stream().map(LedgerRecord::sequence).toList();
     }

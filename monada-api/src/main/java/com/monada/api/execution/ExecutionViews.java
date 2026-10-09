@@ -71,7 +71,11 @@ final class ExecutionViews {
             throw new IllegalStateException("execution " + id + " has no EXECUTION_STARTED event");
         }
         List<AttemptView> attempts = new ArrayList<>();
-        starts.forEach((attempt, s) -> {
+        // Effective ordinal order, not ledger order: a corrected ATTEMPT_STARTED sits at the correction's position.
+        starts.entrySet().stream().sorted(Map.Entry.comparingByValue(
+                java.util.Comparator.comparingInt(AttemptStarted::ordinal))).forEach(entry -> {
+            AttemptId attempt = entry.getKey();
+            AttemptStarted s = entry.getValue();
             Optional<AttemptFinished> f = Optional.ofNullable(finishes.get(attempt));
             attempts.add(new AttemptView(attempt, s.ordinal(), s.reason(), s.previousAttempt(),
                     f.map(AttemptFinished::result), f.flatMap(AttemptFinished::solutionSummary),

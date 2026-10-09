@@ -785,8 +785,10 @@ cost calculators, comparison or export, and no mapping of outcomes to ranking fe
 
 Outcomes of `record`: identical retry -> `IDEMPOTENT` (nothing written); same id with a different payload,
 duplicate execution/attempt start, reused ordinal, or a correction that is not target revision + 1 or not of
-the latest revision -> `CONFLICT` (nothing written). Wrong scope, null, missing references, events after
-`ATTEMPT_FINISHED`, and oversized records throw `IllegalArgumentException` before any I/O.
+the latest revision -> `CONFLICT` (nothing written). Wrong scope, missing references, events after
+`ATTEMPT_FINISHED`, and oversized records throw `IllegalArgumentException` before any I/O. The lifecycle check
+comes first (`IllegalStateException` after close, even for a null argument); a null argument on an open
+instance throws `NullPointerException`.
 
 ### 17.3 Acceptance, revisions, history
 

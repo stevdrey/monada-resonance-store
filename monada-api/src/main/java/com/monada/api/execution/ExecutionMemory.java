@@ -12,7 +12,9 @@ import com.monada.storage.execution.LedgerRecord;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -71,8 +73,8 @@ public final class ExecutionMemory implements AutoCloseable {
      * counts each fact once.
      */
     public RecordResult record(ExecutionEvent event) {
-        Objects.requireNonNull(event, "event");
         requireOpen();
+        Objects.requireNonNull(event, "event");
         try {
             AppendResult r = ledger.append(event);
             return new RecordResult(RecordResult.Status.valueOf(r.status().name()), r.sequence(), r.reason());
@@ -82,12 +84,13 @@ public final class ExecutionMemory implements AutoCloseable {
     }
 
     public Optional<ExecutionView> loadExecution(ScopeId scope, ExecutionId execution) {
-        Objects.requireNonNull(execution, "execution");
         requireOpen(scope);
+        Objects.requireNonNull(execution, "execution");
         return ExecutionViews.execution(ledger.replay(), execution);
     }
 
     public Optional<AttemptView> loadAttempt(ScopeId scope, ExecutionId execution, AttemptId attempt) {
+        requireOpen(scope);
         Objects.requireNonNull(attempt, "attempt");
         return loadExecution(scope, execution).flatMap(v -> v.attempt(attempt));
     }
@@ -97,51 +100,39 @@ public final class ExecutionMemory implements AutoCloseable {
      * chain with the given revision is returned (1 = the original).
      */
     public Optional<LedgerRecord> loadEvent(ScopeId scope, EventId eventId, int revision) {
-        Objects.requireNonNull(eventId, "eventId");
         requireOpen(scope);
-        List<LedgerRecord> all = ledger.replay();
-        Optional<LedgerRecord> cursor = ledger.find(eventId);
-        if (cursor.isEmpty()) {
-            return Optional.empty();
-        }
-        while (cursor.get().event().envelope().supersedes().isPresent()) { // walk back to revision 1
-            cursor = ledger.find(cursor.get().event().envelope().supersedes().get());
-        }
-        while (cursor.isPresent() && cursor.get().event().envelope().revision() < revision) { // walk forward
-            EventId current = cursor.get().event().eventId();
-            cursor = all.stream()
-                    .filter(r -> r.event().envelope().supersedes().filter(current::equals).isPresent())
-                    .findFirst();
-        }
-        return cursor.filter(r -> r.event().envelope().revision() == revision);
+        Objects.requireNonNull(eventId, "eventId");
+        return walk(eventId, revision);
     }
 
     /** Latest revision of the event chain that contains {@code eventId}. */
     public Optional<LedgerRecord> loadEvent(ScopeId scope, EventId eventId) {
-        Objects.requireNonNull(eventId, "eventId");
         requireOpen(scope);
-        int latest = 0;
-        for (LedgerRecord r : ledger.replay()) {
-            if (r.event().eventId().equals(eventId)) {
-                latest = r.event().envelope().revision();
-            }
-        }
-        Optional<LedgerRecord> found = latest == 0 ? Optional.empty() : loadEvent(scope, eventId, latest);
-        return found.isPresent() ? latestOf(found.get()) : Optional.empty();
+        Objects.requireNonNull(eventId, "eventId");
+        return walk(eventId, Integer.MAX_VALUE);
     }
 
-    private Optional<LedgerRecord> latestOf(LedgerRecord start) {
-        Optional<LedgerRecord> current = Optional.of(start);
-        while (true) {
-            EventId id = current.get().event().eventId();
-            Optional<LedgerRecord> next = ledger.replay().stream()
-                    .filter(r -> r.event().envelope().supersedes().filter(id::equals).isPresent())
-                    .findFirst();
-            if (next.isEmpty()) {
-                return current;
-            }
-            current = next;
+    /** One pass builds the successor index; walking the chain is then O(revisions). */
+    private Optional<LedgerRecord> walk(EventId eventId, int revision) {
+        Optional<LedgerRecord> current = ledger.find(eventId);
+        if (current.isEmpty()) {
+            return Optional.empty();
         }
+        while (current.get().event().envelope().supersedes().isPresent()) { // back to revision 1
+            current = ledger.find(current.get().event().envelope().supersedes().get());
+        }
+        Map<EventId, LedgerRecord> successor = new HashMap<>();
+        for (LedgerRecord r : ledger.replay()) {
+            r.event().envelope().supersedes().ifPresent(target -> successor.put(target, r));
+        }
+        while (current.get().event().envelope().revision() < revision) { // forward
+            LedgerRecord next = successor.get(current.get().event().eventId());
+            if (next == null) {
+                break;
+            }
+            current = Optional.of(next);
+        }
+        return current.filter(r -> revision == Integer.MAX_VALUE || r.event().envelope().revision() == revision);
     }
 
     /** First page of a new snapshot with the configured default page size. */

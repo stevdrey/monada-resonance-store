@@ -94,6 +94,15 @@ final class Fixtures {
                 Optional.empty()), "tests were flaky");
     }
 
+    /** Correction of an ATTEMPT_STARTED (same attempt, ordinal and reason as the replacement). */
+    static ExecutionEvent correctAttemptStart(String id, String target, int revision, AttemptId attempt,
+                                              int ordinal) {
+        EventEnvelope outer = new EventEnvelope(EventId.of(id), SCOPE, TASK, EXEC, Optional.of(attempt), revision,
+                Optional.of(EventId.of(target)), T0, T0);
+        AttemptStarted replacement = (AttemptStarted) attempt(id, attempt, ordinal);
+        return new Correction(outer, replacement, "re-recorded");
+    }
+
     /** Correction of an evidence event to another observation state. */
     static ExecutionEvent correctEvidence(String id, String target, int revision, AttemptId attempt,
                                           ObservationState state) {
