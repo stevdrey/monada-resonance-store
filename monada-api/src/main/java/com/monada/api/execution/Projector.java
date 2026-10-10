@@ -39,7 +39,11 @@ final class Projector {
     private record Experience(ExperienceRef ref, Optional<String> solution, Optional<String> lesson, String atomId) {
     }
 
-    /** Checkpoint entries for one ledger event and the texts of its PROJECT entries, by atom ID. */
+    /**
+     * Checkpoint entries for one ledger event, and the texts of the atoms it projects for the first time, by
+     * atom ID. An atom projected before (even if retired since) is already stored, so it is not listed and is
+     * never rediscovered by scanning the memory.
+     */
     record Step(List<Entry> entries, Map<String, String> texts) {
     }
 
@@ -95,10 +99,11 @@ final class Projector {
             }
         }
         entries.add(new Entry(EntryKind.PROJECT, next.atomId(), next.ref()));
-        texts.put(next.atomId(), text);
+        if (projected.add(next.atomId())) {
+            texts.put(next.atomId(), text);
+        }
         live.computeIfAbsent(next.atomId(), k -> new TreeMap<>())
                 .put(ExperienceRefCodec.canonical(next.ref()), next.ref());
-        projected.add(next.atomId());
     }
 
     static String atomId(String text) {

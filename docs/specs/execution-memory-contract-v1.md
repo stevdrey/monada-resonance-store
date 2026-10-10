@@ -886,7 +886,8 @@ order, duplicate projection, unknown retirement) stops reading and makes it `INC
   Verification is read-only and fail-closed: any symbolic link or special file under `projection/` is
   `INCOMPATIBLE` before anything is read through it; the fixed memory layout (`manifest.json`, atom log,
   vector segment, `vector-map.idx`, feedback log and their directories) must be complete, the manifest
-  must name exactly the standard atom, vector and feedback segments, and the
+  must name exactly the standard atom, vector and feedback segments, the feedback log must be empty
+  (projections hold no retrieval feedback, so default feedback-aware ranking is a no-op), and the
   side-effect-free `StorageIntegrityAuditor` must report no error (for example `ATOM_WITHOUT_VECTOR`), all
   before `MonadaMemory` is opened, so diagnosing a damaged projection never recreates files. It
   initializes a projection only for an **empty** ledger; a scope recorded before #98 is `MISSING`.
@@ -954,6 +955,9 @@ try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
   differ between rebuilds; ranking, scores and the checkpoint do not.
 - Retrieval feedback on projection atoms is not exposed; outcomes never become feedback.
 - Projection verification on open re-projects the covered ledger in memory (linear in the scope size).
+- Projection writes call `MonadaMemory.remember` only for atoms never projected before. Each distinct new
+  atom still costs one scan of the atom log inside `remember` (its existence check), so a full rebuild of N
+  distinct texts is quadratic in N; a bulk append path in `MonadaMemory` is follow-up work.
 - Existing ledgers stay valid: a pre-#98 scope opens as `MISSING` until rebuilt. Legacy text stores,
   baselines and production defaults are untouched.
 

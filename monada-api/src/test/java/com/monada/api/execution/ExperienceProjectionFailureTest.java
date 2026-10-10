@@ -424,6 +424,30 @@ class ExperienceProjectionFailureTest {
         }
     }
 
+    @Test
+    void retrievalFeedbackInsideTheProjectionIsIncompatible() throws IOException {
+        Path store = root.resolve("store");
+        List<String> expected;
+        String boostedAtom;
+        try (ExecutionMemory m = ExecutionMemory.open(store, SCOPE)) {
+            two(m);
+            expected = render(m.recall(SCOPE, "gradle cache", 10));
+            boostedAtom = m.recall(SCOPE, "gradle cache", 10).hits().get(1).atomId();
+        }
+        // A valid feedback row would reorder recall while the checkpoint still matches the ledger.
+        new com.monada.storage.feedback.FileFeedbackStore(projectionDir(store, SCOPE).resolve("memory"))
+                .append(new com.monada.storage.feedback.FeedbackEvent("gradle cache", boostedAtom,
+                        com.monada.storage.feedback.FeedbackSignal.POSITIVE, 5.0, Experiences.T0));
+        try (ExecutionMemory m = ExecutionMemory.open(store, SCOPE)) {
+            ProjectionStatus status = m.projectionStatus(SCOPE);
+            assertEquals(ProjectionStatus.State.INCOMPATIBLE, status.state());
+            assertTrue(status.diagnostics().get(0).contains("retrieval feedback"), status.diagnostics().toString());
+            assertEquals(List.of(), m.recall(SCOPE, "gradle cache", 10).hits());
+            assertEquals(ProjectionStatus.State.CURRENT, m.rebuildProjection(SCOPE).state());
+            assertEquals(expected, render(m.recall(SCOPE, "gradle cache", 10)));
+        }
+    }
+
     private static void deleteTree(Path dir) throws IOException {
         try (Stream<Path> walk = Files.walk(dir)) {
             for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {

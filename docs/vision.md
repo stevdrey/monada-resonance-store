@@ -52,4 +52,6 @@ The next direction is execution-experience memory: an embedded, caller-owned his
 executions, outcomes, quality evidence and usage that Monada Forge can record and recall, and that
 Monada Neuron can consume as neutral exported samples. Store keeps persistence, retrieval and
 deterministic calculations; Forge keeps execution and judgment; Neuron keeps adaptation and routing.
-See [ADR 0004](adr/0004-embedded-execution-memory.md). This is planned work, not implemented behavior.
+See [ADR 0004](adr/0004-embedded-execution-memory.md). Implemented so far: the domain records, the
+append-only ledger, the `ExecutionMemory` history facade and scoped, bounded experience recall (#95–#98).
+Cost calculators, comparison, sample export and the Forge and Neuron integrations remain planned work.

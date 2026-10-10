@@ -123,6 +123,9 @@ public final class ExecutionMemory implements AutoCloseable {
 
         default void beforeRecallQuery(int attempt) {
         }
+
+        default void onRecallRound(int topK) {
+        }
     }
 
     static ExecutionMemory openReadOnly(Path root, ScopeId scope, ExecutionMemoryConfig config,
@@ -174,6 +177,11 @@ public final class ExecutionMemory implements AutoCloseable {
                 @Override
                 public void beforeReadOnlyQuery(int queryAttempt) {
                     hook.beforeRecallQuery(queryAttempt);
+                }
+
+                @Override
+                public void onRecallRound(int topK) {
+                    hook.onRecallRound(topK);
                 }
             };
             ExperienceProjection projection = ExperienceProjection.open(root, scope, index.all(), false, faults);

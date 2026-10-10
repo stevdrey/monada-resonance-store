@@ -13,4 +13,8 @@ interface ProjectionFaults {
 
     default void beforeReadOnlyQuery(int attempt) {
     }
+
+    /** Called before each ranker query of a recall, with its top-K. */
+    default void onRecallRound(int topK) {
+    }
 }

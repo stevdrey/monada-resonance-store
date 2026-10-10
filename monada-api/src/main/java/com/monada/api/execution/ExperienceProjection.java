@@ -205,11 +205,17 @@ final class ExperienceProjection implements AutoCloseable {
      * Read-only checks of the projection memory, run before {@link MonadaMemory#open} because opening would
      * recreate missing directories and logs: the fixed layout must be complete, the existing side-effect-free
      * {@link StorageIntegrityAuditor} must report no error (for example an atom without a vector), and the
-     * manifest must name the standard segments.
+     * manifest must name the standard segments. The feedback log must be empty, so the default feedback-aware
+     * ranking is a no-op and scores depend on the ledger alone.
      */
     private static List<String> memoryProblems(ProjectionLayout layout, Path memoryDir) throws IOException {
         List<String> problems = new ArrayList<>(layout.memoryLayoutProblems(memoryDir));
         if (!problems.isEmpty()) {
+            return problems;
+        }
+        if (Files.size(memoryDir.resolve(ProjectionLayout.FEEDBACK_SEGMENT)) != 0) {
+            // Feedback would change ranking while the checkpoint still matches the ledger.
+            problems.add("projection memory holds retrieval feedback; projections are derived from the ledger only");
             return problems;
         }
         StorageIntegrityReport report = new StorageIntegrityAuditor().audit(memoryDir);
@@ -367,8 +373,8 @@ final class ExperienceProjection implements AutoCloseable {
         while (true) {
             List<ResonanceResult> results = memory.resonate(query).topK(topK).execute().results();
             List<ExperienceHit> hits = new ArrayList<>();
+            faults.onRecallRound(topK);
             int unknown = 0;
-            int atoms = 0;
             for (ResonanceResult result : results) {
                 String atomId = result.atom().id();
                 if (excluded.contains(atomId)) {
@@ -382,7 +388,6 @@ final class ExperienceProjection implements AutoCloseable {
                     unknown++;
                     continue;
                 }
-                atoms++;
                 for (ExperienceRef ref : refs) {
                     Optional<HistoryEntry> event = resolver.apply(ref);
                     if (event.isEmpty()) {
@@ -393,10 +398,12 @@ final class ExperienceProjection implements AutoCloseable {
                             ProjectionCheckpoint.FORMAT_VERSION, covered));
                 }
             }
-            if (unknown == 0 || atoms >= limit || results.size() < topK) {
+            // Ranker order is the atom-major prefix of the total order, so once limit refs are collected no unseen
+            // atom can displace them.
+            if (unknown == 0 || hits.size() >= limit || results.size() < topK) {
                 return new Collected(hits, null);
             }
-            topK = limit + excluded.size() + unknown; // strictly larger: fewer than limit known atoms were seen
+            topK = limit + excluded.size() + unknown; // strictly larger: fewer than limit refs were collected
         }
     }
 

@@ -129,4 +129,43 @@ class ExperienceRecallReadOnlySnapshotTest {
             assertEquals(1, attempts[0]);
         }
     }
+
+    @Test
+    void expansionStopsOnceLimitRefsAreCollected() {
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            Experiences.appended(m, Experiences.start(SCOPE, "x-1", "Repair the flaky login test"));
+            String previous = null;
+            for (int i = 1; i <= 3; i++) {
+                Experiences.appended(m, Experiences.attempt(SCOPE, "x-1", "a" + i, i, previous));
+                Experiences.appended(m, Experiences.finish(SCOPE, "x-1", "a" + i, "Waited for the cookie", null));
+                previous = "a" + i;
+            }
+        }
+        java.util.List<Integer> rounds = new java.util.ArrayList<>();
+        ExecutionMemory.ReadOnlyOpenHook hook = new ExecutionMemory.ReadOnlyOpenHook() {
+            @Override
+            public void afterLedgerSnapshot(int attempt) {
+            }
+
+            @Override
+            public void onRecallRound(int topK) {
+                rounds.add(topK);
+            }
+        };
+        try (ExecutionMemory snapshot = ExecutionMemory.openReadOnly(root, SCOPE, ExecutionMemoryConfig.defaults(),
+                hook)) {
+            try (ExecutionMemory writer = ExecutionMemory.open(root, SCOPE)) {
+                for (int i = 2; i <= 6; i++) {
+                    experience(writer, SCOPE, "y-" + i, "Fix the flaky test number " + i, "Retried test " + i, null);
+                }
+            }
+            ExperienceRecall recall = snapshot.recall(SCOPE, QUERY, 3);
+            assertEquals(ProjectionStatus.State.CURRENT, recall.status().state());
+            assertEquals(List.of("a1", "a2", "a3"),
+                    recall.hits().stream().map(h -> h.ref().attempt().orElseThrow().value()).toList());
+            // One snapshot atom supplies all 3 refs: the second round stops even though only one atom is known.
+            assertEquals(2, rounds.size(), rounds.toString());
+            assertTrue(rounds.get(1) > rounds.get(0));
+        }
+    }
 }
