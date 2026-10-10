@@ -109,7 +109,7 @@ Expected scope and implementation order:
 - #94 consumable Java 27 library publications — depends on #93;
 - #95 immutable execution and evidence domain records — depends on #93;
 - #96 versioned append-only execution ledger with replay and integrity diagnostics — depends on #93, #95;
-- #97 caller-owned `ExecutionMemory` facade with idempotent recording and revisions — depends on #94, #95, #96;
+- #97 caller-owned `ExecutionMemory` facade with idempotent recording and revisions — depends on #94, #95, #96 (implemented: one scope per instance, ledger-backed history; see contract section 17);
 - #98 scoped ledger-derived projections and bounded recall — depends on #97;
 - #99 attempt-chain usage and hypothetical `CostToAcceptedOutcome` calculators (`monada-evaluation`) — depends on #95, #97;
 - #100 evidence-gated pairwise comparison and Pareto diagnostics — depends on #99;

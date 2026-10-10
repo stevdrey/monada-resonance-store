@@ -1,8 +1,8 @@
 # Execution Memory Contract v1
 
 Status: accepted contract. The immutable domain records (section 15, issue #95) and the ledger with
-replay and read-only audit (section 16, issue #96) are implemented; the facade, projections, calculators
-and export remain future work. Decision record:
+replay and read-only audit (section 16, issue #96) and the `ExecutionMemory` facade (section 17,
+issue #97) are implemented; projections, calculators and export remain future work. Decision record:
 [ADR 0004](../adr/0004-embedded-execution-memory.md). Issue: #93 (Forge Integration 1/10).
 
 This document is the normative v1 contract that issues #94–#102 implement. Later issues may refine
@@ -57,12 +57,12 @@ Define, without implementing, the v1 semantics for:
 
 ## Affected Modules
 
-- `monada-core`: yes (later) — `com.monada.core.execution` immutable records (#95).
+- `monada-core`: yes — `com.monada.core.execution` immutable records (#95, implemented).
 - `monada-encoder`: no — projections reuse the existing encoding unchanged.
-- `monada-storage`: yes (later) — `com.monada.storage.execution` ledger, codec, replay, audit (#96).
+- `monada-storage`: yes — `com.monada.storage.execution` ledger, codec, replay, audit (#96, implemented).
 - `monada-index`: no — projections reuse `LinearScanResonanceIndex` unchanged.
 - `monada-learning`: no.
-- `monada-api`: yes (later) — `com.monada.api.execution` facade, derived acceptance, recall, export (#97, #98, #101).
+- `monada-api`: yes — `com.monada.api.execution` facade, derived acceptance and history (#97, implemented); recall, export (#98, #101, later).
 - `monada-evaluation`: yes (later) — `com.monada.evaluation.execution` usage/cost calculators, comparison,
   export annotations and end-to-end gates (#99, #100, #101, #102).
 - `monada-speech`: no.
@@ -141,7 +141,8 @@ Rules:
 - A root containing a legacy `manifest.json` but no `execution-manifest.json` is rejected.
 - An unknown `format`/`version`/`recordCodec` is rejected; there is no automatic upgrade.
 - Writable open creates missing directories only for the scope being written. Read-only open creates
-  nothing and fails cleanly when the root or scope does not exist.
+  nothing: a missing root or manifest fails cleanly, while a missing scope of an existing root is an empty
+  history (no files are created).
 - Segment rollover (`events-000002.log`) is reserved; v1 writes a single segment.
 
 ## 3. Record Envelope
@@ -301,8 +302,8 @@ Derived acceptance (computed, never stored as a separate fact):
 
 | Derived status | Condition |
 | --- | --- |
-| `VALIDATED_ACCEPTED` | Current outcome `ACCEPTED` + origin `VALIDATED` + every mandatory dimension has an effective observation that is `PASS` or justified `NOT_APPLICABLE` |
-| `ACCEPTED_UNVALIDATED` | Current outcome `ACCEPTED` but origin `IMPORTED_CLAIM`, or some mandatory dimension's effective observation is `FAIL` or `UNKNOWN`, or it has none; reasons list each dimension |
+| `VALIDATED_ACCEPTED` | Current outcome `ACCEPTED` + origin `VALIDATED` + the accepted attempt finished `COMPLETED` + every mandatory dimension has an effective observation that is `PASS` or justified `NOT_APPLICABLE` |
+| `ACCEPTED_UNVALIDATED` | Current outcome `ACCEPTED` but origin `IMPORTED_CLAIM`, or the accepted attempt is unfinished, `FAILED` or `CANCELLED` (even when mandatory evidence passes), or some mandatory dimension's effective observation is `FAIL` or `UNKNOWN`, or it has none; reasons list each dimension |
 | `NOT_ACCEPTED` | Current outcome `REJECTED`, `FAILED` or `CANCELLED` |
 | `PENDING` | No outcome or current outcome `PENDING` |
 
@@ -603,9 +604,9 @@ Future consumer integration in Monada Forge and Monada Neuron remains future cro
 ## 16. Execution Ledger (implemented in #96)
 
 Package `com.monada.storage.execution` (`monada-storage`). Scope: one writable ledger per scope with
-append, exact lookup, deterministic replay and read-only audit. Out of scope and still future work:
-the `ExecutionMemory` facade (#97), projections, recall, export, segment rollover, compaction and
-explicit repair.
+append, exact lookup, deterministic replay and read-only audit. The `ExecutionMemory` facade was added
+afterwards by #97 (section 17). Out of scope and still future work: projections, recall, export, segment
+rollover, compaction and explicit repair.
 
 ### 16.1 Public API
 
@@ -754,6 +755,82 @@ size), the in-memory event index grows with the scope, and no repair tool exists
 - Experimental behavior stays behind explicit options; quality evidence stays separate from protected
   correctness gates.
 - Stable Java 27 features only; no preview or incubator flags; no incidental dependency upgrades.
+
+## 17. ExecutionMemory Facade (issue #97)
+
+Package `com.monada.api.execution` in `monada-api`. It is ledger-backed only: no projections, recall,
+cost calculators, comparison or export, and no mapping of outcomes to ranking feedback.
+`MonadaMemory` and its lifecycle are unchanged.
+
+### 17.1 Ownership and threading
+
+- `ExecutionMemory.open(root, scope[, config])` binds **one scope per instance** and takes the exclusive
+  writer lock of `root` (the ledger lock is per root). A second open fails immediately with the unchecked
+  `ExecutionMemoryLockedException`. Reading other scopes of the same root needs a separate instance after
+  close; a multi-scope writer is future work.
+- `ExecutionMemory.openReadOnly(root, scope[, config])` returns a **snapshot** of the valid ledger prefix at
+  open time: no lock, nothing created, usable next to a live writer. Later appends are not visible; the host
+  opens a new read-only instance to see them. `record` throws `UnsupportedOperationException`. A missing root
+  or manifest fails with `UncheckedIOException`, and so does a ledger with integrity errors (the writable
+  open refuses it too), so a damaged history is never served silently truncated. A torn tail (possibly a
+  writer mid-append) is tolerated and reported by `hasTornTail()`. A missing scope is an empty history.
+  Lifecycle rules are the same as for the writable instance.
+- Operations keep the contract's `ScopeId` parameter; a scope other than the opened one throws
+  `IllegalArgumentException`.
+- Single writer, **not thread-safe**: the host serializes calls. `close()` is idempotent and releases the
+  lock; every other call afterwards throws `IllegalStateException`. No hidden globals, threads or clock reads.
+- I/O and corruption failures throw `UncheckedIOException`.
+
+### 17.2 Operations
+
+| Operation | Result |
+| --- | --- |
+| `record(ExecutionEvent)` | `RecordResult(APPENDED \| IDEMPOTENT \| CONFLICT, sequence, reason)` |
+| `loadExecution(scope, execution)` | `Optional<ExecutionView>` (provenance, policy, current outcome with origin, `DerivedAcceptance`, attempts, full history) |
+| `loadAttempt(scope, execution, attempt)` | `Optional<AttemptView>` (route, usage, evidence exactly as recorded) |
+| `loadEvent(scope, eventId[, revision])` | `Optional<HistoryEntry>` (sequence + event); `eventId` may name any member of a correction chain; revision 1 is the original |
+| `history(scope[, cursor], pageSize)` | `HistoryPage(entries, highWatermark, hasMore, next)` |
+| `openReadOnly(root, scope[, config])` | Lock-free snapshot instance; `record` is unsupported; `hasTornTail()` |
+
+Outcomes of `record`: identical retry -> `IDEMPOTENT` (nothing written); same id with a different payload,
+duplicate execution/attempt start, reused ordinal, or a correction that is not target revision + 1 or not of
+the latest revision -> `CONFLICT` (nothing written). Wrong scope, missing references, events after
+`ATTEMPT_FINISHED`, and oversized records throw `IllegalArgumentException` before any I/O. The lifecycle check
+comes first (`IllegalStateException` after close, even for a null argument); a null argument on an open
+instance throws `NullPointerException`.
+
+### 17.3 Acceptance, revisions, history
+
+- `ExecutionView.acceptance()` is derived on every read (section 8), never stored. `VALIDATED_ACCEPTED`
+  requires a `VALIDATED` accepted outcome whose accepted attempt finished `COMPLETED`, and passing (or justified not-applicable) evidence of the accepted
+  attempt under the execution's own policy id and version for every mandatory dimension. An
+  `IMPORTED_CLAIM` outcome stays visible as such and is never validated. `FAILED`, `REJECTED` and `CANCELLED`
+  are `NOT_ACCEPTED`.
+- A correction appends a new revision; earlier lines are never rewritten and stay in `history`. Views show
+  the latest revision; usage is exposed as recorded and each fact is replayed once, so a revision replay
+  never charges cost a second time.
+- `history` pages are 1..`maxPageSize` (default max 500, default page 100; there is no unbounded read), in
+  ascending sequence including every revision. `HistoryCursor` is an opaque token (version, scope,
+  high-watermark, last sequence): the same cursor always returns the same page even after later appends;
+  a foreign-scope or beyond-ledger cursor is rejected.
+
+### 17.4 Usage
+
+```java
+ScopeId scope = ScopeId.of("project-a");
+try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
+    RecordResult r = memory.record(ExecutionEvent.executionStarted(EventId.of("ev-1"), scope, taskId,
+            executionId, provenance, policy, "Fix the bug", Instant.parse("2026-01-01T00:00:00Z")));
+    ExecutionView view = memory.loadExecution(scope, executionId).orElseThrow();
+    HistoryPage page = memory.history(scope, null, 50);
+}
+```
+
+### 17.5 Compatibility and verification
+
+No persisted format change and no change to existing API signatures or defaults. Verification:
+`./gradlew :monada-api:test`, `./gradlew test`, `./gradlew verifyLibraryConsumer` (class-path and JPMS
+consumers record, retry, close, reopen and load execution history).
 
 ## Acceptance Criteria
 
