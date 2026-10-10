@@ -260,6 +260,148 @@ class ExperienceProjectionFailureTest {
         assertFalse(Files.exists(projectionDir(store, unknown).getParent()));
     }
 
+    @Test
+    void symbolicLinkInsideTheProjectionIsIncompatibleAndNeverFollowed() throws IOException {
+        Path store = root.resolve("store");
+        try (ExecutionMemory m = ExecutionMemory.open(store, SCOPE)) {
+            two(m);
+        }
+        Path feedback = projectionDir(store, SCOPE).resolve("memory").resolve("feedback");
+        Path outside = root.resolve("outside");
+        Files.createDirectories(outside);
+        Files.move(feedback.resolve("feedback-000001.log"), outside.resolve("feedback-000001.log"));
+        Files.delete(feedback);
+        Files.createSymbolicLink(feedback, outside);
+        Map<String, String> outsideBefore = digests(outside);
+        try (ExecutionMemory m = ExecutionMemory.openReadOnly(store, SCOPE)) {
+            ProjectionStatus status = m.projectionStatus(SCOPE);
+            assertEquals(ProjectionStatus.State.INCOMPATIBLE, status.state());
+            assertTrue(status.diagnostics().get(0).contains("symbolic link"), status.diagnostics().toString());
+        }
+        try (ExecutionMemory m = ExecutionMemory.open(store, SCOPE)) {
+            assertEquals(ProjectionStatus.State.INCOMPATIBLE, m.projectionStatus(SCOPE).state());
+            appended(m, start(SCOPE, "x-3", "Fix the flaky upload test"));
+            assertEquals(outsideBefore, digests(outside), "nothing written through the link");
+            assertEquals(ProjectionStatus.State.CURRENT, m.rebuildProjection(SCOPE).state());
+        }
+        assertEquals(outsideBefore, digests(outside), "rebuild removes the link, never its target");
+        assertFalse(Files.isSymbolicLink(feedback));
+    }
+
+    @Test
+    void diagnosingADamagedProjectionRecreatesNothing() throws IOException {
+        for (String damaged : List.of("feedback/feedback-000001.log", "atoms/segment-000001.log")) {
+            Path store = root.resolve("store-" + damaged.substring(0, damaged.indexOf('/')));
+            try (ExecutionMemory m = ExecutionMemory.open(store, SCOPE)) {
+                two(m);
+            }
+            Path file = projectionDir(store, SCOPE).resolve("memory").resolve(damaged);
+            Files.delete(file);
+            Map<String, String> before = digests(projectionDir(store, SCOPE));
+            try (ExecutionMemory m = ExecutionMemory.openReadOnly(store, SCOPE)) {
+                ProjectionStatus status = m.projectionStatus(SCOPE);
+                assertEquals(ProjectionStatus.State.INCOMPATIBLE, status.state(), damaged);
+                assertTrue(status.diagnostics().get(0).contains(damaged), status.diagnostics().toString());
+            }
+            try (ExecutionMemory m = ExecutionMemory.open(store, SCOPE)) {
+                assertEquals(ProjectionStatus.State.INCOMPATIBLE, m.projectionStatus(SCOPE).state(), damaged);
+            }
+            assertFalse(Files.exists(file), "verification never recreates " + damaged);
+            assertEquals(before, digests(projectionDir(store, SCOPE)));
+        }
+    }
+
+    @Test
+    void mappedAtomWithoutAVectorIsIncompatible() throws IOException {
+        Path store = root.resolve("store");
+        try (ExecutionMemory m = ExecutionMemory.open(store, SCOPE)) {
+            two(m);
+        }
+        // Drop the last vector frame and its index entry: the store stays structurally valid.
+        Path memory = projectionDir(store, SCOPE).resolve("memory");
+        Path index = memory.resolve("indexes/vector-map.idx");
+        Path segment = memory.resolve("vectors/segment-000001.f32");
+        List<String> entries = Files.readAllLines(index, StandardCharsets.UTF_8);
+        assertEquals(2, entries.size());
+        long frame = Files.size(segment) / entries.size();
+        Files.write(index, entries.subList(0, 1), StandardCharsets.UTF_8);
+        try (var channel = java.nio.channels.FileChannel.open(segment, StandardOpenOption.WRITE)) {
+            channel.truncate(frame);
+        }
+        try (ExecutionMemory m = ExecutionMemory.open(store, SCOPE)) {
+            ProjectionStatus status = m.projectionStatus(SCOPE);
+            assertEquals(ProjectionStatus.State.INCOMPATIBLE, status.state());
+            assertTrue(status.diagnostics().toString().contains("ATOM_WITHOUT_VECTOR"), status.diagnostics().toString());
+            assertEquals(ProjectionStatus.State.CURRENT, m.rebuildProjection(SCOPE).state());
+            assertEquals(2, m.recall(SCOPE, "gradle flaky test", 10).hits().size());
+        }
+    }
+
+    @Test
+    void readOnlyOpenRetriesWhenAWriterCompletesAnEventMidOpen() {
+        Path store = root.resolve("store");
+        try (ExecutionMemory m = ExecutionMemory.open(store, SCOPE)) {
+            two(m);
+        }
+        int[] attempts = {0};
+        try (ExecutionMemory m = ExecutionMemory.openReadOnly(store, SCOPE, ExecutionMemoryConfig.defaults(),
+                attempt -> {
+                    attempts[0] = attempt;
+                    if (attempt == 1) {
+                        // After the reader's ledger snapshot, a writer appends and projects one more event, so
+                        // the checkpoint now covers a sequence beyond this snapshot.
+                        try (ExecutionMemory writer = ExecutionMemory.open(store, SCOPE)) {
+                            appended(writer, start(SCOPE, "x-3", "Fix the flaky upload test"));
+                        }
+                    }
+                })) {
+            assertEquals(2, attempts[0], "one retry with a fresh snapshot");
+            ProjectionStatus status = m.projectionStatus(SCOPE);
+            assertEquals(ProjectionStatus.State.CURRENT, status.state(), status.diagnostics().toString());
+            assertEquals(7, status.ledgerSequence());
+        }
+    }
+
+    @Test
+    void readOnlyOpenGivesUpAfterBoundedAttemptsWhileFilesKeepChanging() throws IOException {
+        Path store = root.resolve("store");
+        try (ExecutionMemory m = ExecutionMemory.open(store, SCOPE)) {
+            two(m);
+        }
+        Path segment = projectionDir(store, SCOPE).resolve("memory/vectors/segment-000001.f32");
+        int[] attempts = {0};
+        try (ExecutionMemory m = ExecutionMemory.openReadOnly(store, SCOPE, ExecutionMemoryConfig.defaults(),
+                attempt -> {
+                    attempts[0] = attempt;
+                    try { // a writer that is always midway through a vector frame
+                        Files.write(segment, new byte[] {1, 2, 3}, StandardOpenOption.APPEND);
+                    } catch (IOException e) {
+                        throw new java.io.UncheckedIOException(e);
+                    }
+                })) {
+            assertEquals(ExecutionMemory.READ_ONLY_ATTEMPTS, attempts[0]);
+            ProjectionStatus status = m.projectionStatus(SCOPE);
+            assertEquals(ProjectionStatus.State.INCOMPATIBLE, status.state());
+            assertTrue(status.diagnostics().get(0).contains("live writer"), status.diagnostics().toString());
+        }
+    }
+
+    @Test
+    void stableDamageIsReportedOnTheFirstReadOnlyAttempt() throws IOException {
+        Path store = root.resolve("store");
+        try (ExecutionMemory m = ExecutionMemory.open(store, SCOPE)) {
+            two(m);
+        }
+        Path file = checkpoint(store, SCOPE);
+        Files.writeString(file, Files.readString(file).replace("|x-2-a1-fin|", "|x-2-a1-fiN|"));
+        int[] attempts = {0};
+        try (ExecutionMemory m = ExecutionMemory.openReadOnly(store, SCOPE, ExecutionMemoryConfig.defaults(),
+                attempt -> attempts[0] = attempt)) {
+            assertEquals(1, attempts[0]);
+            assertEquals(ProjectionStatus.State.INCOMPATIBLE, m.projectionStatus(SCOPE).state());
+        }
+    }
+
     private static void deleteTree(Path dir) throws IOException {
         try (Stream<Path> walk = Files.walk(dir)) {
             for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {

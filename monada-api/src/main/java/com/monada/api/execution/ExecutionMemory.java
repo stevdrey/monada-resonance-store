@@ -12,6 +12,7 @@ import com.monada.storage.execution.ExecutionLedgerReader;
 import com.monada.storage.execution.LedgerDiagnostic;
 import com.monada.storage.execution.LedgerException;
 import com.monada.storage.execution.LedgerLockedException;
+import com.monada.storage.execution.ProjectionLayout;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
@@ -99,11 +100,55 @@ public final class ExecutionMemory implements AutoCloseable {
      * manifest fails with {@link UncheckedIOException}, and so does a ledger with integrity errors (the
      * writable open refuses it too); a missing scope is an empty history. A torn tail (possibly a writer
      * mid-append) is tolerated and reported by {@link #hasTornTail()}.
+     *
+     * <p>A live writer may be between its ledger append and its projection write while the snapshot is
+     * taken. When the projection then looks incompatible and the scope's files changed during the open, the
+     * whole snapshot is taken again (at most {@value #READ_ONLY_ATTEMPTS} attempts, no waiting); a projection
+     * that is incompatible while nothing changes is reported on the first attempt.
      */
     public static ExecutionMemory openReadOnly(Path root, ScopeId scope, ExecutionMemoryConfig config) {
+        return openReadOnly(root, scope, config, attempt -> { });
+    }
+
+    /** Attempts of a read-only open racing a live writer. */
+    static final int READ_ONLY_ATTEMPTS = 3;
+
+    /** Test seam: runs after the ledger snapshot of each read-only attempt, before the projection loads. */
+    interface ReadOnlyOpenHook {
+        void afterLedgerSnapshot(int attempt);
+    }
+
+    static ExecutionMemory openReadOnly(Path root, ScopeId scope, ExecutionMemoryConfig config,
+                                        ReadOnlyOpenHook hook) {
         Objects.requireNonNull(root, "root");
         Objects.requireNonNull(scope, "scope");
         Objects.requireNonNull(config, "config");
+        for (int attempt = 1; ; attempt++) {
+            String before = generation(root, scope);
+            ExecutionMemory snapshot = readOnlySnapshot(root, scope, config, hook, attempt);
+            if (snapshot.projection.state() != ProjectionStatus.State.INCOMPATIBLE
+                    || before.equals(generation(root, scope))) {
+                return snapshot; // consistent, or damaged while nothing was being written
+            }
+            if (attempt == READ_ONLY_ATTEMPTS) {
+                snapshot.projection.note("projection changed during a read-only open (live writer?) in all "
+                        + READ_ONLY_ATTEMPTS + " attempts; reopen to retry");
+                return snapshot;
+            }
+            snapshot.close();
+        }
+    }
+
+    private static String generation(Path root, ScopeId scope) {
+        try {
+            return ProjectionLayout.of(root, scope).generation();
+        } catch (IOException e) {
+            return "unavailable: " + e.getMessage();
+        }
+    }
+
+    private static ExecutionMemory readOnlySnapshot(Path root, ScopeId scope, ExecutionMemoryConfig config,
+                                                    ReadOnlyOpenHook hook, int attempt) {
         try {
             ExecutionLedgerReader reader = ExecutionLedgerReader.open(root, scope);
             List<LedgerDiagnostic> errors = reader.diagnostics().stream()
@@ -113,6 +158,7 @@ public final class ExecutionMemory implements AutoCloseable {
                         + "refusing a read-only open: " + errors.get(0).message(), errors));
             }
             HistoryIndex index = HistoryIndex.of(reader.replay());
+            hook.afterLedgerSnapshot(attempt);
             ExperienceProjection projection = ExperienceProjection.open(root, scope, index.all(), false,
                     ProjectionFaults.NONE);
             return new ExecutionMemory(null, index, reader.hasTornTail(), scope, config, projection);

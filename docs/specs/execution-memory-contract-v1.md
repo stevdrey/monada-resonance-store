@@ -1,8 +1,9 @@
 # Execution Memory Contract v1
 
 Status: accepted contract. The immutable domain records (section 15, issue #95) and the ledger with
-replay and read-only audit (section 16, issue #96) and the `ExecutionMemory` facade (section 17,
-issue #97) are implemented; projections, calculators and export remain future work. Decision record:
+replay and read-only audit (section 16, issue #96), the `ExecutionMemory` facade (section 17,
+issue #97) and scoped projections with bounded recall (section 18, issue #98) are implemented;
+calculators and export remain future work. Decision record:
 [ADR 0004](../adr/0004-embedded-execution-memory.md). Issue: #93 (Forge Integration 1/10).
 
 This document is the normative v1 contract that issues #94–#102 implement. Later issues may refine
@@ -881,7 +882,12 @@ order, duplicate projection, unknown retirement) stops reading and makes it `INC
 ### 18.3 Status, writes and reconciliation
 
 - `open` loads the projection and verifies it against the ledger by re-projecting the covered prefix:
-  cover digests, mapping and retired atoms must match, and every mapped atom must exist in `memory/`. It
+  cover digests, mapping and retired atoms must match, and every mapped atom must exist in `memory/`.
+  Verification is read-only and fail-closed: any symbolic link or special file under `projection/` is
+  `INCOMPATIBLE` before anything is read through it; the fixed memory layout (`manifest.json`, atom log,
+  vector segment, `vector-map.idx`, feedback log and their directories) must be complete, and the
+  side-effect-free `StorageIntegrityAuditor` must report no error (for example `ATOM_WITHOUT_VECTOR`), all
+  before `MonadaMemory` is opened, so diagnosing a damaged projection never recreates files. It
   initializes a projection only for an **empty** ledger; a scope recorded before #98 is `MISSING`.
 - `projectionStatus(scope)` returns `ProjectionStatus(state, coveredSequence, ledgerSequence,
   projectionVersion, diagnostics)`:
@@ -898,7 +904,11 @@ order, duplicate projection, unknown retirement) stops reading and makes it `INC
   interrupted rebuild are discarded by the next one. Incremental projection and rebuild share one function,
   so a rebuild of a current projection is byte-identical in `projection-checkpoint.log` and ranking-identical.
 - `openReadOnly` creates nothing: it serves recall from an existing projection and reports `MISSING`
-  otherwise; `rebuildProjection` is unsupported.
+  otherwise; `rebuildProjection` is unsupported. Beside a live writer, a snapshot can observe a projection
+  write in progress. If the projection looks `INCOMPATIBLE` and a generation fingerprint of the scope (ledger
+  segment size plus every projection file size) changed during the open, the snapshot is taken again, at
+  most 3 attempts with no waiting; afterwards it stays `INCOMPATIBLE` with a "reopen to retry" diagnostic.
+  Damage observed while nothing changes is reported on the first attempt.
 
 ### 18.4 Recall
 

@@ -7,6 +7,10 @@ import com.monada.core.ResonanceResult;
 import com.monada.core.execution.ExperienceRef;
 import com.monada.core.execution.ScopeId;
 import com.monada.storage.FileAtomStore;
+import com.monada.storage.Manifest;
+import com.monada.storage.audit.StorageIntegrityAuditor;
+import com.monada.storage.audit.StorageIntegrityReport;
+import com.monada.storage.audit.StorageIntegritySeverity;
 import com.monada.storage.execution.ExperienceRefCodec;
 import com.monada.storage.execution.ProjectionCheckpoint;
 import com.monada.storage.execution.ProjectionLayout;
@@ -36,8 +40,6 @@ import java.util.function.Function;
  * exist in the memory. Any disagreement is {@code INCOMPATIBLE}; nothing is repaired automatically.
  */
 final class ExperienceProjection implements AutoCloseable {
-    private static final String MEMORY_MANIFEST = "manifest.json";
-
     private final Path root;
     private final ScopeId scope;
     private final boolean writable;
@@ -68,6 +70,15 @@ final class ExperienceProjection implements AutoCloseable {
         ExperienceProjection p = new ExperienceProjection(root, scope, writable, faults);
         p.load(ledger, true);
         return p;
+    }
+
+    ProjectionStatus.State state() {
+        return state;
+    }
+
+    /** Adds a leading diagnostic explaining the current state. */
+    void note(String diagnostic) {
+        diagnostics.add(0, diagnostic);
     }
 
     ProjectionStatus status(long ledgerSequence) {
@@ -104,6 +115,13 @@ final class ExperienceProjection implements AutoCloseable {
     }
 
     private void verify(ProjectionLayout layout, Path dir, List<HistoryEntry> ledger) throws IOException {
+        // Fail closed before reading anything through a link that could leave the ledger root.
+        List<String> links = layout.linkProblems(dir);
+        if (!links.isEmpty()) {
+            state = ProjectionStatus.State.INCOMPATIBLE;
+            diagnostics.addAll(links);
+            return;
+        }
         ProjectionCheckpoint.Snapshot snapshot = ProjectionCheckpoint.read(layout.checkpoint(dir), scope);
         List<String> problems = new ArrayList<>(snapshot.problems());
         if (problems.isEmpty() && snapshot.coveredSequence() > ledger.size()) {
@@ -126,8 +144,8 @@ final class ExperienceProjection implements AutoCloseable {
             problems.add("checkpoint mapping disagrees with the projection of the ledger");
         }
         Path memoryDir = layout.memory(dir);
-        if (problems.isEmpty() && !Files.isRegularFile(memoryDir.resolve(MEMORY_MANIFEST))) {
-            problems.add("projection memory is missing");
+        if (problems.isEmpty()) {
+            problems.addAll(memoryProblems(layout, memoryDir));
         }
         MonadaMemory opened = null;
         if (problems.isEmpty()) {
@@ -178,6 +196,34 @@ final class ExperienceProjection implements AutoCloseable {
         if (writable) {
             writer = ProjectionCheckpoint.openForAppend(layout.checkpoint(dir), scope, snapshot);
         }
+    }
+
+    /**
+     * Read-only checks of the projection memory, run before {@link MonadaMemory#open} because opening would
+     * recreate missing directories and logs: the fixed layout must be complete, the existing side-effect-free
+     * {@link StorageIntegrityAuditor} must report no error (for example an atom without a vector), and the
+     * manifest must name the standard segments.
+     */
+    private static List<String> memoryProblems(ProjectionLayout layout, Path memoryDir) throws IOException {
+        List<String> problems = new ArrayList<>(layout.memoryLayoutProblems(memoryDir));
+        if (!problems.isEmpty()) {
+            return problems;
+        }
+        StorageIntegrityReport report = new StorageIntegrityAuditor().audit(memoryDir);
+        report.findings().stream()
+                .filter(f -> f.severity() == StorageIntegritySeverity.ERROR
+                        || f.severity() == StorageIntegritySeverity.FATAL)
+                .limit(3)
+                .forEach(f -> problems.add("projection memory " + f.category() + " in " + f.target() + ": "
+                        + f.message()));
+        Manifest manifest = report.manifest();
+        if (problems.isEmpty() && (manifest == null
+                || !ProjectionLayout.MEMORY_FILES.contains(manifest.atomSegment())
+                || !ProjectionLayout.MEMORY_FILES.contains(manifest.vectorSegment())
+                || !ProjectionLayout.MEMORY_FILES.contains(manifest.feedbackSegment()))) {
+            problems.add("projection memory manifest does not use the standard projection layout");
+        }
+        return problems;
     }
 
     // ------------------------------------------------------------------ writing

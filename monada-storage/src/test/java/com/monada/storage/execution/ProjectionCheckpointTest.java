@@ -194,4 +194,36 @@ class ProjectionCheckpointTest {
         assertFalse(Files.exists(root.resolve("scopes")));
         assertThrows(IOException.class, () -> ProjectionLayout.of(root.resolve("missing"), scope));
     }
+
+    @Test
+    void layoutChecksLinksMemoryArtifactsAndGeneration() throws IOException {
+        ScopeId scope = ScopeId.of("scope-1");
+        ProjectionLayout layout = ProjectionLayout.of(root, scope);
+        Path dir = layout.projectionDir();
+        Path memory = layout.memory(dir);
+        assertEquals(List.of(), layout.linkProblems(dir), "a missing projection has no link problems");
+        assertEquals(1, layout.memoryLayoutProblems(memory).size());
+
+        for (String d : ProjectionLayout.MEMORY_DIRS) {
+            Files.createDirectories(memory.resolve(d));
+        }
+        for (String f : ProjectionLayout.MEMORY_FILES) {
+            Files.createFile(memory.resolve(f));
+        }
+        assertEquals(List.of(), layout.memoryLayoutProblems(memory));
+        String generation = layout.generation();
+        assertEquals(generation, layout.generation(), "stable while nothing changes");
+        Files.writeString(memory.resolve("feedback/feedback-000001.log"), "x");
+        assertFalse(generation.equals(layout.generation()), "a growing file changes the generation");
+
+        Files.delete(memory.resolve("feedback/feedback-000001.log"));
+        assertTrue(layout.memoryLayoutProblems(memory).get(0).contains("feedback-000001.log"));
+
+        Path outside = Files.createDirectories(root.resolve("outside"));
+        Files.createSymbolicLink(memory.resolve("feedback/feedback-000001.log"), outside.resolve("log"));
+        List<String> links = layout.linkProblems(dir);
+        assertEquals(1, links.size());
+        assertTrue(links.get(0).contains("symbolic link"), links.toString());
+        assertFalse(Files.exists(outside.resolve("log")), "checks never create anything");
+    }
 }
