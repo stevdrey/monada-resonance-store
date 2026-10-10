@@ -104,7 +104,8 @@ public final class ExecutionMemory implements AutoCloseable {
      * <p>A live writer may be between its ledger append and its projection write while the snapshot is
      * taken. When the projection then looks incompatible and the scope's files changed during the open, the
      * whole snapshot is taken again (at most {@value #READ_ONLY_ATTEMPTS} attempts, no waiting); a projection
-     * that is incompatible while nothing changes is reported on the first attempt.
+     * that is incompatible while nothing changes is reported on the first attempt. {@link #recall} on the
+     * snapshot ignores experiences projected after it was opened and retries a read that overlaps a write.
      */
     public static ExecutionMemory openReadOnly(Path root, ScopeId scope, ExecutionMemoryConfig config) {
         return openReadOnly(root, scope, config, attempt -> { });
@@ -113,9 +114,15 @@ public final class ExecutionMemory implements AutoCloseable {
     /** Attempts of a read-only open racing a live writer. */
     static final int READ_ONLY_ATTEMPTS = 3;
 
-    /** Test seam: runs after the ledger snapshot of each read-only attempt, before the projection loads. */
+    /**
+     * Test seam: runs after the ledger snapshot of each read-only attempt, before the projection loads, and
+     * before each read-only recall query attempt.
+     */
     interface ReadOnlyOpenHook {
         void afterLedgerSnapshot(int attempt);
+
+        default void beforeRecallQuery(int attempt) {
+        }
     }
 
     static ExecutionMemory openReadOnly(Path root, ScopeId scope, ExecutionMemoryConfig config,
@@ -159,8 +166,17 @@ public final class ExecutionMemory implements AutoCloseable {
             }
             HistoryIndex index = HistoryIndex.of(reader.replay());
             hook.afterLedgerSnapshot(attempt);
-            ExperienceProjection projection = ExperienceProjection.open(root, scope, index.all(), false,
-                    ProjectionFaults.NONE);
+            ProjectionFaults faults = new ProjectionFaults() {
+                @Override
+                public void beforeCommit(long ledgerSequence) {
+                }
+
+                @Override
+                public void beforeReadOnlyQuery(int queryAttempt) {
+                    hook.beforeRecallQuery(queryAttempt);
+                }
+            };
+            ExperienceProjection projection = ExperienceProjection.open(root, scope, index.all(), false, faults);
             return new ExecutionMemory(null, index, reader.hasTornTail(), scope, config, projection);
         } catch (IOException e) {
             throw new UncheckedIOException("cannot open execution memory " + root + " read-only", e);

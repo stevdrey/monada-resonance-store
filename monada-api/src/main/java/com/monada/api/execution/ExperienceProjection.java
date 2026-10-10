@@ -52,6 +52,8 @@ final class ExperienceProjection implements AutoCloseable {
     private Set<String> uncovered = Set.of(); // atoms of an interrupted batch, outside the covered prefix
     private MonadaMemory memory;
     private ProjectionCheckpoint writer;
+    private ProjectionLayout layout;
+    private String openGeneration = ""; // read-only: generation of the scope files when the snapshot was taken
 
     private ExperienceProjection(Path root, ScopeId scope, boolean writable, ProjectionFaults faults) {
         this.root = root;
@@ -95,7 +97,8 @@ final class ExperienceProjection implements AutoCloseable {
         projector = new Projector();
         uncovered = Set.of();
         try {
-            ProjectionLayout layout = ProjectionLayout.of(root, scope);
+            layout = ProjectionLayout.of(root, scope);
+            openGeneration = layout.generation();
             Path dir = layout.projectionDir();
             if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
                 if (writable && initializeEmpty && ledger.isEmpty()) {
@@ -218,10 +221,10 @@ final class ExperienceProjection implements AutoCloseable {
                         + f.message()));
         Manifest manifest = report.manifest();
         if (problems.isEmpty() && (manifest == null
-                || !ProjectionLayout.MEMORY_FILES.contains(manifest.atomSegment())
-                || !ProjectionLayout.MEMORY_FILES.contains(manifest.vectorSegment())
-                || !ProjectionLayout.MEMORY_FILES.contains(manifest.feedbackSegment()))) {
-            problems.add("projection memory manifest does not use the standard projection layout");
+                || !ProjectionLayout.ATOM_SEGMENT.equals(manifest.atomSegment())
+                || !ProjectionLayout.VECTOR_SEGMENT.equals(manifest.vectorSegment())
+                || !ProjectionLayout.FEEDBACK_SEGMENT.equals(manifest.feedbackSegment()))) {
+            problems.add("projection memory manifest does not name the standard projection segments");
         }
         return problems;
     }
@@ -319,30 +322,82 @@ final class ExperienceProjection implements AutoCloseable {
         if (query.isBlank() || (state != ProjectionStatus.State.CURRENT && state != ProjectionStatus.State.STALE)) {
             return new ExperienceRecall(status(ledgerSequence), List.of());
         }
-        Set<String> excluded = new HashSet<>(projector.retired());
-        excluded.addAll(uncovered);
-        List<ResonanceResult> results = memory.resonate(query).topK(limit + excluded.size()).execute().results();
-        List<ExperienceHit> hits = new ArrayList<>();
-        for (ResonanceResult result : results) {
-            String atomId = result.atom().id();
-            if (excluded.contains(atomId)) {
-                continue;
-            }
-            List<ExperienceRef> refs = projector.refs(atomId);
-            if (refs.isEmpty()) {
-                return incompatible("recalled atom " + atomId + " has no experience refs", ledgerSequence);
-            }
-            for (ExperienceRef ref : refs) {
-                Optional<HistoryEntry> event = resolver.apply(ref);
-                if (event.isEmpty()) {
-                    return incompatible("experience ref " + ExperienceRefCodec.canonical(ref)
-                            + " is missing from the ledger", ledgerSequence);
+        if (writable) { // the single writer: nothing changes the files behind this instance
+            Collected c = collect(query, limit, resolver, false);
+            return c.problem() == null ? new ExperienceRecall(status(ledgerSequence), order(c.hits(), limit))
+                    : incompatible(c.problem(), ledgerSequence);
+        }
+        // A read-only snapshot may run beside a live writer that keeps appending to the projection files. Atoms
+        // projected after the snapshot are skipped (they never consume a slot), and a read that fails or looks
+        // inconsistent while the files are changing is retried; stable damage is reported at once.
+        for (int attempt = 1; ; attempt++) {
+            String before = layout.generation();
+            faults.beforeReadOnlyQuery(attempt);
+            boolean grown = !before.equals(openGeneration);
+            String problem;
+            try {
+                Collected c = collect(query, limit, resolver, grown);
+                if (c.problem() == null) {
+                    return new ExperienceRecall(status(ledgerSequence), order(c.hits(), limit));
                 }
-                hits.add(new ExperienceHit(ref, atomId, result.score(), event.get(),
-                        ProjectionCheckpoint.FORMAT_VERSION, covered));
+                problem = c.problem();
+            } catch (RuntimeException e) {
+                problem = "projection memory cannot be read: " + e.getMessage();
+            }
+            if (before.equals(layout.generation()) || attempt == ExecutionMemory.READ_ONLY_ATTEMPTS) {
+                return incompatible(problem, ledgerSequence);
             }
         }
-        return new ExperienceRecall(status(ledgerSequence), order(hits, limit));
+    }
+
+    private record Collected(List<ExperienceHit> hits, String problem) {
+    }
+
+    /**
+     * Runs the ranker and expands atoms to refs. With {@code skipUnknown}, atoms the frozen projector does not
+     * know (projected after a read-only snapshot) are skipped and the ranker is asked again with a larger
+     * top-K until {@code limit} known atoms are found or the store is exhausted; otherwise such an atom is a
+     * problem. The order of known atoms is unaffected: each atom is scored independently.
+     */
+    private Collected collect(String query, int limit, Function<ExperienceRef, Optional<HistoryEntry>> resolver,
+                              boolean skipUnknown) {
+        Set<String> excluded = new HashSet<>(projector.retired());
+        excluded.addAll(uncovered);
+        int topK = limit + excluded.size();
+        while (true) {
+            List<ResonanceResult> results = memory.resonate(query).topK(topK).execute().results();
+            List<ExperienceHit> hits = new ArrayList<>();
+            int unknown = 0;
+            int atoms = 0;
+            for (ResonanceResult result : results) {
+                String atomId = result.atom().id();
+                if (excluded.contains(atomId)) {
+                    continue;
+                }
+                List<ExperienceRef> refs = projector.refs(atomId);
+                if (refs.isEmpty()) {
+                    if (!skipUnknown) {
+                        return new Collected(List.of(), "recalled atom " + atomId + " has no experience refs");
+                    }
+                    unknown++;
+                    continue;
+                }
+                atoms++;
+                for (ExperienceRef ref : refs) {
+                    Optional<HistoryEntry> event = resolver.apply(ref);
+                    if (event.isEmpty()) {
+                        return new Collected(List.of(), "experience ref " + ExperienceRefCodec.canonical(ref)
+                                + " is missing from the ledger");
+                    }
+                    hits.add(new ExperienceHit(ref, atomId, result.score(), event.get(),
+                            ProjectionCheckpoint.FORMAT_VERSION, covered));
+                }
+            }
+            if (unknown == 0 || atoms >= limit || results.size() < topK) {
+                return new Collected(hits, null);
+            }
+            topK = limit + excluded.size() + unknown; // strictly larger: fewer than limit known atoms were seen
+        }
     }
 
     /**

@@ -885,7 +885,8 @@ order, duplicate projection, unknown retirement) stops reading and makes it `INC
   cover digests, mapping and retired atoms must match, and every mapped atom must exist in `memory/`.
   Verification is read-only and fail-closed: any symbolic link or special file under `projection/` is
   `INCOMPATIBLE` before anything is read through it; the fixed memory layout (`manifest.json`, atom log,
-  vector segment, `vector-map.idx`, feedback log and their directories) must be complete, and the
+  vector segment, `vector-map.idx`, feedback log and their directories) must be complete, the manifest
+  must name exactly the standard atom, vector and feedback segments, and the
   side-effect-free `StorageIntegrityAuditor` must report no error (for example `ATOM_WITHOUT_VECTOR`), all
   before `MonadaMemory` is opened, so diagnosing a damaged projection never recreates files. It
   initializes a projection only for an **empty** ledger; a scope recorded before #98 is `MISSING`.
@@ -908,7 +909,11 @@ order, duplicate projection, unknown retirement) stops reading and makes it `INC
   write in progress. If the projection looks `INCOMPATIBLE` and a generation fingerprint of the scope (ledger
   segment size plus every projection file size) changed during the open, the snapshot is taken again, at
   most 3 attempts with no waiting; afterwards it stays `INCOMPATIBLE` with a "reopen to retry" diagnostic.
-  Damage observed while nothing changes is reported on the first attempt.
+  Damage observed while nothing changes is reported on the first attempt. Recall on a read-only snapshot
+  stays a snapshot even though the projection files are shared with the writer: atoms projected after the
+  snapshot was opened are skipped and the ranker is asked again with a larger top-K, so they never consume
+  a slot; a query that fails or looks inconsistent while the files change is retried (at most 3 attempts),
+  and one that fails while nothing changes makes the snapshot `INCOMPATIBLE`.
 
 ### 18.4 Recall
 

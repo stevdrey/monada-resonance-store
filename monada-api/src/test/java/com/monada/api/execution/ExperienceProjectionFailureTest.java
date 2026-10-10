@@ -402,6 +402,28 @@ class ExperienceProjectionFailureTest {
         }
     }
 
+    @Test
+    void manifestMustNameTheExactProjectionSegments() throws IOException {
+        Path store = root.resolve("store");
+        try (ExecutionMemory m = ExecutionMemory.open(store, SCOPE)) {
+            two(m);
+        }
+        Path manifest = projectionDir(store, SCOPE).resolve("memory/manifest.json");
+        String text = Files.readString(manifest);
+        String swapped = text.replace("\"atomSegment\": \"atoms/segment-000001.log\"",
+                "\"atomSegment\": \"feedback/feedback-000001.log\"");
+        assertFalse(text.equals(swapped), "fixture must change the manifest");
+        Files.writeString(manifest, swapped);
+        try (ExecutionMemory m = ExecutionMemory.open(store, SCOPE)) {
+            ProjectionStatus status = m.projectionStatus(SCOPE);
+            assertEquals(ProjectionStatus.State.INCOMPATIBLE, status.state());
+            assertTrue(status.diagnostics().toString().contains("standard projection segments"),
+                    status.diagnostics().toString());
+            assertEquals(ProjectionStatus.State.CURRENT, m.rebuildProjection(SCOPE).state());
+            assertEquals(2, m.recall(SCOPE, "gradle flaky test", 10).hits().size());
+        }
+    }
+
     private static void deleteTree(Path dir) throws IOException {
         try (Stream<Path> walk = Files.walk(dir)) {
             for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {

@@ -32,11 +32,17 @@ public final class ProjectionLayout {
     public static final String STAGING_DIR = "projection.staging";
     public static final String RETIRED_DIR = "projection.retired";
     public static final String MEMORY_DIR = "memory";
+    /** Atom segment a projection memory's manifest must name (manifest 0.4 default). */
+    public static final String ATOM_SEGMENT = "atoms/segment-000001.log";
+    /** Vector segment a projection memory's manifest must name (manifest 0.4 default). */
+    public static final String VECTOR_SEGMENT = "vectors/segment-000001.f32";
+    /** Feedback segment a projection memory's manifest must name (manifest 0.4 default). */
+    public static final String FEEDBACK_SEGMENT = "feedback/feedback-000001.log";
     /** Directories of the fixed MonadaMemory layout a projection creates (manifest 0.4 defaults). */
     public static final List<String> MEMORY_DIRS = List.of("atoms", "vectors", "indexes", "feedback");
     /** Files of the fixed MonadaMemory layout a projection creates (manifest 0.4 defaults). */
-    public static final List<String> MEMORY_FILES = List.of("manifest.json", "atoms/segment-000001.log",
-            "vectors/segment-000001.f32", "indexes/vector-map.idx", "feedback/feedback-000001.log");
+    public static final List<String> MEMORY_FILES = List.of("manifest.json", ATOM_SEGMENT, VECTOR_SEGMENT,
+            "indexes/vector-map.idx", FEEDBACK_SEGMENT);
 
     private final LedgerPaths paths;
     private final Path scopeDir;
