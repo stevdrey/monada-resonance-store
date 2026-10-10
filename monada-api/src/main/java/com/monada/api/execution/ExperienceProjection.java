@@ -111,9 +111,11 @@ final class ExperienceProjection implements AutoCloseable {
                     + " but the ledger ends at " + ledger.size());
         }
         Projector replayed = new Projector();
-        for (int i = 0; problems.isEmpty() && i < snapshot.coveredSequence(); i++) {
+        // coverDigests holds exactly one digest per covered sequence, so its int size bounds the loop.
+        List<String> digests = snapshot.coverDigests();
+        for (int i = 0; problems.isEmpty() && i < digests.size(); i++) {
             HistoryEntry entry = ledger.get(i);
-            if (!ProjectionCheckpoint.ledgerDigest(entry.event()).equals(snapshot.coverDigests().get(i))) {
+            if (!ProjectionCheckpoint.ledgerDigest(entry.event()).equals(digests.get(i))) {
                 problems.add("checkpoint was built from a different ledger at sequence " + entry.sequence());
             } else {
                 replayed.apply(entry.event());
