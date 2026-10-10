@@ -4,6 +4,7 @@ import com.monada.core.execution.AttemptId;
 import com.monada.core.execution.EventId;
 import com.monada.core.execution.ExecutionEvent;
 import com.monada.core.execution.ExecutionId;
+import com.monada.core.execution.ExperienceRef;
 import com.monada.core.execution.ScopeId;
 import com.monada.storage.execution.AppendResult;
 import com.monada.storage.execution.ExecutionLedger;
@@ -11,6 +12,7 @@ import com.monada.storage.execution.ExecutionLedgerReader;
 import com.monada.storage.execution.LedgerDiagnostic;
 import com.monada.storage.execution.LedgerException;
 import com.monada.storage.execution.LedgerLockedException;
+import com.monada.storage.execution.ProjectionLayout;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
@@ -29,8 +31,11 @@ import java.util.Optional;
  *
  * <p>{@link #openReadOnly} gives a lock-free snapshot for hosts that only inspect history.
  *
- * <p>This facade only records and reads ledger history. It never maps outcomes to ranking feedback, does not
- * change {@code MonadaMemory}, and exposes no cost, recall or export operation.
+ * <p>The facade records and reads ledger history and keeps a derived, per-scope projection for bounded
+ * {@link #recall} (contract v1, section 11). The ledger is written first and stays authoritative: a failed
+ * projection write never fails or repeats {@link #record}; it leaves {@link #projectionStatus} {@code STALE}
+ * until an explicit {@link #rebuildProjection}. It never maps outcomes to ranking feedback, does not change
+ * {@code MonadaMemory}, and exposes no cost or export operation.
  *
  * <p>Failures: invalid or illegal events throw {@link IllegalArgumentException} before any I/O (the ledger's
  * {@code LedgerRejectedException} category is preserved); I/O and corruption throw {@link UncheckedIOException}.
@@ -41,24 +46,41 @@ public final class ExecutionMemory implements AutoCloseable {
     private final boolean tornTail;
     private final ScopeId scope;
     private final ExecutionMemoryConfig config;
+    private final ExperienceProjection projection;
     private boolean closed;
 
     private ExecutionMemory(ExecutionLedger ledger, HistoryIndex index, boolean tornTail, ScopeId scope,
-                            ExecutionMemoryConfig config) {
+                            ExecutionMemoryConfig config, ExperienceProjection projection) {
         this.ledger = ledger;
         this.index = index;
         this.tornTail = tornTail;
         this.scope = scope;
         this.config = config;
+        this.projection = projection;
     }
 
+    /**
+     * Opens the scope for writing. The scope's projection is loaded and verified against the ledger; it is
+     * created only for an empty ledger and is never repaired here (see {@link #projectionStatus}).
+     */
     public static ExecutionMemory open(Path root, ScopeId scope, ExecutionMemoryConfig config) {
+        return open(root, scope, config, ProjectionFaults.NONE);
+    }
+
+    static ExecutionMemory open(Path root, ScopeId scope, ExecutionMemoryConfig config, ProjectionFaults faults) {
         Objects.requireNonNull(root, "root");
         Objects.requireNonNull(scope, "scope");
         Objects.requireNonNull(config, "config");
         try {
             ExecutionLedger opened = ExecutionLedger.open(root, scope);
-            return new ExecutionMemory(opened, HistoryIndex.of(opened.replay()), false, scope, config);
+            try {
+                HistoryIndex index = HistoryIndex.of(opened.replay());
+                ExperienceProjection projection = ExperienceProjection.open(root, scope, index.all(), true, faults);
+                return new ExecutionMemory(opened, index, false, scope, config, projection);
+            } catch (RuntimeException e) {
+                opened.close();
+                throw e;
+            }
         } catch (LedgerLockedException e) {
             throw new ExecutionMemoryLockedException("execution memory " + root + " is owned by another writer", e);
         } catch (IOException e) {
@@ -73,15 +95,70 @@ public final class ExecutionMemory implements AutoCloseable {
     /**
      * Opens a read-only <b>snapshot</b> of the scope: it takes no lock, creates nothing and may run next to a
      * live writer, seeing the valid prefix of the ledger at the moment of opening. Later appends are not
-     * visible; open a new read-only instance to see them. {@link #record} is unsupported. A missing root or
+     * visible; open a new read-only instance to see them. {@link #record} and {@link #rebuildProjection} are
+     * unsupported; {@link #recall} reads an existing projection and never creates one. A missing root or
      * manifest fails with {@link UncheckedIOException}, and so does a ledger with integrity errors (the
      * writable open refuses it too); a missing scope is an empty history. A torn tail (possibly a writer
      * mid-append) is tolerated and reported by {@link #hasTornTail()}.
+     *
+     * <p>A live writer may be between its ledger append and its projection write while the snapshot is
+     * taken. When the projection then looks incompatible and the scope's files changed during the open, the
+     * whole snapshot is taken again (at most {@value #READ_ONLY_ATTEMPTS} attempts, no waiting); a projection
+     * that is incompatible while nothing changes is reported on the first attempt. {@link #recall} on the
+     * snapshot ignores experiences projected after it was opened and retries a read that overlaps a write.
      */
     public static ExecutionMemory openReadOnly(Path root, ScopeId scope, ExecutionMemoryConfig config) {
+        return openReadOnly(root, scope, config, attempt -> { });
+    }
+
+    /** Attempts of a read-only open racing a live writer. */
+    static final int READ_ONLY_ATTEMPTS = 3;
+
+    /**
+     * Test seam: runs after the ledger snapshot of each read-only attempt, before the projection loads, and
+     * before each read-only recall query attempt.
+     */
+    interface ReadOnlyOpenHook {
+        void afterLedgerSnapshot(int attempt);
+
+        default void beforeRecallQuery(int attempt) {
+        }
+
+        default void onRecallRound(int topK) {
+        }
+    }
+
+    static ExecutionMemory openReadOnly(Path root, ScopeId scope, ExecutionMemoryConfig config,
+                                        ReadOnlyOpenHook hook) {
         Objects.requireNonNull(root, "root");
         Objects.requireNonNull(scope, "scope");
         Objects.requireNonNull(config, "config");
+        for (int attempt = 1; ; attempt++) {
+            String before = generation(root, scope);
+            ExecutionMemory snapshot = readOnlySnapshot(root, scope, config, hook, attempt);
+            if (snapshot.projection.state() != ProjectionStatus.State.INCOMPATIBLE
+                    || before.equals(generation(root, scope))) {
+                return snapshot; // consistent, or damaged while nothing was being written
+            }
+            if (attempt == READ_ONLY_ATTEMPTS) {
+                snapshot.projection.note("projection changed during a read-only open (live writer?) in all "
+                        + READ_ONLY_ATTEMPTS + " attempts; reopen to retry");
+                return snapshot;
+            }
+            snapshot.close();
+        }
+    }
+
+    private static String generation(Path root, ScopeId scope) {
+        try {
+            return ProjectionLayout.of(root, scope).generation();
+        } catch (IOException e) {
+            return "unavailable: " + e.getMessage();
+        }
+    }
+
+    private static ExecutionMemory readOnlySnapshot(Path root, ScopeId scope, ExecutionMemoryConfig config,
+                                                    ReadOnlyOpenHook hook, int attempt) {
         try {
             ExecutionLedgerReader reader = ExecutionLedgerReader.open(root, scope);
             List<LedgerDiagnostic> errors = reader.diagnostics().stream()
@@ -90,7 +167,25 @@ public final class ExecutionMemory implements AutoCloseable {
                 throw new UncheckedIOException(new LedgerException("execution memory " + root + " is not healthy; "
                         + "refusing a read-only open: " + errors.get(0).message(), errors));
             }
-            return new ExecutionMemory(null, HistoryIndex.of(reader.replay()), reader.hasTornTail(), scope, config);
+            HistoryIndex index = HistoryIndex.of(reader.replay());
+            hook.afterLedgerSnapshot(attempt);
+            ProjectionFaults faults = new ProjectionFaults() {
+                @Override
+                public void beforeCommit(long ledgerSequence) {
+                }
+
+                @Override
+                public void beforeReadOnlyQuery(int queryAttempt) {
+                    hook.beforeRecallQuery(queryAttempt);
+                }
+
+                @Override
+                public void onRecallRound(int topK) {
+                    hook.onRecallRound(topK);
+                }
+            };
+            ExperienceProjection projection = ExperienceProjection.open(root, scope, index.all(), false, faults);
+            return new ExecutionMemory(null, index, reader.hasTornTail(), scope, config, projection);
         } catch (IOException e) {
             throw new UncheckedIOException("cannot open execution memory " + root + " read-only", e);
         }
@@ -114,7 +209,8 @@ public final class ExecutionMemory implements AutoCloseable {
     /**
      * Appends {@code event}: {@code APPENDED}, {@code IDEMPOTENT} (identical retry, nothing written) or
      * {@code CONFLICT} (nothing written). Retrying a revision never charges its usage twice because replay
-     * counts each fact once.
+     * counts each fact once. An appended event is then projected when the projection is {@code CURRENT}; if
+     * that fails the result is still {@code APPENDED} and the projection becomes {@code STALE}.
      */
     public RecordResult record(ExecutionEvent event) {
         requireOpen();
@@ -126,6 +222,7 @@ public final class ExecutionMemory implements AutoCloseable {
             AppendResult r = ledger.append(event);
             if (r.status() == AppendResult.Status.APPENDED) {
                 index.add(r.sequence(), event);
+                projection.onAppended(index.all().get(index.all().size() - 1), index.all());
             }
             RecordResult.Status status = switch (r.status()) {
                 case APPENDED -> RecordResult.Status.APPENDED;
@@ -219,6 +316,51 @@ public final class ExecutionMemory implements AutoCloseable {
                 hasMore ? Optional.of(new HistoryCursor(scope, highWatermark, lastReturned)) : Optional.empty());
     }
 
+    /** Projection state of the scope and the ledger sequence it covers; side-effect free. */
+    public ProjectionStatus projectionStatus(ScopeId scope) {
+        requireOpen(scope);
+        return projection.status(index.all().size());
+    }
+
+    /**
+     * Explicit, deterministic reconciliation: rebuilds the scope's projection from the ledger (any prior
+     * state, including {@code INCOMPATIBLE}), publishing it only once complete. Re-running it on a current
+     * projection yields the same mapping and recall results. The ledger is never modified.
+     */
+    public ProjectionStatus rebuildProjection(ScopeId scope) {
+        requireOpen(scope);
+        if (ledger == null) {
+            throw new UnsupportedOperationException("this execution memory is read-only");
+        }
+        return projection.rebuild(index.all());
+    }
+
+    /**
+     * Bounded recall of prior experiences of this scope only (contract v1, section 11). Scope selection
+     * happens before ranking: each scope has its own projection, so another scope can never consume a slot.
+     * Runs the existing {@code MonadaMemory} ranking with its production defaults and expands atoms to their
+     * exact experience refs. {@code limit} must be 1–{@value ExperienceRecall#MAX_LIMIT}; a blank query
+     * returns no hits. A missing or incompatible projection returns no hits with its status; a stale one
+     * answers from the covered ledger prefix.
+     */
+    public ExperienceRecall recall(ScopeId scope, String query, int limit) {
+        requireOpen(scope);
+        Objects.requireNonNull(query, "query");
+        if (limit < 1 || limit > ExperienceRecall.MAX_LIMIT) {
+            throw new IllegalArgumentException("limit must be between 1 and " + ExperienceRecall.MAX_LIMIT);
+        }
+        return projection.recall(query, limit, index.all().size(), this::resolve);
+    }
+
+    private Optional<HistoryEntry> resolve(ExperienceRef ref) {
+        return index.find(ref.eventId())
+                .filter(e -> e.event().envelope().revision() == ref.revision())
+                .filter(e -> e.event().scopeId().equals(ref.scope())
+                        && e.event().envelope().taskId().equals(ref.task())
+                        && e.event().executionId().equals(ref.execution())
+                        && e.event().envelope().attemptId().equals(ref.attempt()));
+    }
+
     /** Releases the writer lock. Idempotent. */
     @Override
     public void close() {
@@ -226,6 +368,7 @@ public final class ExecutionMemory implements AutoCloseable {
             return;
         }
         closed = true;
+        projection.close();
         if (ledger != null) {
             ledger.close();
         }

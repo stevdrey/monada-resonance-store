@@ -1,8 +1,9 @@
 # Execution Memory Contract v1
 
 Status: accepted contract. The immutable domain records (section 15, issue #95) and the ledger with
-replay and read-only audit (section 16, issue #96) and the `ExecutionMemory` facade (section 17,
-issue #97) are implemented; projections, calculators and export remain future work. Decision record:
+replay and read-only audit (section 16, issue #96), the `ExecutionMemory` facade (section 17,
+issue #97) and scoped projections with bounded recall (section 18, issue #98) are implemented;
+calculators and export remain future work. Decision record:
 [ADR 0004](../adr/0004-embedded-execution-memory.md). Issue: #93 (Forge Integration 1/10).
 
 This document is the normative v1 contract that issues #94–#102 implement. Later issues may refine
@@ -62,7 +63,7 @@ Define, without implementing, the v1 semantics for:
 - `monada-storage`: yes — `com.monada.storage.execution` ledger, codec, replay, audit (#96, implemented).
 - `monada-index`: no — projections reuse `LinearScanResonanceIndex` unchanged.
 - `monada-learning`: no.
-- `monada-api`: yes — `com.monada.api.execution` facade, derived acceptance and history (#97, implemented); recall, export (#98, #101, later).
+- `monada-api`: yes — `com.monada.api.execution` facade, derived acceptance and history (#97, implemented); projections and bounded recall (#98, implemented, section 18); export (#101, later).
 - `monada-evaluation`: yes (later) — `com.monada.evaluation.execution` usage/cost calculators, comparison,
   export annotations and end-to-end gates (#99, #100, #101, #102).
 - `monada-speech`: no.
@@ -124,9 +125,11 @@ dedicated to execution memory; it must not be a legacy text store root.
         ├── scope.id                 # raw scope ID, UTF-8, verified on every open
         ├── ledger/
         │   └── events-000001.log    # authoritative append-only events
-        └── projection/              # derived, rebuildable (section 11)
-            ├── projection-checkpoint.log
-            └── memory/              # standard MonadaMemory layout (manifest 0.4)
+        ├── projection/              # derived, rebuildable (sections 11 and 18)
+        │   ├── projection-checkpoint.log
+        │   └── memory/              # standard MonadaMemory layout (manifest 0.4)
+        ├── projection.staging/      # transient: explicit rebuild in progress
+        └── projection.retired/      # transient: previous projection during the rebuild swap
 ```
 
 `execution-manifest.json` v1 fields: `format` = `"monada-execution-ledger"`, `version` = `"1"`,
@@ -435,6 +438,9 @@ version.
 - Comparison lives in `monada-evaluation` only (#100).
 
 ## 11. Projections and Bounded Recall
+
+Implemented in #98; section 18 records the implemented details (experience unit, checkpoint format,
+retired atoms, status rules and limits).
 
 - Each scope has its own projection store (`projection/memory/`), a standard `MonadaMemory` opened with
   `MonadaMemoryOptions.defaults()` (exact query keys, existing encoder and ranker). Scope selection
@@ -758,8 +764,9 @@ size), the in-memory event index grows with the scope, and no repair tool exists
 
 ## 17. ExecutionMemory Facade (issue #97)
 
-Package `com.monada.api.execution` in `monada-api`. It is ledger-backed only: no projections, recall,
-cost calculators, comparison or export, and no mapping of outcomes to ranking feedback.
+Package `com.monada.api.execution` in `monada-api`. As shipped in #97 it was ledger-backed only (projections
+and recall were added by #98, section 18): no cost calculators, comparison or export, and no mapping of
+outcomes to ranking feedback.
 `MonadaMemory` and its lifecycle are unchanged.
 
 ### 17.1 Ownership and threading
@@ -831,6 +838,132 @@ try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
 No persisted format change and no change to existing API signatures or defaults. Verification:
 `./gradlew :monada-api:test`, `./gradlew test`, `./gradlew verifyLibraryConsumer` (class-path and JPMS
 consumers record, retry, close, reopen and load execution history).
+
+## 18. Projections and Bounded Recall (issue #98)
+
+Implements section 11. New code: `com.monada.api.execution` (`ProjectionStatus`, `ExperienceRecall`,
+`ExperienceHit`, additive `ExecutionMemory` operations) and, in `com.monada.storage.execution`, the
+projection layout and checkpoint (`ProjectionLayout`, `ProjectionCheckpoint`, `ExperienceRefCodec`).
+`MonadaMemory`, `KnowledgeAtom`, atom/vector/feedback formats and ranking/query-key defaults are unchanged.
+
+### 18.1 Experience unit and projection text
+
+- One experience is one `ATTEMPT_FINISHED` fact at its latest revision, whatever its `AttemptResult`.
+- Its `ExperienceRef` is `(scope, task, execution, attempt, eventId, revision)` of the exact ledger event:
+  the original finish (revision 1) or the `CORRECTION` that replaced it (its own event ID and revision).
+- Projection text, scheme `summary-text-v1`: the execution's latest task summary, then the solution summary
+  and the lesson summary when present, joined by `\n`. Identifiers, outcomes, gate states, usage, costs,
+  routes and artifacts are never part of the text. Each part is bounded by the 4096 code point summary limit.
+- The identity envelope is kept out of the text on purpose (section 11): identical summaries from distinct
+  attempts produce **one atom with several refs**, and the refs live only in the checkpoint.
+- A correction of the finish, or of the execution's task summary, retires the old atom/ref pair and projects
+  the new one. An atom left without refs is a **retired atom**: recorded explicitly, never returned, and not
+  counted against `limit` (recall asks the ranker for `limit + retired atoms`). Retired atoms disappear on
+  the next rebuild.
+
+### 18.2 Checkpoint format (`projection-checkpoint.log`, version 1)
+
+Line framing `MXP1 TAB lineNumber TAB payloadBytes TAB sha256hex TAB payload LF` (max 65,536 bytes per
+line). Payload tokens are `|`-separated and escaped like ledger payloads:
+
+| Payload | Meaning |
+| --- | --- |
+| `HEADER\|1\|summary-text-v1\|<scope>` | Line 1: projection manifest (format version, text scheme, scope) |
+| `PROJECT\|<seq>\|<atomId>\|<ref>` | The atom now represents the ref |
+| `RETIRE\|<seq>\|<atomId>\|<ref>` | The atom no longer represents the ref |
+| `COVER\|<seq>\|<sha256>` | Ledger sequence `seq` is fully projected; digest of its ledger payload |
+
+`<ref>` is the canonical ref `scope|task|execution|~attempt|eventId|revision` (`ExperienceRefCodec`), which
+is also the last recall tie-break. Every ledger sequence gets exactly one `COVER`, in order from 1, written
+together with its entries in one forced write. Entries after the last `COVER` (an interrupted batch) and a
+torn final line are ignored and make the projection `STALE`; any other defect (digest, framing, version,
+order, duplicate projection, unknown retirement) stops reading and makes it `INCOMPATIBLE`.
+
+### 18.3 Status, writes and reconciliation
+
+- `open` loads the projection and verifies it against the ledger by re-projecting the covered prefix:
+  cover digests, mapping and retired atoms must match, and every mapped atom must exist in `memory/`.
+  Verification is read-only and fail-closed: any symbolic link or special file under `projection/` is
+  `INCOMPATIBLE` before anything is read through it; the fixed memory layout (`manifest.json`, atom log,
+  vector segment, `vector-map.idx`, feedback log and their directories) must be complete, the manifest
+  must name exactly the standard atom, vector and feedback segments, the feedback log must be empty
+  (projections hold no retrieval feedback, so default feedback-aware ranking is a no-op), and the
+  side-effect-free `StorageIntegrityAuditor` must report no error (for example `ATOM_WITHOUT_VECTOR`), all
+  before `MonadaMemory` is opened, so diagnosing a damaged projection never recreates files. It
+  initializes a projection only for an **empty** ledger; a scope recorded before #98 is `MISSING`.
+- `projectionStatus(scope)` returns `ProjectionStatus(state, coveredSequence, ledgerSequence,
+  projectionVersion, diagnostics)`:
+  `CURRENT` (covered = ledger), `STALE` (covered < ledger, or an interrupted checkpoint write), `MISSING`
+  (no projection), `INCOMPATIBLE` (unsound checkpoint, foreign ledger digests, mapping that disagrees with the
+  ledger, missing or incompatible `memory/`, unmapped atoms in a caught-up projection, or a recalled atom or
+  ref that cannot be resolved).
+- `record`: the ledger is appended first. When the projection is `CURRENT` the event is projected; if that
+  fails, `record` still returns `APPENDED`, the projection becomes `STALE` and the event is never retried as
+  a new event. While not `CURRENT`, appends are not projected; nothing catches up implicitly.
+- `rebuildProjection(scope)` (writable only) is the single, explicit reconciliation path for every state:
+  it re-projects the whole ledger into `projection.staging/`, renames the old projection to
+  `projection.retired/`, publishes the staging directory and deletes the retired one. Leftovers of an
+  interrupted rebuild are discarded by the next one. Incremental projection and rebuild share one function,
+  so a rebuild of a current projection is byte-identical in `projection-checkpoint.log` and ranking-identical.
+- `openReadOnly` creates nothing: it serves recall from an existing projection and reports `MISSING`
+  otherwise; `rebuildProjection` is unsupported. Beside a live writer, a snapshot can observe a projection
+  write in progress. If the projection looks `INCOMPATIBLE` and a generation fingerprint of the scope (ledger
+  segment size plus every projection file size) changed during the open, the snapshot is taken again, at
+  most 3 attempts with no waiting; afterwards it stays `INCOMPATIBLE` with a "reopen to retry" diagnostic.
+  Damage observed while nothing changes is reported on the first attempt. Recall on a read-only snapshot
+  stays a snapshot even though the projection files are shared with the writer: atoms projected after the
+  snapshot was opened are skipped and the ranker is asked again with a larger top-K, so they never consume
+  a slot; a query that fails or looks inconsistent while the files change is retried (at most 3 attempts),
+  and one that fails while nothing changes makes the snapshot `INCOMPATIBLE`.
+
+### 18.4 Recall
+
+`recall(scope, query, limit)` returns `ExperienceRecall(status, hits)`:
+
+- `limit` 1–50 (`ExperienceRecall.MAX_LIMIT`), otherwise `IllegalArgumentException`; a null query throws
+  `NullPointerException`; a blank query returns no hits.
+- `MISSING` / `INCOMPATIBLE`: no hits, status explains why. `STALE`: hits from the covered prefix, each
+  carrying that `coveredSequence`.
+- Ranking is the existing `MonadaMemory` query with `MonadaMemoryOptions.defaults()` (exact query keys,
+  default encoder, threshold 0.0); order is similarity descending, atom ID ascending, canonical ref
+  ascending, truncated to `limit`.
+- `ExperienceHit(ref, atomId, similarity, event, projectionVersion, coveredSequence)`: `event` is the
+  exact ledger `HistoryEntry` for the ref's event ID and revision. `similarity` is resonance similarity, not
+  quality or confidence. A ref missing from the ledger makes the projection `INCOMPATIBLE`; it is never
+  skipped silently.
+
+```java
+ScopeId scope = ScopeId.of("project-a");
+try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
+    ExperienceRecall recall = memory.recall(scope, "flaky gradle cache test", 5);
+    if (recall.status().state() != ProjectionStatus.State.CURRENT) {
+        memory.rebuildProjection(scope); // explicit reconciliation
+    }
+    for (ExperienceHit hit : recall.hits()) {
+        ExecutionView view = memory.loadExecution(scope, hit.ref().execution()).orElseThrow();
+    }
+}
+```
+
+### 18.5 Limits and compatibility
+
+- One scope per instance, as in section 17; another scope is never loaded, so it cannot consume top-K
+  slots. There is no cross-scope search.
+- The default threshold 0.0 is kept, so with fewer relevant experiences than `limit` the tail can contain
+  zero-similarity hits; callers filter by similarity if they need to.
+- `MonadaMemory.remember` stamps `createdAt` from the clock (unchanged legacy behavior), so atom log bytes
+  differ between rebuilds; ranking, scores and the checkpoint do not.
+- Retrieval feedback on projection atoms is not exposed; outcomes never become feedback.
+- Projection verification on open re-projects the covered ledger in memory (linear in the scope size).
+- Projection writes call `MonadaMemory.remember` only for atoms never projected before. Each distinct new
+  atom still costs one scan of the atom log inside `remember` (its existence check), so a full rebuild of N
+  distinct texts is quadratic in N; a bulk append path in `MonadaMemory` is follow-up work.
+- Existing ledgers stay valid: a pre-#98 scope opens as `MISSING` until rebuilt. Legacy text stores,
+  baselines and production defaults are untouched.
+
+Verification: `./gradlew :monada-storage:test`, `./gradlew :monada-api:test`,
+`./gradlew :monada-evaluation:test`, `./gradlew test`, `./gradlew verifyLibraryConsumer`. Per-query top-K
+evidence for the isolation fixture is printed by `ExperienceRecallIsolationReportTest`.
 
 ## Acceptance Criteria
 
