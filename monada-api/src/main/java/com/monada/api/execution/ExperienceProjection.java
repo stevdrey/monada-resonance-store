@@ -10,6 +10,7 @@ import com.monada.encoder.SimpleFrequencyEncoder;
 import com.monada.encoder.WeightedAtomEncoder;
 import com.monada.storage.FileAtomStore;
 import com.monada.storage.FileFrequencyStore;
+import com.monada.storage.FileManifestStore;
 import com.monada.storage.StoredVector;
 import com.monada.storage.VectorFormatProfile;
 import com.monada.storage.Manifest;
@@ -66,6 +67,7 @@ final class ExperienceProjection implements AutoCloseable {
     private ProjectionCheckpoint writer;
     private ProjectionLayout layout;
     private String openGeneration = ""; // read-only: generation of the scope files when the snapshot was taken
+    private Path loadedDir; // generation directory this instance loaded
 
     private ExperienceProjection(Path root, ScopeId scope, boolean writable, ProjectionFaults faults) {
         this.root = root;
@@ -109,6 +111,7 @@ final class ExperienceProjection implements AutoCloseable {
         projector = new Projector();
         uncovered = Set.of();
         stored.clear();
+        loadedDir = null;
         try {
             layout = ProjectionLayout.of(root, scope);
             openGeneration = layout.generation();
@@ -128,6 +131,7 @@ final class ExperienceProjection implements AutoCloseable {
                         + dir.get().getFileName());
                 return;
             }
+            loadedDir = dir.get();
             verify(layout, dir.get(), ledger);
         } catch (IOException | RuntimeException e) {
             closeResources();
@@ -168,7 +172,7 @@ final class ExperienceProjection implements AutoCloseable {
         Path memoryDir = layout.memory(dir);
         Manifest manifest = null;
         if (problems.isEmpty()) {
-            MemoryCheck check = memoryProblems(layout, memoryDir);
+            MemoryCheck check = memoryProblems(layout, memoryDir, snapshot.dimensions());
             problems.addAll(check.problems());
             manifest = check.manifest();
         }
@@ -238,7 +242,8 @@ final class ExperienceProjection implements AutoCloseable {
     private record MemoryCheck(List<String> problems, Manifest manifest) {
     }
 
-    private static MemoryCheck memoryProblems(ProjectionLayout layout, Path memoryDir) throws IOException {
+    private static MemoryCheck memoryProblems(ProjectionLayout layout, Path memoryDir, int dimensions)
+            throws IOException {
         List<String> problems = new ArrayList<>(layout.memoryLayoutProblems(memoryDir));
         if (!problems.isEmpty()) {
             return new MemoryCheck(problems, null);
@@ -268,10 +273,16 @@ final class ExperienceProjection implements AutoCloseable {
         }
         // Projections are always written as current-format stores with the production defaults; a legacy or
         // different profile would encode queries with semantics the stored vectors were not built with.
+        // The dimension is pinned by the checkpoint header written when the generation was built, never taken
+        // from the (possibly rewritten) manifest itself.
+        if (problems.isEmpty() && manifest.dimensions() != dimensions) {
+            problems.add("projection memory dimension " + manifest.dimensions()
+                    + " differs from the generation's dimension " + dimensions);
+        }
         if (problems.isEmpty() && (!PROJECTION_MANIFEST_VERSION.equals(manifest.version())
-                || !MonadaMemory.getExpectedProfile(manifest.dimensions(), MonadaMemoryOptions.defaults())
+                || !MonadaMemory.getExpectedProfile(dimensions, MonadaMemoryOptions.defaults())
                         .equals(manifest.encodingProfile())
-                || !VectorFormatProfile.currentFixedRaw(manifest.dimensions()).equals(manifest.vectorFormatProfile()))) {
+                || !VectorFormatProfile.currentFixedRaw(dimensions).equals(manifest.vectorFormatProfile()))) {
             problems.add("projection memory manifest is not a " + PROJECTION_MANIFEST_VERSION
                     + " store with the default encoding and vector profile");
         }
@@ -346,13 +357,14 @@ final class ExperienceProjection implements AutoCloseable {
         if (!writable) {
             throw new UnsupportedOperationException("this execution memory is read-only");
         }
-        // Keep the previous generation for in-flight readers only when it was sound.
-        boolean keepPrevious = state == ProjectionStatus.State.CURRENT || state == ProjectionStatus.State.STALE;
+        // A sound previous generation may back open read-only snapshots and is kept until pruneProjection; an
+        // unsound one backs no snapshot memory and is reclaimed by this rebuild.
+        boolean previousSound = state == ProjectionStatus.State.CURRENT || state == ProjectionStatus.State.STALE;
         closeResources();
         List<String> cleanup;
         try {
             ProjectionLayout layout = ProjectionLayout.of(root, scope);
-            cleanup = build(layout, ledger, keepPrevious);
+            cleanup = build(layout, ledger, previousSound);
         } catch (IOException e) {
             load(ledger, false);
             throw new UncheckedIOException("cannot rebuild the projection of scope " + scope, e);
@@ -361,33 +373,44 @@ final class ExperienceProjection implements AutoCloseable {
             throw e;
         }
         load(ledger, false);
-        diagnostics.addAll(cleanup);
-        return status(ledger.size());
+        return withNotes(status(ledger.size()), cleanup);
+    }
+
+    /** {@code status} plus transient notes of the operation that produced it (not kept in later statuses). */
+    private static ProjectionStatus withNotes(ProjectionStatus status, List<String> notes) {
+        List<String> all = new ArrayList<>(status.diagnostics());
+        all.addAll(notes);
+        return new ProjectionStatus(status.state(), status.coveredSequence(), status.ledgerSequence(),
+                status.projectionVersion(), all);
     }
 
     /**
-     * Builds a new generation: the checkpoint replays every ledger event (the same entries an incremental
-     * projection writes, so verification is unchanged), and the memory stores only the atoms live at the end, in
-     * atom ID order; retired atoms are compacted away. The generation gets a fresh name no reader references, is
-     * published by atomically replacing the pointer, and afterwards every generation except the new one and,
-     * when {@code keepPrevious} (it was sound), the previous one is deleted. A failure before publication
-     * deletes the new generation and leaves the pointer.
+     * Builds a new generation: the memory is created first and its dimension is pinned in the checkpoint header;
+     * the checkpoint replays every ledger event (the same entries an incremental projection writes, so
+     * verification is unchanged), and the memory stores only the atoms live at the end, in atom ID order; retired
+     * atoms are compacted away. The generation gets a fresh name no reader references and is published by
+     * atomically replacing the pointer. A failure before publication deletes the new generation and leaves the
+     * pointer. Afterwards, best effort, invalid generation entries are removed and the previous generation is
+     * reclaimed only when it was unsound; sound older generations stay until {@link #prune}.
      */
-    private List<String> build(ProjectionLayout layout, List<HistoryEntry> ledger, boolean keepPrevious)
+    private List<String> build(ProjectionLayout layout, List<HistoryEntry> ledger, boolean previousSound)
             throws IOException {
-        Optional<Path> previous = Optional.empty();
-        if (keepPrevious) {
-            try {
-                previous = layout.currentDir();
-            } catch (IOException e) {
-                previous = Optional.empty(); // an unreadable pointer is replaced by this rebuild
-            }
+        Optional<Path> previous;
+        try {
+            previous = layout.currentDir();
+        } catch (IOException e) {
+            previous = Optional.empty(); // an unreadable pointer is replaced by this rebuild
         }
         Path dir = layout.nextGenerationDir();
         Files.createDirectory(dir);
         try {
+            Path memoryDir = layout.memory(dir);
+            MonadaMemory target = MonadaMemory.open(memoryDir, MonadaMemoryOptions.defaults());
+            int dimensions = new FileManifestStore(memoryDir).load()
+                    .orElseThrow(() -> new IOException("new projection memory has no manifest")).dimensions();
             Projector p = new Projector();
-            try (ProjectionCheckpoint checkpoint = ProjectionCheckpoint.create(layout.checkpoint(dir), scope)) {
+            try (ProjectionCheckpoint checkpoint = ProjectionCheckpoint.create(layout.checkpoint(dir), scope,
+                    dimensions)) {
                 for (HistoryEntry entry : ledger) {
                     Projector.Step step = p.apply(entry.event());
                     faults.beforeCommit(entry.sequence());
@@ -395,7 +418,6 @@ final class ExperienceProjection implements AutoCloseable {
                             step.entries());
                 }
             }
-            MonadaMemory target = MonadaMemory.open(layout.memory(dir), MonadaMemoryOptions.defaults());
             for (var live : p.liveTexts().entrySet()) {
                 remember(target, live.getKey(), live.getValue());
             }
@@ -411,17 +433,50 @@ final class ExperienceProjection implements AutoCloseable {
         }
         // Published: from here on the rebuild has succeeded. Cleanup is best effort and reported, never thrown,
         // so a caller can tell a committed rebuild from one that did not happen.
-        List<String> cleanup = new ArrayList<>();
+        Optional<Path> unsound = previousSound ? Optional.empty() : previous;
+        return reclaim(layout, dir, g -> unsound.map(g::equals).orElse(false));
+    }
+
+    /**
+     * Explicit reclamation: deletes every generation except the published one (all of them when nothing is
+     * published), invalid generation entries and a leftover temporary pointer. The host calls it when no
+     * read-only snapshot is open; a snapshot whose generation is deleted reports {@code MISSING}. Best effort:
+     * failures are returned as diagnostics, never thrown.
+     */
+    ProjectionStatus prune(long ledgerSequence) {
+        if (!writable) {
+            throw new UnsupportedOperationException("this execution memory is read-only");
+        }
+        List<String> notes = new ArrayList<>();
+        try {
+            ProjectionLayout layout = ProjectionLayout.of(root, scope);
+            Optional<Path> current;
+            try {
+                current = layout.currentDir();
+            } catch (IOException e) {
+                notes.add("the projection pointer is unreadable (" + e.getMessage()
+                        + "); rebuild before pruning, nothing was deleted");
+                return withNotes(status(ledgerSequence), notes);
+            }
+            notes.addAll(reclaim(layout, current.orElse(null), g -> true));
+        } catch (IOException | RuntimeException e) {
+            notes.add("pruning failed: " + e.getMessage());
+        }
+        return withNotes(status(ledgerSequence), notes);
+    }
+
+    /** Deletes generations other than {@code keep} that {@code delete} selects, invalid entries and the temp pointer. */
+    private List<String> reclaim(ProjectionLayout layout, Path keep, java.util.function.Predicate<Path> delete) {
+        List<String> problems = new ArrayList<>();
         try {
             for (Path generation : layout.generationDirs()) {
-                if (!generation.equals(dir) && !previous.map(generation::equals).orElse(false)) {
+                if (!generation.equals(keep) && delete.test(generation)) {
                     try {
                         faults.beforeDeleteGeneration(generation);
                         deleteTree(generation);
                     } catch (IOException | RuntimeException e) {
-                        cleanup.add("published " + dir.getFileName() + " but could not delete old generation "
-                                + generation.getFileName() + ": " + e.getMessage()
-                                + "; the next rebuild retries the cleanup");
+                        problems.add("could not delete old generation " + generation.getFileName() + ": "
+                                + e.getMessage() + "; pruneProjection retries the cleanup");
                     }
                 }
             }
@@ -429,15 +484,14 @@ final class ExperienceProjection implements AutoCloseable {
                 try {
                     Files.delete(invalid); // removes a link itself, never its target
                 } catch (IOException | RuntimeException e) {
-                    cleanup.add("published " + dir.getFileName() + " but could not remove invalid entry "
-                            + invalid.getFileName() + ": " + e.getMessage());
+                    problems.add("could not remove invalid entry " + invalid.getFileName() + ": " + e.getMessage());
                 }
             }
             Files.deleteIfExists(layout.pointerTemp());
         } catch (IOException | RuntimeException e) {
-            cleanup.add("published " + dir.getFileName() + " but cleanup failed: " + e.getMessage());
+            problems.add("cleanup failed: " + e.getMessage());
         }
-        return cleanup;
+        return problems;
     }
 
     // ------------------------------------------------------------------ recall
@@ -455,6 +509,9 @@ final class ExperienceProjection implements AutoCloseable {
         // A read-only snapshot may run beside a live writer that keeps appending to the projection files. Atoms
         // projected after the snapshot are skipped (they never consume a slot), and a read that fails or looks
         // inconsistent while the files are changing is retried; stable damage is reported at once.
+        if (reclaimed(false)) {
+            return reclaimedRecall(ledgerSequence);
+        }
         for (int attempt = 1; ; attempt++) {
             String before = layout.generation();
             faults.beforeReadOnlyQuery(attempt);
@@ -469,10 +526,42 @@ final class ExperienceProjection implements AutoCloseable {
             } catch (RuntimeException e) {
                 problem = "projection memory cannot be read: " + e.getMessage();
             }
+            if (reclaimed(true)) {
+                return reclaimedRecall(ledgerSequence);
+            }
             if (before.equals(layout.generation()) || attempt == ExecutionMemory.READ_ONLY_ATTEMPTS) {
                 return incompatible(problem, ledgerSequence);
             }
         }
+    }
+
+    /**
+     * True when this snapshot's generation was deleted, or (after a failed read, {@code afterFailure}) is no
+     * longer the published one and is therefore being reclaimed by {@code pruneProjection}.
+     */
+    private boolean reclaimed(boolean afterFailure) {
+        if (loadedDir == null) {
+            return false;
+        }
+        if (!Files.isDirectory(loadedDir, LinkOption.NOFOLLOW_LINKS)) {
+            return true;
+        }
+        if (!afterFailure) {
+            return false;
+        }
+        try {
+            return !layout.currentDir().map(loadedDir::equals).orElse(false);
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private ExperienceRecall reclaimedRecall(long ledgerSequence) {
+        closeResources();
+        state = ProjectionStatus.State.MISSING;
+        diagnostics.add(0, "this snapshot's projection generation " + loadedDir.getFileName()
+                + " was reclaimed (pruneProjection); reopen the snapshot");
+        return new ExperienceRecall(status(ledgerSequence), List.of());
     }
 
     private record Collected(List<ExperienceHit> hits, String problem) {

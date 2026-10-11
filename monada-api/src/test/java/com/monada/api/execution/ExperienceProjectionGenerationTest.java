@@ -107,19 +107,6 @@ class ExperienceProjectionGenerationTest {
     }
 
     @Test
-    void rebuildsKeepOnlyTheCurrentAndPreviousGenerations() throws IOException {
-        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
-            corpus(m);
-            for (int i = 0; i < 3; i++) {
-                m.rebuildProjection(SCOPE);
-            }
-            assertEquals(List.of("projection-000003", "projection-000004"),
-                    layout().generationDirs().stream().map(p -> p.getFileName().toString()).toList());
-            assertEquals("projection-000004", projectionDir(root, SCOPE).getFileName().toString());
-        }
-    }
-
-    @Test
     void malformedOrDanglingPointerIsIncompatibleUntilRebuilt() throws IOException {
         try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
             corpus(m);
@@ -269,40 +256,6 @@ class ExperienceProjectionGenerationTest {
     }
 
     @Test
-    void failedCleanupAfterPublicationIsReportedNotThrown() throws IOException {
-        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
-            corpus(m);
-            m.rebuildProjection(SCOPE); // generations 1 (previous) and 2 (current)
-        }
-        boolean[] fail = {true};
-        ProjectionFaults faults = new ProjectionFaults() {
-            @Override
-            public void beforeCommit(long ledgerSequence) {
-            }
-
-            @Override
-            public void beforeDeleteGeneration(Path generation) throws IOException {
-                if (fail[0]) {
-                    throw new IOException("file in use");
-                }
-            }
-        };
-        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE, ExecutionMemoryConfig.defaults(), faults)) {
-            ProjectionStatus status = m.rebuildProjection(SCOPE); // committed: must not throw
-            assertEquals(ProjectionStatus.State.CURRENT, status.state());
-            assertTrue(status.diagnostics().toString().contains("could not delete old generation projection-000001"),
-                    status.diagnostics().toString());
-            assertEquals("projection-000003", projectionDir(root, SCOPE).getFileName().toString());
-            assertEquals(3, layout().generationDirs().size(), "the undeleted generation is still there");
-            fail[0] = false;
-            assertEquals(List.of(), m.rebuildProjection(SCOPE).diagnostics());
-            assertEquals(List.of("projection-000003", "projection-000004"),
-                    layout().generationDirs().stream().map(p -> p.getFileName().toString()).toList(),
-                    "the next rebuild retries the cleanup");
-        }
-    }
-
-    @Test
     void rebuildRecoversFromLinkedOrDanglingGenerationEntries() throws IOException {
         try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
             corpus(m);
@@ -324,5 +277,151 @@ class ExperienceProjectionGenerationTest {
         assertFalse(Files.exists(scopeDir.resolve("projection-000003"), java.nio.file.LinkOption.NOFOLLOW_LINKS));
         assertEquals("outside", Files.readString(outside.resolve("keep.txt")), "link targets are untouched");
         assertEquals(List.of(), layout().invalidGenerationEntries());
+    }
+
+    private List<String> generationNames() throws IOException {
+        return layout().generationDirs().stream().map(p -> p.getFileName().toString()).toList();
+    }
+
+    @Test
+    void rebuildsKeepSoundGenerationsUntilPruned() throws IOException {
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            corpus(m);
+            List<String> expected = render(m.recall(SCOPE, QUERY, 10));
+            for (int i = 0; i < 3; i++) {
+                m.rebuildProjection(SCOPE);
+            }
+            assertEquals(List.of("projection-000001", "projection-000002", "projection-000003", "projection-000004"),
+                    generationNames(), "rebuilds never reclaim sound generations");
+            ProjectionStatus pruned = m.pruneProjection(SCOPE);
+            assertEquals(ProjectionStatus.State.CURRENT, pruned.state());
+            assertEquals(List.of(), pruned.diagnostics());
+            assertEquals(List.of("projection-000004"), generationNames());
+            assertEquals(expected, render(m.recall(SCOPE, QUERY, 10)));
+        }
+    }
+
+    @Test
+    void snapshotSurvivesSeveralRebuilds() throws IOException {
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            corpus(m);
+        }
+        try (ExecutionMemory snapshot = ExecutionMemory.openReadOnly(root, SCOPE)) {
+            List<String> expected = render(snapshot.recall(SCOPE, QUERY, 10));
+            try (ExecutionMemory writer = ExecutionMemory.open(root, SCOPE)) {
+                writer.rebuildProjection(SCOPE);
+                writer.rebuildProjection(SCOPE);
+            }
+            ExperienceRecall recall = snapshot.recall(SCOPE, QUERY, 10);
+            assertEquals(ProjectionStatus.State.CURRENT, recall.status().state(), recall.status().diagnostics().toString());
+            assertEquals(expected, render(recall));
+            assertEquals(List.of("projection-000001", "projection-000002", "projection-000003"), generationNames());
+        }
+    }
+
+    @Test
+    void snapshotOfAPrunedGenerationReportsMissing() throws IOException {
+        List<String> expected;
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            corpus(m);
+            expected = render(m.recall(SCOPE, QUERY, 10));
+        }
+        try (ExecutionMemory snapshot = ExecutionMemory.openReadOnly(root, SCOPE)) {
+            try (ExecutionMemory writer = ExecutionMemory.open(root, SCOPE)) {
+                writer.rebuildProjection(SCOPE);
+                writer.pruneProjection(SCOPE); // the host prunes although this snapshot is still open
+            }
+            ExperienceRecall recall = snapshot.recall(SCOPE, QUERY, 10);
+            assertEquals(ProjectionStatus.State.MISSING, recall.status().state());
+            assertEquals(List.of(), recall.hits());
+            assertTrue(recall.status().diagnostics().get(0).contains("projection-000001 was reclaimed"),
+                    recall.status().diagnostics().toString());
+        }
+        try (ExecutionMemory fresh = ExecutionMemory.openReadOnly(root, SCOPE)) {
+            assertEquals(expected, render(fresh.recall(SCOPE, QUERY, 10)), "a reopened snapshot works");
+        }
+    }
+
+    @Test
+    void failedCleanupIsReportedNotThrownAndRetried() throws IOException {
+        boolean[] fail = {true};
+        ProjectionFaults faults = new ProjectionFaults() {
+            @Override
+            public void beforeCommit(long ledgerSequence) {
+            }
+
+            @Override
+            public void beforeDeleteGeneration(Path generation) throws IOException {
+                if (fail[0]) {
+                    throw new IOException("file in use");
+                }
+            }
+        };
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE, ExecutionMemoryConfig.defaults(), faults)) {
+            corpus(m);
+            m.rebuildProjection(SCOPE);
+            ProjectionStatus pruned = m.pruneProjection(SCOPE); // must not throw
+            assertEquals(ProjectionStatus.State.CURRENT, pruned.state());
+            assertTrue(pruned.diagnostics().toString().contains("could not delete old generation projection-000001"),
+                    pruned.diagnostics().toString());
+            assertEquals(List.of("projection-000001", "projection-000002"), generationNames());
+            fail[0] = false;
+            assertEquals(List.of(), m.pruneProjection(SCOPE).diagnostics());
+            assertEquals(List.of("projection-000002"), generationNames(), "the next prune retries the cleanup");
+
+            // An unsound previous generation is reclaimed by the rebuild itself; a failure there is reported too.
+            Files.writeString(projectionDir(root, SCOPE).resolve("memory/feedback/feedback-000001.log"), "x");
+            m.close();
+        }
+        fail[0] = true;
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE, ExecutionMemoryConfig.defaults(), faults)) {
+            assertEquals(ProjectionStatus.State.INCOMPATIBLE, m.projectionStatus(SCOPE).state());
+            ProjectionStatus rebuilt = m.rebuildProjection(SCOPE); // committed: must not throw
+            assertEquals(ProjectionStatus.State.CURRENT, rebuilt.state());
+            assertTrue(rebuilt.diagnostics().toString().contains("projection-000002"), rebuilt.diagnostics().toString());
+            assertTrue(rebuilt.diagnostics().toString().contains("pruneProjection retries"),
+                    rebuilt.diagnostics().toString());
+            assertEquals(List.of("projection-000002", "projection-000003"), generationNames());
+            fail[0] = false;
+            assertEquals(List.of(), m.pruneProjection(SCOPE).diagnostics());
+            assertEquals(List.of("projection-000003"), generationNames(), "prune retries the failed cleanup");
+        }
+    }
+
+    @Test
+    void pruneWithAnUnreadablePointerDeletesNothing() throws IOException {
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            corpus(m);
+            m.rebuildProjection(SCOPE);
+            Files.writeString(layout().pointer(), "garbage\n");
+            ProjectionStatus status = m.pruneProjection(SCOPE);
+            assertTrue(status.diagnostics().toString().contains("rebuild before pruning"), status.diagnostics().toString());
+            assertEquals(List.of("projection-000001", "projection-000002"), generationNames());
+        }
+    }
+
+    @Test
+    void manifestDimensionIsPinnedByTheGeneration() throws IOException {
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            corpus(m);
+        }
+        // Rewrite the memory as an internally consistent 0.4 store at another dimension.
+        Path memory = projectionDir(root, SCOPE).resolve("memory");
+        Path scratch = root.resolve("scratch-64");
+        com.monada.api.MonadaMemory other = com.monada.api.MonadaMemory.open(scratch,
+                com.monada.api.MonadaMemoryOptions.defaults());
+        String manifest = Files.readString(scratch.resolve("manifest.json"))
+                .replace("\"dimensions\": 128", "\"dimensions\": 64")
+                .replace("\"vectorDimensions\": 128", "\"vectorDimensions\": 64");
+        assertFalse(manifest.contains("128"), manifest);
+        Files.writeString(memory.resolve("manifest.json"), manifest);
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            ProjectionStatus status = m.projectionStatus(SCOPE);
+            assertEquals(ProjectionStatus.State.INCOMPATIBLE, status.state());
+            assertTrue(status.diagnostics().toString().contains("differs from the generation's dimension 128"),
+                    status.diagnostics().toString());
+            assertEquals(ProjectionStatus.State.CURRENT, m.rebuildProjection(SCOPE).state());
+        }
+        assertTrue(other != null);
     }
 }

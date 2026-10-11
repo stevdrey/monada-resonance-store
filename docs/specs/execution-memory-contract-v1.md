@@ -471,7 +471,9 @@ retired atoms, status rules and limits).
   → returns A/`z`; (b) one atom with refs `r1 < r2`, `limit = 1` → returns `r1`; `limit = 2` → `r1`, `r2`.
 - Each `ExperienceHit` carries the ref, similarity, projection version and covered ledger sequence.
 - Similarity is resonance similarity, never quality or confidence. Missing refs are reported, never
-  silently dropped. Retrieval feedback on projection atoms remains the explicit `feedback(...)` path.
+  silently dropped. Projections hold no retrieval feedback: there is no feedback
+  operation on projections, the projection feedback log must stay empty (section 18.3), and outcomes never
+  become feedback.
 
 ## 12. History and Export
 
@@ -869,7 +871,7 @@ line). Payload tokens are `|`-separated and escaped like ledger payloads:
 
 | Payload | Meaning |
 | --- | --- |
-| `HEADER\|1\|summary-text-v1\|<scope>` | Line 1: projection manifest (format version, text scheme, scope) |
+| `HEADER\|1\|summary-text-v1\|<dims>\|<scope>` | Line 1: projection manifest (format version, text scheme, the vector dimension the generation's memory was built with, scope) |
 | `PROJECT\|<seq>\|<atomId>\|<ref>` | The atom now represents the ref |
 | `RETIRE\|<seq>\|<atomId>\|<ref>` | The atom no longer represents the ref |
 | `COVER\|<seq>\|<sha256>` | Ledger sequence `seq` is fully projected; digest of its ledger payload |
@@ -891,7 +893,8 @@ order, duplicate projection, unknown retirement) stops reading and makes it `INC
   `INCOMPATIBLE` before anything is read through it; the fixed memory layout (`manifest.json`, atom log,
   vector segment, `vector-map.idx`, feedback log and their directories) must be complete, the manifest
   must name exactly the standard atom, vector and feedback segments and be a 0.4 manifest with the default
-  encoding profile and current vector format (a legacy manifest would apply other query weights), the
+  encoding profile and current vector format at the dimension recorded in the checkpoint header when the
+  generation was built (never the manifest's own, possibly rewritten, dimension) (a legacy manifest would apply other query weights), the
   feedback log must be empty
   (projections hold no retrieval feedback, so default feedback-aware ranking is a no-op), and the
   side-effect-free `StorageIntegrityAuditor` must report no error (for example `ATOM_WITHOUT_VECTOR`) and
@@ -913,15 +916,21 @@ order, duplicate projection, unknown retirement) stops reading and makes it `INC
 - `rebuildProjection(scope)` (writable only) is the single, explicit reconciliation path for every state:
   it re-projects the whole ledger into a new generation directory (`projection-<n+1>/`, a name never
   reused), stores only the final live atoms, and publishes it by atomically replacing `projection.current`.
-  The scope is never without a published projection and no directory a reader may hold is moved. Afterwards
-  every generation except the new one and the previous one (kept for in-flight readers, and only if it was
-  sound) is deleted; a failure before publication deletes the new generation and leaves the pointer.
+  The scope is never without a published projection and no directory a reader may hold is moved. A failure
+  before publication deletes the new generation and leaves the pointer. Rebuilds never reclaim sound older
+  generations, because open read-only snapshots keep reading them; only a previous generation that was
+  unsound (it backs no snapshot memory) is deleted after publication.
+- `pruneProjection(scope)` (writable only) is the explicit reclamation: it deletes every generation except
+  the published one (all of them when nothing is published), invalid entries and a leftover temporary
+  pointer. The host calls it when no read-only snapshot of the scope is open. A snapshot whose generation is
+  reclaimed anyway reports `MISSING` ("was reclaimed (pruneProjection); reopen the snapshot") with no hits,
+  never `INCOMPATIBLE`. With an unreadable pointer it deletes nothing and says to rebuild first.
   Generation entries are enumerated without resolving links: only real directories count as generations,
   numbering skips every name already present (links included), and entries that are links or files are
   removed after publication (the link itself, never its target), so a rebuild recovers from them.
-  Publication is the commit point: deleting old generations afterwards is best effort, so a cleanup failure
-  never makes `rebuildProjection` throw; it is reported in the returned status diagnostics and retried by
-  the next rebuild.
+  Publication is the commit point: deleting generations or entries afterwards (in a rebuild or a prune) is
+  best effort, so a cleanup failure never throws; it is reported in the diagnostics of the status that
+  operation returns (not in later statuses) and retried by the next `pruneProjection`.
   Incremental projection and rebuild share one projection function, so a rebuild of a current projection is
   byte-identical in `projection-checkpoint.log` and ranking-identical.
 - `openReadOnly` creates nothing: it serves recall from an existing projection and reports `MISSING`
@@ -979,10 +988,13 @@ try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
   each final live atom once. Each distinct new atom still costs one scan of the atom log inside `remember`
   (its existence check), so a full rebuild of N distinct live texts is quadratic in N; a bulk append path in
   `MonadaMemory` is follow-up work (#111).
+- Disk use grows by one generation per rebuild until the host calls `pruneProjection` (when no read-only
+  snapshot of the scope is open). A snapshot that outlives a prune of its generation reports `MISSING` and
+  must be reopened.
 - `MonadaMemory.open` can create missing standard directories. Verification checks the layout first, but a
-  read-only open that overlaps two consecutive rebuilds can still reach it on a generation that was just
-  deleted and recreate empty directories there; the next rebuild deletes them. A creation-free read-only
-  `MonadaMemory` open would remove this window and is outside this issue.
+  read-only open that overlaps a `pruneProjection` of the generation it is opening can still reach it and
+  recreate empty directories there; the next prune deletes them. A creation-free read-only `MonadaMemory`
+  open would remove this window and is outside this issue.
 - Existing ledgers stay valid: a pre-#98 scope opens as `MISSING` until rebuilt. Legacy text stores,
   baselines and production defaults are untouched.
 

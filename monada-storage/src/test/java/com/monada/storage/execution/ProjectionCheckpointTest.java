@@ -49,7 +49,7 @@ class ProjectionCheckpointTest {
 
     @Test
     void roundTripFoldsMappingRetirementsAndCovers() throws IOException {
-        try (ProjectionCheckpoint c = ProjectionCheckpoint.create(file(), SCOPE)) {
+        try (ProjectionCheckpoint c = ProjectionCheckpoint.create(file(), SCOPE, 128)) {
             c.commit(1, DIGEST, List.of());
             c.commit(2, DIGEST, List.of(new Entry(EntryKind.PROJECT, ATOM_A, ref("z", 1)),
                     new Entry(EntryKind.PROJECT, ATOM_A, ref("b", 1))));
@@ -70,7 +70,7 @@ class ProjectionCheckpointTest {
 
     @Test
     void commitRequiresTheNextSequenceAndScope() throws IOException {
-        try (ProjectionCheckpoint c = ProjectionCheckpoint.create(file(), SCOPE)) {
+        try (ProjectionCheckpoint c = ProjectionCheckpoint.create(file(), SCOPE, 128)) {
             assertThrows(IllegalArgumentException.class, () -> c.commit(2, DIGEST, List.of()));
             ExperienceRef foreign = new ExperienceRef(ScopeId.of("other"), TaskId.of("t"), ExecutionId.of("e"),
                     Optional.empty(), EventId.of("x"), 1);
@@ -78,12 +78,12 @@ class ProjectionCheckpointTest {
                     () -> c.commit(1, DIGEST, List.of(new Entry(EntryKind.PROJECT, ATOM_A, foreign))));
             assertThrows(IllegalArgumentException.class, () -> c.commit(1, "XYZ", List.of()));
         }
-        assertThrows(IOException.class, () -> ProjectionCheckpoint.create(file(), SCOPE), "never overwrites");
+        assertThrows(IOException.class, () -> ProjectionCheckpoint.create(file(), SCOPE, 128), "never overwrites");
     }
 
     @Test
     void tornTailAndIncompleteBatchAreUncleanNotProblems() throws IOException {
-        try (ProjectionCheckpoint c = ProjectionCheckpoint.create(file(), SCOPE)) {
+        try (ProjectionCheckpoint c = ProjectionCheckpoint.create(file(), SCOPE, 128)) {
             c.commit(1, DIGEST, List.of(new Entry(EntryKind.PROJECT, ATOM_A, ref("e1", 1))));
             c.commit(2, DIGEST, List.of(new Entry(EntryKind.PROJECT, ATOM_B, ref("e2", 1))));
         }
@@ -106,7 +106,7 @@ class ProjectionCheckpointTest {
 
     @Test
     void corruptionIsAProblemAndStopsReading() throws IOException {
-        try (ProjectionCheckpoint c = ProjectionCheckpoint.create(file(), SCOPE)) {
+        try (ProjectionCheckpoint c = ProjectionCheckpoint.create(file(), SCOPE, 128)) {
             c.commit(1, DIGEST, List.of(new Entry(EntryKind.PROJECT, ATOM_A, ref("e1", 1))));
             c.commit(2, DIGEST, List.of());
         }
@@ -123,7 +123,7 @@ class ProjectionCheckpointTest {
 
     @Test
     void unknownVersionOrForeignScopeIsAProblem() throws IOException {
-        ProjectionCheckpoint.create(file(), SCOPE).close();
+        ProjectionCheckpoint.create(file(), SCOPE, 128).close();
         assertFalse(ProjectionCheckpoint.read(file(), ScopeId.of("other")).isSound());
 
         Path v2 = root.resolve("v2.log");
@@ -141,14 +141,14 @@ class ProjectionCheckpointTest {
 
     @Test
     void duplicateProjectionAndUnknownRetirementAreProblems() throws IOException {
-        try (ProjectionCheckpoint c = ProjectionCheckpoint.create(file(), SCOPE)) {
+        try (ProjectionCheckpoint c = ProjectionCheckpoint.create(file(), SCOPE, 128)) {
             c.commit(1, DIGEST, List.of(new Entry(EntryKind.PROJECT, ATOM_A, ref("e1", 1))));
             c.commit(2, DIGEST, List.of(new Entry(EntryKind.PROJECT, ATOM_A, ref("e1", 1))));
         }
         assertTrue(read().problems().get(0).contains("duplicate projection"));
 
         Path other = root.resolve("other.log");
-        try (ProjectionCheckpoint c = ProjectionCheckpoint.create(other, SCOPE)) {
+        try (ProjectionCheckpoint c = ProjectionCheckpoint.create(other, SCOPE, 128)) {
             c.commit(1, DIGEST, List.of(new Entry(EntryKind.RETIRE, ATOM_A, ref("e1", 1))));
         }
         assertTrue(ProjectionCheckpoint.read(other, SCOPE).problems().get(0).contains("retirement"));
@@ -156,7 +156,7 @@ class ProjectionCheckpointTest {
 
     @Test
     void appendContinuesAfterReopen() throws IOException {
-        try (ProjectionCheckpoint c = ProjectionCheckpoint.create(file(), SCOPE)) {
+        try (ProjectionCheckpoint c = ProjectionCheckpoint.create(file(), SCOPE, 128)) {
             c.commit(1, DIGEST, List.of(new Entry(EntryKind.PROJECT, ATOM_A, ref("e1", 1))));
         }
         try (ProjectionCheckpoint c = ProjectionCheckpoint.openForAppend(file(), SCOPE, read())) {
@@ -271,5 +271,23 @@ class ProjectionCheckpointTest {
         assertEquals(List.of(escaping, dangling), layout.invalidGenerationEntries());
         assertEquals("projection-000004", layout.nextGenerationDir().getFileName().toString(),
                 "names held by links are never reused");
+    }
+
+    @Test
+    void headerRecordsTheGenerationDimension() throws IOException {
+        ProjectionCheckpoint.create(file(), SCOPE, 64).close();
+        ProjectionCheckpoint.Snapshot s = read();
+        assertTrue(s.isSound(), s.problems().toString());
+        assertEquals(64, s.dimensions());
+        assertThrows(IllegalArgumentException.class, () -> ProjectionCheckpoint.create(root.resolve("x.log"), SCOPE, 0));
+        assertFalse(Files.exists(root.resolve("x.log")), "an invalid dimension creates nothing");
+
+        Path bad = root.resolve("bad.log");
+        String payload = "HEADER|1|summary-text-v1|064|" + EventPayloadCodec.escape(SCOPE.value());
+        byte[] body = payload.getBytes(StandardCharsets.UTF_8);
+        Files.writeString(bad, "MXP1\t1\t" + body.length + "\t" + RecordLine.sha256Hex(body) + "\t" + payload + "\n");
+        ProjectionCheckpoint.Snapshot malformed = ProjectionCheckpoint.read(bad, SCOPE);
+        assertTrue(malformed.problems().get(0).contains("malformed projection header"), malformed.problems().toString());
+        assertEquals(0, malformed.dimensions());
     }
 }

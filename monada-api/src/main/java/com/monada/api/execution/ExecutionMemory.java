@@ -339,6 +339,21 @@ public final class ExecutionMemory implements AutoCloseable {
     }
 
     /**
+     * Explicit reclamation of old projection generations: deletes every generation except the published one
+     * (and invalid leftovers). Rebuilds keep sound older generations so that open read-only snapshots keep
+     * working; the host calls this when it has no read-only snapshot of the scope open. A snapshot whose
+     * generation is reclaimed reports {@code MISSING} and must be reopened. Best effort: failures are reported in
+     * the returned diagnostics, never thrown. Writable only; the ledger is never modified.
+     */
+    public ProjectionStatus pruneProjection(ScopeId scope) {
+        requireOpen(scope);
+        if (ledger == null) {
+            throw new UnsupportedOperationException("this execution memory is read-only");
+        }
+        return projection.prune(index.all().size());
+    }
+
+    /**
      * Bounded recall of prior experiences of this scope only (contract v1, section 11). Scope selection
      * happens before ranking: each scope has its own projection, so another scope can never consume a slot.
      * Runs the existing {@code MonadaMemory} ranking with its production defaults and expands atoms to their

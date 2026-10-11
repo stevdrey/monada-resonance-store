@@ -36,7 +36,7 @@ import java.util.regex.Pattern;
  * <p>Line framing: {@code MXP1 TAB lineNumber TAB payloadBytes TAB sha256hex TAB payload LF}. Payloads:
  *
  * <pre>
- * HEADER|1|summary-text-v1|&lt;scope&gt;                      line 1, the projection manifest
+ * HEADER|1|summary-text-v1|&lt;dims&gt;|&lt;scope&gt;               line 1: projection manifest (memory dimension)
  * PROJECT|&lt;ledgerSeq&gt;|&lt;atomId&gt;|&lt;canonical ref&gt;           atom now represents ref
  * RETIRE|&lt;ledgerSeq&gt;|&lt;atomId&gt;|&lt;canonical ref&gt;            atom no longer represents ref
  * COVER|&lt;ledgerSeq&gt;|&lt;sha256hex of the ledger payload&gt;   ledger event fully projected
@@ -60,6 +60,8 @@ public final class ProjectionCheckpoint implements AutoCloseable {
             Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
     private static final Pattern DIGEST = Pattern.compile("[0-9a-f]{64}");
     private static final Pattern SEQUENCE = Pattern.compile("[1-9][0-9]{0,18}");
+    private static final Pattern DIMENSIONS = Pattern.compile("[1-9][0-9]{0,5}");
+    private static final int MAX_DIMENSIONS = 999_999;
 
     /** Kind of a mapping entry. */
     public enum EntryKind { PROJECT, RETIRE }
@@ -85,8 +87,9 @@ public final class ProjectionCheckpoint implements AutoCloseable {
      * @param retiredAtoms    atoms that were projected and no longer represent any ref
      * @param cleanTail       false when the file ends in a torn line or an incomplete batch
      * @param problems        defects that make the projection incompatible (empty when sound)
+     * @param dimensions      vector dimension the generation's memory was built with (0 without a valid header)
      */
-    public record Snapshot(long coveredSequence, List<String> coverDigests,
+    public record Snapshot(int dimensions, long coveredSequence, List<String> coverDigests,
                            SortedMap<String, List<ExperienceRef>> refsByAtom, SortedSet<String> retiredAtoms,
                            boolean cleanTail, List<String> problems) {
         public Snapshot {
@@ -124,14 +127,20 @@ public final class ProjectionCheckpoint implements AutoCloseable {
         return RecordLine.sha256Hex(EventPayloadCodec.encode(event));
     }
 
-    /** Creates a new checkpoint (the file must not exist) holding only the header, durably. */
-    public static ProjectionCheckpoint create(Path file, ScopeId scope) throws IOException {
+    /**
+     * Creates a new checkpoint (the file must not exist) holding only the header, durably. {@code dimensions} is
+     * the vector dimension of the generation's memory; verification pins the memory manifest to it.
+     */
+    public static ProjectionCheckpoint create(Path file, ScopeId scope, int dimensions) throws IOException {
         Objects.requireNonNull(file, "file");
         Objects.requireNonNull(scope, "scope");
+        if (dimensions < 1 || dimensions > MAX_DIMENSIONS) {
+            throw new IllegalArgumentException("dimensions must be between 1 and " + MAX_DIMENSIONS);
+        }
         FileChannel channel = FileChannel.open(file, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE,
                 StandardOpenOption.APPEND);
         try {
-            writeFully(channel, frame(1, header(scope)));
+            writeFully(channel, frame(1, header(scope, dimensions)));
             channel.force(true);
         } catch (IOException | RuntimeException e) {
             channel.close();
@@ -289,6 +298,7 @@ public final class ProjectionCheckpoint implements AutoCloseable {
         private final Set<String> projected = new LinkedHashSet<>();
         private final List<String[]> pending = new ArrayList<>();
         private boolean header;
+        private int dimensions;
         private boolean tornTail;
 
         Fold(ScopeId scope) {
@@ -302,14 +312,17 @@ public final class ProjectionCheckpoint implements AutoCloseable {
         void accept(long line, String payload) {
             String[] t = payload.split("\\|", -1);
             if (!header) {
-                if (t.length != 4 || !t[0].equals("HEADER")) {
+                if (t.length < 3 || !t[0].equals("HEADER")) {
                     problem(line, "first line is not a projection header");
                 } else if (!t[1].equals(Integer.toString(FORMAT_VERSION)) || !t[2].equals(TEXT_SCHEME)) {
                     problem(line, "unsupported projection version " + t[1] + "/" + t[2]);
-                } else if (!t[3].equals(EventPayloadCodec.escape(scope.value()))) {
+                } else if (t.length != 5 || !DIMENSIONS.matcher(t[3]).matches()) {
+                    problem(line, "malformed projection header");
+                } else if (!t[4].equals(EventPayloadCodec.escape(scope.value()))) {
                     problem(line, "header belongs to another scope");
                 } else {
                     header = true;
+                    dimensions = Integer.parseInt(t[3]);
                 }
                 return;
             }
@@ -381,14 +394,15 @@ public final class ProjectionCheckpoint implements AutoCloseable {
             TreeSet<String> retired = new TreeSet<>(projected);
             retired.removeAll(live.keySet());
             boolean clean = !tornTail && pending.isEmpty();
-            return new Snapshot(coverDigests.size(), coverDigests, refsByAtom, retired, clean, problems);
+            return new Snapshot(dimensions, coverDigests.size(), coverDigests, refsByAtom, retired, clean, problems);
         }
     }
 
     // ------------------------------------------------------------------ framing helpers
 
-    private static String header(ScopeId scope) {
-        return "HEADER|" + FORMAT_VERSION + "|" + TEXT_SCHEME + "|" + EventPayloadCodec.escape(scope.value());
+    private static String header(ScopeId scope, int dimensions) {
+        return "HEADER|" + FORMAT_VERSION + "|" + TEXT_SCHEME + "|" + dimensions + "|"
+                + EventPayloadCodec.escape(scope.value());
     }
 
     private static byte[] frame(long line, String payload) {
