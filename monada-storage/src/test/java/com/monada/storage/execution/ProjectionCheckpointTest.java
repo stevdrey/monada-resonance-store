@@ -274,20 +274,23 @@ class ProjectionCheckpointTest {
     }
 
     @Test
-    void headerRecordsTheGenerationDimension() throws IOException {
-        ProjectionCheckpoint.create(file(), SCOPE, 64).close();
+    void headerPinsTheFormatDimension() throws IOException {
+        ProjectionCheckpoint.create(file(), SCOPE, ProjectionCheckpoint.PROJECTION_DIMENSIONS).close();
         ProjectionCheckpoint.Snapshot s = read();
         assertTrue(s.isSound(), s.problems().toString());
-        assertEquals(64, s.dimensions());
-        assertThrows(IllegalArgumentException.class, () -> ProjectionCheckpoint.create(root.resolve("x.log"), SCOPE, 0));
+        assertEquals(128, s.dimensions());
+        assertThrows(IllegalArgumentException.class, () -> ProjectionCheckpoint.create(root.resolve("x.log"), SCOPE, 64));
         assertFalse(Files.exists(root.resolve("x.log")), "an invalid dimension creates nothing");
 
-        Path bad = root.resolve("bad.log");
-        String payload = "HEADER|1|summary-text-v1|064|" + EventPayloadCodec.escape(SCOPE.value());
-        byte[] body = payload.getBytes(StandardCharsets.UTF_8);
-        Files.writeString(bad, "MXP1\t1\t" + body.length + "\t" + RecordLine.sha256Hex(body) + "\t" + payload + "\n");
-        ProjectionCheckpoint.Snapshot malformed = ProjectionCheckpoint.read(bad, SCOPE);
-        assertTrue(malformed.problems().get(0).contains("malformed projection header"), malformed.problems().toString());
-        assertEquals(0, malformed.dimensions());
+        for (String dims : List.of("064", "64")) {
+            Path bad = root.resolve("bad-" + dims + ".log");
+            String payload = "HEADER|1|summary-text-v1|" + dims + "|" + EventPayloadCodec.escape(SCOPE.value());
+            byte[] body = payload.getBytes(StandardCharsets.UTF_8);
+            Files.writeString(bad, "MXP1\t1\t" + body.length + "\t" + RecordLine.sha256Hex(body) + "\t" + payload + "\n");
+            ProjectionCheckpoint.Snapshot rejected = ProjectionCheckpoint.read(bad, SCOPE);
+            assertFalse(rejected.isSound(), dims);
+            assertTrue(rejected.problems().get(0).contains(dims.equals("64") ? "unsupported projection dimension"
+                    : "malformed projection header"), rejected.problems().toString());
+        }
     }
 }

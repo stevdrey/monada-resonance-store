@@ -424,4 +424,32 @@ class ExperienceProjectionGenerationTest {
         }
         assertTrue(other != null);
     }
+
+    @Test
+    void consistentlyRewrittenHeaderAndManifestDimensionIsIncompatible() throws Exception {
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            corpus(m);
+        }
+        Path generation = projectionDir(root, SCOPE);
+        // Rewrite the checkpoint header (with a recomputed line hash) and the manifest to 64 dimensions.
+        Path checkpoint = generation.resolve("projection-checkpoint.log");
+        List<String> lines = new ArrayList<>(Files.readAllLines(checkpoint, StandardCharsets.UTF_8));
+        String payload = lines.get(0).split("\t", 5)[4].replace("|128|", "|64|");
+        byte[] body = payload.getBytes(StandardCharsets.UTF_8);
+        String digest = java.util.HexFormat.of().formatHex(
+                java.security.MessageDigest.getInstance("SHA-256").digest(body));
+        lines.set(0, "MXP1\t1\t" + body.length + "\t" + digest + "\t" + payload);
+        Files.write(checkpoint, lines, StandardCharsets.UTF_8);
+        Path manifest = generation.resolve("memory/manifest.json");
+        Files.writeString(manifest, Files.readString(manifest)
+                .replace("\"dimensions\": 128", "\"dimensions\": 64")
+                .replace("\"vectorDimensions\": 128", "\"vectorDimensions\": 64"));
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            ProjectionStatus status = m.projectionStatus(SCOPE);
+            assertEquals(ProjectionStatus.State.INCOMPATIBLE, status.state());
+            assertTrue(status.diagnostics().toString().contains("unsupported projection dimension 64"),
+                    status.diagnostics().toString());
+            assertEquals(ProjectionStatus.State.CURRENT, m.rebuildProjection(SCOPE).state());
+        }
+    }
 }

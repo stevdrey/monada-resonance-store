@@ -871,7 +871,7 @@ line). Payload tokens are `|`-separated and escaped like ledger payloads:
 
 | Payload | Meaning |
 | --- | --- |
-| `HEADER\|1\|summary-text-v1\|<dims>\|<scope>` | Line 1: projection manifest (format version, text scheme, the vector dimension the generation's memory was built with, scope) |
+| `HEADER\|1\|summary-text-v1\|<dims>\|<scope>` | Line 1: projection manifest (format version, text scheme, vector dimension, scope). Format 1 fixes the dimension at 128 (the production default); any other value is rejected |
 | `PROJECT\|<seq>\|<atomId>\|<ref>` | The atom now represents the ref |
 | `RETIRE\|<seq>\|<atomId>\|<ref>` | The atom no longer represents the ref |
 | `COVER\|<seq>\|<sha256>` | Ledger sequence `seq` is fully projected; digest of its ledger payload |
@@ -893,8 +893,8 @@ order, duplicate projection, unknown retirement) stops reading and makes it `INC
   `INCOMPATIBLE` before anything is read through it; the fixed memory layout (`manifest.json`, atom log,
   vector segment, `vector-map.idx`, feedback log and their directories) must be complete, the manifest
   must name exactly the standard atom, vector and feedback segments and be a 0.4 manifest with the default
-  encoding profile and current vector format at the dimension recorded in the checkpoint header when the
-  generation was built (never the manifest's own, possibly rewritten, dimension) (a legacy manifest would apply other query weights), the
+  encoding profile and current vector format at the format-1 projection dimension (128, a constant of the
+  code, never trusted from the checkpoint header or the manifest; the header and manifest must both name it) (a legacy manifest would apply other query weights), the
   feedback log must be empty
   (projections hold no retrieval feedback, so default feedback-aware ranking is a no-op), and the
   side-effect-free `StorageIntegrityAuditor` must report no error (for example `ATOM_WITHOUT_VECTOR`) and

@@ -52,6 +52,12 @@ public final class ProjectionCheckpoint implements AutoCloseable {
     public static final String FILE_NAME = "projection-checkpoint.log";
     /** Projection format version, reported with every recall hit. */
     public static final int FORMAT_VERSION = 1;
+    /**
+     * Vector dimension of every format-1 projection memory: the production {@code MonadaMemory} default the
+     * builder uses. It is part of the format, not trusted from files: a header or manifest naming another
+     * dimension is a problem, and a builder producing another dimension must introduce a new format version.
+     */
+    public static final int PROJECTION_DIMENSIONS = 128;
     /** Canonical projection text scheme (see the API's projection text builder). */
     public static final String TEXT_SCHEME = "summary-text-v1";
     static final String MAGIC = "MXP1";
@@ -61,7 +67,6 @@ public final class ProjectionCheckpoint implements AutoCloseable {
     private static final Pattern DIGEST = Pattern.compile("[0-9a-f]{64}");
     private static final Pattern SEQUENCE = Pattern.compile("[1-9][0-9]{0,18}");
     private static final Pattern DIMENSIONS = Pattern.compile("[1-9][0-9]{0,5}");
-    private static final int MAX_DIMENSIONS = 999_999;
 
     /** Kind of a mapping entry. */
     public enum EntryKind { PROJECT, RETIRE }
@@ -134,8 +139,9 @@ public final class ProjectionCheckpoint implements AutoCloseable {
     public static ProjectionCheckpoint create(Path file, ScopeId scope, int dimensions) throws IOException {
         Objects.requireNonNull(file, "file");
         Objects.requireNonNull(scope, "scope");
-        if (dimensions < 1 || dimensions > MAX_DIMENSIONS) {
-            throw new IllegalArgumentException("dimensions must be between 1 and " + MAX_DIMENSIONS);
+        if (dimensions != PROJECTION_DIMENSIONS) {
+            throw new IllegalArgumentException("format " + FORMAT_VERSION + " projections have "
+                    + PROJECTION_DIMENSIONS + " dimensions, not " + dimensions);
         }
         FileChannel channel = FileChannel.open(file, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE,
                 StandardOpenOption.APPEND);
@@ -318,6 +324,9 @@ public final class ProjectionCheckpoint implements AutoCloseable {
                     problem(line, "unsupported projection version " + t[1] + "/" + t[2]);
                 } else if (t.length != 5 || !DIMENSIONS.matcher(t[3]).matches()) {
                     problem(line, "malformed projection header");
+                } else if (Integer.parseInt(t[3]) != PROJECTION_DIMENSIONS) {
+                    problem(line, "unsupported projection dimension " + t[3] + " (format " + FORMAT_VERSION
+                            + " uses " + PROJECTION_DIMENSIONS + ")");
                 } else if (!t[4].equals(EventPayloadCodec.escape(scope.value()))) {
                     problem(line, "header belongs to another scope");
                 } else {

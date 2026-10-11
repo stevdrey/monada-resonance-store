@@ -408,6 +408,11 @@ final class ExperienceProjection implements AutoCloseable {
             MonadaMemory target = MonadaMemory.open(memoryDir, MonadaMemoryOptions.defaults());
             int dimensions = new FileManifestStore(memoryDir).load()
                     .orElseThrow(() -> new IOException("new projection memory has no manifest")).dimensions();
+            if (dimensions != ProjectionCheckpoint.PROJECTION_DIMENSIONS) {
+                throw new IllegalStateException("MonadaMemory created a " + dimensions + "-dimensional store, but "
+                        + "projection format " + ProjectionCheckpoint.FORMAT_VERSION + " is "
+                        + ProjectionCheckpoint.PROJECTION_DIMENSIONS + "-dimensional; a new format version is required");
+            }
             Projector p = new Projector();
             try (ProjectionCheckpoint checkpoint = ProjectionCheckpoint.create(layout.checkpoint(dir), scope,
                     dimensions)) {
