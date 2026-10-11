@@ -18,6 +18,10 @@ interface ProjectionFaults {
     default void beforePublish() throws IOException {
     }
 
+    /** Called before an old generation is deleted after a successful publication. */
+    default void beforeDeleteGeneration(java.nio.file.Path generation) throws IOException {
+    }
+
     /** Called before each ranker query of a recall, with its top-K. */
     default void onRecallRound(int topK) {
     }

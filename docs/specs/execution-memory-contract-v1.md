@@ -890,11 +890,16 @@ order, duplicate projection, unknown retirement) stops reading and makes it `INC
   special file under the generation is
   `INCOMPATIBLE` before anything is read through it; the fixed memory layout (`manifest.json`, atom log,
   vector segment, `vector-map.idx`, feedback log and their directories) must be complete, the manifest
-  must name exactly the standard atom, vector and feedback segments, the feedback log must be empty
+  must name exactly the standard atom, vector and feedback segments and be a 0.4 manifest with the default
+  encoding profile and current vector format (a legacy manifest would apply other query weights), the
+  feedback log must be empty
   (projections hold no retrieval feedback, so default feedback-aware ranking is a no-op), and the
   side-effect-free `StorageIntegrityAuditor` must report no error (for example `ATOM_WITHOUT_VECTOR`) and
   no duplicate vector (`DUPLICATE_VECTOR_INDEX_ID`, `DUPLICATE_VECTOR_OFFSET`), all
-  before `MonadaMemory` is opened, so diagnosing a damaged projection never recreates files. It
+  before `MonadaMemory` is opened, so diagnosing a damaged projection never recreates files. Finally the
+  projection text of every live atom is re-encoded with the production pipeline (`WeightedAtomEncoder`
+  and the manifest's encoder dimensions) and must equal its stored vector, so a structurally valid but
+  altered frame is `INCOMPATIBLE`. It
   initializes a projection only for an **empty** ledger; a scope recorded before #98 is `MISSING`.
 - `projectionStatus(scope)` returns `ProjectionStatus(state, coveredSequence, ledgerSequence,
   projectionVersion, diagnostics)`:
@@ -911,6 +916,9 @@ order, duplicate projection, unknown retirement) stops reading and makes it `INC
   The scope is never without a published projection and no directory a reader may hold is moved. Afterwards
   every generation except the new one and the previous one (kept for in-flight readers, and only if it was
   sound) is deleted; a failure before publication deletes the new generation and leaves the pointer.
+  Publication is the commit point: deleting old generations afterwards is best effort, so a cleanup failure
+  never makes `rebuildProjection` throw; it is reported in the returned status diagnostics and retried by
+  the next rebuild.
   Incremental projection and rebuild share one projection function, so a rebuild of a current projection is
   byte-identical in `projection-checkpoint.log` and ranking-identical.
 - `openReadOnly` creates nothing: it serves recall from an existing projection and reports `MISSING`

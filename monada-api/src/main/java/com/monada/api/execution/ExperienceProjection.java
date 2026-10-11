@@ -6,7 +6,12 @@ import com.monada.core.KnowledgeAtom;
 import com.monada.core.ResonanceResult;
 import com.monada.core.execution.ExperienceRef;
 import com.monada.core.execution.ScopeId;
+import com.monada.encoder.SimpleFrequencyEncoder;
+import com.monada.encoder.WeightedAtomEncoder;
 import com.monada.storage.FileAtomStore;
+import com.monada.storage.FileFrequencyStore;
+import com.monada.storage.StoredVector;
+import com.monada.storage.VectorFormatProfile;
 import com.monada.storage.Manifest;
 import com.monada.storage.audit.StorageIntegrityAuditor;
 import com.monada.storage.audit.StorageIntegrityCategory;
@@ -22,6 +27,9 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -41,6 +49,8 @@ import java.util.function.Function;
  * exist in the memory. Any disagreement is {@code INCOMPATIBLE}; nothing is repaired automatically.
  */
 final class ExperienceProjection implements AutoCloseable {
+    /** Manifest version of every projection memory (the current {@code MonadaMemory} format). */
+    private static final String PROJECTION_MANIFEST_VERSION = "0.4";
     private final Path root;
     private final ScopeId scope;
     private final boolean writable;
@@ -156,8 +166,11 @@ final class ExperienceProjection implements AutoCloseable {
             problems.add("checkpoint mapping disagrees with the projection of the ledger");
         }
         Path memoryDir = layout.memory(dir);
+        Manifest manifest = null;
         if (problems.isEmpty()) {
-            problems.addAll(memoryProblems(layout, memoryDir));
+            MemoryCheck check = memoryProblems(layout, memoryDir);
+            problems.addAll(check.problems());
+            manifest = check.manifest();
         }
         MonadaMemory opened = null;
         if (problems.isEmpty()) {
@@ -183,6 +196,9 @@ final class ExperienceProjection implements AutoCloseable {
             extra.addAll(present);
             extra.removeAll(snapshot.refsByAtom().keySet());
             extra.removeAll(snapshot.retiredAtoms());
+        }
+        if (problems.isEmpty()) {
+            vectorProblem(memoryDir, manifest, replayed).ifPresent(problems::add);
         }
         boolean caughtUp = snapshot.cleanTail() && snapshot.coveredSequence() == ledger.size();
         if (problems.isEmpty() && caughtUp && !extra.isEmpty()) {
@@ -219,15 +235,18 @@ final class ExperienceProjection implements AutoCloseable {
      * manifest must name the standard segments. The feedback log must be empty, so the default feedback-aware
      * ranking is a no-op and scores depend on the ledger alone.
      */
-    private static List<String> memoryProblems(ProjectionLayout layout, Path memoryDir) throws IOException {
+    private record MemoryCheck(List<String> problems, Manifest manifest) {
+    }
+
+    private static MemoryCheck memoryProblems(ProjectionLayout layout, Path memoryDir) throws IOException {
         List<String> problems = new ArrayList<>(layout.memoryLayoutProblems(memoryDir));
         if (!problems.isEmpty()) {
-            return problems;
+            return new MemoryCheck(problems, null);
         }
         if (Files.size(memoryDir.resolve(ProjectionLayout.FEEDBACK_SEGMENT)) != 0) {
             // Feedback would change ranking while the checkpoint still matches the ledger.
             problems.add("projection memory holds retrieval feedback; projections are derived from the ledger only");
-            return problems;
+            return new MemoryCheck(problems, null);
         }
         StorageIntegrityReport report = new StorageIntegrityAuditor().audit(memoryDir);
         report.findings().stream()
@@ -247,7 +266,42 @@ final class ExperienceProjection implements AutoCloseable {
                 || !ProjectionLayout.FEEDBACK_SEGMENT.equals(manifest.feedbackSegment()))) {
             problems.add("projection memory manifest does not name the standard projection segments");
         }
-        return problems;
+        // Projections are always written as current-format stores with the production defaults; a legacy or
+        // different profile would encode queries with semantics the stored vectors were not built with.
+        if (problems.isEmpty() && (!PROJECTION_MANIFEST_VERSION.equals(manifest.version())
+                || !MonadaMemory.getExpectedProfile(manifest.dimensions(), MonadaMemoryOptions.defaults())
+                        .equals(manifest.encodingProfile())
+                || !VectorFormatProfile.currentFixedRaw(manifest.dimensions()).equals(manifest.vectorFormatProfile()))) {
+            problems.add("projection memory manifest is not a " + PROJECTION_MANIFEST_VERSION
+                    + " store with the default encoding and vector profile");
+        }
+        return new MemoryCheck(problems, manifest);
+    }
+
+    /**
+     * Re-encodes the projection text of every live atom with the production pipeline ({@link WeightedAtomEncoder},
+     * the side-effect-free helper {@code MonadaMemory.remember} itself relies on, and the manifest's encoder
+     * dimensions) and compares it with the stored vector, so a structurally valid but different frame cannot
+     * silently change scores. Reads only; the store layout and manifest were verified before.
+     */
+    private static Optional<String> vectorProblem(Path memoryDir, Manifest manifest, Projector replayed)
+            throws IOException {
+        Map<String, float[]> vectors = new HashMap<>();
+        for (StoredVector v : FileFrequencyStore.openExisting(memoryDir, ProjectionLayout.VECTOR_SEGMENT,
+                manifest.vectorFormatProfile()).findAll()) {
+            vectors.put(v.atomId(), v.vector().values());
+        }
+        MonadaMemoryOptions options = MonadaMemoryOptions.defaults();
+        SimpleFrequencyEncoder encoder = new SimpleFrequencyEncoder(manifest.dimensions());
+        for (var live : replayed.liveTexts().entrySet()) {
+            float[] expected = encoder.encode(WeightedAtomEncoder.toWeightedText(KnowledgeAtom.text(live.getValue()),
+                    options.textNormalizer(), options.expansionOptions())).values();
+            if (!Arrays.equals(expected, vectors.get(live.getKey()))) {
+                return Optional.of("stored vector of atom " + live.getKey()
+                        + " does not match its projected text");
+            }
+        }
+        return Optional.empty();
     }
 
     // ------------------------------------------------------------------ writing
@@ -295,9 +349,10 @@ final class ExperienceProjection implements AutoCloseable {
         // Keep the previous generation for in-flight readers only when it was sound.
         boolean keepPrevious = state == ProjectionStatus.State.CURRENT || state == ProjectionStatus.State.STALE;
         closeResources();
+        List<String> cleanup;
         try {
             ProjectionLayout layout = ProjectionLayout.of(root, scope);
-            build(layout, ledger, keepPrevious);
+            cleanup = build(layout, ledger, keepPrevious);
         } catch (IOException e) {
             load(ledger, false);
             throw new UncheckedIOException("cannot rebuild the projection of scope " + scope, e);
@@ -306,6 +361,7 @@ final class ExperienceProjection implements AutoCloseable {
             throw e;
         }
         load(ledger, false);
+        diagnostics.addAll(cleanup);
         return status(ledger.size());
     }
 
@@ -317,7 +373,8 @@ final class ExperienceProjection implements AutoCloseable {
      * when {@code keepPrevious} (it was sound), the previous one is deleted. A failure before publication
      * deletes the new generation and leaves the pointer.
      */
-    private void build(ProjectionLayout layout, List<HistoryEntry> ledger, boolean keepPrevious) throws IOException {
+    private List<String> build(ProjectionLayout layout, List<HistoryEntry> ledger, boolean keepPrevious)
+            throws IOException {
         Optional<Path> previous = Optional.empty();
         if (keepPrevious) {
             try {
@@ -352,12 +409,27 @@ final class ExperienceProjection implements AutoCloseable {
             }
             throw e;
         }
-        for (Path generation : layout.generationDirs()) {
-            if (!generation.equals(dir) && !previous.map(generation::equals).orElse(false)) {
-                deleteTree(generation);
+        // Published: from here on the rebuild has succeeded. Cleanup is best effort and reported, never thrown,
+        // so a caller can tell a committed rebuild from one that did not happen.
+        List<String> cleanup = new ArrayList<>();
+        try {
+            for (Path generation : layout.generationDirs()) {
+                if (!generation.equals(dir) && !previous.map(generation::equals).orElse(false)) {
+                    try {
+                        faults.beforeDeleteGeneration(generation);
+                        deleteTree(generation);
+                    } catch (IOException | RuntimeException e) {
+                        cleanup.add("published " + dir.getFileName() + " but could not delete old generation "
+                                + generation.getFileName() + ": " + e.getMessage()
+                                + "; the next rebuild retries the cleanup");
+                    }
+                }
             }
+            Files.deleteIfExists(layout.pointerTemp());
+        } catch (IOException | RuntimeException e) {
+            cleanup.add("published " + dir.getFileName() + " but cleanup failed: " + e.getMessage());
         }
-        Files.deleteIfExists(layout.pointerTemp());
+        return cleanup;
     }
 
     // ------------------------------------------------------------------ recall

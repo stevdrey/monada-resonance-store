@@ -217,4 +217,88 @@ class ExperienceProjectionGenerationTest {
         }
         assertFalse(resolved.contains("a3"));
     }
+
+    @Test
+    void legacyManifestInAProjectionIsIncompatible() throws IOException {
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            corpus(m);
+        }
+        // A structurally valid 0.1 manifest with the same segments: legacy query weights would apply.
+        Files.writeString(projectionDir(root, SCOPE).resolve("memory/manifest.json"), """
+                {
+                  "version": "0.1",
+                  "dimensions": 128,
+                  "vectorSegment": "vectors/segment-000001.f32",
+                  "atomSegment": "atoms/segment-000001.log",
+                  "feedbackSegment": "feedback/feedback-000001.log"
+                }
+                """);
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            ProjectionStatus status = m.projectionStatus(SCOPE);
+            assertEquals(ProjectionStatus.State.INCOMPATIBLE, status.state());
+            assertTrue(status.diagnostics().toString().contains("default encoding"), status.diagnostics().toString());
+            assertEquals(ProjectionStatus.State.CURRENT, m.rebuildProjection(SCOPE).state());
+        }
+    }
+
+    @Test
+    void alteredVectorOfALiveAtomIsIncompatible() throws IOException {
+        List<String> expected;
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            corpus(m);
+            expected = render(m.recall(SCOPE, QUERY, 10));
+        }
+        // Swap the two frames: the store stays structurally valid, but each atom now has the other's vector.
+        Path segment = projectionDir(root, SCOPE).resolve("memory/vectors/segment-000001.f32");
+        byte[] bytes = Files.readAllBytes(segment);
+        int frame = bytes.length / 2;
+        byte[] swapped = new byte[bytes.length];
+        System.arraycopy(bytes, frame, swapped, 0, frame);
+        System.arraycopy(bytes, 0, swapped, frame, frame);
+        Files.write(segment, swapped);
+        try (ExecutionMemory m = ExecutionMemory.openReadOnly(root, SCOPE)) {
+            ProjectionStatus status = m.projectionStatus(SCOPE);
+            assertEquals(ProjectionStatus.State.INCOMPATIBLE, status.state());
+            assertTrue(status.diagnostics().toString().contains("does not match its projected text"),
+                    status.diagnostics().toString());
+        }
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            assertEquals(ProjectionStatus.State.CURRENT, m.rebuildProjection(SCOPE).state());
+            assertEquals(expected, render(m.recall(SCOPE, QUERY, 10)));
+        }
+    }
+
+    @Test
+    void failedCleanupAfterPublicationIsReportedNotThrown() throws IOException {
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            corpus(m);
+            m.rebuildProjection(SCOPE); // generations 1 (previous) and 2 (current)
+        }
+        boolean[] fail = {true};
+        ProjectionFaults faults = new ProjectionFaults() {
+            @Override
+            public void beforeCommit(long ledgerSequence) {
+            }
+
+            @Override
+            public void beforeDeleteGeneration(Path generation) throws IOException {
+                if (fail[0]) {
+                    throw new IOException("file in use");
+                }
+            }
+        };
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE, ExecutionMemoryConfig.defaults(), faults)) {
+            ProjectionStatus status = m.rebuildProjection(SCOPE); // committed: must not throw
+            assertEquals(ProjectionStatus.State.CURRENT, status.state());
+            assertTrue(status.diagnostics().toString().contains("could not delete old generation projection-000001"),
+                    status.diagnostics().toString());
+            assertEquals("projection-000003", projectionDir(root, SCOPE).getFileName().toString());
+            assertEquals(3, layout().generationDirs().size(), "the undeleted generation is still there");
+            fail[0] = false;
+            assertEquals(List.of(), m.rebuildProjection(SCOPE).diagnostics());
+            assertEquals(List.of("projection-000003", "projection-000004"),
+                    layout().generationDirs().stream().map(p -> p.getFileName().toString()).toList(),
+                    "the next rebuild retries the cleanup");
+        }
+    }
 }
