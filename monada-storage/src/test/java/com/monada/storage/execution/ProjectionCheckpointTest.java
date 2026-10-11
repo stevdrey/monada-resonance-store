@@ -258,4 +258,18 @@ class ProjectionCheckpointTest {
         assertTrue(links.get(0).contains("symbolic link"), links.toString());
         assertFalse(Files.exists(outside.resolve("log")), "checks never create anything");
     }
+
+    @Test
+    void generationEnumerationNeverResolvesLinks() throws IOException {
+        ProjectionLayout layout = ProjectionLayout.of(root, ScopeId.of("scope-1"));
+        Path real = Files.createDirectories(layout.nextGenerationDir());
+        Path outside = Files.createDirectories(root.resolve("outside"));
+        Path escaping = Files.createSymbolicLink(layout.scopeDir().resolve("projection-000002"), outside);
+        Path dangling = Files.createSymbolicLink(layout.scopeDir().resolve("projection-000003"),
+                layout.scopeDir().resolve("nowhere"));
+        assertEquals(List.of(real), layout.generationDirs(), "only real directories are generations");
+        assertEquals(List.of(escaping, dangling), layout.invalidGenerationEntries());
+        assertEquals("projection-000004", layout.nextGenerationDir().getFileName().toString(),
+                "names held by links are never reused");
+    }
 }

@@ -301,4 +301,28 @@ class ExperienceProjectionGenerationTest {
                     "the next rebuild retries the cleanup");
         }
     }
+
+    @Test
+    void rebuildRecoversFromLinkedOrDanglingGenerationEntries() throws IOException {
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            corpus(m);
+        }
+        Path scopeDir = layout().scopeDir();
+        Path outside = Files.createDirectories(root.getParent().resolve(root.getFileName() + "-outside"));
+        Files.writeString(outside.resolve("keep.txt"), "outside");
+        Files.createSymbolicLink(scopeDir.resolve("projection-000002"), outside);
+        Files.createSymbolicLink(scopeDir.resolve("projection-000003"), scopeDir.resolve("missing-target"));
+        Files.writeString(layout().pointer(), "projection-000002\n");
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            assertEquals(ProjectionStatus.State.INCOMPATIBLE, m.projectionStatus(SCOPE).state());
+            ProjectionStatus rebuilt = m.rebuildProjection(SCOPE); // the explicit recovery path must work
+            assertEquals(ProjectionStatus.State.CURRENT, rebuilt.state(), rebuilt.diagnostics().toString());
+            assertEquals("projection-000004", projectionDir(root, SCOPE).getFileName().toString(),
+                    "never reuses a name held by a link");
+        }
+        assertFalse(Files.exists(scopeDir.resolve("projection-000002"), java.nio.file.LinkOption.NOFOLLOW_LINKS));
+        assertFalse(Files.exists(scopeDir.resolve("projection-000003"), java.nio.file.LinkOption.NOFOLLOW_LINKS));
+        assertEquals("outside", Files.readString(outside.resolve("keep.txt")), "link targets are untouched");
+        assertEquals(List.of(), layout().invalidGenerationEntries());
+    }
 }

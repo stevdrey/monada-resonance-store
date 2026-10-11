@@ -425,6 +425,14 @@ final class ExperienceProjection implements AutoCloseable {
                     }
                 }
             }
+            for (Path invalid : layout.invalidGenerationEntries()) {
+                try {
+                    Files.delete(invalid); // removes a link itself, never its target
+                } catch (IOException | RuntimeException e) {
+                    cleanup.add("published " + dir.getFileName() + " but could not remove invalid entry "
+                            + invalid.getFileName() + ": " + e.getMessage());
+                }
+            }
             Files.deleteIfExists(layout.pointerTemp());
         } catch (IOException | RuntimeException e) {
             cleanup.add("published " + dir.getFileName() + " but cleanup failed: " + e.getMessage());

@@ -116,13 +116,38 @@ public final class ProjectionLayout {
     /** Generation directories present in the scope, in ascending generation order. */
     public List<Path> generationDirs() throws LedgerException {
         List<Path> out = new ArrayList<>();
+        for (Path p : generationEntries()) {
+            if (Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)) {
+                out.add(paths.contained(p)); // a real directory directly below the scope never escapes
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Entries named like a generation that are not real directories (symbolic links, dangling or not, and
+     * plain files). They are never followed or resolved; a rebuild removes the entries themselves.
+     */
+    public List<Path> invalidGenerationEntries() throws LedgerException {
+        List<Path> out = new ArrayList<>();
+        for (Path p : generationEntries()) {
+            if (!Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)) {
+                out.add(p);
+            }
+        }
+        return out;
+    }
+
+    /** Every entry named like a generation, in ascending generation order; nothing is resolved or followed. */
+    private List<Path> generationEntries() throws LedgerException {
+        List<Path> out = new ArrayList<>();
         if (!Files.isDirectory(scopeDir, LinkOption.NOFOLLOW_LINKS)) {
             return out;
         }
         try (Stream<Path> entries = Files.list(scopeDir)) {
             for (Path p : entries.toList()) {
                 if (GENERATION_NAME.matcher(p.getFileName().toString()).matches()) {
-                    out.add(paths.contained(p));
+                    out.add(scopeDir.resolve(p.getFileName()));
                 }
             }
         } catch (IOException e) {
@@ -132,9 +157,12 @@ public final class ProjectionLayout {
         return out;
     }
 
-    /** A fresh generation directory name, above every existing one, so a name is never reused. */
+    /**
+     * A fresh generation directory name above every entry named like a generation (including invalid ones), so
+     * a name is never reused and never collides with a leftover link.
+     */
     public Path nextGenerationDir() throws LedgerException {
-        List<Path> existing = generationDirs();
+        List<Path> existing = generationEntries();
         long next = existing.isEmpty() ? 1 : generationNumber(existing.get(existing.size() - 1)) + 1;
         return paths.contained(scopeDir.resolve(GENERATION_PREFIX + String.format("%06d", next)));
     }

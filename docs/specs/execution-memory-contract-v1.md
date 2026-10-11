@@ -916,6 +916,9 @@ order, duplicate projection, unknown retirement) stops reading and makes it `INC
   The scope is never without a published projection and no directory a reader may hold is moved. Afterwards
   every generation except the new one and the previous one (kept for in-flight readers, and only if it was
   sound) is deleted; a failure before publication deletes the new generation and leaves the pointer.
+  Generation entries are enumerated without resolving links: only real directories count as generations,
+  numbering skips every name already present (links included), and entries that are links or files are
+  removed after publication (the link itself, never its target), so a rebuild recovers from them.
   Publication is the commit point: deleting old generations afterwards is best effort, so a cleanup failure
   never makes `rebuildProjection` throw; it is reported in the returned status diagnostics and retried by
   the next rebuild.
