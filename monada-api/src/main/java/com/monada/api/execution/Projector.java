@@ -39,11 +39,7 @@ final class Projector {
     private record Experience(ExperienceRef ref, Optional<String> solution, Optional<String> lesson, String atomId) {
     }
 
-    /**
-     * Checkpoint entries for one ledger event, and the texts of the atoms it projects for the first time, by
-     * atom ID. An atom projected before (even if retired since) is already stored, so it is not listed and is
-     * never rediscovered by scanning the memory.
-     */
+    /** Checkpoint entries for one ledger event and the text of every atom it projects, by atom ID. */
     record Step(List<Entry> entries, Map<String, String> texts) {
     }
 
@@ -51,6 +47,7 @@ final class Projector {
     private final Map<ExecutionId, LinkedHashMap<AttemptId, Experience>> experiences = new HashMap<>();
     private final TreeMap<String, TreeMap<String, ExperienceRef>> live = new TreeMap<>();
     private final Set<String> projected = new HashSet<>();
+    private final TreeMap<String, String> liveTexts = new TreeMap<>();
 
     Step apply(ExecutionEvent event) {
         ExecutionEvent effective = event instanceof Correction c ? c.replacement() : event;
@@ -96,12 +93,13 @@ final class Projector {
             refs.remove(ExperienceRefCodec.canonical(old.ref()));
             if (refs.isEmpty()) {
                 live.remove(old.atomId());
+                liveTexts.remove(old.atomId());
             }
         }
         entries.add(new Entry(EntryKind.PROJECT, next.atomId(), next.ref()));
-        if (projected.add(next.atomId())) {
-            texts.put(next.atomId(), text);
-        }
+        texts.put(next.atomId(), text);
+        projected.add(next.atomId());
+        liveTexts.put(next.atomId(), text);
         live.computeIfAbsent(next.atomId(), k -> new TreeMap<>())
                 .put(ExperienceRefCodec.canonical(next.ref()), next.ref());
     }
@@ -120,6 +118,11 @@ final class Projector {
         TreeMap<String, List<ExperienceRef>> out = new TreeMap<>();
         live.forEach((atom, refs) -> out.put(atom, List.copyOf(refs.values())));
         return out;
+    }
+
+    /** Text of every live atom, in atom ID order: what a compacted rebuild stores. */
+    SortedMap<String, String> liveTexts() {
+        return Collections.unmodifiableSortedMap(new TreeMap<>(liveTexts));
     }
 
     /** Atoms that were projected and no longer represent any ref. */

@@ -9,6 +9,7 @@ import com.monada.core.execution.ScopeId;
 import com.monada.storage.FileAtomStore;
 import com.monada.storage.Manifest;
 import com.monada.storage.audit.StorageIntegrityAuditor;
+import com.monada.storage.audit.StorageIntegrityCategory;
 import com.monada.storage.audit.StorageIntegrityReport;
 import com.monada.storage.audit.StorageIntegritySeverity;
 import com.monada.storage.execution.ExperienceRefCodec;
@@ -50,6 +51,7 @@ final class ExperienceProjection implements AutoCloseable {
     private final List<String> diagnostics = new ArrayList<>();
     private Projector projector = new Projector();
     private Set<String> uncovered = Set.of(); // atoms of an interrupted batch, outside the covered prefix
+    private final Set<String> stored = new HashSet<>(); // atom IDs present in the projection memory
     private MonadaMemory memory;
     private ProjectionCheckpoint writer;
     private ProjectionLayout layout;
@@ -96,20 +98,27 @@ final class ExperienceProjection implements AutoCloseable {
         diagnostics.clear();
         projector = new Projector();
         uncovered = Set.of();
+        stored.clear();
         try {
             layout = ProjectionLayout.of(root, scope);
             openGeneration = layout.generation();
-            Path dir = layout.projectionDir();
-            if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
+            Optional<Path> dir = layout.currentDir();
+            if (dir.isEmpty()) {
                 if (writable && initializeEmpty && ledger.isEmpty()) {
-                    build(layout, ledger);
+                    build(layout, ledger, false);
                     load(ledger, false);
                     return;
                 }
                 diagnostics.add("scope has no projection; call rebuildProjection to create it");
                 return;
             }
-            verify(layout, dir, ledger);
+            if (!Files.isDirectory(dir.get(), LinkOption.NOFOLLOW_LINKS)) {
+                state = ProjectionStatus.State.INCOMPATIBLE;
+                diagnostics.add(ProjectionLayout.POINTER_FILE + " names a missing generation "
+                        + dir.get().getFileName());
+                return;
+            }
+            verify(layout, dir.get(), ledger);
         } catch (IOException | RuntimeException e) {
             closeResources();
             state = ProjectionStatus.State.INCOMPATIBLE;
@@ -159,21 +168,21 @@ final class ExperienceProjection implements AutoCloseable {
             }
         }
         Set<String> extra = new TreeSet<>();
+        Set<String> present = new HashSet<>();
         if (problems.isEmpty()) {
-            Set<String> stored = new HashSet<>();
             for (KnowledgeAtom atom : new FileAtomStore(memoryDir).findAll()) {
-                stored.add(atom.id());
+                present.add(atom.id());
             }
-            Set<String> known = new HashSet<>(snapshot.refsByAtom().keySet());
-            known.addAll(snapshot.retiredAtoms());
-            for (String atom : known) {
-                if (!stored.contains(atom)) {
+            // Live atoms must be stored; retired atoms may be absent (a rebuild compacts them away).
+            for (String atom : snapshot.refsByAtom().keySet()) {
+                if (!present.contains(atom)) {
                     problems.add("mapped atom " + atom + " is missing from the projection memory");
                     break;
                 }
             }
-            stored.removeAll(known);
-            extra.addAll(stored);
+            extra.addAll(present);
+            extra.removeAll(snapshot.refsByAtom().keySet());
+            extra.removeAll(snapshot.retiredAtoms());
         }
         boolean caughtUp = snapshot.cleanTail() && snapshot.coveredSequence() == ledger.size();
         if (problems.isEmpty() && caughtUp && !extra.isEmpty()) {
@@ -188,6 +197,7 @@ final class ExperienceProjection implements AutoCloseable {
         projector = replayed;
         covered = snapshot.coveredSequence();
         uncovered = Set.copyOf(extra);
+        stored.addAll(present);
         if (!caughtUp) {
             state = ProjectionStatus.State.STALE;
             diagnostics.add("projection covers ledger sequence " + covered + " of " + ledger.size()
@@ -204,7 +214,8 @@ final class ExperienceProjection implements AutoCloseable {
     /**
      * Read-only checks of the projection memory, run before {@link MonadaMemory#open} because opening would
      * recreate missing directories and logs: the fixed layout must be complete, the existing side-effect-free
-     * {@link StorageIntegrityAuditor} must report no error (for example an atom without a vector), and the
+     * {@link StorageIntegrityAuditor} must report no error (for example an atom without a vector) and no
+     * duplicate vector, and the
      * manifest must name the standard segments. The feedback log must be empty, so the default feedback-aware
      * ranking is a no-op and scores depend on the ledger alone.
      */
@@ -221,7 +232,11 @@ final class ExperienceProjection implements AutoCloseable {
         StorageIntegrityReport report = new StorageIntegrityAuditor().audit(memoryDir);
         report.findings().stream()
                 .filter(f -> f.severity() == StorageIntegritySeverity.ERROR
-                        || f.severity() == StorageIntegritySeverity.FATAL)
+                        || f.severity() == StorageIntegritySeverity.FATAL
+                        // Projection writes never index an atom or a frame twice; a duplicate would let an
+                        // extra frame change the atom's score.
+                        || f.category() == StorageIntegrityCategory.DUPLICATE_VECTOR_INDEX_ID
+                        || f.category() == StorageIntegrityCategory.DUPLICATE_VECTOR_OFFSET)
                 .limit(3)
                 .forEach(f -> problems.add("projection memory " + f.category() + " in " + f.target() + ": "
                         + f.message()));
@@ -243,7 +258,15 @@ final class ExperienceProjection implements AutoCloseable {
             return; // STALE/MISSING/INCOMPATIBLE stay so until an explicit rebuild
         }
         try {
-            project(memory, writer, projector, appended);
+            Projector.Step step = projector.apply(appended.event());
+            for (var text : step.texts().entrySet()) {
+                if (!stored.contains(text.getKey())) { // never rediscover a stored atom by scanning the log
+                    remember(memory, text.getKey(), text.getValue());
+                    stored.add(text.getKey());
+                }
+            }
+            faults.beforeCommit(appended.sequence());
+            writer.commit(appended.sequence(), ProjectionCheckpoint.ledgerDigest(appended.event()), step.entries());
             covered = appended.sequence();
         } catch (IOException | RuntimeException e) {
             load(ledger, false);
@@ -254,32 +277,27 @@ final class ExperienceProjection implements AutoCloseable {
         }
     }
 
-    private void project(MonadaMemory target, ProjectionCheckpoint checkpoint, Projector p, HistoryEntry entry)
-            throws IOException {
-        Projector.Step step = p.apply(entry.event());
-        for (var text : step.texts().entrySet()) {
-            String stored = target.remember(text.getValue()).id();
-            if (!stored.equals(text.getKey())) {
-                throw new IllegalStateException("projection memory assigned atom " + stored + ", expected "
-                        + text.getKey());
-            }
+    private static void remember(MonadaMemory target, String atomId, String text) {
+        String assigned = target.remember(text).id();
+        if (!assigned.equals(atomId)) {
+            throw new IllegalStateException("projection memory assigned atom " + assigned + ", expected " + atomId);
         }
-        faults.beforeCommit(entry.sequence());
-        checkpoint.commit(entry.sequence(), ProjectionCheckpoint.ledgerDigest(entry.event()), step.entries());
     }
 
     /**
-     * Deterministic full rebuild from the ledger, built privately and published with atomic renames; the
-     * previous projection (whatever its state) is replaced only after the new one is complete.
+     * Deterministic full rebuild from the ledger into a new generation, published by replacing the pointer only
+     * once complete; the previous projection (whatever its state) stays published until then.
      */
     ProjectionStatus rebuild(List<HistoryEntry> ledger) {
         if (!writable) {
             throw new UnsupportedOperationException("this execution memory is read-only");
         }
+        // Keep the previous generation for in-flight readers only when it was sound.
+        boolean keepPrevious = state == ProjectionStatus.State.CURRENT || state == ProjectionStatus.State.STALE;
         closeResources();
         try {
             ProjectionLayout layout = ProjectionLayout.of(root, scope);
-            build(layout, ledger);
+            build(layout, ledger, keepPrevious);
         } catch (IOException e) {
             load(ledger, false);
             throw new UncheckedIOException("cannot rebuild the projection of scope " + scope, e);
@@ -291,34 +309,55 @@ final class ExperienceProjection implements AutoCloseable {
         return status(ledger.size());
     }
 
-    private void build(ProjectionLayout layout, List<HistoryEntry> ledger) throws IOException {
-        Path staging = layout.stagingDir();
-        Path retired = layout.retiredDir();
-        Path published = layout.projectionDir();
-        deleteTree(staging);
-        deleteTree(retired);
-        Files.createDirectory(staging);
+    /**
+     * Builds a new generation: the checkpoint replays every ledger event (the same entries an incremental
+     * projection writes, so verification is unchanged), and the memory stores only the atoms live at the end, in
+     * atom ID order; retired atoms are compacted away. The generation gets a fresh name no reader references, is
+     * published by atomically replacing the pointer, and afterwards every generation except the new one and,
+     * when {@code keepPrevious} (it was sound), the previous one is deleted. A failure before publication
+     * deletes the new generation and leaves the pointer.
+     */
+    private void build(ProjectionLayout layout, List<HistoryEntry> ledger, boolean keepPrevious) throws IOException {
+        Optional<Path> previous = Optional.empty();
+        if (keepPrevious) {
+            try {
+                previous = layout.currentDir();
+            } catch (IOException e) {
+                previous = Optional.empty(); // an unreadable pointer is replaced by this rebuild
+            }
+        }
+        Path dir = layout.nextGenerationDir();
+        Files.createDirectory(dir);
         try {
-            MonadaMemory target = MonadaMemory.open(layout.memory(staging), MonadaMemoryOptions.defaults());
             Projector p = new Projector();
-            try (ProjectionCheckpoint checkpoint = ProjectionCheckpoint.create(layout.checkpoint(staging), scope)) {
+            try (ProjectionCheckpoint checkpoint = ProjectionCheckpoint.create(layout.checkpoint(dir), scope)) {
                 for (HistoryEntry entry : ledger) {
-                    project(target, checkpoint, p, entry);
+                    Projector.Step step = p.apply(entry.event());
+                    faults.beforeCommit(entry.sequence());
+                    checkpoint.commit(entry.sequence(), ProjectionCheckpoint.ledgerDigest(entry.event()),
+                            step.entries());
                 }
             }
-            if (Files.exists(published, LinkOption.NOFOLLOW_LINKS)) {
-                Files.move(published, retired, StandardCopyOption.ATOMIC_MOVE);
+            MonadaMemory target = MonadaMemory.open(layout.memory(dir), MonadaMemoryOptions.defaults());
+            for (var live : p.liveTexts().entrySet()) {
+                remember(target, live.getKey(), live.getValue());
             }
-            Files.move(staging, published, StandardCopyOption.ATOMIC_MOVE);
+            faults.beforePublish();
+            layout.publish(dir);
         } catch (IOException | RuntimeException e) {
             try {
-                deleteTree(staging);
+                deleteTree(dir);
             } catch (IOException suppressed) {
                 e.addSuppressed(suppressed);
             }
             throw e;
         }
-        deleteTree(retired);
+        for (Path generation : layout.generationDirs()) {
+            if (!generation.equals(dir) && !previous.map(generation::equals).orElse(false)) {
+                deleteTree(generation);
+            }
+        }
+        Files.deleteIfExists(layout.pointerTemp());
     }
 
     // ------------------------------------------------------------------ recall
@@ -369,7 +408,9 @@ final class ExperienceProjection implements AutoCloseable {
                               boolean skipUnknown) {
         Set<String> excluded = new HashSet<>(projector.retired());
         excluded.addAll(uncovered);
-        int topK = limit + excluded.size();
+        // Only excluded atoms that are actually stored can occupy ranker slots (a rebuild compacts retired ones).
+        int padding = (int) excluded.stream().filter(stored::contains).count();
+        int topK = limit + padding;
         while (true) {
             List<ResonanceResult> results = memory.resonate(query).topK(topK).execute().results();
             List<ExperienceHit> hits = new ArrayList<>();
@@ -396,6 +437,10 @@ final class ExperienceProjection implements AutoCloseable {
                     }
                     hits.add(new ExperienceHit(ref, atomId, result.score(), event.get(),
                             ProjectionCheckpoint.FORMAT_VERSION, covered));
+                    if (hits.size() == limit) {
+                        // Atom-major order with canonically ordered refs: these are the first limit hits.
+                        return new Collected(hits, null);
+                    }
                 }
             }
             // Ranker order is the atom-major prefix of the total order, so once limit refs are collected no unseen
@@ -403,7 +448,7 @@ final class ExperienceProjection implements AutoCloseable {
             if (unknown == 0 || hits.size() >= limit || results.size() < topK) {
                 return new Collected(hits, null);
             }
-            topK = limit + excluded.size() + unknown; // strictly larger: fewer than limit refs were collected
+            topK = limit + padding + unknown; // strictly larger: fewer than limit refs were collected
         }
     }
 

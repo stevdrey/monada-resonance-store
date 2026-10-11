@@ -125,11 +125,11 @@ dedicated to execution memory; it must not be a legacy text store root.
         ├── scope.id                 # raw scope ID, UTF-8, verified on every open
         ├── ledger/
         │   └── events-000001.log    # authoritative append-only events
-        ├── projection/              # derived, rebuildable (sections 11 and 18)
+        ├── projection.current       # pointer "projection-<n>" + LF, replaced atomically (section 18)
+        ├── projection-<n>/          # current generation: derived, rebuildable (sections 11 and 18)
         │   ├── projection-checkpoint.log
         │   └── memory/              # standard MonadaMemory layout (manifest 0.4)
-        ├── projection.staging/      # transient: explicit rebuild in progress
-        └── projection.retired/      # transient: previous projection during the rebuild swap
+        └── projection-<n-1>/        # previous generation, kept for in-flight readers
 ```
 
 `execution-manifest.json` v1 fields: `format` = `"monada-execution-ledger"`, `version` = `"1"`,
@@ -442,7 +442,7 @@ version.
 Implemented in #98; section 18 records the implemented details (experience unit, checkpoint format,
 retired atoms, status rules and limits).
 
-- Each scope has its own projection store (`projection/memory/`), a standard `MonadaMemory` opened with
+- Each scope has its own projection store (`projection-<n>/memory/`), a standard `MonadaMemory` opened with
   `MonadaMemoryOptions.defaults()` (exact query keys, existing encoder and ranker). Scope selection
   happens before ranking, so top-K never mixes scopes.
 - Projection text is built from caller-approved summaries (task, solution, lesson) in a fixed canonical
@@ -858,8 +858,9 @@ projection layout and checkpoint (`ProjectionLayout`, `ProjectionCheckpoint`, `E
   attempts produce **one atom with several refs**, and the refs live only in the checkpoint.
 - A correction of the finish, or of the execution's task summary, retires the old atom/ref pair and projects
   the new one. An atom left without refs is a **retired atom**: recorded explicitly, never returned, and not
-  counted against `limit` (recall asks the ranker for `limit + retired atoms`). Retired atoms disappear on
-  the next rebuild.
+  counted against `limit` (recall pads the ranker's top-K by the retired atoms still stored). A rebuild
+  compacts them: the checkpoint still records the full history, but the new memory stores only the atoms
+  live at the end.
 
 ### 18.2 Checkpoint format (`projection-checkpoint.log`, version 1)
 
@@ -882,13 +883,17 @@ order, duplicate projection, unknown retirement) stops reading and makes it `INC
 ### 18.3 Status, writes and reconciliation
 
 - `open` loads the projection and verifies it against the ledger by re-projecting the covered prefix:
-  cover digests, mapping and retired atoms must match, and every mapped atom must exist in `memory/`.
-  Verification is read-only and fail-closed: any symbolic link or special file under `projection/` is
+  cover digests, mapping and retired atoms must match, and every live atom must exist in `memory/`
+  (retired atoms may be absent). The published generation is the one named by `projection.current`, which
+  must be a regular file holding exactly `projection-<n>` and a line feed; a malformed pointer or one naming
+  a missing generation is `INCOMPATIBLE`. Verification is read-only and fail-closed: any symbolic link or
+  special file under the generation is
   `INCOMPATIBLE` before anything is read through it; the fixed memory layout (`manifest.json`, atom log,
   vector segment, `vector-map.idx`, feedback log and their directories) must be complete, the manifest
   must name exactly the standard atom, vector and feedback segments, the feedback log must be empty
   (projections hold no retrieval feedback, so default feedback-aware ranking is a no-op), and the
-  side-effect-free `StorageIntegrityAuditor` must report no error (for example `ATOM_WITHOUT_VECTOR`), all
+  side-effect-free `StorageIntegrityAuditor` must report no error (for example `ATOM_WITHOUT_VECTOR`) and
+  no duplicate vector (`DUPLICATE_VECTOR_INDEX_ID`, `DUPLICATE_VECTOR_OFFSET`), all
   before `MonadaMemory` is opened, so diagnosing a damaged projection never recreates files. It
   initializes a projection only for an **empty** ledger; a scope recorded before #98 is `MISSING`.
 - `projectionStatus(scope)` returns `ProjectionStatus(state, coveredSequence, ledgerSequence,
@@ -901,14 +906,18 @@ order, duplicate projection, unknown retirement) stops reading and makes it `INC
   fails, `record` still returns `APPENDED`, the projection becomes `STALE` and the event is never retried as
   a new event. While not `CURRENT`, appends are not projected; nothing catches up implicitly.
 - `rebuildProjection(scope)` (writable only) is the single, explicit reconciliation path for every state:
-  it re-projects the whole ledger into `projection.staging/`, renames the old projection to
-  `projection.retired/`, publishes the staging directory and deletes the retired one. Leftovers of an
-  interrupted rebuild are discarded by the next one. Incremental projection and rebuild share one function,
-  so a rebuild of a current projection is byte-identical in `projection-checkpoint.log` and ranking-identical.
+  it re-projects the whole ledger into a new generation directory (`projection-<n+1>/`, a name never
+  reused), stores only the final live atoms, and publishes it by atomically replacing `projection.current`.
+  The scope is never without a published projection and no directory a reader may hold is moved. Afterwards
+  every generation except the new one and the previous one (kept for in-flight readers, and only if it was
+  sound) is deleted; a failure before publication deletes the new generation and leaves the pointer.
+  Incremental projection and rebuild share one projection function, so a rebuild of a current projection is
+  byte-identical in `projection-checkpoint.log` and ranking-identical.
 - `openReadOnly` creates nothing: it serves recall from an existing projection and reports `MISSING`
   otherwise; `rebuildProjection` is unsupported. Beside a live writer, a snapshot can observe a projection
-  write in progress. If the projection looks `INCOMPATIBLE` and a generation fingerprint of the scope (ledger
-  segment size plus every projection file size) changed during the open, the snapshot is taken again, at
+  write in progress. If the projection looks `INCOMPATIBLE` or `MISSING` and a generation fingerprint of the
+  scope (ledger segment size, pointer and every file size of the current generation) changed during the
+  open, the snapshot is taken again, at
   most 3 attempts with no waiting; afterwards it stays `INCOMPATIBLE` with a "reopen to retry" diagnostic.
   Damage observed while nothing changes is reported on the first attempt. Recall on a read-only snapshot
   stays a snapshot even though the projection files are shared with the writer: atoms projected after the
@@ -955,9 +964,14 @@ try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
   differ between rebuilds; ranking, scores and the checkpoint do not.
 - Retrieval feedback on projection atoms is not exposed; outcomes never become feedback.
 - Projection verification on open re-projects the covered ledger in memory (linear in the scope size).
-- Projection writes call `MonadaMemory.remember` only for atoms never projected before. Each distinct new
-  atom still costs one scan of the atom log inside `remember` (its existence check), so a full rebuild of N
-  distinct texts is quadratic in N; a bulk append path in `MonadaMemory` is follow-up work.
+- Projection writes call `MonadaMemory.remember` only for atoms not already stored, and a rebuild stores
+  each final live atom once. Each distinct new atom still costs one scan of the atom log inside `remember`
+  (its existence check), so a full rebuild of N distinct live texts is quadratic in N; a bulk append path in
+  `MonadaMemory` is follow-up work (#111).
+- `MonadaMemory.open` can create missing standard directories. Verification checks the layout first, but a
+  read-only open that overlaps two consecutive rebuilds can still reach it on a generation that was just
+  deleted and recreate empty directories there; the next rebuild deletes them. A creation-free read-only
+  `MonadaMemory` open would remove this window and is outside this issue.
 - Existing ledgers stay valid: a pre-#98 scope opens as `MISSING` until rebuilt. Legacy text stores,
   baselines and production defaults are untouched.
 

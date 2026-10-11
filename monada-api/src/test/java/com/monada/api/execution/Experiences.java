@@ -101,9 +101,36 @@ final class Experiences {
                 .map(h -> ExperienceRefCodec.canonical(h.ref()) + "@" + h.similarity()).toList();
     }
 
+    /** Current projection generation directory, resolved through the pointer. */
     static Path projectionDir(Path root, ScopeId scope) {
         try {
-            return ProjectionLayout.of(root, scope).projectionDir();
+            return ProjectionLayout.of(root, scope).currentDir()
+                    .orElseThrow(() -> new IllegalStateException("scope has no published projection"));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /** Removes the pointer and every generation: the state of a scope recorded before projections existed. */
+    static void removeProjection(Path root, ScopeId scope) {
+        try {
+            ProjectionLayout layout = ProjectionLayout.of(root, scope);
+            Files.deleteIfExists(layout.pointer());
+            for (Path generation : layout.generationDirs()) {
+                try (var walk = Files.walk(generation)) {
+                    for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                        Files.delete(p);
+                    }
+                }
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    static Path scopeDir(Path root, ScopeId scope) {
+        try {
+            return ProjectionLayout.of(root, scope).scopeDir();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

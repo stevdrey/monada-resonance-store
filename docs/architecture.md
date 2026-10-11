@@ -157,7 +157,8 @@ Execution memory uses its own root, separate from legacy text stores:
     └── s-<sha256hex(scope ID)>/
         ├── scope.id
         ├── ledger/events-000001.log
-        └── projection/            # derived; rebuilt explicitly via projection.staging/
+        ├── projection.current     # pointer to the published generation, replaced atomically
+        └── projection-<n>/        # derived generation; an explicit rebuild writes projection-<n+1>/
             ├── projection-checkpoint.log
             └── memory/            # standard manifest 0.4 store
 ```

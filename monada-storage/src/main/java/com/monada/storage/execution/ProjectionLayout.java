@@ -2,13 +2,22 @@ package com.monada.storage.execution;
 
 import com.monada.core.execution.ScopeId;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
@@ -16,21 +25,26 @@ import java.util.stream.Stream;
  *
  * <pre>
  * scopes/s-&lt;sha256hex(scope id)&gt;/
- *   projection/                     # published projection
+ *   projection.current              # pointer: "projection-&lt;n&gt;" + LF, replaced atomically
+ *   projection-&lt;n&gt;/                 # current generation
  *     projection-checkpoint.log     # see {@link ProjectionCheckpoint}
  *     memory/                       # standard MonadaMemory layout (manifest 0.4)
- *   projection.staging/             # private build directory of an explicit rebuild
- *   projection.retired/             # previous projection while a rebuild swaps it out
+ *   projection-&lt;n-1&gt;/               # previous generation, kept for in-flight readers
  * </pre>
  *
+ * <p>A rebuild writes a new generation under a name no reader references and publishes it by replacing the
+ * pointer, so the scope is never without a published projection and no directory a reader may hold is
+ * moved.
  * <p>The scope directory name is derived only from the SHA-256 of the scope ID, so raw IDs are never path
  * segments, and every path is checked to stay inside the ledger root (symbolic links included). Resolving a
  * layout creates nothing.
  */
 public final class ProjectionLayout {
-    public static final String PROJECTION_DIR = "projection";
-    public static final String STAGING_DIR = "projection.staging";
-    public static final String RETIRED_DIR = "projection.retired";
+    public static final String POINTER_FILE = "projection.current";
+    static final String POINTER_TEMP = "projection.current.tmp";
+    public static final String GENERATION_PREFIX = "projection-";
+    private static final Pattern GENERATION_NAME = Pattern.compile("projection-([0-9]{6,18})");
+    private static final int MAX_POINTER_BYTES = 64;
     public static final String MEMORY_DIR = "memory";
     /** Atom segment a projection memory's manifest must name (manifest 0.4 default). */
     public static final String ATOM_SEGMENT = "atoms/segment-000001.log";
@@ -64,24 +78,107 @@ public final class ProjectionLayout {
         return scopeDir;
     }
 
-    public Path projectionDir() throws LedgerException {
-        return paths.contained(scopeDir.resolve(PROJECTION_DIR));
+    public Path pointer() throws LedgerException {
+        return paths.contained(scopeDir.resolve(POINTER_FILE));
     }
 
-    public Path stagingDir() throws LedgerException {
-        return paths.contained(scopeDir.resolve(STAGING_DIR));
+    /**
+     * The published generation directory named by the pointer, or empty when there is no pointer. The pointer
+     * must be a regular file (never a link) holding exactly {@code projection-<n>} and a line feed; anything
+     * else fails with a {@link LedgerException}. Reading creates nothing.
+     */
+    public Optional<Path> currentDir() throws LedgerException {
+        Path pointer = pointer();
+        if (!Files.exists(pointer, LinkOption.NOFOLLOW_LINKS)) {
+            return Optional.empty();
+        }
+        if (!Files.isRegularFile(pointer, LinkOption.NOFOLLOW_LINKS)) {
+            throw new LedgerException(POINTER_FILE + " is not a regular file");
+        }
+        String text;
+        try {
+            Optional<byte[]> bytes = LedgerPaths.readBounded(pointer, MAX_POINTER_BYTES);
+            if (bytes.isEmpty()) {
+                throw new LedgerException(POINTER_FILE + " is larger than " + MAX_POINTER_BYTES + " bytes");
+            }
+            text = LedgerPaths.decodeStrict(bytes.get());
+        } catch (LedgerException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new LedgerException("cannot read " + POINTER_FILE + ": " + e.getMessage());
+        }
+        if (!text.endsWith("\n") || !GENERATION_NAME.matcher(text.substring(0, text.length() - 1)).matches()) {
+            throw new LedgerException(POINTER_FILE + " does not name a projection generation");
+        }
+        return Optional.of(paths.contained(scopeDir.resolve(text.substring(0, text.length() - 1))));
     }
 
-    public Path retiredDir() throws LedgerException {
-        return paths.contained(scopeDir.resolve(RETIRED_DIR));
+    /** Generation directories present in the scope, in ascending generation order. */
+    public List<Path> generationDirs() throws LedgerException {
+        List<Path> out = new ArrayList<>();
+        if (!Files.isDirectory(scopeDir, LinkOption.NOFOLLOW_LINKS)) {
+            return out;
+        }
+        try (Stream<Path> entries = Files.list(scopeDir)) {
+            for (Path p : entries.toList()) {
+                if (GENERATION_NAME.matcher(p.getFileName().toString()).matches()) {
+                    out.add(paths.contained(p));
+                }
+            }
+        } catch (IOException e) {
+            throw new LedgerException("cannot list " + paths.display(scopeDir) + ": " + e.getMessage());
+        }
+        out.sort(Comparator.comparingLong(ProjectionLayout::generationNumber));
+        return out;
     }
 
-    /** Checkpoint file inside a projection directory ({@link #projectionDir()} or {@link #stagingDir()}). */
+    /** A fresh generation directory name, above every existing one, so a name is never reused. */
+    public Path nextGenerationDir() throws LedgerException {
+        List<Path> existing = generationDirs();
+        long next = existing.isEmpty() ? 1 : generationNumber(existing.get(existing.size() - 1)) + 1;
+        return paths.contained(scopeDir.resolve(GENERATION_PREFIX + String.format("%06d", next)));
+    }
+
+    static long generationNumber(Path generationDir) {
+        Matcher m = GENERATION_NAME.matcher(generationDir.getFileName().toString());
+        if (!m.matches()) {
+            throw new IllegalArgumentException("not a projection generation: " + generationDir.getFileName());
+        }
+        return Long.parseLong(m.group(1));
+    }
+
+    /**
+     * Publishes {@code generationDir} by durably writing a temporary pointer and atomically replacing
+     * {@code projection.current} with it. Readers see either the old or the new generation, never none.
+     */
+    public void publish(Path generationDir) throws IOException {
+        Path dir = paths.contained(generationDir);
+        if (!dir.getParent().equals(scopeDir) || !GENERATION_NAME.matcher(dir.getFileName().toString()).matches()) {
+            throw new IllegalArgumentException("not a generation directory of this scope: " + generationDir);
+        }
+        Path temp = paths.contained(scopeDir.resolve(POINTER_TEMP));
+        Files.deleteIfExists(temp);
+        try (FileChannel out = FileChannel.open(temp, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) {
+            ByteBuffer buffer = ByteBuffer.wrap((dir.getFileName() + "\n").getBytes(StandardCharsets.US_ASCII));
+            while (buffer.hasRemaining()) {
+                out.write(buffer);
+            }
+            out.force(true);
+        }
+        Files.move(temp, pointer(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    /** Leftover temporary pointer of an interrupted publication, if any. */
+    public Path pointerTemp() throws LedgerException {
+        return paths.contained(scopeDir.resolve(POINTER_TEMP));
+    }
+
+    /** Checkpoint file inside a generation directory. */
     public Path checkpoint(Path projectionDir) throws LedgerException {
         return paths.contained(projectionDir.resolve(ProjectionCheckpoint.FILE_NAME));
     }
 
-    /** MonadaMemory directory inside a projection directory. */
+    /** MonadaMemory directory inside a generation directory. */
     public Path memory(Path projectionDir) throws LedgerException {
         return paths.contained(projectionDir.resolve(MEMORY_DIR));
     }
@@ -140,8 +237,8 @@ public final class ProjectionLayout {
     }
 
     /**
-     * Read-only generation fingerprint of the scope: the ledger segment size and the relative path and size of
-     * every entry under {@code projection/}. Two equal fingerprints taken around a read mean no writer changed
+     * Read-only generation fingerprint of the scope: the ledger segment size, the pointer and the relative path
+     * and size of every entry of the current generation. Two equal fingerprints taken around a read mean no writer changed
      * these files in between. Links are not followed.
      */
     public String generation() {
@@ -150,8 +247,15 @@ public final class ProjectionLayout {
             Path segment = paths.segment(scopeDir);
             sb.append("ledger=").append(Files.exists(segment, LinkOption.NOFOLLOW_LINKS)
                     ? Files.size(segment) : -1);
-            Path dir = projectionDir();
-            if (Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
+            Path pointer = pointer();
+            sb.append("|pointer=");
+            if (Files.isRegularFile(pointer, LinkOption.NOFOLLOW_LINKS)) {
+                sb.append(LedgerPaths.readBounded(pointer, MAX_POINTER_BYTES)
+                        .map(b -> new String(b, StandardCharsets.UTF_8).strip()).orElse("oversized"));
+            }
+            Optional<Path> current = currentDir();
+            if (current.isPresent() && Files.exists(current.get(), LinkOption.NOFOLLOW_LINKS)) {
+                Path dir = current.get();
                 try (Stream<Path> walk = Files.walk(dir)) {
                     for (Path p : walk.sorted().toList()) {
                         BasicFileAttributes a = Files.readAttributes(p, BasicFileAttributes.class,

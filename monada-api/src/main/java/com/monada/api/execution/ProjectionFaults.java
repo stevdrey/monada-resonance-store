@@ -14,6 +14,10 @@ interface ProjectionFaults {
     default void beforeReadOnlyQuery(int attempt) {
     }
 
+    /** Called after a rebuilt generation is complete, before its pointer is published. */
+    default void beforePublish() throws IOException {
+    }
+
     /** Called before each ranker query of a recall, with its top-K. */
     default void onRecallRound(int topK) {
     }

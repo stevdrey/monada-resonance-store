@@ -166,10 +166,11 @@ class ExperienceProjectionFailureTest {
             two(m);
             expected = render(m.recall(SCOPE, "gradle cache", 10));
         }
-        // A scope recorded before projections existed (#97) has no projection directory.
-        deleteTree(projectionDir(store, SCOPE));
+        // A scope recorded before projections existed (#97) has no projection pointer or generation.
+        Experiences.removeProjection(store, SCOPE);
         try (ExecutionMemory m = ExecutionMemory.open(store, SCOPE)) {
-            assertFalse(Files.exists(projectionDir(store, SCOPE)), "open never builds a projection for history");
+            assertFalse(Files.exists(Experiences.scopeDir(store, SCOPE).resolve("projection.current")),
+                    "open never builds a projection for history");
             ExperienceRecall recall = m.recall(SCOPE, "gradle cache", 10);
             assertEquals(ProjectionStatus.State.MISSING, recall.status().state());
             assertEquals(List.of(), recall.hits());
@@ -244,7 +245,7 @@ class ExperienceProjectionFailureTest {
         try (ExecutionMemory m = ExecutionMemory.open(store, SCOPE)) {
             two(m);
         }
-        deleteTree(projectionDir(store, SCOPE));
+        Experiences.removeProjection(store, SCOPE);
         Map<String, String> before = digests(store);
         try (ExecutionMemory m = ExecutionMemory.openReadOnly(store, SCOPE)) {
             assertEquals(ProjectionStatus.State.MISSING, m.projectionStatus(SCOPE).state());
@@ -257,7 +258,7 @@ class ExperienceProjectionFailureTest {
             assertEquals(List.of(), m.recall(unknown, "gradle", 5).hits());
         }
         assertEquals(before, digests(store));
-        assertFalse(Files.exists(projectionDir(store, unknown).getParent()));
+        assertFalse(Files.exists(Experiences.scopeDir(store, unknown)));
     }
 
     @Test

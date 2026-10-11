@@ -102,7 +102,8 @@ public final class ExecutionMemory implements AutoCloseable {
      * mid-append) is tolerated and reported by {@link #hasTornTail()}.
      *
      * <p>A live writer may be between its ledger append and its projection write while the snapshot is
-     * taken. When the projection then looks incompatible and the scope's files changed during the open, the
+     * taken. When the projection then looks incompatible or missing and the scope's files changed during the
+     * open, the
      * whole snapshot is taken again (at most {@value #READ_ONLY_ATTEMPTS} attempts, no waiting); a projection
      * that is incompatible while nothing changes is reported on the first attempt. {@link #recall} on the
      * snapshot ignores experiences projected after it was opened and retries a read that overlaps a write.
@@ -136,9 +137,11 @@ public final class ExecutionMemory implements AutoCloseable {
         for (int attempt = 1; ; attempt++) {
             String before = generation(root, scope);
             ExecutionMemory snapshot = readOnlySnapshot(root, scope, config, hook, attempt);
-            if (snapshot.projection.state() != ProjectionStatus.State.INCOMPATIBLE
-                    || before.equals(generation(root, scope))) {
-                return snapshot; // consistent, or damaged while nothing was being written
+            ProjectionStatus.State state = snapshot.projection.state();
+            boolean suspicious = state == ProjectionStatus.State.INCOMPATIBLE
+                    || state == ProjectionStatus.State.MISSING;
+            if (!suspicious || before.equals(generation(root, scope))) {
+                return snapshot; // consistent, or damaged/missing while nothing was being written
             }
             if (attempt == READ_ONLY_ATTEMPTS) {
                 snapshot.projection.note("projection changed during a read-only open (live writer?) in all "

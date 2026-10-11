@@ -186,9 +186,12 @@ class ProjectionCheckpointTest {
     void layoutUsesHashedScopeDirectoryAndCreatesNothing() throws IOException {
         ScopeId scope = ScopeId.of("../../etc");
         ProjectionLayout layout = ProjectionLayout.of(root, scope);
-        Path dir = layout.projectionDir();
-        assertEquals(root.toAbsolutePath().normalize().resolve("scopes")
-                .resolve(LedgerPaths.scopeDirectoryName(scope)).resolve("projection"), dir);
+        Path scopeDir = root.toAbsolutePath().normalize().resolve("scopes").resolve(LedgerPaths.scopeDirectoryName(scope));
+        assertEquals(scopeDir, layout.scopeDir());
+        assertEquals(scopeDir.resolve("projection.current"), layout.pointer());
+        assertEquals(Optional.empty(), layout.currentDir());
+        Path dir = layout.nextGenerationDir();
+        assertEquals(scopeDir.resolve("projection-000001"), dir);
         assertEquals(dir.resolve(ProjectionCheckpoint.FILE_NAME), layout.checkpoint(dir));
         assertEquals(dir.resolve("memory"), layout.memory(dir));
         assertFalse(Files.exists(root.resolve("scopes")));
@@ -196,12 +199,40 @@ class ProjectionCheckpointTest {
     }
 
     @Test
+    void pointerPublishesGenerationsAtomicallyAndStrictly() throws IOException {
+        ScopeId scope = ScopeId.of("scope-1");
+        ProjectionLayout layout = ProjectionLayout.of(root, scope);
+        Path first = Files.createDirectories(layout.nextGenerationDir());
+        layout.publish(first);
+        assertEquals(Optional.of(first), layout.currentDir());
+        Path second = Files.createDirectories(layout.nextGenerationDir());
+        assertEquals("projection-000002", second.getFileName().toString());
+        layout.publish(second);
+        assertEquals(Optional.of(second), layout.currentDir());
+        assertFalse(Files.exists(layout.pointerTemp()));
+        Files.createDirectories(layout.scopeDir().resolve("projection-000010"));
+        assertEquals(List.of("projection-000001", "projection-000002", "projection-000010"),
+                layout.generationDirs().stream().map(p -> p.getFileName().toString()).toList(), "numeric order");
+        assertEquals("projection-000011", layout.nextGenerationDir().getFileName().toString());
+        assertThrows(IllegalArgumentException.class, () -> layout.publish(root.resolve("elsewhere")));
+
+        for (String bad : List.of("projection-000002", "projection-1\n", "../projection-000002\n", "x".repeat(80))) {
+            Files.writeString(layout.pointer(), bad);
+            assertThrows(LedgerException.class, layout::currentDir, bad);
+        }
+        Files.delete(layout.pointer());
+        Path target = Files.writeString(root.resolve("target"), "projection-000002\n");
+        Files.createSymbolicLink(layout.pointer(), target);
+        assertThrows(LedgerException.class, layout::currentDir, "a linked pointer is refused");
+    }
+
+    @Test
     void layoutChecksLinksMemoryArtifactsAndGeneration() throws IOException {
         ScopeId scope = ScopeId.of("scope-1");
         ProjectionLayout layout = ProjectionLayout.of(root, scope);
-        Path dir = layout.projectionDir();
+        Path dir = layout.nextGenerationDir();
         Path memory = layout.memory(dir);
-        assertEquals(List.of(), layout.linkProblems(dir), "a missing projection has no link problems");
+        assertEquals(List.of(), layout.linkProblems(dir), "a missing generation has no link problems");
         assertEquals(1, layout.memoryLayoutProblems(memory).size());
 
         for (String d : ProjectionLayout.MEMORY_DIRS) {
@@ -210,6 +241,7 @@ class ProjectionCheckpointTest {
         for (String f : ProjectionLayout.MEMORY_FILES) {
             Files.createFile(memory.resolve(f));
         }
+        layout.publish(dir);
         assertEquals(List.of(), layout.memoryLayoutProblems(memory));
         String generation = layout.generation();
         assertEquals(generation, layout.generation(), "stable while nothing changes");
