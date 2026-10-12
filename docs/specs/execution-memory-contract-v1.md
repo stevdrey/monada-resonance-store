@@ -878,7 +878,9 @@ line). Payload tokens are `|`-separated and escaped like ledger payloads:
 
 `<ref>` is the canonical ref `scope|task|execution|~attempt|eventId|revision` (`ExperienceRefCodec`), which
 is also the last recall tie-break. Every ledger sequence gets exactly one `COVER`, in order from 1, streamed
-after its entries through a bounded buffer and forced once; readers fold in two streaming passes (find the
+after its entries through a bounded buffer and forced once; the projector hands entries to the checkpoint one
+at a time (no per-event batch is materialized, however many attempts a correction touches); readers fold in two
+streaming passes (find the
 last `COVER`, then apply entries up to it immediately), so memory stays bounded for large batches. Entries after the last `COVER` (an interrupted batch) and a
 torn final line are ignored and make the projection `STALE`; any other defect (digest, framing, version,
 order, duplicate projection, unknown retirement) stops reading and makes it `INCOMPATIBLE`.

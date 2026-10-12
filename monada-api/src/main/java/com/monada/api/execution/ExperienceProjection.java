@@ -185,7 +185,7 @@ final class ExperienceProjection implements AutoCloseable {
             if (!ProjectionCheckpoint.ledgerDigest(entry.event()).equals(digests.get(i))) {
                 problems.add("checkpoint was built from a different ledger at sequence " + entry.sequence());
             } else {
-                replayed.apply(entry.event());
+                replayed.apply(entry.event(), Projector.Sink.NONE);
             }
         }
         if (problems.isEmpty() && (!replayed.refsByAtom().equals(snapshot.refsByAtom())
@@ -349,15 +349,18 @@ final class ExperienceProjection implements AutoCloseable {
             return; // STALE/MISSING/INCOMPATIBLE stay so until an explicit rebuild
         }
         try {
-            Projector.Step step = projector.apply(appended.event());
-            for (var text : step.texts().entrySet()) {
-                if (!stored.contains(text.getKey())) { // never rediscover a stored atom by scanning the log
-                    remember(memory, text.getKey(), text.getValue());
-                    stored.add(text.getKey());
+            // Entries are streamed from the projector to the checkpoint one by one: a correction touching any
+            // number of attempts never materializes its whole batch. Each new atom is stored before its PROJECT.
+            ProjectionCheckpoint.Batch batch = writer.begin(appended.sequence());
+            projector.apply(appended.event(), (entry, text) -> {
+                if (text != null && !stored.contains(entry.atomId())) { // never rediscover a stored atom
+                    remember(memory, entry.atomId(), text);
+                    stored.add(entry.atomId());
                 }
-            }
+                batch.write(entry);
+            });
             faults.beforeCommit(appended.sequence());
-            writer.commit(appended.sequence(), ProjectionCheckpoint.ledgerDigest(appended.event()), step.entries());
+            batch.cover(ProjectionCheckpoint.ledgerDigest(appended.event()));
             covered = appended.sequence();
         } catch (IOException | RuntimeException e) {
             load(ledger, false);
@@ -443,10 +446,10 @@ final class ExperienceProjection implements AutoCloseable {
             try (ProjectionCheckpoint checkpoint = ProjectionCheckpoint.create(layout.checkpoint(dir), scope,
                     dimensions)) {
                 for (HistoryEntry entry : ledger) {
-                    Projector.Step step = p.apply(entry.event());
+                    ProjectionCheckpoint.Batch batch = checkpoint.begin(entry.sequence());
+                    p.apply(entry.event(), (e, text) -> batch.write(e));
                     faults.beforeCommit(entry.sequence());
-                    checkpoint.commit(entry.sequence(), ProjectionCheckpoint.ledgerDigest(entry.event()),
-                            step.entries());
+                    batch.cover(ProjectionCheckpoint.ledgerDigest(entry.event()));
                 }
             }
             for (var live : p.liveTexts().entrySet()) {

@@ -452,6 +452,37 @@ class ExperienceProjectionFailureTest {
         }
     }
 
+    @Test
+    void failureInTheMiddleOfALargeStreamedBatchLeavesTheProjectionStale() throws IOException {
+        Path store = root.resolve("store");
+        int attempts = 50;
+        long correctionSequence = 1 + 2L * attempts + 1;
+        boolean[] fail = {false};
+        try (ExecutionMemory m = ExecutionMemory.open(store, SCOPE, ExecutionMemoryConfig.defaults(), seq -> {
+            if (fail[0] && seq == correctionSequence) {
+                throw new IOException("injected failure after the streamed entries, before COVER");
+            }
+        })) {
+            appended(m, start(SCOPE, "x-1", "Repair the flaky login test"));
+            String previous = null;
+            for (int i = 1; i <= attempts; i++) {
+                appended(m, attempt(SCOPE, "x-1", "a" + i, i, previous));
+                appended(m, finish(SCOPE, "x-1", "a" + i, "Waited " + i, null));
+                previous = "a" + i;
+            }
+            fail[0] = true;
+            RecordResult r = m.record(Experiences.correctStart(SCOPE, "x-1", "x-1-retitle", 2, "Repair the signup test"));
+            assertEquals(RecordResult.Status.APPENDED, r.status(), "the ledger append is never undone");
+            assertEquals(ProjectionStatus.State.STALE, m.projectionStatus(SCOPE).state());
+            assertEquals(correctionSequence - 1, m.projectionStatus(SCOPE).coveredSequence());
+        }
+        try (ExecutionMemory m = ExecutionMemory.open(store, SCOPE)) {
+            assertEquals(ProjectionStatus.State.STALE, m.projectionStatus(SCOPE).state(), "survives reopen");
+            assertEquals(ProjectionStatus.State.CURRENT, m.rebuildProjection(SCOPE).state());
+            assertTrue(m.recall(SCOPE, "signup test", 1).hits().get(0).ref().execution().value().equals("x-1"));
+        }
+    }
+
     private static void deleteTree(Path dir) throws IOException {
         try (Stream<Path> walk = Files.walk(dir)) {
             for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {

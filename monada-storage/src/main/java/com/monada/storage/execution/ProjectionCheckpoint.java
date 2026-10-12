@@ -123,6 +123,7 @@ public final class ProjectionCheckpoint implements AutoCloseable {
     private long covered;
     private boolean closed;
     private boolean failed;
+    private boolean batchOpen;
 
     private ProjectionCheckpoint(Path file, ScopeId scope, FileChannel channel, long lines, long covered) {
         this.file = file;
@@ -178,47 +179,112 @@ public final class ProjectionCheckpoint implements AutoCloseable {
     }
 
     /**
-     * Durably appends the entries of ledger sequence {@code ledgerSequence} followed by its {@code COVER},
-     * in one write. The sequence must be the next uncovered one.
+     * Durably appends the entries of ledger sequence {@code ledgerSequence} followed by its {@code COVER}. The
+     * sequence must be the next uncovered one. Convenience over {@link #begin}.
      */
     public void commit(long ledgerSequence, String ledgerDigest, List<Entry> entries) throws IOException {
+        Objects.requireNonNull(ledgerDigest, "ledgerDigest");
+        Objects.requireNonNull(entries, "entries");
+        for (Entry e : entries) { // validate before writing anything
+            if (!e.ref().scope().equals(scope)) {
+                throw new IllegalArgumentException("entry ref belongs to scope " + e.ref().scope());
+            }
+        }
+        if (!DIGEST.matcher(ledgerDigest).matches()) {
+            throw new IllegalArgumentException("ledger digest must be 64 lowercase hex characters");
+        }
+        Batch batch = begin(ledgerSequence);
+        for (Entry e : entries) {
+            batch.write(e);
+        }
+        batch.cover(ledgerDigest);
+    }
+
+    /**
+     * Starts the batch of ledger sequence {@code ledgerSequence} (the next uncovered one). Entries are streamed
+     * through a bounded buffer as they are produced, never held as a whole batch, and {@link Batch#cover}
+     * writes the {@code COVER} last and forces the file. A batch abandoned part-way leaves entries without their
+     * {@code COVER}, which readers ignore as an unclean tail.
+     */
+    public Batch begin(long ledgerSequence) {
         if (closed) {
             throw new IllegalStateException("projection checkpoint is closed");
         }
         if (failed) {
             throw new IllegalStateException("projection checkpoint failed earlier; rebuild the projection");
         }
-        Objects.requireNonNull(ledgerDigest, "ledgerDigest");
-        Objects.requireNonNull(entries, "entries");
+        if (batchOpen) {
+            throw new IllegalStateException("a batch is already open");
+        }
         if (ledgerSequence != covered + 1) {
             throw new IllegalArgumentException("expected ledger sequence " + (covered + 1) + ", got " + ledgerSequence);
         }
-        if (!DIGEST.matcher(ledgerDigest).matches()) {
-            throw new IllegalArgumentException("ledger digest must be 64 lowercase hex characters");
+        batchOpen = true;
+        return new Batch(ledgerSequence);
+    }
+
+    /** One ledger sequence's entries being streamed to the checkpoint; see {@link #begin}. */
+    public final class Batch {
+        private final long ledgerSequence;
+        private final OutputStream out = new BufferedOutputStream(Channels.newOutputStream(channel),
+                STREAM_BUFFER_BYTES); // never closed: closing would close the channel
+        private long line = lines;
+        private boolean done;
+
+        private Batch(long ledgerSequence) {
+            this.ledgerSequence = ledgerSequence;
         }
-        for (Entry e : entries) { // validate before writing anything
+
+        public void write(Entry e) throws IOException {
+            Objects.requireNonNull(e, "entry");
+            requireActive();
             if (!e.ref().scope().equals(scope)) {
+                fail();
                 throw new IllegalArgumentException("entry ref belongs to scope " + e.ref().scope());
             }
-        }
-        // Frames are streamed through a bounded buffer (never the whole batch in memory) with COVER last: a batch
-        // interrupted part-way leaves entries without their COVER, which readers ignore as an unclean tail.
-        long line = lines;
-        try {
-            OutputStream out = new BufferedOutputStream(Channels.newOutputStream(channel), STREAM_BUFFER_BYTES);
-            for (Entry e : entries) {
-                out.write(frame(++line, e.kind().name() + "|" + ledgerSequence + "|" + e.atomId() + "|"
+            try {
+                out.write(frame(line + 1, e.kind().name() + "|" + ledgerSequence + "|" + e.atomId() + "|"
                         + ExperienceRefCodec.canonical(e.ref())));
+                line++;
+            } catch (IOException | RuntimeException ex) {
+                fail();
+                throw ex;
             }
-            out.write(frame(++line, "COVER|" + ledgerSequence + "|" + ledgerDigest));
-            out.flush(); // not closed: closing would close the channel
-            channel.force(true);
-        } catch (IOException | RuntimeException e) {
-            failed = true;
-            throw e;
         }
-        lines = line;
-        covered = ledgerSequence;
+
+        /** Writes the {@code COVER}, flushes and forces: the ledger sequence is now fully projected. */
+        public void cover(String ledgerDigest) throws IOException {
+            Objects.requireNonNull(ledgerDigest, "ledgerDigest");
+            requireActive();
+            if (!DIGEST.matcher(ledgerDigest).matches()) {
+                fail();
+                throw new IllegalArgumentException("ledger digest must be 64 lowercase hex characters");
+            }
+            try {
+                out.write(frame(line + 1, "COVER|" + ledgerSequence + "|" + ledgerDigest));
+                out.flush();
+                channel.force(true);
+            } catch (IOException | RuntimeException ex) {
+                fail();
+                throw ex;
+            }
+            line++;
+            done = true;
+            batchOpen = false;
+            lines = line;
+            covered = ledgerSequence;
+        }
+
+        private void requireActive() {
+            if (done || failed || closed) {
+                throw new IllegalStateException("projection checkpoint batch is no longer usable");
+            }
+        }
+
+        private void fail() {
+            failed = true;
+            batchOpen = false;
+        }
     }
 
     public long coveredSequence() {
