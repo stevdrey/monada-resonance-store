@@ -9,12 +9,13 @@ import java.util.Optional;
 
 /**
  * Complete, inspectable summary of one execution. {@code chain*} covers every stage up to the acceptance
- * cutoff (all recorded stages when there is no validated acceptance, so nothing is hidden); {@code
+ * cutoff; {@link #chainScope()} says so, and is {@code ALL_RECORDED_NO_ACCEPTANCE} when there is no validated
+ * acceptance, so nothing is hidden but nothing is presented as an accepted chain; {@code
  * postAcceptance*} covers later stages and never enters {@link #cost()}. Hypothetical cost and {@code
  * actualBilled} are separate fields and are never merged. Gate evidence is per dimension, with no score.
  */
 public record ExecutionSummary(ExecutionId execution, DerivedAcceptance acceptance, Optional<Long> acceptanceCutoff,
-                               List<StageUsageCost> chainStages, UsageTotals chainUsage, TimeSummary chainTime,
+                               ChainScope chainScope, List<StageUsageCost> chainStages, UsageTotals chainUsage, TimeSummary chainTime,
                                List<StageUsageCost> postAcceptanceStages, UsageTotals postAcceptanceUsage,
                                TimeSummary postAcceptanceTime, CostToAcceptedOutcome cost,
                                List<ActualBilledAmount> actualBilled, List<GateEvidence> gates,
@@ -23,6 +24,7 @@ public record ExecutionSummary(ExecutionId execution, DerivedAcceptance acceptan
         Objects.requireNonNull(execution, "execution");
         Objects.requireNonNull(acceptance, "acceptance");
         Objects.requireNonNull(acceptanceCutoff, "acceptanceCutoff");
+        Objects.requireNonNull(chainScope, "chainScope");
         Objects.requireNonNull(chainUsage, "chainUsage");
         Objects.requireNonNull(chainTime, "chainTime");
         Objects.requireNonNull(postAcceptanceUsage, "postAcceptanceUsage");

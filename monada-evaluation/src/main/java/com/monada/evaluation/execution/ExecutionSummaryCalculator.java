@@ -73,8 +73,10 @@ public final class ExecutionSummaryCalculator {
         }
 
         CostToAcceptedOutcome cost = costToAcceptedOutcome(acceptance, cutoff, chain);
-        return new ExecutionSummary(view.id(), acceptance, cutoff, chain, UsageTotalsCalculator.totals(chainEvents),
-                TimeCalculator.of(chainEvents), post, UsageTotalsCalculator.totals(postEvents),
+        ChainScope scope = cutoff.isPresent() ? ChainScope.UP_TO_ACCEPTANCE : ChainScope.ALL_RECORDED_NO_ACCEPTANCE;
+        return new ExecutionSummary(view.id(), acceptance, cutoff, scope, chain,
+                UsageTotalsCalculator.totals(chainEvents, chain), TimeCalculator.of(chainEvents), post,
+                UsageTotalsCalculator.totals(postEvents, post),
                 TimeCalculator.of(postEvents), cost, actualBilled, gates, resolved.ignoredDuplicates());
     }
 
@@ -132,8 +134,7 @@ public final class ExecutionSummaryCalculator {
         }
 
         CurrencyCost toCost() {
-            BigDecimal total = reported.add(estimated);
-            return new CurrencyCost(currency, total, reported, estimated, CostArithmetic.report(total));
+            return new CurrencyCost(currency, reported, estimated);
         }
     }
 }

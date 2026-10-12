@@ -26,7 +26,6 @@ final class UsageCostCalculator {
                                boolean postAcceptance) {
         List<CostReason> reasons = new ArrayList<>();
         List<CostLine> lines = new ArrayList<>();
-        var attempt = stage.envelope().attemptId().orElseThrow();
 
         if (stage.usageDeclaration() == UsageDeclaration.NO_BILLABLE_USAGE) {
             reasons.add(CostReason.forStage(Code.DECLARED_NO_BILLABLE_USAGE, effective.id(), stage.stage(), null,
@@ -103,9 +102,8 @@ final class UsageCostCalculator {
     private static StageUsageCost build(ChainResolver.Effective effective, StageRecorded stage,
                                         boolean postAcceptance, Optional<PriceSnapshot> snapshot,
                                         List<CostLine> lines, List<CostReason> reasons) {
-        boolean covered = reasons.stream().noneMatch(CostReason::isGap);
         return new StageUsageCost(effective.id(), stage.envelope().attemptId().orElseThrow(), stage.stage(),
                 effective.sequence(), effective.originalSequence(), postAcceptance, stage.route().billingMode(),
-                stage.usageDeclaration(), snapshot, lines, reasons, covered);
+                stage.usageDeclaration(), snapshot, lines, reasons);
     }
 }

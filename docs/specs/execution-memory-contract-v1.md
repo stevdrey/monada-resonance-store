@@ -64,8 +64,8 @@ Define, without implementing, the v1 semantics for:
 - `monada-index`: no — projections reuse `LinearScanResonanceIndex` unchanged.
 - `monada-learning`: no.
 - `monada-api`: yes — `com.monada.api.execution` facade, derived acceptance and history (#97, implemented); projections and bounded recall (#98, implemented, section 18); export (#101, later).
-- `monada-evaluation`: yes (later) — `com.monada.evaluation.execution` usage/cost calculators, comparison,
-  export annotations and end-to-end gates (#99, #100, #101, #102).
+- `monada-evaluation`: yes — `com.monada.evaluation.execution` usage/cost calculators (#99, implemented,
+  section 19); comparison, export annotations and end-to-end gates (#100, #101, #102, later).
 - `monada-speech`: no.
 
 `monada-api` must never depend on `monada-evaluation`. The documented dependency direction is unchanged.
@@ -1056,6 +1056,12 @@ s.cost().status();      // AVAILABLE | PARTIAL | UNAVAILABLE   (basis: HYPOTHETI
   `CUTOFF_UNDERIVABLE`; nothing is guessed.
 - Without a cutoff (pending, rejected, failed, cancelled, unvalidated) every recorded stage is listed in
   `chainStages` so no work is hidden, `postAcceptanceStages` is empty and the cost is `UNAVAILABLE`.
+  `ExecutionSummary.chainScope()` says which case applies: `UP_TO_ACCEPTANCE` or `ALL_RECORDED_NO_ACCEPTANCE`.
+  Consumers must not treat the `chain*` fields of an `ALL_RECORDED_NO_ACCEPTANCE` summary as an accepted chain
+  (for example when comparing in #100).
+- Correction resolution mirrors the facade's own (`ExecutionViews`, package-private in `monada-api`) and is
+  kept honest by `ChainScopeGatesAndParityTest`, which compares the resolved effective stages, evidence and
+  outcome with the facade's `ExecutionView` after multi-revision corrections.
 
 ### 19.3 Price selection and arithmetic
 
@@ -1089,6 +1095,11 @@ Status and reasons follow section 8. Clarifications:
 
 - `UsageTotals` keeps, per `UsageKind`, reported and estimated sums apart, plus the number of stages with an
   `UNKNOWN` counter and the number of `MEASURED` stages that did not measure it. Neither is added as zero.
+  "Not measured" is counted only for kinds the stage's price snapshot prices (a stage without a snapshot
+  already has `MISSING_PRICE`; unpriced kinds such as `REQUESTS` are not a coverage gap), so it agrees with the
+  coverage reasons.
+- `StageUsageCost.covered()`, `CurrencyCost.unrounded()`/`amount()` and `TimeSummary.parallelOverlap()` are
+  derived accessors, not stored state, so they cannot disagree with the data they come from.
 - `TimeSummary`: `effort` = sum of stage durations; `wallClock` = first start to last end; `activeTime` = union
   of the stage intervals (touching intervals merge); `parallelOverlap` = `effort - activeTime`. Without stages
   every duration is absent with a reason, never `Duration.ZERO`.

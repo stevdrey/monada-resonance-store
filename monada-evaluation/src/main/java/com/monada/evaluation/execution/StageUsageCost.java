@@ -12,12 +12,12 @@ import java.util.Optional;
 /**
  * Hypothetical cost of one effective {@code STAGE_RECORDED} event. {@code sequence} is the ledger sequence of
  * the latest revision, {@code originalSequence} that of the first revision (it decides chain membership).
- * A stage is {@code covered} when it has no gap reason; a declared zero is covered and visibly declared.
+ * A stage is {@link #covered()} when it has no gap reason; a declared zero is covered and visibly declared.
  */
 public record StageUsageCost(EventId event, AttemptId attempt, String stage, long sequence, long originalSequence,
                              boolean postAcceptance, BillingMode billingMode, UsageDeclaration declaration,
                              Optional<PriceSnapshot> priceSnapshot, List<CostLine> lines,
-                             List<CostReason> reasons, boolean covered) {
+                             List<CostReason> reasons) {
     public StageUsageCost {
         Objects.requireNonNull(event, "event");
         Objects.requireNonNull(attempt, "attempt");
@@ -27,5 +27,9 @@ public record StageUsageCost(EventId event, AttemptId attempt, String stage, lon
         Objects.requireNonNull(priceSnapshot, "priceSnapshot");
         lines = List.copyOf(lines);
         reasons = List.copyOf(reasons);
+    }
+
+    public boolean covered() {
+        return reasons.stream().noneMatch(CostReason::isGap);
     }
 }

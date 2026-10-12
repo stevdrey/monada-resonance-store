@@ -9,7 +9,7 @@ import java.util.Objects;
 /**
  * Usage of a set of stages with provenance kept apart: reported and estimated values are never merged, an
  * unknown counter and a counter that was not measured are counted, not added as zero. Not-measured counts
- * apply to {@code MEASURED} stages only.
+ * apply to {@code MEASURED} stages and only to kinds their price snapshot prices.
  */
 public record UsageTotals(int stageCount, Map<UsageKind, KindUsage> byKind) {
 

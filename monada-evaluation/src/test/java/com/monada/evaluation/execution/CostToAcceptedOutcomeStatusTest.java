@@ -70,7 +70,7 @@ class CostToAcceptedOutcomeStatusTest {
         for (Outcome outcome : List.of(Outcome.rejected(OutcomeOrigin.VALIDATED),
                 Outcome.failed(OutcomeOrigin.VALIDATED), Outcome.cancelled(OutcomeOrigin.VALIDATED),
                 Outcome.pending(OutcomeOrigin.VALIDATED))) {
-            try (Run run = new Run(root.resolve(outcome.status().name()).toFile().toPath(), Set.of(QualityDimension.TESTS))) {
+            try (Run run = new Run(root.resolve(outcome.status().name()), Set.of(QualityDimension.TESTS))) {
                 run.initial(A1);
                 run.stage(A1, "implement", 0, 10, in(1_000), out(100));
                 run.finish(A1, AttemptResult.FAILED);

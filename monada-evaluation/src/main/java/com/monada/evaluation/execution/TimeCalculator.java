@@ -17,7 +17,7 @@ final class TimeCalculator {
     static TimeSummary of(List<StageRecorded> stages) {
         if (stages.isEmpty()) {
             return new TimeSummary(0, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
-                    Optional.empty(), Optional.empty(), Optional.of("no stage recorded"));
+                    Optional.empty(), Optional.of("no stage recorded"));
         }
         Duration effort = Duration.ZERO;
         Instant first = null;
@@ -44,7 +44,6 @@ final class TimeCalculator {
         }
         active = active.plus(Duration.between(runStart, runEnd));
         return new TimeSummary(stages.size(), Optional.of(first), Optional.of(last), Optional.of(effort),
-                Optional.of(Duration.between(first, last)), Optional.of(active),
-                Optional.of(effort.minus(active)), Optional.empty());
+                Optional.of(Duration.between(first, last)), Optional.of(active), Optional.empty());
     }
 }
