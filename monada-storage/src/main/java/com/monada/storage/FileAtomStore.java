@@ -6,6 +6,7 @@ import com.monada.core.KnowledgeAtom;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -30,6 +31,7 @@ public class FileAtomStore implements AtomStore {
     private final Map<String, KnowledgeAtom> byId = new LinkedHashMap<>();
     private long parsedBytes;
     private long parsedRecords;
+    private KnowledgeAtom tail; // provisional unterminated final record, never committed to byId
 
     public FileAtomStore(Path root) throws IOException {
         this(root, DEFAULT_SEGMENT);
@@ -65,6 +67,9 @@ public class FileAtomStore implements AtomStore {
     @Override
     public Optional<KnowledgeAtom> findById(String id) throws IOException {
         refresh();
+        if (tail != null && tail.id().equals(id)) {
+            return Optional.of(tail);
+        }
         return Optional.ofNullable(byId.get(id));
     }
 
@@ -74,18 +79,25 @@ public class FileAtomStore implements AtomStore {
         // alias merge), the most recently appended entry supersedes earlier ones.
         // Insertion order is preserved based on the first occurrence of each id.
         refresh();
-        return List.copyOf(byId.values());
+        if (tail == null) {
+            return List.copyOf(byId.values());
+        }
+        var withTail = new LinkedHashMap<>(byId);
+        withTail.put(tail.id(), tail);
+        return List.copyOf(withTail.values());
     }
 
-    /** Number of log records parsed by this instance so far (diagnostic; a record may be re-parsed if unterminated). */
+    /** Number of log records parsed by this instance so far (diagnostic; an unterminated tail is re-parsed per lookup). */
     public long parsedRecordCount() {
         return parsedRecords;
     }
 
     /**
      * Brings the in-memory view up to date with the log: reparses from the start if the log shrank, otherwise
-     * parses only the bytes appended since the last refresh. A final line without a line terminator is applied
-     * but not consumed, so it is read again (and superseded) once it is completed.
+     * parses only the bytes appended since the last refresh. Only line-terminated records are committed to
+     * {@code byId}/{@code parsedBytes}. A final record without a terminator is provisional: it is parsed into
+     * {@code tail} on every refresh and overlaid on the committed view, so it disappears if the file loses it and
+     * is superseded once it is completed. Bytes are decoded strictly: malformed UTF-8 fails like a full read would.
      */
     private void refresh() throws IOException {
         long size = Files.size(atomLog);
@@ -93,6 +105,7 @@ public class FileAtomStore implements AtomStore {
             byId.clear();
             parsedBytes = 0;
         }
+        tail = null;
         if (size == parsedBytes) {
             return;
         }
@@ -104,21 +117,35 @@ public class FileAtomStore implements AtomStore {
                 end++;
             }
             boolean terminated = end < chunk.length;
-            String line = new String(chunk, start, end - start, StandardCharsets.UTF_8);
-            if (line.endsWith("\r")) {
-                line = line.substring(0, line.length() - 1);
-            }
-            if (!line.isBlank()) {
-                var atom = parse(line);
-                parsedRecords++;
-                byId.put(atom.id(), atom);
-            }
+            var atom = parseRecord(chunk, start, end);
             if (!terminated) {
+                tail = atom;
                 return;
+            }
+            if (atom != null) {
+                byId.put(atom.id(), atom);
             }
             parsedBytes += end + 1 - start;
             start = end + 1;
         }
+    }
+
+    /** Parses one record's bytes; null for a blank line. */
+    private KnowledgeAtom parseRecord(byte[] chunk, int start, int end) throws IOException {
+        String line = StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(chunk, start, end - start))
+                .toString();
+        if (line.endsWith("\r")) {
+            line = line.substring(0, line.length() - 1);
+        }
+        if (line.isBlank()) {
+            return null;
+        }
+        var atom = parse(line);
+        parsedRecords++;
+        return atom;
     }
 
     private byte[] readFrom(long position, int length) throws IOException {

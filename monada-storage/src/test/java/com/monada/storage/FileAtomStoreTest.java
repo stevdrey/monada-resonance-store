@@ -192,4 +192,99 @@ class FileAtomStoreTest {
         assertEquals("a", store.findById("tail-id").orElseThrow().content());
         assertEquals(1, store.findAll().size());
     }
+
+    private static final String TAIL = "tail-id\tTEXT\t1.0\t2024-01-01T00:00:00Z\tYQ==";
+
+    @Test
+    void removedUnterminatedTailWithNewIdIsRolledBack() throws IOException {
+        var store = new FileAtomStore(root);
+        store.save(atom("prefix", "kept", Map.of()));
+        var log = root.resolve("atoms/segment-000001.log");
+        byte[] prefix = Files.readAllBytes(log);
+        Files.writeString(log, TAIL, StandardOpenOption.APPEND);
+        assertEquals(List.of("prefix", "tail-id"), store.findAll().stream().map(KnowledgeAtom::id).toList());
+
+        Files.write(log, prefix);
+
+        assertEquals(List.of("prefix"), store.findAll().stream().map(KnowledgeAtom::id).toList());
+        assertTrue(store.findById("tail-id").isEmpty());
+    }
+
+    @Test
+    void removedUnterminatedUpdateRestoresThePreviousValueAndOrder() throws IOException {
+        var store = new FileAtomStore(root);
+        store.save(atom("first", "one", Map.of()));
+        store.save(atom("second", "two", Map.of()));
+        var log = root.resolve("atoms/segment-000001.log");
+        byte[] prefix = Files.readAllBytes(log);
+        // unterminated update of "first" (content "a")
+        Files.writeString(log, "first\tTEXT\t1.0\t2024-01-01T00:00:00Z\tYQ==", StandardOpenOption.APPEND);
+        assertEquals("a", store.findById("first").orElseThrow().content());
+        assertEquals(List.of("first", "second"), store.findAll().stream().map(KnowledgeAtom::id).toList());
+
+        Files.write(log, prefix);
+
+        assertEquals("one", store.findById("first").orElseThrow().content());
+        assertEquals(List.of("first", "second"), store.findAll().stream().map(KnowledgeAtom::id).toList());
+    }
+
+    @Test
+    void replacedUnterminatedTailSupersedesTheProvisionalRecord() throws IOException {
+        var store = new FileAtomStore(root);
+        store.save(atom("prefix", "kept", Map.of()));
+        var log = root.resolve("atoms/segment-000001.log");
+        byte[] prefix = Files.readAllBytes(log);
+        Files.writeString(log, TAIL, StandardOpenOption.APPEND);
+        assertTrue(store.findById("tail-id").isPresent());
+
+        Files.write(log, prefix);
+        Files.writeString(log, "other-id\tTEXT\t1.0\t2024-01-01T00:00:00Z\tYg==", StandardOpenOption.APPEND);
+
+        assertTrue(store.findById("tail-id").isEmpty());
+        assertEquals("b", store.findById("other-id").orElseThrow().content());
+    }
+
+    @Test
+    void rejectsMalformedUtf8LikeAFullRead() throws IOException {
+        var store = new FileAtomStore(root);
+        var log = root.resolve("atoms/segment-000001.log");
+        byte[] rest = "\tTEXT\t1.0\t2024-01-01T00:00:00Z\tYQ==\n".getBytes(StandardCharsets.UTF_8);
+        byte[] bad = new byte[rest.length + 1];
+        bad[0] = (byte) 0xC3;
+        System.arraycopy(rest, 0, bad, 1, rest.length);
+        Files.write(log, bad);
+
+        assertThrows(java.nio.charset.MalformedInputException.class, store::findAll);
+        assertThrows(java.nio.charset.MalformedInputException.class, () -> store.findById("x"));
+    }
+
+    @Test
+    void rejectsMalformedUtf8AppendedIncrementallyAndKeepsEarlierRecords() throws IOException {
+        var store = new FileAtomStore(root);
+        store.save(atom("good", "fine", Map.of()));
+        assertEquals(1, store.findAll().size());
+        var log = root.resolve("atoms/segment-000001.log");
+        byte[] rest = "\tTEXT\t1.0\t2024-01-01T00:00:00Z\tYQ==\n".getBytes(StandardCharsets.UTF_8);
+        byte[] bad = new byte[rest.length + 1];
+        bad[0] = (byte) 0xC3;
+        System.arraycopy(rest, 0, bad, 1, rest.length);
+        Files.write(log, bad, StandardOpenOption.APPEND);
+
+        assertThrows(java.nio.charset.MalformedInputException.class, store::findAll);
+    }
+
+    @Test
+    void readsValidNonAsciiIdsInitiallyAndIncrementally() throws IOException {
+        var store = new FileAtomStore(root);
+        var log = root.resolve("atoms/segment-000001.log");
+        Files.writeString(log, "idé-ñ\tTEXT\t1.0\t2024-01-01T00:00:00Z\tYQ==\n", StandardCharsets.UTF_8,
+                StandardOpenOption.APPEND);
+        assertTrue(store.findById("idé-ñ").isPresent());
+
+        Files.writeString(log, "日本-2\tTEXT\t1.0\t2024-01-01T00:00:00Z\tYg==\n", StandardCharsets.UTF_8,
+                StandardOpenOption.APPEND);
+
+        assertEquals("b", store.findById("日本-2").orElseThrow().content());
+        assertEquals(2, store.findAll().size());
+    }
 }
