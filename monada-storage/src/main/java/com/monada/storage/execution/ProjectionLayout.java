@@ -78,8 +78,12 @@ public final class ProjectionLayout {
         return scopeDir;
     }
 
-    public Path pointer() throws LedgerException {
-        return paths.contained(scopeDir.resolve(POINTER_FILE));
+    /**
+     * The pointer entry, as a lexical path inside the (contained) scope directory. It is never resolved through
+     * a link: readers refuse anything but a regular file, and {@link #publish} replaces any other entry itself.
+     */
+    public Path pointer() {
+        return scopeDir.resolve(POINTER_FILE);
     }
 
     /**
@@ -184,8 +188,8 @@ public final class ProjectionLayout {
         if (!dir.getParent().equals(scopeDir) || !GENERATION_NAME.matcher(dir.getFileName().toString()).matches()) {
             throw new IllegalArgumentException("not a generation directory of this scope: " + generationDir);
         }
-        Path temp = paths.contained(scopeDir.resolve(POINTER_TEMP));
-        Files.deleteIfExists(temp);
+        Path temp = pointerTemp();
+        removeEntry(temp);
         try (FileChannel out = FileChannel.open(temp, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) {
             ByteBuffer buffer = ByteBuffer.wrap((dir.getFileName() + "\n").getBytes(StandardCharsets.US_ASCII));
             while (buffer.hasRemaining()) {
@@ -193,12 +197,34 @@ public final class ProjectionLayout {
             }
             out.force(true);
         }
-        Files.move(temp, pointer(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        Path pointer = pointer();
+        if (Files.exists(pointer, LinkOption.NOFOLLOW_LINKS) && !Files.isRegularFile(pointer, LinkOption.NOFOLLOW_LINKS)) {
+            // A link (dangling or not) or a directory cannot be atomically replaced by a file: remove the entry
+            // itself, never what it points to. Readers meanwhile see no pointer (MISSING) for this instant only.
+            removeEntry(pointer);
+        }
+        Files.move(temp, pointer, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
     }
 
-    /** Leftover temporary pointer of an interrupted publication, if any. */
-    public Path pointerTemp() throws LedgerException {
-        return paths.contained(scopeDir.resolve(POINTER_TEMP));
+    /** Leftover temporary pointer of an interrupted publication, if any (lexical, never resolved). */
+    public Path pointerTemp() {
+        return scopeDir.resolve(POINTER_TEMP);
+    }
+
+    /** Deletes an entry without following links: a link or file is deleted itself, a directory tree is walked. */
+    private static void removeEntry(Path entry) throws IOException {
+        if (!Files.exists(entry, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        if (!Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS)) {
+            Files.delete(entry);
+            return;
+        }
+        try (Stream<Path> walk = Files.walk(entry)) { // Files.walk never follows links by default
+            for (Path p : walk.sorted(Comparator.reverseOrder()).toList()) {
+                Files.delete(p);
+            }
+        }
     }
 
     /** Checkpoint file inside a generation directory. */

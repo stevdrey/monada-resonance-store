@@ -917,14 +917,16 @@ order, duplicate projection, unknown retirement) stops reading and makes it `INC
   it re-projects the whole ledger into a new generation directory (`projection-<n+1>/`, a name never
   reused), stores only the final live atoms, and publishes it by atomically replacing `projection.current`.
   The scope is never without a published projection and no directory a reader may hold is moved. A failure
-  before publication deletes the new generation and leaves the pointer. Rebuilds never reclaim sound older
+  before publication deletes the new generation and leaves the pointer. A pointer entry that is not a regular
+  file (a dangling or escaping link, or a directory) is removed itself, never followed, and replaced, so a
+  rebuild also repairs it. Rebuilds never reclaim sound older
   generations, because open read-only snapshots keep reading them; only a previous generation that was
   unsound (it backs no snapshot memory) is deleted after publication.
 - `pruneProjection(scope)` (writable only) is the explicit reclamation: it deletes every generation except
   the published one (all of them when nothing is published), invalid entries and a leftover temporary
   pointer. The host calls it when no read-only snapshot of the scope is open. A snapshot whose generation is
-  reclaimed anyway reports `MISSING` ("was reclaimed (pruneProjection); reopen the snapshot") with no hits,
-  never `INCOMPATIBLE`. With an unreadable pointer it deletes nothing and says to rebuild first.
+  reclaimed anyway reports `MISSING` ("was reclaimed (pruneProjection); reopen the snapshot") from both
+  `projectionStatus` and `recall` (no hits), never `INCOMPATIBLE`; the check reads no file content. With an unreadable pointer it deletes nothing and says to rebuild first.
   Generation entries are enumerated without resolving links: only real directories count as generations,
   numbering skips every name already present (links included), and entries that are links or files are
   removed after publication (the link itself, never its target), so a rebuild recovers from them.

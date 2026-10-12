@@ -94,6 +94,9 @@ class ExperienceProjectionFailureTest {
             assertEquals(9, m.loadEvent(SCOPE, com.monada.core.execution.EventId.of("x-3-a1-fin")).orElseThrow()
                     .sequence(), "the failed event was not re-appended");
             assertEquals(ProjectionStatus.State.STALE, m.projectionStatus(SCOPE).state(), "no silent catch-up");
+            String diagnostics = m.projectionStatus(SCOPE).diagnostics().toString();
+            assertTrue(diagnostics.contains("covers ledger sequence 6 of 9"), diagnostics);
+            assertFalse(diagnostics.contains("of 7"), "the coverage message follows later appends: " + diagnostics);
             assertEquals(6, m.projectionStatus(SCOPE).coveredSequence());
             ExperienceRecall partial = m.recall(SCOPE, "flaky test", 10);
             assertEquals(ProjectionStatus.State.STALE, partial.status().state());

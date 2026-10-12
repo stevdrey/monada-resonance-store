@@ -68,6 +68,7 @@ final class ExperienceProjection implements AutoCloseable {
     private ProjectionLayout layout;
     private String openGeneration = ""; // read-only: generation of the scope files when the snapshot was taken
     private Path loadedDir; // generation directory this instance loaded
+    private boolean interruptedTail; // STALE: the checkpoint ends in an interrupted write
 
     private ExperienceProjection(Path root, ScopeId scope, boolean writable, ProjectionFaults faults) {
         this.root = root;
@@ -98,7 +99,26 @@ final class ExperienceProjection implements AutoCloseable {
     }
 
     ProjectionStatus status(long ledgerSequence) {
-        return new ProjectionStatus(state, covered, ledgerSequence, ProjectionCheckpoint.FORMAT_VERSION, diagnostics);
+        List<String> all = new ArrayList<>(diagnostics);
+        if (state == ProjectionStatus.State.STALE) {
+            // Computed now, so it always names the current ledger end, however many events were appended since.
+            all.add("projection covers ledger sequence " + covered + " of " + ledgerSequence
+                    + (interruptedTail ? " and ends in an interrupted write" : "")
+                    + "; call rebuildProjection to reconcile");
+        }
+        return new ProjectionStatus(state, covered, ledgerSequence, ProjectionCheckpoint.FORMAT_VERSION, all);
+    }
+
+    /**
+     * Status for {@code projectionStatus}: a read-only snapshot first checks, without touching any file, whether
+     * its generation was reclaimed by {@code pruneProjection}, and then reports {@code MISSING}.
+     */
+    ProjectionStatus currentStatus(long ledgerSequence) {
+        if (!writable && (state == ProjectionStatus.State.CURRENT || state == ProjectionStatus.State.STALE)
+                && reclaimed(false)) {
+            markReclaimed();
+        }
+        return status(ledgerSequence);
     }
 
     // ------------------------------------------------------------------ loading and verification
@@ -112,6 +132,7 @@ final class ExperienceProjection implements AutoCloseable {
         uncovered = Set.of();
         stored.clear();
         loadedDir = null;
+        interruptedTail = false;
         try {
             layout = ProjectionLayout.of(root, scope);
             openGeneration = layout.generation();
@@ -219,10 +240,8 @@ final class ExperienceProjection implements AutoCloseable {
         uncovered = Set.copyOf(extra);
         stored.addAll(present);
         if (!caughtUp) {
-            state = ProjectionStatus.State.STALE;
-            diagnostics.add("projection covers ledger sequence " + covered + " of " + ledger.size()
-                    + (snapshot.cleanTail() ? "" : " and ends in an interrupted write")
-                    + "; call rebuildProjection to reconcile");
+            state = ProjectionStatus.State.STALE; // the coverage diagnostic is computed by status()
+            interruptedTail = !snapshot.cleanTail();
             return;
         }
         state = ProjectionStatus.State.CURRENT;
@@ -562,11 +581,15 @@ final class ExperienceProjection implements AutoCloseable {
     }
 
     private ExperienceRecall reclaimedRecall(long ledgerSequence) {
+        markReclaimed();
+        return new ExperienceRecall(status(ledgerSequence), List.of());
+    }
+
+    private void markReclaimed() {
         closeResources();
         state = ProjectionStatus.State.MISSING;
         diagnostics.add(0, "this snapshot's projection generation " + loadedDir.getFileName()
                 + " was reclaimed (pruneProjection); reopen the snapshot");
-        return new ExperienceRecall(status(ledgerSequence), List.of());
     }
 
     private record Collected(List<ExperienceHit> hits, String problem) {

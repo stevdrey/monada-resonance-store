@@ -293,4 +293,23 @@ class ProjectionCheckpointTest {
                     : "malformed projection header"), rejected.problems().toString());
         }
     }
+
+    @Test
+    void publishReplacesALinkedOrDirectoryPointerWithoutFollowingIt() throws IOException {
+        ProjectionLayout layout = ProjectionLayout.of(root, ScopeId.of("scope-1"));
+        Path generation = Files.createDirectories(layout.nextGenerationDir());
+        Path target = Files.writeString(root.resolve("target"), "unchanged");
+        Files.createSymbolicLink(layout.pointer(), target);
+        Files.createDirectories(layout.pointerTemp()); // a leftover temp entry that is a directory
+        layout.publish(generation);
+        assertTrue(Files.isRegularFile(layout.pointer(), java.nio.file.LinkOption.NOFOLLOW_LINKS));
+        assertEquals(Optional.of(generation), layout.currentDir());
+        assertEquals("unchanged", Files.readString(target), "the old link's target is never written");
+        assertFalse(Files.exists(layout.pointerTemp(), java.nio.file.LinkOption.NOFOLLOW_LINKS));
+
+        Files.delete(layout.pointer());
+        Files.writeString(Files.createDirectories(layout.pointer()).resolve("inner"), "x");
+        layout.publish(generation);
+        assertEquals(Optional.of(generation), layout.currentDir());
+    }
 }

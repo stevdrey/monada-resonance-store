@@ -331,6 +331,10 @@ class ExperienceProjectionGenerationTest {
                 writer.rebuildProjection(SCOPE);
                 writer.pruneProjection(SCOPE); // the host prunes although this snapshot is still open
             }
+            ProjectionStatus status = snapshot.projectionStatus(SCOPE); // before any recall
+            assertEquals(ProjectionStatus.State.MISSING, status.state());
+            assertTrue(status.diagnostics().get(0).contains("projection-000001 was reclaimed"),
+                    status.diagnostics().toString());
             ExperienceRecall recall = snapshot.recall(SCOPE, QUERY, 10);
             assertEquals(ProjectionStatus.State.MISSING, recall.status().state());
             assertEquals(List.of(), recall.hits());
@@ -451,5 +455,33 @@ class ExperienceProjectionGenerationTest {
                     status.diagnostics().toString());
             assertEquals(ProjectionStatus.State.CURRENT, m.rebuildProjection(SCOPE).state());
         }
+    }
+
+    @Test
+    void rebuildReplacesAnInvalidPointerEntry() throws IOException {
+        Path outsideFile = Files.writeString(root.getParent().resolve(root.getFileName() + "-pointer-target"),
+                "projection-000001\n");
+        for (String kind : List.of("dangling link", "outside link", "directory")) {
+            Path store = root.resolve(kind.replace(' ', '-'));
+            try (ExecutionMemory m = ExecutionMemory.open(store, SCOPE)) {
+                corpus(m);
+            }
+            ProjectionLayout layout = ProjectionLayout.of(store, SCOPE);
+            Path pointer = layout.pointer();
+            Files.delete(pointer);
+            switch (kind) {
+                case "dangling link" -> Files.createSymbolicLink(pointer, layout.scopeDir().resolve("nowhere"));
+                case "outside link" -> Files.createSymbolicLink(pointer, outsideFile);
+                default -> Files.writeString(Files.createDirectories(pointer).resolve("inner.txt"), "x");
+            }
+            try (ExecutionMemory m = ExecutionMemory.open(store, SCOPE)) {
+                assertEquals(ProjectionStatus.State.INCOMPATIBLE, m.projectionStatus(SCOPE).state(), kind);
+                ProjectionStatus rebuilt = m.rebuildProjection(SCOPE);
+                assertEquals(ProjectionStatus.State.CURRENT, rebuilt.state(), kind + " " + rebuilt.diagnostics());
+            }
+            assertTrue(Files.isRegularFile(pointer, java.nio.file.LinkOption.NOFOLLOW_LINKS), kind);
+            assertEquals("projection-000002\n", Files.readString(pointer), kind);
+        }
+        assertEquals("projection-000001\n", Files.readString(outsideFile), "a link target is never written");
     }
 }

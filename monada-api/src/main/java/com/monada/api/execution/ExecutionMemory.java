@@ -322,7 +322,7 @@ public final class ExecutionMemory implements AutoCloseable {
     /** Projection state of the scope and the ledger sequence it covers; side-effect free. */
     public ProjectionStatus projectionStatus(ScopeId scope) {
         requireOpen(scope);
-        return projection.status(index.all().size());
+        return projection.currentStatus(index.all().size());
     }
 
     /**
