@@ -28,10 +28,13 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.UnaryOperator;
 
 public class MonadaMemory {
 
@@ -103,6 +106,11 @@ public class MonadaMemory {
     }
 
     public static MonadaMemory open(Path path, MonadaMemoryOptions options) {
+        return open(path, options, UnaryOperator.identity());
+    }
+
+    /** Test seam: lets a test wrap the atom store, e.g. to count log scans. */
+    static MonadaMemory open(Path path, MonadaMemoryOptions options, UnaryOperator<AtomStore> atomStoreDecorator) {
         Objects.requireNonNull(options, "options");
         try {
             ManifestStore manifestStore = new FileManifestStore(path);
@@ -205,7 +213,7 @@ public class MonadaMemory {
                 manifestStore.save(manifest);
             }
 
-            AtomStore atomStore = new FileAtomStore(path, manifest.atomSegment());
+            AtomStore atomStore = atomStoreDecorator.apply(new FileAtomStore(path, manifest.atomSegment()));
             FrequencyStore frequencyStore = existing.isPresent()
                     ? FileFrequencyStore.openExisting(path, manifest.vectorSegment(), vectorFormatProfile)
                     : FileFrequencyStore.create(path, manifest.vectorSegment(), vectorFormatProfile);
@@ -249,15 +257,51 @@ public class MonadaMemory {
                 knownAtomIds.remember(merged.id());
                 return merged;
             }
-            // Persist vector first: a partial failure leaves an orphan vector that search
-            // safely ignores, instead of an atom that cannot be recalled by resonance.
-            frequencyStore.save(atom.id(), encoder.encode(getWeightedTextForAtom(atom)));
-            atomStore.save(atom);
-            knownAtomIds.remember(atom.id());
+            appendNew(atom);
             return atom;
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    /**
+     * Bulk variant of {@link #remember(String)} (no aliases) for callers that store many texts at once, such as
+     * projection rebuilds. Equivalent to calling {@code remember} for each text in order, but the atom log is read
+     * once for the whole batch instead of once per text. Texts already stored, or repeated within the batch, are
+     * idempotent and write nothing.
+     */
+    public List<KnowledgeAtom> rememberAll(List<String> texts) {
+        Objects.requireNonNull(texts, "texts");
+        try {
+            var known = new HashMap<String, KnowledgeAtom>();
+            for (var stored : atomStore.findAll()) {
+                known.put(stored.id(), stored);
+            }
+            var result = new ArrayList<KnowledgeAtom>(texts.size());
+            for (var text : texts) {
+                var atom = KnowledgeAtom.text(text, List.of());
+                var existing = known.get(atom.id());
+                if (existing != null) {
+                    knownAtomIds.remember(existing.id());
+                    result.add(existing);
+                    continue;
+                }
+                appendNew(atom);
+                known.put(atom.id(), atom);
+                result.add(atom);
+            }
+            return List.copyOf(result);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private void appendNew(KnowledgeAtom atom) throws IOException {
+        // Persist vector first: a partial failure leaves an orphan vector that search
+        // safely ignores, instead of an atom that cannot be recalled by resonance.
+        frequencyStore.save(atom.id(), encoder.encode(getWeightedTextForAtom(atom)));
+        atomStore.save(atom);
+        knownAtomIds.remember(atom.id());
     }
 
     private WeightedText getWeightedTextForAtom(KnowledgeAtom atom) {

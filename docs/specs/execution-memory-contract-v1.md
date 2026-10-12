@@ -996,10 +996,12 @@ try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
   differ between rebuilds; ranking, scores and the checkpoint do not.
 - Retrieval feedback on projection atoms is not exposed; outcomes never become feedback.
 - Projection verification on open re-projects the covered ledger in memory (linear in the scope size).
-- Projection writes call `MonadaMemory.remember` only for atoms not already stored, and a rebuild stores
-  each final live atom once. Each distinct new atom still costs one scan of the atom log inside `remember`
-  (its existence check), so a full rebuild of N distinct live texts is quadratic in N; a bulk append path in
-  `MonadaMemory` is follow-up work (#111).
+- Incremental projection writes call `MonadaMemory.remember` only for atoms not already stored. A rebuild
+  stores each final live atom once through `MonadaMemory.rememberAll` (issue #111), which reads the atom log
+  once per call and then appends vector-then-atom with the same encoding as `remember`, so a full rebuild of
+  N distinct live texts is linear in N. Results, atom IDs, vector bytes, ranking and
+  `projection-checkpoint.log` are unchanged. Each distinct atom written by incremental projection still costs
+  one atom-log scan inside `remember`.
 - A read-only snapshot holds its generation's atoms and vectors in memory for its lifetime (proportional to
   the scope's projected atoms); hosts close snapshots they no longer need.
 - Existing ledgers stay valid: a pre-#98 scope opens as `MISSING` until rebuilt. Legacy text stores,

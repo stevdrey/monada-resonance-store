@@ -2,6 +2,7 @@ package com.monada.api.execution;
 
 import com.monada.api.MonadaMemory;
 import com.monada.api.MonadaMemoryOptions;
+import com.monada.core.KnowledgeAtom;
 import com.monada.core.ResonanceResult;
 import com.monada.core.execution.ExperienceRef;
 import com.monada.core.execution.ScopeId;
@@ -301,8 +302,15 @@ final class ExperienceProjection implements AutoCloseable {
                     }
                 }
             }
-            for (var live : p.liveTexts().entrySet()) {
-                remember(target, live.getKey(), live.getValue());
+            // One append-only bulk write: the atom log is scanned once, not once per atom.
+            var live = p.liveTexts();
+            List<String> atomIds = List.copyOf(live.keySet());
+            List<KnowledgeAtom> assigned = target.rememberAll(List.copyOf(live.values()));
+            for (int i = 0; i < atomIds.size(); i++) {
+                if (!assigned.get(i).id().equals(atomIds.get(i))) {
+                    throw new IllegalStateException("projection memory assigned atom " + assigned.get(i).id()
+                            + ", expected " + atomIds.get(i));
+                }
             }
             faults.beforePublish();
             layout.publish(dir);
