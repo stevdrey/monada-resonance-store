@@ -12,11 +12,8 @@ import com.monada.storage.execution.ExperienceRefCodec;
 import com.monada.storage.execution.ProjectionCheckpoint.Entry;
 import com.monada.storage.execution.ProjectionCheckpoint.EntryKind;
 import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,10 +38,6 @@ final class Projector {
     private record Experience(ExperienceRef ref, Optional<String> solution, Optional<String> lesson, String atomId) {
     }
 
-    /** Checkpoint entries for one ledger event and the text of every atom it projects, by atom ID (tests). */
-    record Step(List<Entry> entries, Map<String, String> texts) {
-    }
-
     /**
      * Receives the entries of one ledger event as they are produced, in order; {@code text} is the projection
      * text for a {@code PROJECT} entry and null for a {@code RETIRE}. Nothing is buffered per event, so a
@@ -56,27 +49,10 @@ final class Projector {
         void accept(Entry entry, String text) throws IOException;
     }
 
-    /** Collecting form for tests: materializes the event's entries. */
-    Step apply(ExecutionEvent event) {
-        List<Entry> entries = new ArrayList<>();
-        Map<String, String> texts = new LinkedHashMap<>();
-        try {
-            apply(event, (entry, text) -> {
-                entries.add(entry);
-                if (text != null) {
-                    texts.put(entry.atomId(), text);
-                }
-            });
-        } catch (IOException e) {
-            throw new UncheckedIOException(e); // cannot happen: the collecting sink does no I/O
-        }
-        return new Step(List.copyOf(entries), Collections.unmodifiableMap(texts));
-    }
-
     private final Map<ExecutionId, String> taskSummaries = new HashMap<>();
     private final Map<ExecutionId, LinkedHashMap<AttemptId, Experience>> experiences = new HashMap<>();
     private final TreeMap<String, TreeMap<String, ExperienceRef>> live = new TreeMap<>();
-    private final Set<String> projected = new HashSet<>();
+    private final TreeSet<String> retired = new TreeSet<>(); // projected atoms that represent no ref any more
     private final TreeMap<String, String> liveTexts = new TreeMap<>();
     private final Map<String, String> textOf = new HashMap<>(); // every atom ever projected; never pruned
 
@@ -123,10 +99,11 @@ final class Projector {
             if (refs.isEmpty()) {
                 live.remove(old.atomId());
                 liveTexts.remove(old.atomId());
+                retired.add(old.atomId());
             }
         }
         sink.accept(new Entry(EntryKind.PROJECT, next.atomId(), next.ref()), text);
-        projected.add(next.atomId());
+        retired.remove(next.atomId());
         liveTexts.put(next.atomId(), text);
         textOf.put(next.atomId(), text);
         live.computeIfAbsent(next.atomId(), k -> new TreeMap<>())
@@ -159,10 +136,17 @@ final class Projector {
         return Collections.unmodifiableSortedMap(new TreeMap<>(liveTexts));
     }
 
-    /** Atoms that were projected and no longer represent any ref. */
+    /** Atoms that were projected and no longer represent any ref (a copy, for verification). */
     SortedSet<String> retired() {
-        TreeSet<String> out = new TreeSet<>(projected);
-        out.removeAll(live.keySet());
-        return out;
+        return Collections.unmodifiableSortedSet(new TreeSet<>(retired));
+    }
+
+    /** Constant-time membership in the retired set, maintained incrementally (no per-call copy). */
+    boolean isRetired(String atomId) {
+        return retired.contains(atomId);
+    }
+
+    int retiredCount() {
+        return retired.size();
     }
 }

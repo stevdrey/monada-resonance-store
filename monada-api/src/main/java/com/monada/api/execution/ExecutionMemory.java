@@ -95,18 +95,18 @@ public final class ExecutionMemory implements AutoCloseable {
     /**
      * Opens a read-only <b>snapshot</b> of the scope: it takes no lock, creates nothing and may run next to a
      * live writer, seeing the valid prefix of the ledger at the moment of opening. Later appends are not
-     * visible; open a new read-only instance to see them. {@link #record} and {@link #rebuildProjection} are
-     * unsupported; {@link #recall} reads an existing projection and never creates one. A missing root or
+     * visible; open a new read-only instance to see them. {@link #record}, {@link #rebuildProjection} and
+     * {@link #pruneProjection} are unsupported. The projection is verified and then loaded into memory once:
+     * {@link #recall} on the snapshot never reads a file again, so later appends, rebuilds, prunes or damage to
+     * the projection files never change its answers (memory use grows with the scope's projected atoms). A missing root or
      * manifest fails with {@link UncheckedIOException}, and so does a ledger with integrity errors (the
      * writable open refuses it too); a missing scope is an empty history. A torn tail (possibly a writer
      * mid-append) is tolerated and reported by {@link #hasTornTail()}.
      *
      * <p>A live writer may be between its ledger append and its projection write while the snapshot is
      * taken. When the projection then looks incompatible or missing and the scope's files changed during the
-     * open, the
-     * whole snapshot is taken again (at most {@value #READ_ONLY_ATTEMPTS} attempts, no waiting); a projection
-     * that is incompatible while nothing changes is reported on the first attempt. {@link #recall} on the
-     * snapshot ignores experiences projected after it was opened and retries a read that overlaps a write.
+     * open, the whole snapshot is taken again (at most {@value #READ_ONLY_ATTEMPTS} attempts, no waiting); a
+     * projection that is incompatible while nothing changes is reported on the first attempt.
      */
     public static ExecutionMemory openReadOnly(Path root, ScopeId scope, ExecutionMemoryConfig config) {
         return openReadOnly(root, scope, config, attempt -> { });
@@ -115,18 +115,9 @@ public final class ExecutionMemory implements AutoCloseable {
     /** Attempts of a read-only open racing a live writer. */
     static final int READ_ONLY_ATTEMPTS = 3;
 
-    /**
-     * Test seam: runs after the ledger snapshot of each read-only attempt, before the projection loads, and
-     * before each read-only recall query attempt.
-     */
+    /** Test seam: runs after the ledger snapshot of each read-only attempt, before the projection loads. */
     interface ReadOnlyOpenHook {
         void afterLedgerSnapshot(int attempt);
-
-        default void beforeRecallQuery(int attempt) {
-        }
-
-        default void onRecallRound(int topK) {
-        }
     }
 
     static ExecutionMemory openReadOnly(Path root, ScopeId scope, ExecutionMemoryConfig config,
@@ -172,22 +163,8 @@ public final class ExecutionMemory implements AutoCloseable {
             }
             HistoryIndex index = HistoryIndex.of(reader.replay());
             hook.afterLedgerSnapshot(attempt);
-            ProjectionFaults faults = new ProjectionFaults() {
-                @Override
-                public void beforeCommit(long ledgerSequence) {
-                }
-
-                @Override
-                public void beforeReadOnlyQuery(int queryAttempt) {
-                    hook.beforeRecallQuery(queryAttempt);
-                }
-
-                @Override
-                public void onRecallRound(int topK) {
-                    hook.onRecallRound(topK);
-                }
-            };
-            ExperienceProjection projection = ExperienceProjection.open(root, scope, index.all(), false, faults);
+            ExperienceProjection projection = ExperienceProjection.open(root, scope, index.all(), false,
+                    ProjectionFaults.NONE);
             return new ExecutionMemory(null, index, reader.hasTornTail(), scope, config, projection);
         } catch (IOException e) {
             throw new UncheckedIOException("cannot open execution memory " + root + " read-only", e);
@@ -322,7 +299,7 @@ public final class ExecutionMemory implements AutoCloseable {
     /** Projection state of the scope and the ledger sequence it covers; side-effect free. */
     public ProjectionStatus projectionStatus(ScopeId scope) {
         requireOpen(scope);
-        return projection.currentStatus(index.all().size());
+        return projection.status(index.all().size());
     }
 
     /**
@@ -339,11 +316,11 @@ public final class ExecutionMemory implements AutoCloseable {
     }
 
     /**
-     * Explicit reclamation of old projection generations: deletes every generation except the published one
-     * (and invalid leftovers). Rebuilds keep sound older generations so that open read-only snapshots keep
-     * working; the host calls this when it has no read-only snapshot of the scope open. A snapshot whose
-     * generation is reclaimed reports {@code MISSING} and must be reopened. Best effort: failures are reported in
-     * the returned diagnostics, never thrown. Writable only; the ledger is never modified.
+     * Explicit reclamation of old projection generations: deletes every generation except the published one,
+     * invalid leftovers and a temporary pointer. Every rebuild already does this; prune retries a cleanup that
+     * failed (for example a file still in use). Open read-only snapshots are unaffected because they hold their
+     * projection in memory. Best effort: failures are reported in the returned diagnostics, never thrown.
+     * Writable only; the ledger is never modified.
      */
     public ProjectionStatus pruneProjection(ScopeId scope) {
         requireOpen(scope);
@@ -356,8 +333,9 @@ public final class ExecutionMemory implements AutoCloseable {
     /**
      * Bounded recall of prior experiences of this scope only (contract v1, section 11). Scope selection
      * happens before ranking: each scope has its own projection, so another scope can never consume a slot.
-     * Runs the existing {@code MonadaMemory} ranking with its production defaults and expands atoms to their
-     * exact experience refs. {@code limit} must be 1–{@value ExperienceRecall#MAX_LIMIT}; a blank query
+     * Runs the existing ranking with production defaults ({@code MonadaMemory} when writable, the same ranker over
+     * the snapshot's frozen copy when read-only) and expands atoms to their exact experience refs.
+     * {@code limit} must be 1–{@value ExperienceRecall#MAX_LIMIT}; a blank query
      * returns no hits. A missing or incompatible projection returns no hits with its status; a stale one
      * answers from the covered ledger prefix.
      */

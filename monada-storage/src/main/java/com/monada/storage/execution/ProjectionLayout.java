@@ -30,12 +30,12 @@ import java.util.stream.Stream;
  *   projection-&lt;n&gt;/                 # current generation
  *     projection-checkpoint.log     # see {@link ProjectionCheckpoint}
  *     memory/                       # standard MonadaMemory layout (manifest 0.4)
- *   projection-&lt;n-1&gt;/               # previous generation, kept for in-flight readers
  * </pre>
  *
  * <p>A rebuild writes a new generation under a name no reader references and publishes it by replacing the
  * pointer, so the scope is never without a published projection and no directory a reader may hold is
- * moved.
+ * moved; older generations are reclaimed afterwards.
+ *
  * <p>The scope directory name is derived only from the SHA-256 of the scope ID, so raw IDs are never path
  * segments, and every path is checked to stay inside the ledger root (symbolic links included). Resolving a
  * layout creates nothing.
@@ -205,7 +205,7 @@ public final class ProjectionLayout {
             throw new IllegalArgumentException("not a generation directory of this scope: " + generationDir);
         }
         Path temp = pointerTemp();
-        removeEntry(temp);
+        deleteEntry(temp);
         try (FileChannel out = FileChannel.open(temp, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) {
             ByteBuffer buffer = ByteBuffer.wrap((dir.getFileName() + "\n").getBytes(StandardCharsets.US_ASCII));
             while (buffer.hasRemaining()) {
@@ -217,7 +217,7 @@ public final class ProjectionLayout {
         if (Files.exists(pointer, LinkOption.NOFOLLOW_LINKS) && !Files.isRegularFile(pointer, LinkOption.NOFOLLOW_LINKS)) {
             // A link (dangling or not) or a directory cannot be atomically replaced by a file: remove the entry
             // itself, never what it points to. Readers meanwhile see no pointer (MISSING) for this instant only.
-            removeEntry(pointer);
+            deleteEntry(pointer);
         }
         Files.move(temp, pointer, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
     }
@@ -227,20 +227,12 @@ public final class ProjectionLayout {
         return scopeDir.resolve(POINTER_TEMP);
     }
 
-    /** Deletes an entry without following links: a link or file is deleted itself, a directory tree is walked. */
-    private static void removeEntry(Path entry) throws IOException {
-        if (!Files.exists(entry, LinkOption.NOFOLLOW_LINKS)) {
-            return;
-        }
-        if (!Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS)) {
-            Files.delete(entry);
-            return;
-        }
-        try (Stream<Path> walk = Files.walk(entry)) { // Files.walk never follows links by default
-            for (Path p : walk.sorted(Comparator.reverseOrder()).toList()) {
-                Files.delete(p);
-            }
-        }
+    /**
+     * Deletes an entry without following links: a link or file is deleted itself (never its target), a directory
+     * tree is walked without following links. The single link-safe deletion used for projection cleanup.
+     */
+    public static void deleteEntry(Path entry) throws IOException {
+        LedgerPaths.deleteEntry(entry);
     }
 
     /** Checkpoint file inside a generation directory. */

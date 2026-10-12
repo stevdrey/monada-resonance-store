@@ -86,7 +86,7 @@ class ExperienceProjectionGenerationTest {
             assertEquals(expected, render(m.recall(SCOPE, QUERY, 10)));
         }
         assertEquals(List.of(ProjectionStatus.State.CURRENT), seen);
-        assertEquals(2, layout().generationDirs().size(), "the previous generation is kept for readers");
+        assertEquals(1, layout().generationDirs().size(), "old generations are reclaimed after publication");
     }
 
     @Test
@@ -288,18 +288,18 @@ class ExperienceProjectionGenerationTest {
     }
 
     @Test
-    void rebuildsKeepSoundGenerationsUntilPruned() throws IOException {
+    void rebuildsReclaimOldGenerations() throws IOException {
         try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
             corpus(m);
             List<String> expected = render(m.recall(SCOPE, QUERY, 10));
             for (int i = 0; i < 3; i++) {
                 m.rebuildProjection(SCOPE);
+                assertEquals(1, generationNames().size(), "only the published generation remains");
             }
-            assertEquals(List.of("projection-000001", "projection-000002", "projection-000003", "projection-000004"),
-                    generationNames(), "rebuilds never reclaim sound generations");
+            assertEquals(List.of("projection-000004"), generationNames());
             ProjectionStatus pruned = m.pruneProjection(SCOPE);
             assertEquals(ProjectionStatus.State.CURRENT, pruned.state());
-            assertEquals(List.of(), pruned.diagnostics());
+            assertEquals(List.of(), pruned.diagnostics(), "nothing left to prune");
             assertEquals(List.of("projection-000004"), generationNames());
             assertEquals(expected, render(m.recall(SCOPE, QUERY, 10)));
         }
@@ -316,42 +316,34 @@ class ExperienceProjectionGenerationTest {
                 writer.rebuildProjection(SCOPE);
                 writer.rebuildProjection(SCOPE);
             }
+            assertEquals(List.of("projection-000003"), generationNames(), "the snapshot's generation was reclaimed");
             ExperienceRecall recall = snapshot.recall(SCOPE, QUERY, 10);
             assertEquals(ProjectionStatus.State.CURRENT, recall.status().state(), recall.status().diagnostics().toString());
-            assertEquals(expected, render(recall));
-            assertEquals(List.of("projection-000001", "projection-000002", "projection-000003"), generationNames());
+            assertEquals(expected, render(recall), "a frozen snapshot does not need its files");
         }
     }
 
     @Test
-    void snapshotOfAPrunedGenerationReportsMissing() throws IOException {
+    void snapshotKeepsAnsweringAfterRebuildAndPrune() throws IOException {
         List<String> expected;
         try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
             corpus(m);
             expected = render(m.recall(SCOPE, QUERY, 10));
         }
-        try (ExecutionMemory snapshot = ExecutionMemory.openReadOnly(root, SCOPE);
-             ExecutionMemory blankFirst = ExecutionMemory.openReadOnly(root, SCOPE)) {
+        try (ExecutionMemory snapshot = ExecutionMemory.openReadOnly(root, SCOPE)) {
             try (ExecutionMemory writer = ExecutionMemory.open(root, SCOPE)) {
                 writer.rebuildProjection(SCOPE);
-                writer.pruneProjection(SCOPE); // the host prunes although this snapshot is still open
+                writer.pruneProjection(SCOPE);
             }
-            ExperienceRecall blank = blankFirst.recall(SCOPE, "  ", 5); // a blank query is the first operation
-            assertEquals(ProjectionStatus.State.MISSING, blank.status().state());
-            assertEquals(List.of(), blank.hits());
-            assertTrue(blank.status().diagnostics().get(0).contains("was reclaimed"), blank.status().diagnostics().toString());
-            ProjectionStatus status = snapshot.projectionStatus(SCOPE); // before any recall
-            assertEquals(ProjectionStatus.State.MISSING, status.state());
-            assertTrue(status.diagnostics().get(0).contains("projection-000001 was reclaimed"),
-                    status.diagnostics().toString());
+            assertFalse(Files.exists(layout().scopeDir().resolve("projection-000001")));
+            assertEquals(ProjectionStatus.State.CURRENT, snapshot.projectionStatus(SCOPE).state());
+            assertEquals(List.of(), snapshot.recall(SCOPE, "  ", 5).hits());
             ExperienceRecall recall = snapshot.recall(SCOPE, QUERY, 10);
-            assertEquals(ProjectionStatus.State.MISSING, recall.status().state());
-            assertEquals(List.of(), recall.hits());
-            assertTrue(recall.status().diagnostics().get(0).contains("projection-000001 was reclaimed"),
-                    recall.status().diagnostics().toString());
+            assertEquals(ProjectionStatus.State.CURRENT, recall.status().state());
+            assertEquals(expected, render(recall));
         }
         try (ExecutionMemory fresh = ExecutionMemory.openReadOnly(root, SCOPE)) {
-            assertEquals(expected, render(fresh.recall(SCOPE, QUERY, 10)), "a reopened snapshot works");
+            assertEquals(expected, render(fresh.recall(SCOPE, QUERY, 10)), "a new snapshot reads the new generation");
         }
     }
 
@@ -406,10 +398,11 @@ class ExperienceProjectionGenerationTest {
         try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
             corpus(m);
             m.rebuildProjection(SCOPE);
+            Files.createDirectories(layout().scopeDir().resolve("projection-000007")); // an extra generation
             Files.writeString(layout().pointer(), "garbage\n");
             ProjectionStatus status = m.pruneProjection(SCOPE);
             assertTrue(status.diagnostics().toString().contains("rebuild before pruning"), status.diagnostics().toString());
-            assertEquals(List.of("projection-000001", "projection-000002"), generationNames());
+            assertEquals(List.of("projection-000002", "projection-000007"), generationNames());
         }
     }
 
@@ -505,7 +498,7 @@ class ExperienceProjectionGenerationTest {
                         m.projectionStatus(SCOPE).diagnostics().toString());
                 assertEquals(ProjectionStatus.State.CURRENT, m.rebuildProjection(SCOPE).state());
             }
-            assertEquals(List.of("projection-000001", "projection-000002"), generationNames());
+            assertEquals(List.of("projection-000002"), generationNames());
         } finally {
             java.util.Locale.setDefault(java.util.Locale.Category.FORMAT, saved);
         }
@@ -526,54 +519,39 @@ class ExperienceProjectionGenerationTest {
     }
 
     @Test
-    void reusedGenerationNameIsDetectedAsReclaimed() throws IOException {
+    void snapshotIsUnaffectedByGenerationNameReuse() throws IOException {
         try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
             corpus(m);
         }
         try (ExecutionMemory snapshot = ExecutionMemory.openReadOnly(root, SCOPE)) {
-            assertEquals(ProjectionStatus.State.CURRENT, snapshot.projectionStatus(SCOPE).state());
+            List<String> expected = render(snapshot.recall(SCOPE, QUERY, 10));
             try (ExecutionMemory writer = ExecutionMemory.open(root, SCOPE)) {
-                writer.rebuildProjection(SCOPE);           // generation 2
-                writer.pruneProjection(SCOPE);             // generation 1 (the snapshot's) is deleted
-                experience(writer, SCOPE, "x-9", "Different text entirely", "Unrelated solution", null);
+                writer.rebuildProjection(SCOPE);           // generation 2; generation 1 (the snapshot's) is deleted
+                experience(writer, SCOPE, "x-9", "Fix the flaky test again", "Unrelated solution", null);
                 Files.createDirectories(layout().scopeDir().resolve("projection-999999999999999999"));
                 writer.rebuildProjection(SCOPE);           // exhausted numbers: the name projection-000001 is reused
             }
-            assertTrue(Files.isDirectory(layout().scopeDir().resolve("projection-000001")), "name reused");
-            ProjectionStatus status = snapshot.projectionStatus(SCOPE);
-            assertEquals(ProjectionStatus.State.MISSING, status.state(), status.diagnostics().toString());
-            assertTrue(status.diagnostics().get(0).contains("was reclaimed"), status.diagnostics().toString());
-            assertEquals(List.of(), snapshot.recall(SCOPE, QUERY, 10).hits(), "never results from the new generation");
+            assertEquals(List.of("projection-000001"), generationNames(), "name reused for a newer generation");
+            ExperienceRecall recall = snapshot.recall(SCOPE, QUERY, 10);
+            assertEquals(ProjectionStatus.State.CURRENT, recall.status().state());
+            assertEquals(expected, render(recall), "never results from the newer generation");
         }
     }
 
     @Test
-    void failingReadOfARetainedGenerationIsNotReportedAsReclaimed() throws IOException {
+    void orphanedUnpublishedGenerationIsReclaimedByTheNextRebuild() throws IOException {
         try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
             corpus(m);
         }
-        Path retained = projectionDir(root, SCOPE);
-        try (ExecutionMemory snapshot = ExecutionMemory.openReadOnly(root, SCOPE)) {
-            try (ExecutionMemory writer = ExecutionMemory.open(root, SCOPE)) {
-                writer.rebuildProjection(SCOPE); // the snapshot's generation is retained, no longer published
-            }
-            assertEquals(ProjectionStatus.State.CURRENT, snapshot.projectionStatus(SCOPE).state());
-            // Stable damage to the retained generation: the read fails, but nothing was reclaimed.
-            Files.writeString(retained.resolve("memory/indexes/vector-map.idx"), "garbage",
-                    StandardCharsets.UTF_8, StandardOpenOption.APPEND);
-            ExperienceRecall recall = snapshot.recall(SCOPE, QUERY, 10);
-            assertEquals(ProjectionStatus.State.INCOMPATIBLE, recall.status().state());
-            assertFalse(recall.status().diagnostics().toString().contains("reclaimed"),
-                    recall.status().diagnostics().toString());
-
-            // If the generation is later pruned, the snapshot reports MISSING instead.
-            try (ExecutionMemory writer = ExecutionMemory.open(root, SCOPE)) {
-                writer.pruneProjection(SCOPE);
-            }
-            ProjectionStatus status = snapshot.projectionStatus(SCOPE);
-            assertEquals(ProjectionStatus.State.MISSING, status.state());
-            assertTrue(status.diagnostics().get(0).contains("was reclaimed"), status.diagnostics().toString());
+        // A build interrupted by a crash before publication leaves a populated, never-published generation.
+        Path orphan = Files.createDirectories(layout().scopeDir().resolve("projection-000005").resolve("memory"));
+        Files.writeString(orphan.resolve("partial.bin"), "partial");
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            assertEquals(ProjectionStatus.State.CURRENT, m.projectionStatus(SCOPE).state(), "the orphan is ignored");
+            ProjectionStatus rebuilt = m.rebuildProjection(SCOPE);
+            assertEquals(ProjectionStatus.State.CURRENT, rebuilt.state(), rebuilt.diagnostics().toString());
         }
+        assertEquals(List.of("projection-000006"), generationNames(), "the orphan is gone");
     }
 
     @Test

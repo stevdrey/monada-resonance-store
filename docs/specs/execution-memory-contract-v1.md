@@ -126,10 +126,9 @@ dedicated to execution memory; it must not be a legacy text store root.
         ├── ledger/
         │   └── events-000001.log    # authoritative append-only events
         ├── projection.current       # pointer "projection-<n>" + LF, replaced atomically (section 18)
-        ├── projection-<n>/          # current generation: derived, rebuildable (sections 11 and 18)
-        │   ├── projection-checkpoint.log
-        │   └── memory/              # standard MonadaMemory layout (manifest 0.4)
-        └── projection-<n-1>/        # previous generation, kept for in-flight readers
+        └── projection-<n>/          # current generation: derived, rebuildable (sections 11 and 18)
+            ├── projection-checkpoint.log
+            └── memory/              # standard MonadaMemory layout (manifest 0.4)
 ```
 
 `execution-manifest.json` v1 fields: `format` = `"monada-execution-ledger"`, `version` = `"1"`,
@@ -923,38 +922,34 @@ order, duplicate projection, unknown retirement) stops reading and makes it `INC
   The scope is never without a published projection and no directory a reader may hold is moved. A failure
   before publication deletes the new generation and leaves the pointer. A pointer entry that is not a regular
   file (a dangling or escaping link, or a directory) is removed itself, never followed, and replaced, so a
-  rebuild also repairs it. Rebuilds never reclaim sound older
-  generations, because open read-only snapshots keep reading them; only a previous generation that was
-  unsound (it backs no snapshot memory) is deleted after publication.
-- `pruneProjection(scope)` (writable only) is the explicit reclamation: it deletes every generation except
-  the published one (all of them when nothing is published), invalid entries and a leftover temporary
-  pointer. The host calls it when no read-only snapshot of the scope is open. A snapshot whose generation is
-  reclaimed anyway reports `MISSING` ("was reclaimed (pruneProjection); reopen the snapshot") from both
-  `projectionStatus` and `recall` (no hits), never `INCOMPATIBLE`; the check reads no file content and
-  compares the directory's identity (file key and creation time), so a later generation reusing the name is
-  never mistaken for the snapshot's. A snapshot's generation that still exists with its identity, published or
-  retained, is never reported as reclaimed: a failure reading it is `INCOMPATIBLE` (or retried while files
-  change). With an unreadable pointer it deletes nothing and says to rebuild first.
+  rebuild also repairs it. After publication the rebuild reclaims every other generation (read-only
+  snapshots are frozen in memory and never read generation files after opening), including generations
+  orphaned by an interrupted build.
+- `pruneProjection(scope)` (writable only) performs the same reclamation without rebuilding: it deletes every
+  generation except the published one (all of them when nothing is published), invalid entries and a
+  leftover temporary pointer, typically to retry a cleanup that failed. With an unreadable pointer it deletes
+  nothing and says to rebuild first.
   Generation entries are enumerated without resolving links: only real directories count as generations,
   numbering skips every name already present (links included; if numbers above the largest entry are
   exhausted, the smallest free number is used), and entries that are links or files are
   removed after publication (the link itself, never its target), so a rebuild recovers from them.
   Publication is the commit point: deleting generations or entries afterwards (in a rebuild or a prune) is
   best effort, so a cleanup failure never throws; it is reported in the diagnostics of the status that
-  operation returns (not in later statuses) and retried by the next `pruneProjection`.
+  operation returns (not in later statuses) and retried by the next rebuild or `pruneProjection`.
   Incremental projection and rebuild share one projection function, so a rebuild of a current projection is
   byte-identical in `projection-checkpoint.log` and ranking-identical.
-- `openReadOnly` creates nothing: it serves recall from an existing projection and reports `MISSING`
-  otherwise; `rebuildProjection` is unsupported. Beside a live writer, a snapshot can observe a projection
-  write in progress. If the projection looks `INCOMPATIBLE` or `MISSING` and a generation fingerprint of the
-  scope (ledger segment size, pointer and every file size of the current generation) changed during the
-  open, the snapshot is taken again, at
-  most 3 attempts with no waiting; afterwards it stays `INCOMPATIBLE` with a "reopen to retry" diagnostic.
-  Damage observed while nothing changes is reported on the first attempt. Recall on a read-only snapshot
-  stays a snapshot even though the projection files are shared with the writer: atoms projected after the
-  snapshot was opened are skipped and the ranker is asked again with a larger top-K, so they never consume
-  a slot; a query that fails or looks inconsistent while the files change is retried (at most 3 attempts),
-  and one that fails while nothing changes makes the snapshot `INCOMPATIBLE`.
+- `openReadOnly` creates nothing: it verifies an existing projection and reports `MISSING` otherwise;
+  `rebuildProjection` and `pruneProjection` are unsupported. After verification the generation's atoms and
+  vectors are loaded once into an immutable in-memory index, so the snapshot is truly frozen: its recall never
+  reads a file again, and later appends, rebuilds, prunes or damage to the files never change its answers.
+  It ranks with the same `LinearScanResonanceIndex` and the query steps of `MonadaQuery` with production
+  defaults (feedback-aware wrapping is a no-op because the feedback log is verified empty); the recall
+  regression gate and a writable-versus-read-only equality test guard this equivalence. Beside a live writer
+  the open itself can observe a write in progress: if the projection looks `INCOMPATIBLE` or `MISSING` and a
+  generation fingerprint of the scope (ledger segment size, pointer and every file size of the current
+  generation) changed during the open, the snapshot is taken again, at most 3 attempts with no waiting;
+  afterwards it stays `INCOMPATIBLE` with a "reopen to retry" diagnostic. Damage observed while nothing
+  changes is reported on the first attempt.
 
 ### 18.4 Recall
 
@@ -999,13 +994,12 @@ try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
   each final live atom once. Each distinct new atom still costs one scan of the atom log inside `remember`
   (its existence check), so a full rebuild of N distinct live texts is quadratic in N; a bulk append path in
   `MonadaMemory` is follow-up work (#111).
-- Disk use grows by one generation per rebuild until the host calls `pruneProjection` (when no read-only
-  snapshot of the scope is open). A snapshot that outlives a prune of its generation reports `MISSING` and
-  must be reopened.
+- A read-only snapshot holds its generation's atoms and vectors in memory for its lifetime (proportional to
+  the scope's projected atoms); hosts close snapshots they no longer need.
 - `MonadaMemory.open` can create missing standard directories. Verification checks the layout first, but a
-  read-only open that overlaps a `pruneProjection` of the generation it is opening can still reach it and
-  recreate empty directories there; the next prune deletes them. A creation-free read-only `MonadaMemory`
-  open would remove this window and is outside this issue.
+  read-only open that races a rebuild or prune deleting the generation it is opening can still reach it and
+  recreate empty directories there; the open is retried, and the next rebuild or prune deletes them. A
+  creation-free read-only `MonadaMemory` open would remove this window and is outside this issue.
 - Existing ledgers stay valid: a pre-#98 scope opens as `MISSING` until rebuilt. Legacy text stores,
   baselines and production defaults are untouched.
 

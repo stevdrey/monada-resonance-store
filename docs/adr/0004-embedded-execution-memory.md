@@ -124,7 +124,7 @@ Facade operations (`com.monada.api.execution.ExecutionMemory`, `AutoCloseable`):
 | `history(ScopeId[, HistoryCursor], int pageSize)` | `HistoryPage` in ledger sequence order, fixed snapshot high-watermark |
 | `recall(ScopeId, String query, int limit)` | `ExperienceRecall` of `ExperienceHit`, limit 1–50, scope-isolated (implemented, #98) |
 | `projectionStatus(ScopeId)` / `rebuildProjection(ScopeId)` | `ProjectionStatus` (`CURRENT`/`STALE`/`MISSING`/`INCOMPATIBLE`); explicit, deterministic reconciliation (implemented, #98) |
-| `pruneProjection(ScopeId)` | Explicit reclamation of old projection generations when no read-only snapshot is open (implemented, #98) |
+| `pruneProjection(ScopeId)` | Explicit reclamation of old projection generations (rebuilds already reclaim them; read-only snapshots are frozen in memory) (implemented, #98) |
 | `exportSamples(ExportRequest)` | `ExportPage` (read-only, versioned) (planned, #101) |
 
 The facade has no cost or comparison operation. Evaluation-side code (`monada-evaluation`, #99/#100)

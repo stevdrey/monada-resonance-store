@@ -11,8 +11,7 @@ import java.util.Objects;
  *   <li>{@code CURRENT}: every ledger event up to {@code ledgerSequence} is projected.</li>
  *   <li>{@code STALE}: the projection covers only {@code coveredSequence < ledgerSequence} (a projection write
  *   failed or was interrupted). Recall still answers from the covered prefix.</li>
- *   <li>{@code MISSING}: there is no projection (for example a scope recorded before projections existed, or
- *   a read-only snapshot whose generation was reclaimed by {@link ExecutionMemory#pruneProjection}; reopen it).
+ *   <li>{@code MISSING}: there is no projection (for example a scope recorded before projections existed).
  *   Recall returns no hits.</li>
  *   <li>{@code INCOMPATIBLE}: the projection cannot be trusted (unknown version, corrupt checkpoint, mapping or
  *   atoms that disagree with the ledger). Recall returns no hits; nothing is rewritten automatically.</li>

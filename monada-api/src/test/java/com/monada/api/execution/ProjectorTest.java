@@ -13,23 +13,23 @@ class ProjectorTest {
     @Test
     void everyProjectionCarriesItsTextAndOnlyLiveAtomsAreKeptForCompaction() {
         Projector p = new Projector();
-        p.apply(Experiences.start(SCOPE, "x-1", "Repair the flaky login test"));
-        p.apply(Experiences.attempt(SCOPE, "x-1", "a1", 1, null));
-        Projector.Step first = p.apply(Experiences.finish(SCOPE, "x-1", "a1", "Waited for the cookie", null));
+        ProjectorSteps.apply(p, Experiences.start(SCOPE, "x-1", "Repair the flaky login test"));
+        ProjectorSteps.apply(p, Experiences.attempt(SCOPE, "x-1", "a1", 1, null));
+        ProjectorSteps.Step first = ProjectorSteps.apply(p, Experiences.finish(SCOPE, "x-1", "a1", "Waited for the cookie", null));
         String cookie = first.texts().keySet().iterator().next();
         assertEquals(1, first.entries().size());
 
-        p.apply(Experiences.attempt(SCOPE, "x-1", "a2", 2, "a1"));
-        Projector.Step same = p.apply(Experiences.finish(SCOPE, "x-1", "a2", "Waited for the cookie", null));
+        ProjectorSteps.apply(p, Experiences.attempt(SCOPE, "x-1", "a2", 2, "a1"));
+        ProjectorSteps.Step same = ProjectorSteps.apply(p, Experiences.finish(SCOPE, "x-1", "a2", "Waited for the cookie", null));
         assertEquals(Set.of(cookie), same.texts().keySet(), "identical text, same atom, a second ref");
 
-        Projector.Step away = p.apply(Experiences.correctFinish(SCOPE, "x-1", "a2", "x-1-a2-fix", "x-1-a2-fin", 2,
+        ProjectorSteps.Step away = ProjectorSteps.apply(p, Experiences.correctFinish(SCOPE, "x-1", "a2", "x-1-a2-fix", "x-1-a2-fin", 2,
                 "Mocked the session", null));
         String mocked = away.texts().keySet().iterator().next();
         assertEquals(Set.of(cookie, mocked), p.liveTexts().keySet());
 
         // Both attempts move away from the cookie text: its atom is retired and no longer kept for a rebuild.
-        p.apply(Experiences.correctFinish(SCOPE, "x-1", "a1", "x-1-a1-fix", "x-1-a1-fin", 2, "Mocked the session",
+        ProjectorSteps.apply(p, Experiences.correctFinish(SCOPE, "x-1", "a1", "x-1-a1-fix", "x-1-a1-fin", 2, "Mocked the session",
                 null));
         assertEquals(Set.of(mocked), p.liveTexts().keySet());
         assertEquals(Set.of(cookie), p.retired());
@@ -57,11 +57,42 @@ class ProjectorTest {
                         text != null, "text only for PROJECT entries");
                 seen.add(entry.kind() + ":" + entry.atomId() + ":" + entry.ref().eventId().value());
             });
-            collected.apply(event).entries()
+            ProjectorSteps.apply(collected, event).entries()
                     .forEach(e -> expected.add(e.kind() + ":" + e.atomId() + ":" + e.ref().eventId().value()));
         }
         assertEquals(expected, seen);
         assertEquals(3 + 2 * 3, seen.size(), "3 projections, then a RETIRE + PROJECT per attempt");
         assertTrue(seen.get(3).startsWith("RETIRE:") && seen.get(4).startsWith("PROJECT:"));
+    }
+
+    @Test
+    void incrementalRetiredSetEqualsTheRecomputedOne() throws java.io.IOException {
+        Projector p = new Projector();
+        java.util.Set<String> projected = new java.util.HashSet<>();
+        java.util.List<com.monada.core.execution.ExecutionEvent> events = java.util.List.of(
+                Experiences.start(SCOPE, "x-1", "Repair the flaky login test"),
+                Experiences.attempt(SCOPE, "x-1", "a1", 1, null),
+                Experiences.finish(SCOPE, "x-1", "a1", "Waited for the cookie", null),
+                Experiences.attempt(SCOPE, "x-1", "a2", 2, "a1"),
+                Experiences.finish(SCOPE, "x-1", "a2", "Waited for the cookie", null),
+                Experiences.correctFinish(SCOPE, "x-1", "a1", "x-1-a1-fix", "x-1-a1-fin", 2, "Mocked it", null),
+                Experiences.correctFinish(SCOPE, "x-1", "a2", "x-1-a2-fix", "x-1-a2-fin", 2, "Mocked it", null),
+                Experiences.correctStart(SCOPE, "x-1", "x-1-retitle", 2, "Repair the flaky signup test"),
+                Experiences.correctFinish(SCOPE, "x-1", "a1", "x-1-a1-fix2", "x-1-a1-fix", 3, "Waited for the cookie",
+                        null));
+        for (var event : events) {
+            p.apply(event, (entry, text) -> {
+                if (text != null) {
+                    projected.add(entry.atomId());
+                }
+            });
+            java.util.Set<String> recomputed = new java.util.TreeSet<>(projected);
+            recomputed.removeAll(p.refsByAtom().keySet());
+            assertEquals(recomputed, p.retired(), "after " + event.eventId());
+            assertEquals(recomputed.size(), p.retiredCount());
+            recomputed.forEach(id -> assertTrue(p.isRetired(id)));
+            p.refsByAtom().keySet().forEach(id -> assertTrue(!p.isRetired(id)));
+        }
+        assertTrue(p.retiredCount() > 0, "the sequence must retire atoms");
     }
 }

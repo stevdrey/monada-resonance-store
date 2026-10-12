@@ -233,14 +233,7 @@ public final class ExecutionLedger implements AutoCloseable {
     }
 
     private static void deleteTree(Path dir) throws IOException {
-        if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
-            return;
-        }
-        try (var walk = Files.walk(dir)) {
-            for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
-                Files.delete(p);
-            }
-        }
+        LedgerPaths.deleteEntry(dir);
     }
 
     private static void writeDurably(Path file, byte[] content) throws IOException {

@@ -388,4 +388,37 @@ class ProjectionCheckpointTest {
         assertFalse(s.isSound());
         assertTrue(s.problems().get(0).contains("malformed PROJECT"), s.problems().toString());
     }
+
+    @Test
+    void anAbandonedBatchFailsTheCheckpoint() throws IOException {
+        try (ProjectionCheckpoint c = ProjectionCheckpoint.create(file(), SCOPE, 128)) {
+            try (ProjectionCheckpoint.Batch batch = c.begin(1)) {
+                batch.write(new Entry(EntryKind.PROJECT, ATOM_A, ref("e1", 1)));
+                // abandoned: no cover
+            }
+            IllegalStateException e = assertThrows(IllegalStateException.class, () -> c.begin(1));
+            assertTrue(e.getMessage().contains("failed earlier"), e.getMessage());
+            assertEquals(0, c.coveredSequence());
+        }
+        ProjectionCheckpoint.Snapshot s = read();
+        assertTrue(s.isSound(), s.problems().toString());
+        assertEquals(0, s.coveredSequence(), "the abandoned entries are never applied");
+    }
+
+    @Test
+    void snapshotCountsTheLinesItRead() throws IOException {
+        try (ProjectionCheckpoint c = ProjectionCheckpoint.create(file(), SCOPE, 128)) {
+            c.commit(1, DIGEST, List.of(new Entry(EntryKind.PROJECT, ATOM_A, ref("e1", 1))));
+            c.commit(2, DIGEST, List.of());
+        }
+        ProjectionCheckpoint.Snapshot s = read();
+        assertEquals(Files.readAllLines(file()).size(), s.lines(), "header + entry + 2 covers");
+        assertEquals(4, s.lines());
+        try (ProjectionCheckpoint c = ProjectionCheckpoint.openForAppend(file(), SCOPE, s)) {
+            c.commit(3, DIGEST, List.of());
+        }
+        ProjectionCheckpoint.Snapshot after = read();
+        assertTrue(after.isSound(), "line numbering continued from the snapshot's count: " + after.problems());
+        assertEquals(5, after.lines());
+    }
 }

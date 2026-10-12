@@ -98,10 +98,11 @@ public final class ProjectionCheckpoint implements AutoCloseable {
      * @param cleanTail       false when the file ends in a torn line or an incomplete batch
      * @param problems        defects that make the projection incompatible (empty when sound)
      * @param dimensions      vector dimension the generation's memory was built with (0 without a valid header)
+     * @param lines           complete (LF-terminated) lines read; for a sound, clean snapshot the file's line count
      */
     public record Snapshot(int dimensions, long coveredSequence, List<String> coverDigests,
                            SortedMap<String, List<ExperienceRef>> refsByAtom, SortedSet<String> retiredAtoms,
-                           boolean cleanTail, List<String> problems) {
+                           boolean cleanTail, List<String> problems, long lines) {
         public Snapshot {
             coverDigests = List.copyOf(coverDigests);
             TreeMap<String, List<ExperienceRef>> copy = new TreeMap<>();
@@ -173,9 +174,9 @@ public final class ProjectionCheckpoint implements AutoCloseable {
         if (!snapshot.isSound() || !snapshot.cleanTail()) {
             throw new IOException("projection checkpoint is not sound; rebuild the projection explicitly");
         }
-        long lineCount = countLines(file);
+        // A sound, clean snapshot read every line of the file: no second scan is needed to count them.
         FileChannel channel = FileChannel.open(file, StandardOpenOption.WRITE, StandardOpenOption.APPEND);
-        return new ProjectionCheckpoint(file, scope, channel, lineCount, snapshot.coveredSequence());
+        return new ProjectionCheckpoint(file, scope, channel, snapshot.lines(), snapshot.coveredSequence());
     }
 
     /**
@@ -193,18 +194,20 @@ public final class ProjectionCheckpoint implements AutoCloseable {
         if (!DIGEST.matcher(ledgerDigest).matches()) {
             throw new IllegalArgumentException("ledger digest must be 64 lowercase hex characters");
         }
-        Batch batch = begin(ledgerSequence);
-        for (Entry e : entries) {
-            batch.write(e);
+        try (Batch batch = begin(ledgerSequence)) {
+            for (Entry e : entries) {
+                batch.write(e);
+            }
+            batch.cover(ledgerDigest);
         }
-        batch.cover(ledgerDigest);
     }
 
     /**
      * Starts the batch of ledger sequence {@code ledgerSequence} (the next uncovered one). Entries are streamed
      * through a bounded buffer as they are produced, never held as a whole batch, and {@link Batch#cover}
-     * writes the {@code COVER} last and forces the file. A batch abandoned part-way leaves entries without their
-     * {@code COVER}, which readers ignore as an unclean tail.
+     * writes the {@code COVER} last and forces the file. Use it with try-with-resources: closing a batch that
+     * was not covered marks the checkpoint failed (its frames may be partly on disk, which readers ignore as an
+     * unclean tail), so it is never silently reused.
      */
     public Batch begin(long ledgerSequence) {
         if (closed) {
@@ -214,7 +217,10 @@ public final class ProjectionCheckpoint implements AutoCloseable {
             throw new IllegalStateException("projection checkpoint failed earlier; rebuild the projection");
         }
         if (batchOpen) {
-            throw new IllegalStateException("a batch is already open");
+            failed = true; // the previous batch was abandoned without COVER: its frames may be partly written
+            batchOpen = false;
+            throw new IllegalStateException("a previous batch was abandoned; the checkpoint failed, rebuild the "
+                    + "projection");
         }
         if (ledgerSequence != covered + 1) {
             throw new IllegalArgumentException("expected ledger sequence " + (covered + 1) + ", got " + ledgerSequence);
@@ -224,7 +230,7 @@ public final class ProjectionCheckpoint implements AutoCloseable {
     }
 
     /** One ledger sequence's entries being streamed to the checkpoint; see {@link #begin}. */
-    public final class Batch {
+    public final class Batch implements AutoCloseable {
         private final long ledgerSequence;
         private final OutputStream out = new BufferedOutputStream(Channels.newOutputStream(channel),
                 STREAM_BUFFER_BYTES); // never closed: closing would close the channel
@@ -273,6 +279,14 @@ public final class ProjectionCheckpoint implements AutoCloseable {
             batchOpen = false;
             lines = line;
             covered = ledgerSequence;
+        }
+
+        /** Abandons the batch unless it was covered: the checkpoint is then failed and must be rebuilt. */
+        @Override
+        public void close() {
+            if (!done) {
+                fail();
+            }
         }
 
         private void requireActive() {
@@ -329,6 +343,7 @@ public final class ProjectionCheckpoint implements AutoCloseable {
                     fold.tornTail = true;
                     break;
                 }
+                fold.lines = lineNumber;
                 if (line.oversized()) {
                     fold.problem(lineNumber, "line exceeds " + MAX_LINE_BYTES + " bytes");
                     break;
@@ -409,6 +424,7 @@ public final class ProjectionCheckpoint implements AutoCloseable {
         private boolean header;
         private int dimensions;
         private boolean tornTail;
+        private long lines;
 
         Fold(ScopeId scope, long lastCover) {
             this.scope = scope;
@@ -509,7 +525,8 @@ public final class ProjectionCheckpoint implements AutoCloseable {
             TreeSet<String> retired = new TreeSet<>(projected);
             retired.removeAll(live.keySet());
             boolean clean = !tornTail && !uncoveredTail;
-            return new Snapshot(dimensions, coverDigests.size(), coverDigests, refsByAtom, retired, clean, problems);
+            return new Snapshot(dimensions, coverDigests.size(), coverDigests, refsByAtom, retired, clean, problems,
+                    lines);
         }
     }
 
@@ -555,19 +572,6 @@ public final class ProjectionCheckpoint implements AutoCloseable {
             }
         }
         return any ? new Line(buf.toByteArray(), false, oversized) : null;
-    }
-
-    private static long countLines(Path file) throws IOException {
-        long count = 0;
-        try (InputStream in = new BufferedInputStream(Files.newInputStream(file), 65_536)) {
-            int b;
-            while ((b = in.read()) != -1) {
-                if (b == '\n') {
-                    count++;
-                }
-            }
-        }
-        return count;
     }
 
     private static void writeFully(FileChannel channel, byte[] bytes) throws IOException {

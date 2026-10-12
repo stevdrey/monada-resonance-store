@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.monada.core.execution.ScopeId;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,10 +16,15 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/** Recall on a read-only snapshot while a writer keeps appending to the projection files. */
+/**
+ * Recall on a read-only snapshot: the projection is verified and loaded into memory at open, so nothing written,
+ * rebuilt, pruned or damaged afterwards changes its answers, and its ranking equals the writable instance's.
+ */
 class ExperienceRecallReadOnlySnapshotTest {
     static final ScopeId SCOPE = ScopeId.of("project-alpha");
     static final String QUERY = "flaky test";
+    static final List<String> QUERIES = List.of(QUERY, "gradle cache", "session cookie", "release notes",
+            "unrelated astronomy question", "");
 
     @TempDir
     Path root;
@@ -53,7 +57,7 @@ class ExperienceRecallReadOnlySnapshotTest {
                 assertEquals(6, recall.status().ledgerSequence(), "still the snapshot's ledger");
                 recall.hits().forEach(h -> assertTrue(h.event().sequence() <= 6));
             }
-            assertEquals(before1, render(snapshot.recall(SCOPE, QUERY, 1)), "new atoms rank first but are skipped");
+            assertEquals(before1, render(snapshot.recall(SCOPE, QUERY, 1)), "new atoms rank first but are invisible");
             assertEquals(before2, render(snapshot.recall(SCOPE, QUERY, 2)));
         }
         try (ExecutionMemory fresh = ExecutionMemory.openReadOnly(root, SCOPE)) {
@@ -64,140 +68,46 @@ class ExperienceRecallReadOnlySnapshotTest {
     }
 
     @Test
-    void aQueryOverlappingAnAppendIsRetried() throws IOException {
+    void filesChangedAfterOpenNeverAffectTheSnapshot() throws IOException {
         seed();
-        Path index = projectionDir(root, SCOPE).resolve("memory/indexes/vector-map.idx");
-        byte[] complete = Files.readAllBytes(index);
-        List<String> expected;
         try (ExecutionMemory snapshot = ExecutionMemory.openReadOnly(root, SCOPE)) {
-            expected = render(snapshot.recall(SCOPE, QUERY, 2));
-        }
-        int[] attempts = {0};
-        ExecutionMemory.ReadOnlyOpenHook hook = new ExecutionMemory.ReadOnlyOpenHook() {
-            @Override
-            public void afterLedgerSnapshot(int attempt) {
-            }
-
-            @Override
-            public void beforeRecallQuery(int attempt) {
-                attempts[0] = attempt;
-                try { // attempt 1 sees a half-written index line; the writer then finishes (restores) it
-                    if (attempt == 1) {
-                        Files.writeString(index, "half-written", StandardCharsets.UTF_8, StandardOpenOption.APPEND);
-                    } else {
-                        Files.write(index, complete);
-                    }
-                } catch (IOException e) {
-                    throw new UncheckedIOException(e);
-                }
-            }
-        };
-        try (ExecutionMemory snapshot = ExecutionMemory.openReadOnly(root, SCOPE, ExecutionMemoryConfig.defaults(),
-                hook)) {
+            List<String> expected = render(snapshot.recall(SCOPE, QUERY, 2));
+            Path memory = projectionDir(root, SCOPE).resolve("memory");
+            // A half-written index line, a truncated vector segment and a deleted atom log after open.
+            Files.writeString(memory.resolve("indexes/vector-map.idx"), "half-written", StandardCharsets.UTF_8,
+                    StandardOpenOption.APPEND);
+            Files.write(memory.resolve("vectors/segment-000001.f32"), new byte[0]);
+            Files.delete(memory.resolve("atoms/segment-000001.log"));
             ExperienceRecall recall = snapshot.recall(SCOPE, QUERY, 2);
-            assertEquals(2, attempts[0]);
-            assertEquals(ProjectionStatus.State.CURRENT, recall.status().state(),
-                    recall.status().diagnostics().toString());
-            assertEquals(expected, render(recall));
+            assertEquals(ProjectionStatus.State.CURRENT, recall.status().state(), recall.status().diagnostics().toString());
+            assertEquals(expected, render(recall), "the snapshot answers from its frozen copy");
+            assertEquals(ProjectionStatus.State.CURRENT, snapshot.projectionStatus(SCOPE).state());
+        }
+        try (ExecutionMemory fresh = ExecutionMemory.openReadOnly(root, SCOPE)) {
+            assertEquals(ProjectionStatus.State.INCOMPATIBLE, fresh.projectionStatus(SCOPE).state(),
+                    "the damage is reported to snapshots opened afterwards");
         }
     }
 
     @Test
-    void stableDamageIsIncompatibleWithoutRetrying() throws IOException {
-        seed();
-        Path index = projectionDir(root, SCOPE).resolve("memory/indexes/vector-map.idx");
-        int[] attempts = {0};
-        ExecutionMemory.ReadOnlyOpenHook hook = new ExecutionMemory.ReadOnlyOpenHook() {
-            @Override
-            public void afterLedgerSnapshot(int attempt) {
-            }
-
-            @Override
-            public void beforeRecallQuery(int attempt) {
-                attempts[0] = attempt;
-            }
-        };
-        try (ExecutionMemory snapshot = ExecutionMemory.openReadOnly(root, SCOPE, ExecutionMemoryConfig.defaults(),
-                hook)) {
-            Files.writeString(index, "garbage", StandardCharsets.UTF_8, StandardOpenOption.APPEND);
-            // Damage made after open but stable during the query: one attempt, then INCOMPATIBLE.
-            ExperienceRecall recall = snapshot.recall(SCOPE, QUERY, 2);
-            assertEquals(ProjectionStatus.State.INCOMPATIBLE, recall.status().state());
-            assertEquals(List.of(), recall.hits());
-            assertTrue(recall.status().diagnostics().toString().contains("cannot be read"),
-                    recall.status().diagnostics().toString());
-            assertEquals(1, attempts[0]);
-        }
-    }
-
-    @Test
-    void expansionStopsOnceLimitRefsAreCollected() {
+    void readOnlyRecallEqualsWritableRecall() {
         try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
-            Experiences.appended(m, Experiences.start(SCOPE, "x-1", "Repair the flaky login test"));
-            String previous = null;
-            for (int i = 1; i <= 3; i++) {
-                Experiences.appended(m, Experiences.attempt(SCOPE, "x-1", "a" + i, i, previous));
-                Experiences.appended(m, Experiences.finish(SCOPE, "x-1", "a" + i, "Waited for the cookie", null));
-                previous = "a" + i;
-            }
+            experience(m, SCOPE, "x-1", "Repair the flaky login test", "Waited for the session cookie", null);
+            experience(m, SCOPE, "x-2", "Speed up the gradle build", "Enabled the configuration cache",
+                    "Measure before optimizing");
+            experience(m, SCOPE, "x-3", "Write release notes", null, null);
+            // A retired atom and identical texts must be handled the same way by both rankers.
+            Experiences.appended(m, Experiences.correctFinish(SCOPE, "x-3", "a1", "x-3-fix", "x-3-a1-fin", 2,
+                    "Generated the changelog from merged pull requests", null));
+            experience(m, SCOPE, "x-4", "Repair the flaky login test", "Waited for the session cookie", null);
         }
-        java.util.List<Integer> rounds = new java.util.ArrayList<>();
-        ExecutionMemory.ReadOnlyOpenHook hook = new ExecutionMemory.ReadOnlyOpenHook() {
-            @Override
-            public void afterLedgerSnapshot(int attempt) {
-            }
-
-            @Override
-            public void onRecallRound(int topK) {
-                rounds.add(topK);
-            }
-        };
-        try (ExecutionMemory snapshot = ExecutionMemory.openReadOnly(root, SCOPE, ExecutionMemoryConfig.defaults(),
-                hook)) {
-            try (ExecutionMemory writer = ExecutionMemory.open(root, SCOPE)) {
-                for (int i = 2; i <= 6; i++) {
-                    experience(writer, SCOPE, "y-" + i, "Fix the flaky test number " + i, "Retried test " + i, null);
+        try (ExecutionMemory writable = ExecutionMemory.open(root, SCOPE);
+             ExecutionMemory snapshot = ExecutionMemory.openReadOnly(root, SCOPE)) {
+            for (String query : QUERIES) {
+                for (int limit : new int[] {1, 2, 3, 10}) {
+                    assertEquals(render(writable.recall(SCOPE, query, limit)),
+                            render(snapshot.recall(SCOPE, query, limit)), query + " limit " + limit);
                 }
-            }
-            ExperienceRecall recall = snapshot.recall(SCOPE, QUERY, 3);
-            assertEquals(ProjectionStatus.State.CURRENT, recall.status().state());
-            assertEquals(List.of("a1", "a2", "a3"),
-                    recall.hits().stream().map(h -> h.ref().attempt().orElseThrow().value()).toList());
-            // One snapshot atom supplies all 3 refs: the second round stops even though only one atom is known.
-            assertEquals(2, rounds.size(), rounds.toString());
-            assertTrue(rounds.get(1) > rounds.get(0));
-        }
-    }
-
-    @Test
-    void exhaustingManyUnknownAtomsTakesLogarithmicallyManyRounds() {
-        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
-            m.projectionStatus(SCOPE); // an empty scope with an initialized projection
-        }
-        java.util.List<Integer> rounds = new java.util.ArrayList<>();
-        ExecutionMemory.ReadOnlyOpenHook hook = new ExecutionMemory.ReadOnlyOpenHook() {
-            @Override
-            public void afterLedgerSnapshot(int attempt) {
-            }
-
-            @Override
-            public void onRecallRound(int topK) {
-                rounds.add(topK);
-            }
-        };
-        try (ExecutionMemory snapshot = ExecutionMemory.openReadOnly(root, SCOPE, ExecutionMemoryConfig.defaults(),
-                hook)) {
-            try (ExecutionMemory writer = ExecutionMemory.open(root, SCOPE)) {
-                for (int i = 0; i < 200; i++) {
-                    experience(writer, SCOPE, "n-" + i, "Flaky test number " + i, "Retried " + i, null);
-                }
-            }
-            ExperienceRecall recall = snapshot.recall(SCOPE, QUERY, 1);
-            assertEquals(List.of(), recall.hits(), "every atom is newer than the snapshot");
-            assertEquals(ProjectionStatus.State.CURRENT, recall.status().state());
-            assertTrue(rounds.size() <= 10, "geometric growth, not one round per atom: " + rounds);
-            for (int i = 1; i < rounds.size(); i++) {
-                assertTrue(rounds.get(i) >= 2 * rounds.get(i - 1), rounds.toString());
             }
         }
     }
