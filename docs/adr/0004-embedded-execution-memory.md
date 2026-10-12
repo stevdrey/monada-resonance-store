@@ -5,11 +5,12 @@
 Accepted
 
 This ADR fixes ownership and contracts. Implemented so far: the domain records (#95), the append-only
-ledger (#96) and the `ExecutionMemory` facade for recording, loading and history (#97). Projections, recall,
-cost calculators, comparison and export are still planned; the implementation sequence is tracked in
-[`docs/roadmap.md`](../roadmap.md) (Forge Integration track, issues #93–#102) and the normative v1 contract
-lives in [`docs/specs/execution-memory-contract-v1.md`](../specs/execution-memory-contract-v1.md) (section 17
-describes the shipped facade).
+ledger (#96), the `ExecutionMemory` facade for recording, loading and history (#97), and per-scope
+projections with bounded recall (#98). Cost calculators, comparison and export are still planned; the
+implementation sequence is tracked in [`docs/roadmap.md`](../roadmap.md) (Forge Integration track, issues
+#93–#102) and the normative v1 contract lives in
+[`docs/specs/execution-memory-contract-v1.md`](../specs/execution-memory-contract-v1.md) (section 17 describes
+the shipped facade, section 18 the shipped projections and recall).
 
 ## Context
 
@@ -103,7 +104,7 @@ records), #96 (ledger), #97 (facade), #98 (projections/recall), #99 (calculators
 | --- | --- | --- |
 | `com.monada.core.execution` | `monada-core` | Immutable IDs and domain records |
 | `com.monada.storage.execution` | `monada-storage` | Ledger manifest, record codec, replay, audit |
-| `com.monada.api.execution` | `monada-api` | `ExecutionMemory` facade, derived acceptance, history (implemented, #97); recall, export (planned) |
+| `com.monada.api.execution` | `monada-api` | `ExecutionMemory` facade, derived acceptance, history (implemented, #97); projections and recall (implemented, #98); export (planned) |
 | `com.monada.evaluation.execution` | `monada-evaluation` | Usage/cost calculators, comparison/Pareto reports, export annotations (evaluation only) |
 
 Core types (`com.monada.core.execution`): `ScopeId`, `TaskId`, `ExecutionId`, `AttemptId`, `EventId`,
@@ -121,16 +122,17 @@ Facade operations (`com.monada.api.execution.ExecutionMemory`, `AutoCloseable`):
 | `loadAttempt(ScopeId, ExecutionId, AttemptId)` | `Optional<AttemptView>` |
 | `loadEvent(ScopeId, EventId[, int revision])` | `Optional<HistoryEntry>`, exact revision or latest |
 | `history(ScopeId[, HistoryCursor], int pageSize)` | `HistoryPage` in ledger sequence order, fixed snapshot high-watermark |
-| `recall(ScopeId, String query, int limit)` | `ExperienceRecall` of `ExperienceHit` (planned, #98) |
-| `projectionStatus(ScopeId)` / `rebuildProjection(ScopeId)` | Explicit reconciliation (planned, #98) |
+| `recall(ScopeId, String query, int limit)` | `ExperienceRecall` of `ExperienceHit`, limit 1–50, scope-isolated (implemented, #98) |
+| `projectionStatus(ScopeId)` / `rebuildProjection(ScopeId)` | `ProjectionStatus` (`CURRENT`/`STALE`/`MISSING`/`INCOMPATIBLE`); explicit, deterministic reconciliation (implemented, #98) |
+| `pruneProjection(ScopeId)` | Explicit reclamation of old projection generations when no read-only snapshot is open (implemented, #98) |
 | `exportSamples(ExportRequest)` | `ExportPage` (read-only, versioned) (planned, #101) |
 
 The facade has no cost or comparison operation. Evaluation-side code (`monada-evaluation`, #99/#100)
 reads facade views and computes `ExecutionSummary` / `CostToAcceptedOutcome` and comparisons;
 `monada-api` never depends on `monada-evaluation`.
 
-Example host usage (compiles against the shipped #97 surface; `recall` and `exportSamples` are planned
-and therefore not shown):
+Example host usage (compiles against the shipped #97/#98 surface; `exportSamples` is planned and therefore
+not shown):
 
 ```java
 ScopeId scope = ScopeId.of("forge-workspace-7f3a");              // opaque, caller-issued
@@ -156,6 +158,15 @@ try (ExecutionMemory memory = ExecutionMemory.open(root, scope, ExecutionMemoryC
     ExecutionView view = memory.loadExecution(scope, ExecutionId.of("exec-1")).orElseThrow();
     DerivedAcceptance acceptance = view.acceptance();
     HistoryPage page = memory.history(scope, null, 50);
+
+    // Bounded recall of this scope's prior experiences; similarity is resonance, never quality.
+    ExperienceRecall recall = memory.recall(scope, "document execution memory ownership", 5);
+    if (recall.status().state() != ProjectionStatus.State.CURRENT) {
+        memory.rebuildProjection(scope);                         // explicit, deterministic reconciliation
+    }
+    for (ExperienceHit hit : recall.hits()) {
+        HistoryEntry finished = hit.event();                     // the exact ledger event and revision
+    }
 }
 
 // Another component can inspect the same scope while the writer is open (snapshot at open):
