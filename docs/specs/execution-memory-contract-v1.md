@@ -2,9 +2,9 @@
 
 Status: accepted contract. The immutable domain records (section 15, issue #95) and the ledger with
 replay and read-only audit (section 16, issue #96), the `ExecutionMemory` facade (section 17,
-issue #97) and scoped projections with bounded recall (section 18, issue #98) are implemented;
-calculators and export remain future work. Decision record:
-[ADR 0004](../adr/0004-embedded-execution-memory.md). Issue: #93 (Forge Integration 1/10).
+issue #97), scoped projections with bounded recall (section 18, issue #98) and the usage and
+hypothetical-cost calculators (section 19, issue #99) are implemented; comparison and export remain
+future work. Decision record: [ADR 0004](../adr/0004-embedded-execution-memory.md). Issue: #93 (Forge Integration 1/10).
 
 This document is the normative v1 contract that issues #94–#102 implement. Later issues may refine
 exact Java signatures and the byte-level payload codec, but must not change the semantics defined here
@@ -64,8 +64,8 @@ Define, without implementing, the v1 semantics for:
 - `monada-index`: no — projections reuse `LinearScanResonanceIndex` unchanged.
 - `monada-learning`: no.
 - `monada-api`: yes — `com.monada.api.execution` facade, derived acceptance and history (#97, implemented); projections and bounded recall (#98, implemented, section 18); export (#101, later).
-- `monada-evaluation`: yes (later) — `com.monada.evaluation.execution` usage/cost calculators, comparison,
-  export annotations and end-to-end gates (#99, #100, #101, #102).
+- `monada-evaluation`: yes — `com.monada.evaluation.execution` usage/cost calculators (#99, implemented,
+  section 19); comparison, export annotations and end-to-end gates (#100, #101, #102, later).
 - `monada-speech`: no.
 
 `monada-api` must never depend on `monada-evaluation`. The documented dependency direction is unchanged.
@@ -382,8 +382,9 @@ reviews, retries, QA) up to and including the `OUTCOME_RECORDED` event that esta
 `VALIDATED_ACCEPTED`. Later events are reported separately as post-acceptance activity. Events are
 deduplicated by `eventId`; a correction replaces its target, never adds to it.
 
-The acceptance cutoff is the highest ledger sequence among the current `ACCEPTED` outcome event and the
-effective mandatory observations that make it `VALIDATED_ACCEPTED`. `STAGE_RECORDED` events after that
+The acceptance cutoff is the highest ledger sequence among every fact required for `VALIDATED_ACCEPTED`: the
+current `ACCEPTED` outcome event, the effective `ATTEMPT_FINISHED(COMPLETED)` of the accepted attempt and the
+effective mandatory observations (a corrected fact counts at its correction's sequence). `STAGE_RECORDED` events after that
 sequence are post-acceptance activity.
 
 Usage coverage is evaluated per `STAGE_RECORDED` event in the chain (after corrections), never per
@@ -539,7 +540,7 @@ version must be rejected by v1 readers rather than reinterpreted.
 | #96 | Versioned append-only ledger, replay, integrity diagnostics | `monada-storage` | #93, #95 |
 | #97 | `ExecutionMemory` facade: idempotent recording, revisions, history | `monada-api` | #94, #95, #96 |
 | #98 | Scoped projections and bounded recall | `monada-api` | #97 |
-| #99 | Attempt-chain usage and hypothetical `CostToAcceptedOutcome` calculators | `monada-evaluation` | #95, #97 |
+| #99 | Attempt-chain usage and hypothetical `CostToAcceptedOutcome` calculators (**implemented**, section 19) | `monada-evaluation` | #95, #97 |
 | #100 | Evidence-gated pairwise comparison and Pareto diagnostics | `monada-evaluation` | #99 |
 | #101 | Bounded provenance-preserving sample export (+ evaluation annotations) | `monada-api`, `monada-evaluation` | #97, #98, #99, #100 |
 | #102 | Reproducible end-to-end Forge experience evaluation and isolation gates | `monada-evaluation` | #94, #96–#101 |
@@ -1014,6 +1015,113 @@ evidence for the isolation fixture comes from `ExperienceRecallIsolationReportTe
 recall regression gate: it compares every query's top-K refs and similarities with an embedded protected
 baseline, prints a baseline-vs-candidate table and fails on any reordering, changed similarity, cross-scope hit
 or drop in the protected aggregate metrics (Hit@1, MRR, Recall@3 over annotated queries).
+
+## 19. Usage and Cost Calculators (issue #99)
+
+Implements the usage and cost rules of section 8 in `com.monada.evaluation.execution` (`monada-evaluation`
+only; no change to `monada-core`, `monada-api`, storage formats, recall metrics or defaults). The code is
+pure: it reads no clock, file or network, looks up no prices, ranks no model and calls no LLM.
+
+### 19.1 Public API
+
+```java
+PriceBook prices = PriceBook.of(List.of(snapshot));                 // caller-supplied, versioned
+ExecutionView view = memory.loadExecution(scope, execution).orElseThrow();
+ExecutionSummary s = ExecutionSummaryCalculator.summarize(view, prices, List.of(billedAmount));
+s.cost().status();      // AVAILABLE | PARTIAL | UNAVAILABLE   (basis: HYPOTHETICAL_API_EQUIVALENT)
+```
+
+| Type | Role |
+| --- | --- |
+| `ExecutionSummaryCalculator.summarize(ExecutionView, PriceBook, List<ActualBilledAmount>)` | Single entry point; deterministic for identical input |
+| `PriceBook`, `PriceBook.Match` | Snapshot selection by provider, model and effective date |
+| `ExecutionSummary` | Chain and post-acceptance stages, usage, time, cost, gates, actual billed amounts, ignored duplicates |
+| `StageUsageCost`, `CostLine`, `CostReason` | Per-stage priced lines, snapshot used, coverage and reasons |
+| `CostToAcceptedOutcome`, `CurrencyCost`, `CostBasis` | Status, per-currency amounts, reasons; the basis is always hypothetical |
+| `UsageTotals`, `TimeSummary`, `GateEvidence`, `ActualBilledAmount` | Usage by provenance, effort vs elapsed time, per-dimension evidence, caller-supplied billing |
+
+### 19.2 Input and event identity
+
+- The input is the `ExecutionView` of #97. Its `history()` carries every ledger entry with its sequence, which
+  the cutoff needs (`AttemptView.stages()` loses sequences).
+- Entries are processed in ascending sequence. An event is identified by `eventId`: a repeated `eventId` is
+  ignored and listed in `ignoredDuplicateEvents`; the same content under a different `eventId` is a different
+  fact and counts. A `Correction` replaces the revision it supersedes; superseded revisions never count.
+- **Chain membership** uses the sequence of the *first* revision of a stage (`originalSequence`). A stage
+  recorded before the cutoff stays in the chain when it is corrected afterwards: the correction fixes its data
+  but does not make the work post-acceptance. `StageUsageCost.sequence()` is the latest revision's sequence.
+- **Cutoff** (section 8): the highest sequence among the current `ACCEPTED` outcome event, the effective
+  `ATTEMPT_FINISHED(COMPLETED)` of the accepted attempt and its effective mandatory observations. An outcome may
+  be recorded while the accepted attempt is still open; the derived status stays `ACCEPTED_UNVALIDATED` until
+  the completion, so work recorded in between belongs to the chain. Late or corrected validating facts
+  (evidence or a finish corrected to `COMPLETED`) therefore move the cutoff and pull the work done before it
+  into the chain. If the view says `VALIDATED_ACCEPTED` but the outcome, the completed finish or a mandatory
+  observation is missing from the supplied history, the cost is `UNAVAILABLE` with
+  `CUTOFF_UNDERIVABLE`; nothing is guessed.
+- Without a cutoff (pending, rejected, failed, cancelled, unvalidated) every recorded stage is listed in
+  `chainStages` so no work is hidden, `postAcceptanceStages` is empty and the cost is `UNAVAILABLE`.
+  `ExecutionSummary.chainScope()` says which case applies: `UP_TO_ACCEPTANCE` or `ALL_RECORDED_NO_ACCEPTANCE`.
+  Consumers must not treat the `chain*` fields of an `ALL_RECORDED_NO_ACCEPTANCE` summary as an accepted chain
+  (for example when comparing in #100).
+- Correction resolution mirrors the facade's own (`ExecutionViews`, package-private in `monada-api`) and is
+  kept honest by `ChainScopeGatesAndParityTest`, which compares the resolved effective stages, evidence and
+  outcome with the facade's `ExecutionView` after multi-revision corrections.
+
+### 19.3 Price selection and arithmetic
+
+- A stage is priced by the snapshot with the same provider and model and the latest `effectiveDate` on or
+  before the UTC date of the stage's `endedAt`. A stage without provider or model, or without such a snapshot,
+  is `MISSING_PRICE`. Two different snapshots sharing the winning date are `AMBIGUOUS_PRICE` (an addition to
+  the section 8 reason list). `PriceBook.of` rejects duplicate `(id, version)` pairs. The snapshot (id, version,
+  source, assumptions) used by each stage stays visible in `StageUsageCost.priceSnapshot()`.
+- Lines follow section 8: `billable(k)` removes directly included kinds; a negative value is
+  `INCONSISTENT_USAGE`. A line is computed only when its own counter and the counters of every kind included
+  in it are valued; otherwise the missing child is the reason and the parent line is not guessed.
+- `line = billable x price / unitSize`: exact product, one division at scale 18 `HALF_EVEN`. Per-currency totals
+  add unrounded lines; the amount is rounded **once** to scale 6 `HALF_EVEN`. `unrounded` stays alongside and
+  `reportedBasis + estimatedBasis = unrounded`, split by usage provenance (a line is estimated when any
+  contributing counter is). Currencies are sorted by ISO code and never summed.
+- `long` overflow while summing quantities is rejected with `IllegalArgumentException`.
+
+### 19.4 Completeness
+
+Status and reasons follow section 8. Clarifications:
+
+- A `PARTIAL` result reports a lower bound per currency of the snapshots actually used. When no stage has a
+  matching snapshot there is no currency to attach a bound to, so `amounts` is empty and the status is
+  `PARTIAL` (a `MISSING_PRICE` chain does not report an unlabelled `0.000000`).
+- A chain made only of `NO_BILLABLE_USAGE` stages is `AVAILABLE` with empty `amounts` (`isDeclaredZero()`) and
+  one `DECLARED_NO_BILLABLE_USAGE` reason per stage; a declared zero beside priced stages keeps its reason.
+- `UNAVAILABLE` never carries an amount. Reasons: `NO_VALIDATED_ACCEPTANCE` (with the derived status and
+  reasons), `NO_USAGE_RECORDED`, `CUTOFF_UNDERIVABLE`.
+
+### 19.5 Usage, time, gates, actual billing
+
+- `UsageTotals` keeps, per `UsageKind`, reported and estimated sums apart, plus the number of stages with an
+  `UNKNOWN` counter and the number of `MEASURED` stages that did not measure it. Neither is added as zero.
+  "Not measured" is counted only for kinds the stage's price snapshot prices (a stage without a snapshot
+  already has `MISSING_PRICE`; unpriced kinds such as `REQUESTS` are not a coverage gap), so it agrees with the
+  coverage reasons.
+- `StageUsageCost.covered()`, `CurrencyCost.unrounded()`/`amount()` and `TimeSummary.parallelOverlap()` are
+  derived accessors, not stored state, so they cannot disagree with the data they come from.
+- `TimeSummary`: `effort` = sum of stage durations; `wallClock` = first start to last end; `activeTime` = union
+  of the stage intervals (touching intervals merge); `parallelOverlap` = `effort - activeTime`. Without stages
+  every duration is absent with a reason, never `Duration.ZERO`.
+- `GateEvidence` has one entry per `QualityDimension` (enum order), built from the accepted attempt's
+  applicable evidence of section 8. It carries the full observation (state, measured value and unit,
+  evaluator, policy, source, artifacts) and its sequence; `MAINTAINABILITY` and `COMPLEXITY` are rendered like
+  any other dimension. No combined score exists.
+- `ActualBilledAmount` is supplied by the caller (the ledger has no billing event) and is only echoed in
+  `actualBilled`; it is never added to, or compared with, the hypothetical amount.
+
+### 19.6 Compatibility and verification
+
+No persisted format, public signature or default changes. Verification: `./gradlew :monada-evaluation:test`,
+`./gradlew test`, `./gradlew verifyLibraryConsumer`. Tests run on real histories recorded through
+`ExecutionMemory` in temporary directories; the hand-calculated chain (failed implementation, repair, review,
+QA, accepted, plus one post-acceptance stage) is documented in `AttemptChainSummaryTest`: total 0.1365 USD
+(reported 0.0865, estimated 0.05), reported as `0.136500`, effort 180 s, wall-clock 170 s, active 170 s,
+overlap 10 s. Wiring calculators into Forge or Neuron is future cross-repository work.
 
 ## Acceptance Criteria
 

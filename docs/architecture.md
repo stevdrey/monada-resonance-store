@@ -175,8 +175,8 @@ projection write leaves `projectionStatus` `STALE`, and `rebuildProjection` is t
 deterministic reconciliation. Incompatible projections are reported, never rewritten automatically.
 
 Packages: `com.monada.core.execution`, `com.monada.storage.execution` and `com.monada.api.execution`
-(implemented), planned evaluation-only `com.monada.evaluation.execution`. The extension is
-additive: atom, vector, feedback and manifest formats, `KnowledgeAtom` identity, ranking and query-key
+(implemented) and the evaluation-only `com.monada.evaluation.execution` (usage and hypothetical-cost
+calculators, #99; comparison and export annotations are planned). The extension is additive: atom, vector, feedback and manifest formats, `KnowledgeAtom` identity, ranking and query-key
 defaults, and existing public signatures stay unchanged.
 
 ### Execution Ledger Audit
