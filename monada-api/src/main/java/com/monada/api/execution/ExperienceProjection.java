@@ -522,7 +522,11 @@ final class ExperienceProjection implements AutoCloseable {
 
     ExperienceRecall recall(String query, int limit, long ledgerSequence,
                             Function<ExperienceRef, Optional<HistoryEntry>> resolver) {
-        if (query.isBlank() || (state != ProjectionStatus.State.CURRENT && state != ProjectionStatus.State.STALE)) {
+        boolean usable = state == ProjectionStatus.State.CURRENT || state == ProjectionStatus.State.STALE;
+        if (!writable && usable && reclaimed(false)) {
+            return reclaimedRecall(ledgerSequence); // even for a blank query: the status must say MISSING
+        }
+        if (query.isBlank() || !usable) {
             return new ExperienceRecall(status(ledgerSequence), List.of());
         }
         if (writable) { // the single writer: nothing changes the files behind this instance
@@ -533,9 +537,6 @@ final class ExperienceProjection implements AutoCloseable {
         // A read-only snapshot may run beside a live writer that keeps appending to the projection files. Atoms
         // projected after the snapshot are skipped (they never consume a slot), and a read that fails or looks
         // inconsistent while the files are changing is retried; stable damage is reported at once.
-        if (reclaimed(false)) {
-            return reclaimedRecall(ledgerSequence);
-        }
         for (int attempt = 1; ; attempt++) {
             String before = layout.generation();
             faults.beforeReadOnlyQuery(attempt);

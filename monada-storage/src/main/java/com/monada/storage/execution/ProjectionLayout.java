@@ -14,6 +14,7 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.regex.Matcher;
@@ -168,7 +169,7 @@ public final class ProjectionLayout {
     public Path nextGenerationDir() throws LedgerException {
         List<Path> existing = generationEntries();
         long next = existing.isEmpty() ? 1 : generationNumber(existing.get(existing.size() - 1)) + 1;
-        return paths.contained(scopeDir.resolve(GENERATION_PREFIX + String.format("%06d", next)));
+        return paths.contained(scopeDir.resolve(GENERATION_PREFIX + String.format(Locale.ROOT, "%06d", next)));
     }
 
     static long generationNumber(Path generationDir) {

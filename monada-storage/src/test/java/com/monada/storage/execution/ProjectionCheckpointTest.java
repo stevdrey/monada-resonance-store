@@ -312,4 +312,19 @@ class ProjectionCheckpointTest {
         layout.publish(generation);
         assertEquals(Optional.of(generation), layout.currentDir());
     }
+
+    @Test
+    void generationNamesAreAsciiUnderAnyLocale() throws IOException {
+        java.util.Locale saved = java.util.Locale.getDefault(java.util.Locale.Category.FORMAT);
+        try {
+            java.util.Locale.setDefault(java.util.Locale.Category.FORMAT, java.util.Locale.of("fa", "IR"));
+            ProjectionLayout layout = ProjectionLayout.of(root, ScopeId.of("scope-1"));
+            Path dir = Files.createDirectories(layout.nextGenerationDir());
+            assertEquals("projection-000001", dir.getFileName().toString());
+            layout.publish(dir);
+            assertEquals(Optional.of(dir), layout.currentDir());
+        } finally {
+            java.util.Locale.setDefault(java.util.Locale.Category.FORMAT, saved);
+        }
+    }
 }

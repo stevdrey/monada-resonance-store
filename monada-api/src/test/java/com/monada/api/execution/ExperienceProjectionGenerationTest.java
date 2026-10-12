@@ -326,11 +326,16 @@ class ExperienceProjectionGenerationTest {
             corpus(m);
             expected = render(m.recall(SCOPE, QUERY, 10));
         }
-        try (ExecutionMemory snapshot = ExecutionMemory.openReadOnly(root, SCOPE)) {
+        try (ExecutionMemory snapshot = ExecutionMemory.openReadOnly(root, SCOPE);
+             ExecutionMemory blankFirst = ExecutionMemory.openReadOnly(root, SCOPE)) {
             try (ExecutionMemory writer = ExecutionMemory.open(root, SCOPE)) {
                 writer.rebuildProjection(SCOPE);
                 writer.pruneProjection(SCOPE); // the host prunes although this snapshot is still open
             }
+            ExperienceRecall blank = blankFirst.recall(SCOPE, "  ", 5); // a blank query is the first operation
+            assertEquals(ProjectionStatus.State.MISSING, blank.status().state());
+            assertEquals(List.of(), blank.hits());
+            assertTrue(blank.status().diagnostics().get(0).contains("was reclaimed"), blank.status().diagnostics().toString());
             ProjectionStatus status = snapshot.projectionStatus(SCOPE); // before any recall
             assertEquals(ProjectionStatus.State.MISSING, status.state());
             assertTrue(status.diagnostics().get(0).contains("projection-000001 was reclaimed"),
@@ -483,5 +488,22 @@ class ExperienceProjectionGenerationTest {
             assertEquals("projection-000002\n", Files.readString(pointer), kind);
         }
         assertEquals("projection-000001\n", Files.readString(outsideFile), "a link target is never written");
+    }
+
+    @Test
+    void generationNamesIgnoreTheDefaultLocale() throws IOException {
+        java.util.Locale saved = java.util.Locale.getDefault(java.util.Locale.Category.FORMAT);
+        try {
+            java.util.Locale.setDefault(java.util.Locale.Category.FORMAT, java.util.Locale.of("fa", "IR"));
+            try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+                corpus(m);
+                assertEquals(ProjectionStatus.State.CURRENT, m.projectionStatus(SCOPE).state(),
+                        m.projectionStatus(SCOPE).diagnostics().toString());
+                assertEquals(ProjectionStatus.State.CURRENT, m.rebuildProjection(SCOPE).state());
+            }
+            assertEquals(List.of("projection-000001", "projection-000002"), generationNames());
+        } finally {
+            java.util.Locale.setDefault(java.util.Locale.Category.FORMAT, saved);
+        }
     }
 }
