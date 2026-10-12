@@ -2,10 +2,10 @@ package com.monada.api.execution;
 
 import com.monada.api.MonadaMemory;
 import com.monada.api.MonadaMemoryOptions;
+import com.monada.core.FrequencyVector;
 import com.monada.core.KnowledgeAtom;
 import com.monada.encoder.SimpleFrequencyEncoder;
 import com.monada.encoder.WeightedAtomEncoder;
-import com.monada.storage.FileAtomStore;
 import com.monada.storage.FileFrequencyStore;
 import com.monada.storage.Manifest;
 import com.monada.storage.StoredVector;
@@ -17,6 +17,7 @@ import com.monada.storage.audit.StorageIntegritySeverity;
 import com.monada.storage.execution.ProjectionCheckpoint;
 import com.monada.storage.execution.ProjectionLayout;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -41,9 +42,10 @@ final class ProjectionVerifier {
     private static final String PROJECTION_MANIFEST_VERSION = "0.4";
 
     /**
-     * Outcome: {@code problems} is empty when the memory is sound. Then {@code memory} is the opened store,
-     * {@code atoms}/{@code vectors} its full content (read once, reusable by a frozen snapshot), {@code present}
-     * the stored atom IDs, and {@code extra} the stored atoms the checkpoint does not know.
+     * Outcome: {@code problems} is empty when the memory is sound. Then {@code memory} is the opened store
+     * (writable verification only, null for read-only), {@code atoms}/{@code vectors} the live atoms and their
+     * verified vectors (equal to the stored ones), from which a read-only snapshot builds its frozen index,
+     * {@code present} the stored atom IDs, and {@code extra} the stored atoms the checkpoint does not know.
      */
     record Result(List<String> problems, MonadaMemory memory, List<KnowledgeAtom> atoms, List<StoredVector> vectors,
                   Set<String> present, Set<String> extra) {
@@ -60,9 +62,15 @@ final class ProjectionVerifier {
      * ({@code replayed} is the projection of its covered prefix). {@code caughtUp} means the checkpoint covers
      * the whole ledger with a clean tail, so stored atoms it does not know are damage rather than an interrupted
      * write.
+     *
+     * <p>Every read is existing-only: no directory, manifest or segment is ever created, so a generation
+     * reclaimed concurrently (by a rebuild or prune) makes verification fail with an I/O error instead of being
+     * partly recreated. Only a {@code writable} verification, by the scope's single writer, then opens the
+     * store with {@link MonadaMemory#open} for its own writes.
      */
     static Result verify(ProjectionLayout layout, Path memoryDir, ProjectionCheckpoint.Snapshot snapshot,
-                         Projector replayed, boolean caughtUp) throws IOException {
+                         Projector replayed, boolean caughtUp, boolean writable, ProjectionFaults faults)
+            throws IOException {
         List<String> problems = new ArrayList<>(layout.memoryLayoutProblems(memoryDir));
         if (!problems.isEmpty()) {
             return Result.failed(problems);
@@ -76,24 +84,19 @@ final class ProjectionVerifier {
         if (!problems.isEmpty()) {
             return Result.failed(problems);
         }
-        MonadaMemory memory;
-        try {
-            memory = MonadaMemory.open(memoryDir, MonadaMemoryOptions.defaults());
-        } catch (RuntimeException e) {
-            return Result.failed(List.of("projection memory is incompatible: " + e.getMessage()));
-        }
-        List<KnowledgeAtom> atoms = new FileAtomStore(memoryDir).findAll();
-        Set<String> present = new HashSet<>();
-        atoms.forEach(a -> present.add(a.id()));
+        faults.afterLayoutVerified();
+        Set<String> present = storedAtomIds(memoryDir);
         // Live atoms must be stored; retired atoms may be absent (a rebuild compacts them away).
         for (String atom : snapshot.refsByAtom().keySet()) {
             if (!present.contains(atom)) {
                 return Result.failed(List.of("mapped atom " + atom + " is missing from the projection memory"));
             }
         }
+        // openExisting requires every artifact to exist and never creates one.
         List<StoredVector> vectors = FileFrequencyStore.openExisting(memoryDir, ProjectionLayout.VECTOR_SEGMENT,
                 manifest.vectorFormatProfile()).findAll();
-        String vectorProblem = vectorProblem(vectors, manifest, replayed, present);
+        Map<String, float[]> expected = new HashMap<>();
+        String vectorProblem = vectorProblem(vectors, manifest, replayed, present, expected);
         if (vectorProblem != null) {
             return Result.failed(List.of(vectorProblem));
         }
@@ -104,7 +107,43 @@ final class ProjectionVerifier {
             return Result.failed(List.of("projection memory holds atoms without experience refs: "
                     + extra.iterator().next()));
         }
-        return new Result(List.of(), memory, atoms, vectors, Set.copyOf(present), Set.copyOf(extra));
+        MonadaMemory memory = null;
+        if (writable) {
+            try {
+                memory = MonadaMemory.open(memoryDir, MonadaMemoryOptions.defaults());
+            } catch (RuntimeException e) {
+                return Result.failed(List.of("projection memory is incompatible: " + e.getMessage()));
+            }
+        }
+        // The live atoms and their verified vectors: a frozen snapshot needs no file after verification.
+        List<KnowledgeAtom> atoms = new ArrayList<>();
+        List<StoredVector> live = new ArrayList<>();
+        for (String atomId : replayed.refsByAtom().keySet()) {
+            atoms.add(KnowledgeAtom.text(replayed.textOf(atomId)));
+            live.add(new StoredVector(atomId, new FrequencyVector(expected.get(atomId))));
+        }
+        return new Result(List.of(), memory, atoms, live, Set.copyOf(present), Set.copyOf(extra));
+    }
+
+    /**
+     * IDs of the atoms in the projection memory's atom log, read without creating anything (the store's own
+     * constructor would create a missing log). The log's format was validated by the integrity audit; the ID is
+     * its first tab-separated field, and repeated IDs (alias updates) count once.
+     */
+    private static Set<String> storedAtomIds(Path memoryDir) throws IOException {
+        Set<String> ids = new HashSet<>();
+        for (String line : Files.readAllLines(memoryDir.resolve(ProjectionLayout.ATOM_SEGMENT),
+                StandardCharsets.UTF_8)) {
+            if (line.isBlank()) {
+                continue;
+            }
+            int tab = line.indexOf('\t');
+            if (tab <= 0) {
+                throw new IOException("malformed atom log line in the projection memory");
+            }
+            ids.add(line.substring(0, tab));
+        }
+        return ids;
     }
 
     /**
@@ -153,7 +192,7 @@ final class ProjectionVerifier {
      * manifest's verified dimension) and requires it to equal the stored vector. Null when all match.
      */
     private static String vectorProblem(List<StoredVector> stored, Manifest manifest, Projector replayed,
-                                        Set<String> present) {
+                                        Set<String> present, Map<String, float[]> expectedOut) {
         Map<String, float[]> vectors = new HashMap<>();
         stored.forEach(v -> vectors.put(v.atomId(), v.vector().values()));
         MonadaMemoryOptions options = MonadaMemoryOptions.defaults();
@@ -168,6 +207,7 @@ final class ProjectionVerifier {
             if (!Arrays.equals(expected, vectors.get(atomId))) {
                 return "stored vector of atom " + atomId + " does not match its projected text";
             }
+            expectedOut.put(atomId, expected);
         }
         return null;
     }

@@ -115,9 +115,15 @@ public final class ExecutionMemory implements AutoCloseable {
     /** Attempts of a read-only open racing a live writer. */
     static final int READ_ONLY_ATTEMPTS = 3;
 
-    /** Test seam: runs after the ledger snapshot of each read-only attempt, before the projection loads. */
+    /**
+     * Test seam: runs after the ledger snapshot of each read-only attempt (before the projection loads), and
+     * after the projection's layout checks (before its memory is read).
+     */
     interface ReadOnlyOpenHook {
         void afterLedgerSnapshot(int attempt);
+
+        default void afterLayoutVerified(int attempt) {
+        }
     }
 
     static ExecutionMemory openReadOnly(Path root, ScopeId scope, ExecutionMemoryConfig config,
@@ -163,8 +169,17 @@ public final class ExecutionMemory implements AutoCloseable {
             }
             HistoryIndex index = HistoryIndex.of(reader.replay());
             hook.afterLedgerSnapshot(attempt);
-            ExperienceProjection projection = ExperienceProjection.open(root, scope, index.all(), false,
-                    ProjectionFaults.NONE);
+            ProjectionFaults faults = new ProjectionFaults() {
+                @Override
+                public void beforeCommit(long ledgerSequence) {
+                }
+
+                @Override
+                public void afterLayoutVerified() {
+                    hook.afterLayoutVerified(attempt);
+                }
+            };
+            ExperienceProjection projection = ExperienceProjection.open(root, scope, index.all(), false, faults);
             return new ExecutionMemory(null, index, reader.hasTornTail(), scope, config, projection);
         } catch (IOException e) {
             throw new UncheckedIOException("cannot open execution memory " + root + " read-only", e);

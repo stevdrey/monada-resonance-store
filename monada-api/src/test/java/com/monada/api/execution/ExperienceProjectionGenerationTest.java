@@ -619,4 +619,66 @@ class ExperienceProjectionGenerationTest {
             assertEquals(ProjectionStatus.State.CURRENT, m.rebuildProjection(SCOPE).state());
         }
     }
+
+    /** A hook that, at the given read-only attempts, rebuilds (and so reclaims) the generation being verified. */
+    private ExecutionMemory.ReadOnlyOpenHook reclaimDuringVerification(java.util.Set<Integer> attempts,
+                                                                      List<Integer> seen) {
+        return new ExecutionMemory.ReadOnlyOpenHook() {
+            @Override
+            public void afterLedgerSnapshot(int attempt) {
+            }
+
+            @Override
+            public void afterLayoutVerified(int attempt) {
+                seen.add(attempt);
+                if (attempts.contains(attempt)) {
+                    try (ExecutionMemory writer = ExecutionMemory.open(root, SCOPE)) {
+                        writer.rebuildProjection(SCOPE); // publishes a new generation, reclaims the one being read
+                    }
+                }
+            }
+        };
+    }
+
+    @Test
+    void readOnlyOpenNeverRecreatesAGenerationReclaimedMidVerification() throws IOException {
+        List<String> expected;
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            corpus(m);
+            expected = render(m.recall(SCOPE, QUERY, 10));
+        }
+        Path reclaimed = projectionDir(root, SCOPE);
+        List<Integer> seen = new ArrayList<>();
+        try (ExecutionMemory snapshot = ExecutionMemory.openReadOnly(root, SCOPE, ExecutionMemoryConfig.defaults(),
+                reclaimDuringVerification(java.util.Set.of(1), seen))) {
+            assertFalse(Files.exists(reclaimed, java.nio.file.LinkOption.NOFOLLOW_LINKS),
+                    "the reader never recreates any part of the reclaimed generation");
+            assertEquals(List.of(1, 2), seen, "the bounded open retry took a consistent snapshot");
+            ExperienceRecall recall = snapshot.recall(SCOPE, QUERY, 10);
+            assertEquals(ProjectionStatus.State.CURRENT, recall.status().state(), recall.status().diagnostics().toString());
+            assertEquals(expected, render(recall));
+        }
+        assertEquals(List.of("projection-000002"), generationNames());
+    }
+
+    @Test
+    void readOnlyOpenReportsExplicitlyWhenEveryAttemptIsReclaimed() throws IOException {
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            corpus(m);
+        }
+        List<Integer> seen = new ArrayList<>();
+        try (ExecutionMemory snapshot = ExecutionMemory.openReadOnly(root, SCOPE, ExecutionMemoryConfig.defaults(),
+                reclaimDuringVerification(java.util.Set.of(1, 2, 3), seen))) {
+            assertEquals(List.of(1, 2, 3), seen);
+            ProjectionStatus status = snapshot.projectionStatus(SCOPE);
+            assertEquals(ProjectionStatus.State.INCOMPATIBLE, status.state());
+            assertTrue(status.diagnostics().get(0).contains("reopen to retry"), status.diagnostics().toString());
+            assertEquals(List.of(), snapshot.recall(SCOPE, QUERY, 10).hits());
+        }
+        assertEquals(List.of("projection-000004"), generationNames(),
+                "only the latest generation exists: nothing reclaimed was recreated by the reader");
+        try (ExecutionMemory fresh = ExecutionMemory.openReadOnly(root, SCOPE)) {
+            assertEquals(ProjectionStatus.State.CURRENT, fresh.projectionStatus(SCOPE).state());
+        }
+    }
 }

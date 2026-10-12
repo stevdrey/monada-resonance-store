@@ -942,6 +942,12 @@ order, duplicate projection, unknown retirement) stops reading and makes it `INC
   `rebuildProjection` and `pruneProjection` are unsupported. After verification the generation's atoms and
   vectors are loaded once into an immutable in-memory index, so the snapshot is truly frozen: its recall never
   reads a file again, and later appends, rebuilds, prunes or damage to the files never change its answers.
+  Read-only verification uses existing-only readers (the integrity audit, a read-only atom-log ID reader and
+  `FileFrequencyStore.openExisting`) and never `MonadaMemory.open` or a creating store constructor, so a
+  generation reclaimed by a concurrent rebuild or prune mid-open fails the attempt with an I/O error instead
+  of being partly recreated; the bounded open retry then takes a consistent snapshot or reports
+  `INCOMPATIBLE` ("reopen to retry"). The frozen index is built from the live atoms' texts and their verified
+  vectors (equal to the stored ones), so no file is needed after verification.
   It ranks with the same `LinearScanResonanceIndex` and the query steps of `MonadaQuery` with production
   defaults (feedback-aware wrapping is a no-op because the feedback log is verified empty); the recall
   regression gate and a writable-versus-read-only equality test guard this equivalence. Beside a live writer
@@ -996,10 +1002,6 @@ try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
   `MonadaMemory` is follow-up work (#111).
 - A read-only snapshot holds its generation's atoms and vectors in memory for its lifetime (proportional to
   the scope's projected atoms); hosts close snapshots they no longer need.
-- `MonadaMemory.open` can create missing standard directories. Verification checks the layout first, but a
-  read-only open that races a rebuild or prune deleting the generation it is opening can still reach it and
-  recreate empty directories there; the open is retried, and the next rebuild or prune deletes them. A
-  creation-free read-only `MonadaMemory` open would remove this window and is outside this issue.
 - Existing ledgers stay valid: a pre-#98 scope opens as `MISSING` until rebuilt. Legacy text stores,
   baselines and production defaults are untouched.
 

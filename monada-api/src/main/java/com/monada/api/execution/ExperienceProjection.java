@@ -168,7 +168,7 @@ final class ExperienceProjection implements AutoCloseable {
         }
         boolean caughtUp = snapshot.cleanTail() && snapshot.coveredSequence() == ledger.size();
         ProjectionVerifier.Result result = ProjectionVerifier.verify(layout, layout.memory(dir), snapshot, replayed,
-                caughtUp);
+                caughtUp, writable, faults);
         if (!result.problems().isEmpty()) {
             incompatibleOnLoad(result.problems());
             return;
