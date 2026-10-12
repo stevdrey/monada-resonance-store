@@ -878,7 +878,8 @@ line). Payload tokens are `|`-separated and escaped like ledger payloads:
 
 `<ref>` is the canonical ref `scope|task|execution|~attempt|eventId|revision` (`ExperienceRefCodec`), which
 is also the last recall tie-break. Every ledger sequence gets exactly one `COVER`, in order from 1, streamed
-after its entries through a bounded buffer and forced once (memory stays bounded for large batches). Entries after the last `COVER` (an interrupted batch) and a
+after its entries through a bounded buffer and forced once; readers fold in two streaming passes (find the
+last `COVER`, then apply entries up to it immediately), so memory stays bounded for large batches. Entries after the last `COVER` (an interrupted batch) and a
 torn final line are ignored and make the projection `STALE`; any other defect (digest, framing, version,
 order, duplicate projection, unknown retirement) stops reading and makes it `INCOMPATIBLE`.
 
@@ -900,7 +901,8 @@ order, duplicate projection, unknown retirement) stops reading and makes it `INC
   side-effect-free `StorageIntegrityAuditor` must report no error (for example `ATOM_WITHOUT_VECTOR`) and
   no duplicate vector (`DUPLICATE_VECTOR_INDEX_ID`, `DUPLICATE_VECTOR_OFFSET`), all
   before `MonadaMemory` is opened, so diagnosing a damaged projection never recreates files. Finally the
-  projection text of every live atom is re-encoded with the production pipeline (`WeightedAtomEncoder`
+  projection text of every stored atom the checkpoint knows (live, and retired atoms still stored, which a
+  later correction could reactivate without rewriting) is re-encoded with the production pipeline (`WeightedAtomEncoder`
   and the manifest's encoder dimensions) and must equal its stored vector, so a structurally valid but
   altered frame is `INCOMPATIBLE`. It
   initializes a projection only for an **empty** ledger; a scope recorded before #98 is `MISSING`.

@@ -38,6 +38,10 @@ class ExperienceProjectionGenerationTest {
     @TempDir
     Path root;
 
+    /** A separate managed directory, outside the ledger root, for link targets (cleaned up by JUnit). */
+    @TempDir
+    Path outsideRoot;
+
     private void corpus(ExecutionMemory m) {
         experience(m, SCOPE, "x-1", "Repair the flaky login test", "Waited for the session cookie", null);
         experience(m, SCOPE, "x-2", "Speed up the gradle build", "Enabled the configuration cache", null);
@@ -261,7 +265,7 @@ class ExperienceProjectionGenerationTest {
             corpus(m);
         }
         Path scopeDir = layout().scopeDir();
-        Path outside = Files.createDirectories(root.getParent().resolve(root.getFileName() + "-outside"));
+        Path outside = Files.createDirectories(outsideRoot.resolve("outside"));
         Files.writeString(outside.resolve("keep.txt"), "outside");
         Files.createSymbolicLink(scopeDir.resolve("projection-000002"), outside);
         Files.createSymbolicLink(scopeDir.resolve("projection-000003"), scopeDir.resolve("missing-target"));
@@ -464,7 +468,7 @@ class ExperienceProjectionGenerationTest {
 
     @Test
     void rebuildReplacesAnInvalidPointerEntry() throws IOException {
-        Path outsideFile = Files.writeString(root.getParent().resolve(root.getFileName() + "-pointer-target"),
+        Path outsideFile = Files.writeString(outsideRoot.resolve("pointer-target"),
                 "projection-000001\n");
         for (String kind : List.of("dangling link", "outside link", "directory")) {
             Path store = root.resolve(kind.replace(' ', '-'));
@@ -594,6 +598,47 @@ class ExperienceProjectionGenerationTest {
             incremental = Experiences.checkpointBytes(root, SCOPE);
             m.rebuildProjection(SCOPE);
             assertArrayEquals(incremental, Experiences.checkpointBytes(root, SCOPE), "streamed batch is byte-identical");
+        }
+    }
+
+    @Test
+    void alteredRetiredVectorIsCaughtBeforeReactivation() throws IOException {
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            corpus(m);
+            // x-1's original text becomes a retired atom that stays stored (incremental projection).
+            appended(m, Experiences.correctFinish(SCOPE, "x-1", "a1", "x-1-fix", "x-1-a1-fin", 2,
+                    "Mocked the session", null));
+            assertEquals(3, new FileAtomStore(projectionDir(root, SCOPE).resolve("memory")).findAll().size());
+        }
+        // Overwrite only the retired atom's frame with a copy of another frame: structurally valid, semantically
+        // wrong, and no live atom's vector changes (so only the retired-atom check can catch it).
+        Path memory = projectionDir(root, SCOPE).resolve("memory");
+        String retiredAtom = KnowledgeAtom.text("Repair the flaky login test\nWaited for the session cookie").id();
+        List<String> index = Files.readAllLines(memory.resolve("indexes/vector-map.idx"), StandardCharsets.UTF_8);
+        Path segment = memory.resolve("vectors/segment-000001.f32");
+        byte[] bytes = Files.readAllBytes(segment);
+        int frame = bytes.length / index.size();
+        long retiredOffset = -1;
+        long otherOffset = -1;
+        for (String line : index) {
+            String[] parts = line.split("\t");
+            if (parts[0].equals(retiredAtom)) {
+                retiredOffset = Long.parseLong(parts[1]);
+            } else {
+                otherOffset = Long.parseLong(parts[1]);
+            }
+        }
+        assertTrue(retiredOffset >= 0 && otherOffset >= 0, index.toString());
+        byte[] altered = bytes.clone();
+        System.arraycopy(bytes, (int) otherOffset, altered, (int) retiredOffset, frame);
+        Files.write(segment, altered);
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            ProjectionStatus status = m.projectionStatus(SCOPE);
+            assertEquals(ProjectionStatus.State.INCOMPATIBLE, status.state(),
+                    "the retired vector is verified before a correction could reactivate it");
+            assertTrue(status.diagnostics().toString().contains("does not match its projected text"),
+                    status.diagnostics().toString());
+            assertEquals(ProjectionStatus.State.CURRENT, m.rebuildProjection(SCOPE).state());
         }
     }
 }

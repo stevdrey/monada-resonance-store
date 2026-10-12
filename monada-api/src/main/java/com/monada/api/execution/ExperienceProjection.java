@@ -225,7 +225,7 @@ final class ExperienceProjection implements AutoCloseable {
             extra.removeAll(snapshot.retiredAtoms());
         }
         if (problems.isEmpty()) {
-            vectorProblem(memoryDir, manifest, replayed).ifPresent(problems::add);
+            vectorProblem(memoryDir, manifest, replayed, present).ifPresent(problems::add);
         }
         boolean caughtUp = snapshot.cleanTail() && snapshot.coveredSequence() == ledger.size();
         if (problems.isEmpty() && caughtUp && !extra.isEmpty()) {
@@ -316,8 +316,8 @@ final class ExperienceProjection implements AutoCloseable {
      * dimensions) and compares it with the stored vector, so a structurally valid but different frame cannot
      * silently change scores. Reads only; the store layout and manifest were verified before.
      */
-    private static Optional<String> vectorProblem(Path memoryDir, Manifest manifest, Projector replayed)
-            throws IOException {
+    private static Optional<String> vectorProblem(Path memoryDir, Manifest manifest, Projector replayed,
+                                                  Set<String> present) throws IOException {
         Map<String, float[]> vectors = new HashMap<>();
         for (StoredVector v : FileFrequencyStore.openExisting(memoryDir, ProjectionLayout.VECTOR_SEGMENT,
                 manifest.vectorFormatProfile()).findAll()) {
@@ -325,12 +325,17 @@ final class ExperienceProjection implements AutoCloseable {
         }
         MonadaMemoryOptions options = MonadaMemoryOptions.defaults();
         SimpleFrequencyEncoder encoder = new SimpleFrequencyEncoder(manifest.dimensions());
-        for (var live : replayed.liveTexts().entrySet()) {
-            float[] expected = encoder.encode(WeightedAtomEncoder.toWeightedText(KnowledgeAtom.text(live.getValue()),
-                    options.textNormalizer(), options.expansionOptions())).values();
-            if (!Arrays.equals(expected, vectors.get(live.getKey()))) {
-                return Optional.of("stored vector of atom " + live.getKey()
-                        + " does not match its projected text");
+        // Every stored atom the checkpoint knows, live or retired: a retired atom can be reactivated by a later
+        // correction without being written again, so its stored vector must be trustworthy too.
+        TreeSet<String> known = new TreeSet<>(replayed.refsByAtom().keySet());
+        known.addAll(replayed.retired());
+        known.retainAll(present);
+        for (String atomId : known) {
+            float[] expected = encoder.encode(WeightedAtomEncoder.toWeightedText(
+                    KnowledgeAtom.text(replayed.textOf(atomId)), options.textNormalizer(),
+                    options.expansionOptions())).values();
+            if (!Arrays.equals(expected, vectors.get(atomId))) {
+                return Optional.of("stored vector of atom " + atomId + " does not match its projected text");
             }
         }
         return Optional.empty();
@@ -658,7 +663,9 @@ final class ExperienceProjection implements AutoCloseable {
             if (unknown == 0 || hits.size() >= limit || results.size() < topK) {
                 return new Collected(hits, null);
             }
-            topK = limit + padding + unknown; // strictly larger: fewer than limit refs were collected
+            // Grow at least geometrically, so exhausting a store full of unknown (newer) atoms takes logarithmically
+            // many full scans; the exhaustion check above still ends the loop.
+            topK = (int) Math.min(Integer.MAX_VALUE / 2, Math.max((long) limit + padding + unknown, 2L * topK));
         }
     }
 

@@ -355,4 +355,37 @@ class ProjectionCheckpointTest {
         assertEquals(5_000, s.refsByAtom().get(ATOM_A).size());
         assertEquals(5_002, Files.readAllLines(file()).size(), "header + entries + COVER");
     }
+
+    @Test
+    void largeUncoveredBatchIsIgnoredWithBoundedReads() throws IOException {
+        try (ProjectionCheckpoint c = ProjectionCheckpoint.create(file(), SCOPE, 128)) {
+            c.commit(1, DIGEST, List.of(new Entry(EntryKind.PROJECT, ATOM_A, ref("first", 1))));
+            List<Entry> batch = new ArrayList<>();
+            for (int i = 0; i < 5_000; i++) {
+                batch.add(new Entry(EntryKind.PROJECT, ATOM_B, ref("e" + i, 1)));
+            }
+            c.commit(2, DIGEST, batch);
+        }
+        List<String> lines = new ArrayList<>(Files.readAllLines(file()));
+        Files.write(file(), lines.subList(0, lines.size() - 1)); // drop the last COVER: 5,000 uncovered entries
+        ProjectionCheckpoint.Snapshot s = read();
+        assertTrue(s.isSound(), s.problems().toString());
+        assertFalse(s.cleanTail());
+        assertEquals(1, s.coveredSequence());
+        assertEquals(java.util.Set.of(ATOM_A), s.refsByAtom().keySet(), "the uncovered batch is never applied");
+    }
+
+    @Test
+    void malformedEntryAfterTheLastCoverIsStillReported() throws IOException {
+        try (ProjectionCheckpoint c = ProjectionCheckpoint.create(file(), SCOPE, 128)) {
+            c.commit(1, DIGEST, List.of());
+        }
+        String payload = "PROJECT|7|not-an-atom|x";
+        byte[] body = payload.getBytes(StandardCharsets.UTF_8);
+        Files.writeString(file(), "MXP1\t3\t" + body.length + "\t" + RecordLine.sha256Hex(body) + "\t" + payload + "\n",
+                StandardOpenOption.APPEND);
+        ProjectionCheckpoint.Snapshot s = read();
+        assertFalse(s.isSound());
+        assertTrue(s.problems().get(0).contains("malformed PROJECT"), s.problems().toString());
+    }
 }

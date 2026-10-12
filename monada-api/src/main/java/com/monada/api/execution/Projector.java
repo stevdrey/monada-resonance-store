@@ -48,6 +48,7 @@ final class Projector {
     private final TreeMap<String, TreeMap<String, ExperienceRef>> live = new TreeMap<>();
     private final Set<String> projected = new HashSet<>();
     private final TreeMap<String, String> liveTexts = new TreeMap<>();
+    private final Map<String, String> textOf = new HashMap<>(); // every atom ever projected; never pruned
 
     Step apply(ExecutionEvent event) {
         ExecutionEvent effective = event instanceof Correction c ? c.replacement() : event;
@@ -100,6 +101,7 @@ final class Projector {
         texts.put(next.atomId(), text);
         projected.add(next.atomId());
         liveTexts.put(next.atomId(), text);
+        textOf.put(next.atomId(), text);
         live.computeIfAbsent(next.atomId(), k -> new TreeMap<>())
                 .put(ExperienceRefCodec.canonical(next.ref()), next.ref());
     }
@@ -121,6 +123,11 @@ final class Projector {
     }
 
     /** Text of every live atom, in atom ID order: what a compacted rebuild stores. */
+    /** Projection text of any atom this projector ever projected (live or retired), or null. */
+    String textOf(String atomId) {
+        return textOf.get(atomId);
+    }
+
     SortedMap<String, String> liveTexts() {
         return Collections.unmodifiableSortedMap(new TreeMap<>(liveTexts));
     }

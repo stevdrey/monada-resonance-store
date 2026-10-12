@@ -48,7 +48,8 @@ import java.util.regex.Pattern;
  * <p>Every ledger sequence gets exactly one {@code COVER}, in order from 1, preceded by its
  * {@code PROJECT}/{@code RETIRE} lines (often none). Entries after the last {@code COVER} are an
  * incomplete batch: they are ignored and reported as an unclean tail (the projection is stale), never as
- * applied. Any other defect (digest, framing, unknown version, out-of-order sequence, duplicate or unknown
+ * applied. Reading uses two streaming passes, so memory is bounded by the folded state, not by batch size.
+ * Any other defect (digest, framing, unknown version, out-of-order sequence, duplicate or unknown
  * pair) stops reading and is reported as a problem; nothing is ever repaired in place.
  */
 public final class ProjectionCheckpoint implements AutoCloseable {
@@ -246,7 +247,10 @@ public final class ProjectionCheckpoint implements AutoCloseable {
         if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
             throw new IOException(FILE_NAME + " is missing or not a regular file");
         }
-        Fold fold = new Fold(scope);
+        // Two streaming passes keep memory bounded by the folded state: the first finds the last COVER of the
+        // well-framed prefix; the second applies every entry up to it immediately (no per-batch buffer) and only
+        // syntax-checks what follows, which is an uncovered tail and never applied.
+        Fold fold = new Fold(scope, lastCoverLine(file, scope));
         try (InputStream in = new BufferedInputStream(Files.newInputStream(file), 65_536)) {
             long lineNumber = 0;
             while (fold.problems.isEmpty()) {
@@ -273,6 +277,30 @@ public final class ProjectionCheckpoint implements AutoCloseable {
             }
         }
         return fold.snapshot();
+    }
+
+    /** Line number of the last well-framed COVER before the first framing defect or torn line (0 when none). */
+    private static long lastCoverLine(Path file, ScopeId scope) throws IOException {
+        Fold scratch = new Fold(scope, 0);
+        long lastCover = 0;
+        try (InputStream in = new BufferedInputStream(Files.newInputStream(file), 65_536)) {
+            long lineNumber = 0;
+            while (true) {
+                Line line = nextLine(in);
+                if (line == null || !line.terminated() || line.oversized()) {
+                    break;
+                }
+                lineNumber++;
+                String payload = unframe(line.bytes(), lineNumber, scratch);
+                if (payload == null) {
+                    break;
+                }
+                if (payload.startsWith("COVER|")) {
+                    lastCover = lineNumber;
+                }
+            }
+        }
+        return lastCover;
     }
 
     private static String unframe(byte[] bytes, long lineNumber, Fold fold) {
@@ -310,13 +338,15 @@ public final class ProjectionCheckpoint implements AutoCloseable {
         private final List<String> coverDigests = new ArrayList<>();
         private final TreeMap<String, TreeMap<String, ExperienceRef>> live = new TreeMap<>();
         private final Set<String> projected = new LinkedHashSet<>();
-        private final List<String[]> pending = new ArrayList<>();
+        private final long lastCover;
+        private boolean uncoveredTail;
         private boolean header;
         private int dimensions;
         private boolean tornTail;
 
-        Fold(ScopeId scope) {
+        Fold(ScopeId scope, long lastCover) {
             this.scope = scope;
+            this.lastCover = lastCover;
         }
 
         void problem(long line, String message) {
@@ -361,7 +391,11 @@ public final class ProjectionCheckpoint implements AutoCloseable {
                         problem(line, "malformed experience ref: " + e.getMessage());
                         return;
                     }
-                    pending.add(t);
+                    if (line < lastCover) {
+                        apply(line, t); // covered: applied at once; a problem stops the read
+                    } else {
+                        uncoveredTail = true; // an interrupted batch: checked, never applied
+                    }
                 }
                 case "COVER" -> {
                     if (t.length != 3 || !SEQUENCE.matcher(t[1]).matches() || !t[1].equals(Long.toString(next))
@@ -369,12 +403,10 @@ public final class ProjectionCheckpoint implements AutoCloseable {
                         problem(line, "malformed or out-of-order COVER, expected ledger sequence " + next);
                         return;
                     }
-                    for (String[] entry : pending) {
-                        if (!apply(line, entry)) {
-                            return;
-                        }
+                    if (line > lastCover) {
+                        uncoveredTail = true; // appeared after the first pass (a concurrent writer): not applied
+                        return;
                     }
-                    pending.clear();
                     coverDigests.add(t[2]);
                 }
                 default -> problem(line, "unknown entry kind");
@@ -410,7 +442,7 @@ public final class ProjectionCheckpoint implements AutoCloseable {
             live.forEach((atom, refs) -> refsByAtom.put(atom, new ArrayList<>(refs.values())));
             TreeSet<String> retired = new TreeSet<>(projected);
             retired.removeAll(live.keySet());
-            boolean clean = !tornTail && pending.isEmpty();
+            boolean clean = !tornTail && !uncoveredTail;
             return new Snapshot(dimensions, coverDigests.size(), coverDigests, refsByAtom, retired, clean, problems);
         }
     }

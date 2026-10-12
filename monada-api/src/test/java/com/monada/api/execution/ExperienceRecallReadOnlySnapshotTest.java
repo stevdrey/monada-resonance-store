@@ -168,4 +168,37 @@ class ExperienceRecallReadOnlySnapshotTest {
             assertTrue(rounds.get(1) > rounds.get(0));
         }
     }
+
+    @Test
+    void exhaustingManyUnknownAtomsTakesLogarithmicallyManyRounds() {
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            m.projectionStatus(SCOPE); // an empty scope with an initialized projection
+        }
+        java.util.List<Integer> rounds = new java.util.ArrayList<>();
+        ExecutionMemory.ReadOnlyOpenHook hook = new ExecutionMemory.ReadOnlyOpenHook() {
+            @Override
+            public void afterLedgerSnapshot(int attempt) {
+            }
+
+            @Override
+            public void onRecallRound(int topK) {
+                rounds.add(topK);
+            }
+        };
+        try (ExecutionMemory snapshot = ExecutionMemory.openReadOnly(root, SCOPE, ExecutionMemoryConfig.defaults(),
+                hook)) {
+            try (ExecutionMemory writer = ExecutionMemory.open(root, SCOPE)) {
+                for (int i = 0; i < 200; i++) {
+                    experience(writer, SCOPE, "n-" + i, "Flaky test number " + i, "Retried " + i, null);
+                }
+            }
+            ExperienceRecall recall = snapshot.recall(SCOPE, QUERY, 1);
+            assertEquals(List.of(), recall.hits(), "every atom is newer than the snapshot");
+            assertEquals(ProjectionStatus.State.CURRENT, recall.status().state());
+            assertTrue(rounds.size() <= 10, "geometric growth, not one round per atom: " + rounds);
+            for (int i = 1; i < rounds.size(); i++) {
+                assertTrue(rounds.get(i) >= 2 * rounds.get(i - 1), rounds.toString());
+            }
+        }
+    }
 }
