@@ -136,9 +136,27 @@ final class Run implements AutoCloseable {
     }
 
     Run finish(AttemptId attempt, AttemptResult result) {
-        record(new AttemptFinished(EventEnvelope.original(nextId("fin"), SCOPE, TASK, EXEC, attempt, T0, T0),
-                result, Optional.empty(), Optional.empty()));
+        finishEvent(attempt, result);
         return this;
+    }
+
+    EventId finishEvent(AttemptId attempt, AttemptResult result) {
+        EventId id = nextId("fin");
+        record(new AttemptFinished(EventEnvelope.original(id, SCOPE, TASK, EXEC, attempt, T0, T0),
+                result, Optional.empty(), Optional.empty()));
+        return id;
+    }
+
+    /** Correction (revision {@code revision}) of {@code target}, replacing a finish with {@code result}. */
+    EventId correctFinish(EventId target, int revision, AttemptId attempt, AttemptResult result) {
+        EventId id = nextId("corr");
+        EventEnvelope outer = new EventEnvelope(id, SCOPE, TASK, EXEC, Optional.of(attempt), revision,
+                Optional.of(target), T0, T0);
+        AttemptFinished replacement = new AttemptFinished(
+                EventEnvelope.original(id, SCOPE, TASK, EXEC, attempt, T0, T0), result, Optional.empty(),
+                Optional.empty());
+        record(new Correction(outer, replacement, "attempt re-assessed"));
+        return id;
     }
 
     long outcome(Outcome outcome) {

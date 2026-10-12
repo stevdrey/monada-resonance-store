@@ -244,4 +244,71 @@ class RevisionsAndCutoffTest {
             assertEquals(Optional.of(java.time.Duration.ofSeconds(10)), time.parallelOverlap());
         }
     }
+
+    @Test
+    void cutoffIncludesTheCompletionOfTheAcceptedAttemptRecordedAfterTheOutcome() {
+        try (Run run = new Run(root, Set.of(QualityDimension.TESTS))) {
+            run.initial(A1);
+            run.stage(A1, "first", 0, 10, in(1_000), cached(0), out(0));
+            run.evidence(A1, QualityDimension.TESTS, ObservationState.PASS);
+            run.outcome(Outcome.accepted(OutcomeOrigin.VALIDATED, A1)); // attempt still open
+            run.stage(A1, "second", 10, 20, in(4_000), cached(0), out(0));
+            EventId finish = run.finishEvent(A1, AttemptResult.COMPLETED);
+
+            ExecutionSummary summary = ExecutionSummaryCalculator.summarize(run.view(), book(usd()), List.of());
+
+            assertEquals(Optional.of(run.sequenceOf(finish)), summary.acceptanceCutoff());
+            assertEquals(List.of("first", "second"),
+                    summary.chainStages().stream().map(StageUsageCost::stage).toList());
+            assertTrue(summary.postAcceptanceStages().isEmpty());
+            assertEquals(new BigDecimal("0.010000"), summary.cost().amounts().get(0).amount());
+        }
+    }
+
+    @Test
+    void finishCorrectedToCompletedEstablishesTheCutoffAndCountsEarlierWorkOnce() {
+        try (Run run = new Run(root, Set.of(QualityDimension.TESTS))) {
+            run.initial(A1);
+            run.stage(A1, "first", 0, 10, in(1_000), cached(0), out(0));
+            run.evidence(A1, QualityDimension.TESTS, ObservationState.PASS);
+            EventId failed = run.finishEvent(A1, AttemptResult.FAILED);
+            run.outcome(Outcome.accepted(OutcomeOrigin.VALIDATED, A1));
+            run.follow(A2, 2, AttemptReason.REVIEW_FOLLOW_UP, A1);
+            run.stage(A2, "extra", 20, 30, in(4_000), cached(0), out(0));
+
+            ExecutionSummary before = ExecutionSummaryCalculator.summarize(run.view(), book(usd()), List.of());
+            assertEquals(CostToAcceptedOutcome.Status.UNAVAILABLE, before.cost().status());
+
+            EventId correction = run.correctFinish(failed, 2, A1, AttemptResult.COMPLETED);
+            ExecutionSummary after = ExecutionSummaryCalculator.summarize(run.view(), book(usd()), List.of());
+
+            assertEquals(Optional.of(run.sequenceOf(correction)), after.acceptanceCutoff());
+            assertEquals(List.of("first", "extra"),
+                    after.chainStages().stream().map(StageUsageCost::stage).toList());
+            assertTrue(after.postAcceptanceStages().isEmpty());
+            assertEquals(new BigDecimal("0.010000"), after.cost().amounts().get(0).amount());
+        }
+    }
+
+    @Test
+    void validatedViewWhoseHistoryLacksTheCompletedFinishIsUnderivable() {
+        try (Run run = new Run(root, Set.of(QualityDimension.TESTS))) {
+            run.initial(A1);
+            run.stage(A1, "first", 0, 10, in(1_000), cached(0), out(0));
+            run.evidence(A1, QualityDimension.TESTS, ObservationState.PASS);
+            run.finish(A1, AttemptResult.COMPLETED);
+            run.outcome(Outcome.accepted(OutcomeOrigin.VALIDATED, A1));
+            ExecutionView view = run.view();
+            List<HistoryEntry> withoutFinish = view.history().stream()
+                    .filter(h -> !h.event().eventId().value().startsWith("fin-")).toList();
+            ExecutionView truncated = new ExecutionView(view.id(), view.task(), view.taskSummary(), view.provenance(),
+                    view.policy(), view.currentOutcome(), view.acceptance(), view.attempts(), withoutFinish);
+
+            ExecutionSummary summary = ExecutionSummaryCalculator.summarize(truncated, book(usd()), List.of());
+
+            assertEquals(CostToAcceptedOutcome.Status.UNAVAILABLE, summary.cost().status());
+            assertEquals(Code.CUTOFF_UNDERIVABLE, summary.cost().reasons().get(0).code());
+            assertTrue(summary.acceptanceCutoff().isEmpty());
+        }
+    }
 }

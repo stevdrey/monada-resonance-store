@@ -382,8 +382,9 @@ reviews, retries, QA) up to and including the `OUTCOME_RECORDED` event that esta
 `VALIDATED_ACCEPTED`. Later events are reported separately as post-acceptance activity. Events are
 deduplicated by `eventId`; a correction replaces its target, never adds to it.
 
-The acceptance cutoff is the highest ledger sequence among the current `ACCEPTED` outcome event and the
-effective mandatory observations that make it `VALIDATED_ACCEPTED`. `STAGE_RECORDED` events after that
+The acceptance cutoff is the highest ledger sequence among every fact required for `VALIDATED_ACCEPTED`: the
+current `ACCEPTED` outcome event, the effective `ATTEMPT_FINISHED(COMPLETED)` of the accepted attempt and the
+effective mandatory observations (a corrected fact counts at its correction's sequence). `STAGE_RECORDED` events after that
 sequence are post-acceptance activity.
 
 Usage coverage is evaluated per `STAGE_RECORDED` event in the chain (after corrections), never per
@@ -1049,10 +1050,13 @@ s.cost().status();      // AVAILABLE | PARTIAL | UNAVAILABLE   (basis: HYPOTHETI
 - **Chain membership** uses the sequence of the *first* revision of a stage (`originalSequence`). A stage
   recorded before the cutoff stays in the chain when it is corrected afterwards: the correction fixes its data
   but does not make the work post-acceptance. `StageUsageCost.sequence()` is the latest revision's sequence.
-- **Cutoff** (section 8): the highest sequence among the current `ACCEPTED` outcome event and the effective
-  mandatory observations of the accepted attempt. Late or corrected validating evidence therefore moves the
-  cutoff and pulls the work done before it into the chain. If the view says `VALIDATED_ACCEPTED` but the
-  outcome or a mandatory observation is missing from the supplied history, the cost is `UNAVAILABLE` with
+- **Cutoff** (section 8): the highest sequence among the current `ACCEPTED` outcome event, the effective
+  `ATTEMPT_FINISHED(COMPLETED)` of the accepted attempt and its effective mandatory observations. An outcome may
+  be recorded while the accepted attempt is still open; the derived status stays `ACCEPTED_UNVALIDATED` until
+  the completion, so work recorded in between belongs to the chain. Late or corrected validating facts
+  (evidence or a finish corrected to `COMPLETED`) therefore move the cutoff and pull the work done before it
+  into the chain. If the view says `VALIDATED_ACCEPTED` but the outcome, the completed finish or a mandatory
+  observation is missing from the supplied history, the cost is `UNAVAILABLE` with
   `CUTOFF_UNDERIVABLE`; nothing is guessed.
 - Without a cutoff (pending, rejected, failed, cancelled, unvalidated) every recorded stage is listed in
   `chainStages` so no work is hidden, `postAcceptanceStages` is empty and the cost is `UNAVAILABLE`.

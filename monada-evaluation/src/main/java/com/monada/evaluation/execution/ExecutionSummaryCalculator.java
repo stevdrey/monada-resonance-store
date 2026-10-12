@@ -3,6 +3,8 @@ package com.monada.evaluation.execution;
 import com.monada.api.execution.DerivedAcceptance;
 import com.monada.api.execution.ExecutionView;
 import com.monada.core.execution.AttemptId;
+import com.monada.core.execution.AttemptResult;
+import com.monada.core.execution.ExecutionEvent.AttemptFinished;
 import com.monada.core.execution.ExecutionEvent.OutcomeRecorded;
 import com.monada.core.execution.ExecutionEvent.StageRecorded;
 import com.monada.core.execution.OutcomeStatus;
@@ -48,7 +50,16 @@ public final class ExecutionSummaryCalculator {
         Optional<Long> cutoff = Optional.empty();
         if (acceptance.isValidatedAcceptance() && outcomeEvent.isPresent() && acceptedAttempt.isPresent()) {
             long max = outcomeEvent.get().sequence();
-            boolean complete = true;
+            // Acceptance also requires the accepted attempt's effective ATTEMPT_FINISHED(COMPLETED) (section 8).
+            Optional<ChainResolver.Effective> completion = resolved.effective().stream()
+                    .filter(e -> e.event() instanceof AttemptFinished f
+                            && f.envelope().attemptId().equals(acceptedAttempt)
+                            && f.result() == AttemptResult.COMPLETED)
+                    .max(Comparator.comparingLong(ChainResolver.Effective::sequence));
+            boolean complete = completion.isPresent();
+            if (complete) {
+                max = Math.max(max, completion.get().sequence());
+            }
             for (QualityDimension d : view.policy().mandatoryDimensions()) {
                 var o = observed.get(d);
                 if (o == null) {
@@ -89,7 +100,7 @@ public final class ExecutionSummaryCalculator {
         }
         if (cutoff.isEmpty()) {
             return unavailable(basis, CostReason.forChain(Code.CUTOFF_UNDERIVABLE,
-                    "the accepted outcome or its mandatory evidence is not in the supplied history"));
+                    "the accepted outcome, its completed attempt or its mandatory evidence is not in the supplied history"));
         }
         if (chain.isEmpty()) {
             return unavailable(basis, CostReason.forChain(Code.NO_USAGE_RECORDED, "no stage before the cutoff"));
