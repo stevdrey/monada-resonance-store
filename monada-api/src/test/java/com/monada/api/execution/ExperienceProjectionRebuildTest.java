@@ -44,6 +44,24 @@ class ExperienceProjectionRebuildTest {
     }
 
     @Test
+    void rebuildStoresEachDistinctLiveAtomOnceInAtomIdOrderWithLinearParseCost() throws IOException {
+        int n = 40;
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            for (int i = 0; i < n; i++) {
+                experience(m, SCOPE, "bulk-" + i, "Task number " + i + " about subject " + i * 7,
+                        "Solution " + i, null);
+            }
+            m.rebuildProjection(SCOPE);
+        }
+        Path memoryDir = Experiences.projectionDir(root, SCOPE).resolve("memory");
+        com.monada.storage.FileAtomStore store = new com.monada.storage.FileAtomStore(memoryDir);
+        List<String> ids = store.findAll().stream().map(a -> a.id()).toList();
+        assertEquals(n, ids.size());
+        assertEquals(ids.stream().sorted().toList(), ids, "atoms are stored in atom ID order");
+        assertEquals(n, store.parsedRecordCount(), "every record is parsed once");
+    }
+
+    @Test
     void identicalSummariesFromTwoAttemptsKeepTwoExactRefs() throws IOException {
         try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
             appended(m, start(SCOPE, "x-1", "Repair the flaky login test"));

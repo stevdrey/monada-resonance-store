@@ -18,6 +18,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -232,9 +233,12 @@ final class ExperienceProjection implements AutoCloseable {
     }
 
     private static void remember(MonadaMemory target, String atomId, String text) {
-        String assigned = target.remember(text).id();
-        if (!assigned.equals(atomId)) {
-            throw new IllegalStateException("projection memory assigned atom " + assigned + ", expected " + atomId);
+        requireAssigned(target.remember(text).id(), atomId);
+    }
+
+    private static void requireAssigned(String assigned, String expected) {
+        if (!assigned.equals(expected)) {
+            throw new IllegalStateException("projection memory assigned atom " + assigned + ", expected " + expected);
         }
     }
 
@@ -302,15 +306,11 @@ final class ExperienceProjection implements AutoCloseable {
                     }
                 }
             }
-            // One append-only bulk write: the atom log is scanned once, not once per atom.
+            // One bulk write: remember checks each atom against the store's incremental view of the log.
             var live = p.liveTexts();
-            List<String> atomIds = List.copyOf(live.keySet());
-            List<KnowledgeAtom> assigned = target.rememberAll(List.copyOf(live.values()));
-            for (int i = 0; i < atomIds.size(); i++) {
-                if (!assigned.get(i).id().equals(atomIds.get(i))) {
-                    throw new IllegalStateException("projection memory assigned atom " + assigned.get(i).id()
-                            + ", expected " + atomIds.get(i));
-                }
+            Iterator<String> expected = live.keySet().iterator();
+            for (KnowledgeAtom atom : target.rememberAll(new ArrayList<>(live.values()))) {
+                requireAssigned(atom.id(), expected.next());
             }
             faults.beforePublish();
             layout.publish(dir);

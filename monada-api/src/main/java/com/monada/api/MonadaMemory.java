@@ -29,7 +29,6 @@ import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -112,6 +111,7 @@ public class MonadaMemory {
     /** Test seam: lets a test wrap the atom store, e.g. to count log scans. */
     static MonadaMemory open(Path path, MonadaMemoryOptions options, UnaryOperator<AtomStore> atomStoreDecorator) {
         Objects.requireNonNull(options, "options");
+        Objects.requireNonNull(atomStoreDecorator, "atomStoreDecorator");
         try {
             ManifestStore manifestStore = new FileManifestStore(path);
             Optional<Manifest> existing = manifestStore.load();
@@ -266,28 +266,23 @@ public class MonadaMemory {
 
     /**
      * Bulk variant of {@link #remember(String)} (no aliases) for callers that store many texts at once, such as
-     * projection rebuilds. Equivalent to calling {@code remember} for each text in order, but the atom log is read
-     * once for the whole batch instead of once per text. Texts already stored, or repeated within the batch, are
-     * idempotent and write nothing.
+     * projection rebuilds. Equivalent to calling {@code remember} for each text in order. Texts already stored, or
+     * repeated within the batch, are idempotent and write nothing. Existence checks go through the atom store, which
+     * parses each log record once, so the cost of a batch is linear in its size.
      */
     public List<KnowledgeAtom> rememberAll(List<String> texts) {
         Objects.requireNonNull(texts, "texts");
         try {
-            var known = new HashMap<String, KnowledgeAtom>();
-            for (var stored : atomStore.findAll()) {
-                known.put(stored.id(), stored);
-            }
             var result = new ArrayList<KnowledgeAtom>(texts.size());
             for (var text : texts) {
                 var atom = KnowledgeAtom.text(text, List.of());
-                var existing = known.get(atom.id());
-                if (existing != null) {
-                    knownAtomIds.remember(existing.id());
-                    result.add(existing);
+                var existing = atomStore.findById(atom.id());
+                if (existing.isPresent()) {
+                    knownAtomIds.remember(existing.get().id());
+                    result.add(existing.get());
                     continue;
                 }
                 appendNew(atom);
-                known.put(atom.id(), atom);
                 result.add(atom);
             }
             return List.copyOf(result);

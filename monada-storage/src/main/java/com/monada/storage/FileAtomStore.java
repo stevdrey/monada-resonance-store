@@ -4,11 +4,14 @@ import com.monada.core.AtomType;
 import com.monada.core.KnowledgeAtom;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -21,6 +24,12 @@ public class FileAtomStore implements AtomStore {
     private static final String DEFAULT_SEGMENT = "atoms/segment-000001.log";
 
     private final Path atomLog;
+
+    // Incremental view of the log: last-wins per atom id, first-occurrence order (see findAll). Only bytes
+    // appended since the previous refresh are parsed, so repeated lookups cost O(new bytes), not O(log).
+    private final Map<String, KnowledgeAtom> byId = new LinkedHashMap<>();
+    private long parsedBytes;
+    private long parsedRecords;
 
     public FileAtomStore(Path root) throws IOException {
         this(root, DEFAULT_SEGMENT);
@@ -55,7 +64,8 @@ public class FileAtomStore implements AtomStore {
 
     @Override
     public Optional<KnowledgeAtom> findById(String id) throws IOException {
-        return findAll().stream().filter(atom -> atom.id().equals(id)).findFirst();
+        refresh();
+        return Optional.ofNullable(byId.get(id));
     }
 
     @Override
@@ -63,14 +73,67 @@ public class FileAtomStore implements AtomStore {
         // Last-wins per atom id: if the same id appears multiple times (e.g. after an
         // alias merge), the most recently appended entry supersedes earlier ones.
         // Insertion order is preserved based on the first occurrence of each id.
-        var byId = new LinkedHashMap<String, KnowledgeAtom>();
-        for (var line : Files.readAllLines(atomLog)) {
+        refresh();
+        return List.copyOf(byId.values());
+    }
+
+    /** Number of log records parsed by this instance so far (diagnostic; a record may be re-parsed if unterminated). */
+    public long parsedRecordCount() {
+        return parsedRecords;
+    }
+
+    /**
+     * Brings the in-memory view up to date with the log: reparses from the start if the log shrank, otherwise
+     * parses only the bytes appended since the last refresh. A final line without a line terminator is applied
+     * but not consumed, so it is read again (and superseded) once it is completed.
+     */
+    private void refresh() throws IOException {
+        long size = Files.size(atomLog);
+        if (size < parsedBytes) {
+            byId.clear();
+            parsedBytes = 0;
+        }
+        if (size == parsedBytes) {
+            return;
+        }
+        byte[] chunk = readFrom(parsedBytes, (int) (size - parsedBytes));
+        int start = 0;
+        while (start < chunk.length) {
+            int end = start;
+            while (end < chunk.length && chunk[end] != '\n') {
+                end++;
+            }
+            boolean terminated = end < chunk.length;
+            String line = new String(chunk, start, end - start, StandardCharsets.UTF_8);
+            if (line.endsWith("\r")) {
+                line = line.substring(0, line.length() - 1);
+            }
             if (!line.isBlank()) {
                 var atom = parse(line);
+                parsedRecords++;
                 byId.put(atom.id(), atom);
             }
+            if (!terminated) {
+                return;
+            }
+            parsedBytes += end + 1 - start;
+            start = end + 1;
         }
-        return List.copyOf(byId.values());
+    }
+
+    private byte[] readFrom(long position, int length) throws IOException {
+        try (FileChannel channel = FileChannel.open(atomLog, StandardOpenOption.READ)) {
+            ByteBuffer buffer = ByteBuffer.allocate(length);
+            long at = position;
+            while (buffer.hasRemaining()) {
+                int read = channel.read(buffer, at);
+                if (read < 0) {
+                    break;
+                }
+                at += read;
+            }
+            return buffer.position() == length ? buffer.array() : Arrays.copyOf(buffer.array(), buffer.position());
+        }
     }
 
     private KnowledgeAtom parse(String line) {

@@ -143,4 +143,53 @@ class FileAtomStoreTest {
         assertEquals("id-b", all.get(1).id());
         assertEquals(List.of("extra"), all.get(0).aliases());
     }
+
+    @Test
+    void parsesEachRecordOnceAcrossManyLookups() throws IOException {
+        var store = new FileAtomStore(root);
+        for (int i = 0; i < 40; i++) {
+            store.save(atom("id-" + i, "content " + i, Map.of()));
+            assertTrue(store.findById("id-" + i).isPresent());
+            assertTrue(store.findById("missing").isEmpty());
+        }
+        assertEquals(40, store.findAll().size());
+        assertEquals(40, store.parsedRecordCount(), "each record is parsed exactly once, not once per lookup");
+    }
+
+    @Test
+    void seesRecordsAppendedByAnotherStoreInstance() throws IOException {
+        var reader = new FileAtomStore(root);
+        var writer = new FileAtomStore(root);
+        assertTrue(reader.findById("late").isEmpty());
+
+        writer.save(atom("late", "appended elsewhere", Map.of()));
+
+        assertEquals("appended elsewhere", reader.findById("late").orElseThrow().content());
+        assertEquals(1, reader.parsedRecordCount());
+    }
+
+    @Test
+    void reloadsWhenTheLogIsTruncated() throws IOException {
+        var store = new FileAtomStore(root);
+        store.save(atom("old-1", "one", Map.of()));
+        store.save(atom("old-2", "two", Map.of()));
+        assertEquals(2, store.findAll().size());
+
+        Files.writeString(root.resolve("atoms/segment-000001.log"), "");
+        new FileAtomStore(root).save(atom("new-1", "fresh", Map.of()));
+
+        assertEquals(List.of("new-1"), store.findAll().stream().map(KnowledgeAtom::id).toList());
+    }
+
+    @Test
+    void unterminatedFinalLineIsAppliedAndSupersededOnceCompleted() throws IOException {
+        var store = new FileAtomStore(root);
+        var log = root.resolve("atoms/segment-000001.log");
+        Files.writeString(log, "tail-id\tTEXT\t1.0\t2024-01-01T00:00:00Z\tYQ==", StandardOpenOption.APPEND);
+        assertEquals("a", store.findById("tail-id").orElseThrow().content(), "legacy unterminated line is readable");
+
+        Files.writeString(log, "\n", StandardOpenOption.APPEND);
+        assertEquals("a", store.findById("tail-id").orElseThrow().content());
+        assertEquals(1, store.findAll().size());
+    }
 }

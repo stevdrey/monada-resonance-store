@@ -5,12 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.monada.core.KnowledgeAtom;
-import com.monada.storage.AtomStore;
+import com.monada.storage.FileAtomStore;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Optional;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -21,59 +20,56 @@ class MonadaMemoryRememberAllTest {
     @TempDir
     Path root;
 
-    /** Counts how often the atom log is scanned. */
-    private static final class CountingAtomStore implements AtomStore {
-        private final AtomStore delegate;
-        int scans;
-
-        CountingAtomStore(AtomStore delegate) {
-            this.delegate = delegate;
-        }
-
-        @Override
-        public void save(KnowledgeAtom atom) throws IOException {
-            delegate.save(atom);
-        }
-
-        @Override
-        public Optional<KnowledgeAtom> findById(String id) throws IOException {
-            scans++;
-            return delegate.findById(id);
-        }
-
-        @Override
-        public List<KnowledgeAtom> findAll() throws IOException {
-            scans++;
-            return delegate.findAll();
-        }
-    }
-
     private static List<String> texts(int n) {
         return IntStream.range(0, n).mapToObj(i -> "distinct text number " + i + " about topic " + (i * 31)).toList();
     }
 
+    /** Opens a store and captures its FileAtomStore so tests can read the parse counter. */
+    private static MonadaMemory open(Path dir, FileAtomStore[] captured) {
+        return MonadaMemory.open(dir, MonadaMemoryOptions.defaults(), s -> {
+            captured[0] = (FileAtomStore) s;
+            return s;
+        });
+    }
+
     @Test
-    void bulkRememberScansTheAtomLogOnceRegardlessOfBatchSize() {
+    void bulkRememberParsesEachRecordOnce() throws IOException {
         for (int n : new int[] {5, 50}) {
-            CountingAtomStore[] counter = new CountingAtomStore[1];
-            MonadaMemory memory = MonadaMemory.open(root.resolve("bulk-" + n), MonadaMemoryOptions.defaults(), s -> {
-                counter[0] = new CountingAtomStore(s);
-                return counter[0];
-            });
-            memory.rememberAll(texts(n));
-            assertEquals(1, counter[0].scans, "one scan for a batch of " + n);
+            FileAtomStore[] store = new FileAtomStore[1];
+            open(root.resolve("bulk-" + n), store).rememberAll(texts(n));
+            store[0].findAll(); // picks up the last appended record
+            assertEquals(n, store[0].parsedRecordCount(), "linear parse cost for a batch of " + n);
         }
     }
 
     @Test
-    void sequentialRememberScansOncePerText() {
-        CountingAtomStore[] counter = new CountingAtomStore[1];
-        MonadaMemory memory = MonadaMemory.open(root.resolve("seq"), MonadaMemoryOptions.defaults(), s -> {
-            counter[0] = new CountingAtomStore(s);
-            return counter[0];
-        });
+    void sequentialRememberIsAlsoLinear() throws IOException {
+        FileAtomStore[] store = new FileAtomStore[1];
+        MonadaMemory memory = open(root.resolve("seq"), store);
         texts(20).forEach(memory::remember);
-        assertEquals(20, counter[0].scans);
+        store[0].findAll(); // picks up the last appended record
+        assertEquals(20, store[0].parsedRecordCount());
+    }
+
+    @Test
+    void batchRespectsRecordsAppendedByAnotherWriterBetweenBatches() throws IOException {
+        Path dir = root.resolve("shared");
+        MonadaMemory first = MonadaMemory.open(dir);
+        MonadaMemory second = MonadaMemory.open(dir);
+        first.rememberAll(List.of("alpha topic"));
+        second.rememberAll(List.of("beta topic"));
+
+        first.rememberAll(List.of("beta topic", "gamma topic"));
+
+        assertEquals(3, Files.readAllLines(dir.resolve("atoms/segment-000001.log")).size(),
+                "no duplicate record for a text another writer already stored");
+    }
+
+    @Test
+    void rejectsNullAtomStoreDecorator() {
+        var ex = org.junit.jupiter.api.Assertions.assertThrows(NullPointerException.class,
+                () -> MonadaMemory.open(root.resolve("npe"), MonadaMemoryOptions.defaults(), null));
+        assertEquals("atomStoreDecorator", ex.getMessage());
     }
 
     @Test
