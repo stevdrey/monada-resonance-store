@@ -6,7 +6,8 @@ Accepted
 
 This ADR fixes ownership and contracts. Implemented so far: the domain records (#95), the append-only
 ledger (#96), the `ExecutionMemory` facade for recording, loading and history (#97), and per-scope
-projections with bounded recall (#98). Cost calculators, comparison and export are still planned; the
+projections with bounded recall (#98), and the evaluation-side usage and hypothetical-cost calculators (#99).
+Comparison and export are still planned; the
 implementation sequence is tracked in [`docs/roadmap.md`](../roadmap.md) (Forge Integration track, issues
 #93–#102) and the normative v1 contract lives in
 [`docs/specs/execution-memory-contract-v1.md`](../specs/execution-memory-contract-v1.md) (section 17 describes
@@ -128,7 +129,7 @@ Facade operations (`com.monada.api.execution.ExecutionMemory`, `AutoCloseable`):
 | `exportSamples(ExportRequest)` | `ExportPage` (read-only, versioned) (planned, #101) |
 
 The facade has no cost or comparison operation. Evaluation-side code (`monada-evaluation`, #99/#100)
-reads facade views and computes `ExecutionSummary` / `CostToAcceptedOutcome` and comparisons;
+reads facade views and computes `ExecutionSummary` / `CostToAcceptedOutcome` (implemented, #99) and comparisons (planned, #100);
 `monada-api` never depends on `monada-evaluation`.
 
 Example host usage (compiles against the shipped #97/#98 surface; `exportSamples` is planned and therefore
