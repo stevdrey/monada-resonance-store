@@ -136,6 +136,25 @@ final class LedgerPaths {
         return contained(root.resolve(SCOPES_DIR).resolve(".staging-" + scopeDirectoryName(scope)));
     }
 
+    /**
+     * Deletes an entry without following links: a link or file is deleted itself (never its target), a directory
+     * tree is walked without following links. A missing entry is ignored.
+     */
+    static void deleteEntry(Path entry) throws IOException {
+        if (!Files.exists(entry, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        if (!Files.isDirectory(entry, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            Files.delete(entry);
+            return;
+        }
+        try (var walk = Files.walk(entry)) { // Files.walk never follows links by default
+            for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                Files.delete(p);
+            }
+        }
+    }
+
     /** UTF-8 decoding that reports malformed input instead of substituting U+FFFD. */
     static String decodeStrict(byte[] bytes) throws java.nio.charset.CharacterCodingException {
         return StandardCharsets.UTF_8.newDecoder()
