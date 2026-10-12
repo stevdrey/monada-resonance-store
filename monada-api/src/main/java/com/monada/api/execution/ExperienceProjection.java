@@ -115,8 +115,7 @@ final class ExperienceProjection implements AutoCloseable {
      * its generation was reclaimed by {@code pruneProjection}, and then reports {@code MISSING}.
      */
     ProjectionStatus currentStatus(long ledgerSequence) {
-        if (!writable && (state == ProjectionStatus.State.CURRENT || state == ProjectionStatus.State.STALE)
-                && reclaimed(false)) {
+        if (!writable && state != ProjectionStatus.State.MISSING && reclaimed()) {
             markReclaimed();
         }
         return status(ledgerSequence);
@@ -526,7 +525,7 @@ final class ExperienceProjection implements AutoCloseable {
     ExperienceRecall recall(String query, int limit, long ledgerSequence,
                             Function<ExperienceRef, Optional<HistoryEntry>> resolver) {
         boolean usable = state == ProjectionStatus.State.CURRENT || state == ProjectionStatus.State.STALE;
-        if (!writable && usable && reclaimed(false)) {
+        if (!writable && state != ProjectionStatus.State.MISSING && reclaimed()) {
             return reclaimedRecall(ledgerSequence); // even for a blank query: the status must say MISSING
         }
         if (query.isBlank() || !usable) {
@@ -554,7 +553,7 @@ final class ExperienceProjection implements AutoCloseable {
             } catch (RuntimeException e) {
                 problem = "projection memory cannot be read: " + e.getMessage();
             }
-            if (reclaimed(true)) {
+            if (reclaimed()) {
                 return reclaimedRecall(ledgerSequence);
             }
             if (before.equals(layout.generation()) || attempt == ExecutionMemory.READ_ONLY_ATTEMPTS) {
@@ -564,10 +563,11 @@ final class ExperienceProjection implements AutoCloseable {
     }
 
     /**
-     * True when this snapshot's generation was deleted, or (after a failed read, {@code afterFailure}) is no
-     * longer the published one and is therefore being reclaimed by {@code pruneProjection}.
+     * True when this snapshot's generation directory no longer exists, or the name now belongs to another
+     * directory (different identity). A generation that still exists with its identity is the snapshot's own,
+     * published or retained, so a failure while reading it is a read problem, never a reclamation.
      */
-    private boolean reclaimed(boolean afterFailure) {
+    private boolean reclaimed() {
         if (loadedDir == null) {
             return false;
         }
@@ -575,17 +575,7 @@ final class ExperienceProjection implements AutoCloseable {
             return true;
         }
         Object key = fileKey(loadedDir);
-        if (loadedKey != null && key != null && !loadedKey.equals(key)) {
-            return true; // the name now belongs to another (newer) generation
-        }
-        if (!afterFailure) {
-            return false;
-        }
-        try {
-            return !layout.currentDir().map(loadedDir::equals).orElse(false);
-        } catch (IOException e) {
-            return false;
-        }
+        return loadedKey != null && key != null && !loadedKey.equals(key);
     }
 
     /**

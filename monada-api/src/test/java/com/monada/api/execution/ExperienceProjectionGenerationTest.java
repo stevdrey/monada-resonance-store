@@ -542,4 +542,58 @@ class ExperienceProjectionGenerationTest {
             assertEquals(List.of(), snapshot.recall(SCOPE, QUERY, 10).hits(), "never results from the new generation");
         }
     }
+
+    @Test
+    void failingReadOfARetainedGenerationIsNotReportedAsReclaimed() throws IOException {
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            corpus(m);
+        }
+        Path retained = projectionDir(root, SCOPE);
+        try (ExecutionMemory snapshot = ExecutionMemory.openReadOnly(root, SCOPE)) {
+            try (ExecutionMemory writer = ExecutionMemory.open(root, SCOPE)) {
+                writer.rebuildProjection(SCOPE); // the snapshot's generation is retained, no longer published
+            }
+            assertEquals(ProjectionStatus.State.CURRENT, snapshot.projectionStatus(SCOPE).state());
+            // Stable damage to the retained generation: the read fails, but nothing was reclaimed.
+            Files.writeString(retained.resolve("memory/indexes/vector-map.idx"), "garbage",
+                    StandardCharsets.UTF_8, StandardOpenOption.APPEND);
+            ExperienceRecall recall = snapshot.recall(SCOPE, QUERY, 10);
+            assertEquals(ProjectionStatus.State.INCOMPATIBLE, recall.status().state());
+            assertFalse(recall.status().diagnostics().toString().contains("reclaimed"),
+                    recall.status().diagnostics().toString());
+
+            // If the generation is later pruned, the snapshot reports MISSING instead.
+            try (ExecutionMemory writer = ExecutionMemory.open(root, SCOPE)) {
+                writer.pruneProjection(SCOPE);
+            }
+            ProjectionStatus status = snapshot.projectionStatus(SCOPE);
+            assertEquals(ProjectionStatus.State.MISSING, status.state());
+            assertTrue(status.diagnostics().get(0).contains("was reclaimed"), status.diagnostics().toString());
+        }
+    }
+
+    @Test
+    void correctingTheTaskOfAnExecutionWithManyAttemptsStaysCurrent() throws IOException {
+        int attempts = 300;
+        byte[] incremental;
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            appended(m, start(SCOPE, "x-1", "Repair the flaky login test"));
+            String previous = null;
+            for (int i = 1; i <= attempts; i++) {
+                appended(m, attempt(SCOPE, "x-1", "a" + i, i, previous));
+                appended(m, finish(SCOPE, "x-1", "a" + i, "Waited for the cookie " + i, null));
+                previous = "a" + i;
+            }
+            // One correction moves every attempt's text: 2 entries per attempt in a single checkpoint batch.
+            appended(m, Experiences.correctStart(SCOPE, "x-1", "x-1-retitle", 2, "Repair the flaky signup test"));
+            ProjectionStatus status = m.projectionStatus(SCOPE);
+            assertEquals(ProjectionStatus.State.CURRENT, status.state(), status.diagnostics().toString());
+            List<ExperienceHit> hits = m.recall(SCOPE, "flaky signup test", 50).hits();
+            assertEquals(50, hits.size(), "bounded by the limit");
+            assertTrue(hits.stream().allMatch(h -> h.event().event().eventId().value().endsWith("-fin")));
+            incremental = Experiences.checkpointBytes(root, SCOPE);
+            m.rebuildProjection(SCOPE);
+            assertArrayEquals(incremental, Experiences.checkpointBytes(root, SCOPE), "streamed batch is byte-identical");
+        }
+    }
 }

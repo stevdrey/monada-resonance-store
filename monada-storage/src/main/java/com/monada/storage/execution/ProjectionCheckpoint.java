@@ -4,6 +4,9 @@ import com.monada.core.execution.ExecutionEvent;
 import com.monada.core.execution.ExperienceRef;
 import com.monada.core.execution.ScopeId;
 import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.OutputStream;
+import java.nio.channels.Channels;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -66,6 +69,7 @@ public final class ProjectionCheckpoint implements AutoCloseable {
             Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
     private static final Pattern DIGEST = Pattern.compile("[0-9a-f]{64}");
     private static final Pattern SEQUENCE = Pattern.compile("[1-9][0-9]{0,18}");
+    private static final int STREAM_BUFFER_BYTES = 65_536;
     private static final Pattern DIMENSIONS = Pattern.compile("[1-9][0-9]{0,5}");
 
     /** Kind of a mapping entry. */
@@ -191,18 +195,22 @@ public final class ProjectionCheckpoint implements AutoCloseable {
         if (!DIGEST.matcher(ledgerDigest).matches()) {
             throw new IllegalArgumentException("ledger digest must be 64 lowercase hex characters");
         }
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        long line = lines;
-        for (Entry e : entries) {
+        for (Entry e : entries) { // validate before writing anything
             if (!e.ref().scope().equals(scope)) {
                 throw new IllegalArgumentException("entry ref belongs to scope " + e.ref().scope());
             }
-            out.writeBytes(frame(++line, e.kind().name() + "|" + ledgerSequence + "|" + e.atomId() + "|"
-                    + ExperienceRefCodec.canonical(e.ref())));
         }
-        out.writeBytes(frame(++line, "COVER|" + ledgerSequence + "|" + ledgerDigest));
+        // Frames are streamed through a bounded buffer (never the whole batch in memory) with COVER last: a batch
+        // interrupted part-way leaves entries without their COVER, which readers ignore as an unclean tail.
+        long line = lines;
         try {
-            writeFully(channel, out.toByteArray());
+            OutputStream out = new BufferedOutputStream(Channels.newOutputStream(channel), STREAM_BUFFER_BYTES);
+            for (Entry e : entries) {
+                out.write(frame(++line, e.kind().name() + "|" + ledgerSequence + "|" + e.atomId() + "|"
+                        + ExperienceRefCodec.canonical(e.ref())));
+            }
+            out.write(frame(++line, "COVER|" + ledgerSequence + "|" + ledgerDigest));
+            out.flush(); // not closed: closing would close the channel
             channel.force(true);
         } catch (IOException | RuntimeException e) {
             failed = true;

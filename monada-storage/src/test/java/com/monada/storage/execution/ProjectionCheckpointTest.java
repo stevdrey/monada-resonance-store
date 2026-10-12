@@ -339,4 +339,20 @@ class ProjectionCheckpointTest {
         layout.publish(next); // the fallback name is a valid generation name
         assertEquals(Optional.of(next), layout.currentDir());
     }
+
+    @Test
+    void largeBatchesAreStreamedAndRoundTrip() throws IOException {
+        List<Entry> entries = new ArrayList<>();
+        for (int i = 0; i < 5_000; i++) {
+            entries.add(new Entry(EntryKind.PROJECT, ATOM_A, ref("e" + i, 1)));
+        }
+        try (ProjectionCheckpoint c = ProjectionCheckpoint.create(file(), SCOPE, 128)) {
+            c.commit(1, DIGEST, entries);
+        }
+        ProjectionCheckpoint.Snapshot s = read();
+        assertTrue(s.isSound(), s.problems().toString());
+        assertEquals(1, s.coveredSequence());
+        assertEquals(5_000, s.refsByAtom().get(ATOM_A).size());
+        assertEquals(5_002, Files.readAllLines(file()).size(), "header + entries + COVER");
+    }
 }

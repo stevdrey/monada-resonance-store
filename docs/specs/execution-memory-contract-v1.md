@@ -877,8 +877,8 @@ line). Payload tokens are `|`-separated and escaped like ledger payloads:
 | `COVER\|<seq>\|<sha256>` | Ledger sequence `seq` is fully projected; digest of its ledger payload |
 
 `<ref>` is the canonical ref `scope|task|execution|~attempt|eventId|revision` (`ExperienceRefCodec`), which
-is also the last recall tie-break. Every ledger sequence gets exactly one `COVER`, in order from 1, written
-together with its entries in one forced write. Entries after the last `COVER` (an interrupted batch) and a
+is also the last recall tie-break. Every ledger sequence gets exactly one `COVER`, in order from 1, streamed
+after its entries through a bounded buffer and forced once (memory stays bounded for large batches). Entries after the last `COVER` (an interrupted batch) and a
 torn final line are ignored and make the projection `STALE`; any other defect (digest, framing, version,
 order, duplicate projection, unknown retirement) stops reading and makes it `INCOMPATIBLE`.
 
@@ -928,7 +928,9 @@ order, duplicate projection, unknown retirement) stops reading and makes it `INC
   reclaimed anyway reports `MISSING` ("was reclaimed (pruneProjection); reopen the snapshot") from both
   `projectionStatus` and `recall` (no hits), never `INCOMPATIBLE`; the check reads no file content and
   compares the directory's identity (file key and creation time), so a later generation reusing the name is
-  never mistaken for the snapshot's. With an unreadable pointer it deletes nothing and says to rebuild first.
+  never mistaken for the snapshot's. A snapshot's generation that still exists with its identity, published or
+  retained, is never reported as reclaimed: a failure reading it is `INCOMPATIBLE` (or retried while files
+  change). With an unreadable pointer it deletes nothing and says to rebuild first.
   Generation entries are enumerated without resolving links: only real directories count as generations,
   numbering skips every name already present (links included; if numbers above the largest entry are
   exhausted, the smallest free number is used), and entries that are links or files are
