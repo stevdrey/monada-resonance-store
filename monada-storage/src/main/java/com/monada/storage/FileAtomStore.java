@@ -4,11 +4,15 @@ import com.monada.core.AtomType;
 import com.monada.core.KnowledgeAtom;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -21,6 +25,13 @@ public class FileAtomStore implements AtomStore {
     private static final String DEFAULT_SEGMENT = "atoms/segment-000001.log";
 
     private final Path atomLog;
+
+    // Incremental view of the log: last-wins per atom id, first-occurrence order (see findAll). Only bytes
+    // appended since the previous refresh are parsed, so repeated lookups cost O(new bytes), not O(log).
+    private final Map<String, KnowledgeAtom> byId = new LinkedHashMap<>();
+    private long parsedBytes;
+    private long parsedRecords;
+    private KnowledgeAtom tail; // provisional unterminated final record, never committed to byId
 
     public FileAtomStore(Path root) throws IOException {
         this(root, DEFAULT_SEGMENT);
@@ -55,7 +66,11 @@ public class FileAtomStore implements AtomStore {
 
     @Override
     public Optional<KnowledgeAtom> findById(String id) throws IOException {
-        return findAll().stream().filter(atom -> atom.id().equals(id)).findFirst();
+        refresh();
+        if (tail != null && tail.id().equals(id)) {
+            return Optional.of(tail);
+        }
+        return Optional.ofNullable(byId.get(id));
     }
 
     @Override
@@ -63,14 +78,89 @@ public class FileAtomStore implements AtomStore {
         // Last-wins per atom id: if the same id appears multiple times (e.g. after an
         // alias merge), the most recently appended entry supersedes earlier ones.
         // Insertion order is preserved based on the first occurrence of each id.
-        var byId = new LinkedHashMap<String, KnowledgeAtom>();
-        for (var line : Files.readAllLines(atomLog)) {
-            if (!line.isBlank()) {
-                var atom = parse(line);
+        refresh();
+        if (tail == null) {
+            return List.copyOf(byId.values());
+        }
+        var withTail = new LinkedHashMap<>(byId);
+        withTail.put(tail.id(), tail);
+        return List.copyOf(withTail.values());
+    }
+
+    /** Number of log records parsed by this instance so far (diagnostic; an unterminated tail is re-parsed per lookup). */
+    public long parsedRecordCount() {
+        return parsedRecords;
+    }
+
+    /**
+     * Brings the in-memory view up to date with the log: reparses from the start if the log shrank, otherwise
+     * parses only the bytes appended since the last refresh. Only line-terminated records are committed to
+     * {@code byId}/{@code parsedBytes}. A final record without a terminator is provisional: it is parsed into
+     * {@code tail} on every refresh and overlaid on the committed view, so it disappears if the file loses it and
+     * is superseded once it is completed. Bytes are decoded strictly: malformed UTF-8 fails like a full read would.
+     */
+    private void refresh() throws IOException {
+        long size = Files.size(atomLog);
+        if (size < parsedBytes) {
+            byId.clear();
+            parsedBytes = 0;
+        }
+        tail = null;
+        if (size == parsedBytes) {
+            return;
+        }
+        byte[] chunk = readFrom(parsedBytes, (int) (size - parsedBytes));
+        int start = 0;
+        while (start < chunk.length) {
+            int end = start;
+            while (end < chunk.length && chunk[end] != '\n') {
+                end++;
+            }
+            boolean terminated = end < chunk.length;
+            var atom = parseRecord(chunk, start, end);
+            if (!terminated) {
+                tail = atom;
+                return;
+            }
+            if (atom != null) {
                 byId.put(atom.id(), atom);
             }
+            parsedBytes += end + 1 - start;
+            start = end + 1;
         }
-        return List.copyOf(byId.values());
+    }
+
+    /** Parses one record's bytes; null for a blank line. */
+    private KnowledgeAtom parseRecord(byte[] chunk, int start, int end) throws IOException {
+        String line = StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(chunk, start, end - start))
+                .toString();
+        if (line.endsWith("\r")) {
+            line = line.substring(0, line.length() - 1);
+        }
+        if (line.isBlank()) {
+            return null;
+        }
+        var atom = parse(line);
+        parsedRecords++;
+        return atom;
+    }
+
+    private byte[] readFrom(long position, int length) throws IOException {
+        try (FileChannel channel = FileChannel.open(atomLog, StandardOpenOption.READ)) {
+            ByteBuffer buffer = ByteBuffer.allocate(length);
+            long at = position;
+            while (buffer.hasRemaining()) {
+                int read = channel.read(buffer, at);
+                if (read < 0) {
+                    break;
+                }
+                at += read;
+            }
+            return buffer.position() == length ? buffer.array() : Arrays.copyOf(buffer.array(), buffer.position());
+        }
     }
 
     private KnowledgeAtom parse(String line) {
