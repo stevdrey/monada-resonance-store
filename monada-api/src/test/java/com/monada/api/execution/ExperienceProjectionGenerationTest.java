@@ -506,4 +506,40 @@ class ExperienceProjectionGenerationTest {
             java.util.Locale.setDefault(java.util.Locale.Category.FORMAT, saved);
         }
     }
+
+    @Test
+    void rebuildRecoversFromExhaustedGenerationNumbers() throws IOException {
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            corpus(m);
+            List<String> expected = render(m.recall(SCOPE, QUERY, 10));
+            Files.createDirectories(layout().scopeDir().resolve("projection-999999999999999999"));
+            ProjectionStatus rebuilt = m.rebuildProjection(SCOPE);
+            assertEquals(ProjectionStatus.State.CURRENT, rebuilt.state(), rebuilt.diagnostics().toString());
+            assertEquals("projection-000002", projectionDir(root, SCOPE).getFileName().toString());
+            assertEquals(expected, render(m.recall(SCOPE, QUERY, 10)));
+            assertEquals(ProjectionStatus.State.CURRENT, m.rebuildProjection(SCOPE).state(), "and again");
+        }
+    }
+
+    @Test
+    void reusedGenerationNameIsDetectedAsReclaimed() throws IOException {
+        try (ExecutionMemory m = ExecutionMemory.open(root, SCOPE)) {
+            corpus(m);
+        }
+        try (ExecutionMemory snapshot = ExecutionMemory.openReadOnly(root, SCOPE)) {
+            assertEquals(ProjectionStatus.State.CURRENT, snapshot.projectionStatus(SCOPE).state());
+            try (ExecutionMemory writer = ExecutionMemory.open(root, SCOPE)) {
+                writer.rebuildProjection(SCOPE);           // generation 2
+                writer.pruneProjection(SCOPE);             // generation 1 (the snapshot's) is deleted
+                experience(writer, SCOPE, "x-9", "Different text entirely", "Unrelated solution", null);
+                Files.createDirectories(layout().scopeDir().resolve("projection-999999999999999999"));
+                writer.rebuildProjection(SCOPE);           // exhausted numbers: the name projection-000001 is reused
+            }
+            assertTrue(Files.isDirectory(layout().scopeDir().resolve("projection-000001")), "name reused");
+            ProjectionStatus status = snapshot.projectionStatus(SCOPE);
+            assertEquals(ProjectionStatus.State.MISSING, status.state(), status.diagnostics().toString());
+            assertTrue(status.diagnostics().get(0).contains("was reclaimed"), status.diagnostics().toString());
+            assertEquals(List.of(), snapshot.recall(SCOPE, QUERY, 10).hits(), "never results from the new generation");
+        }
+    }
 }

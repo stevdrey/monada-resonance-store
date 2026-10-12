@@ -68,6 +68,7 @@ final class ExperienceProjection implements AutoCloseable {
     private ProjectionLayout layout;
     private String openGeneration = ""; // read-only: generation of the scope files when the snapshot was taken
     private Path loadedDir; // generation directory this instance loaded
+    private Object loadedKey; // its file identity, so a later directory reusing the name is not mistaken for it
     private boolean interruptedTail; // STALE: the checkpoint ends in an interrupted write
 
     private ExperienceProjection(Path root, ScopeId scope, boolean writable, ProjectionFaults faults) {
@@ -132,6 +133,7 @@ final class ExperienceProjection implements AutoCloseable {
         uncovered = Set.of();
         stored.clear();
         loadedDir = null;
+        loadedKey = null;
         interruptedTail = false;
         try {
             layout = ProjectionLayout.of(root, scope);
@@ -153,6 +155,7 @@ final class ExperienceProjection implements AutoCloseable {
                 return;
             }
             loadedDir = dir.get();
+            loadedKey = fileKey(loadedDir);
             verify(layout, dir.get(), ledger);
         } catch (IOException | RuntimeException e) {
             closeResources();
@@ -571,6 +574,10 @@ final class ExperienceProjection implements AutoCloseable {
         if (!Files.isDirectory(loadedDir, LinkOption.NOFOLLOW_LINKS)) {
             return true;
         }
+        Object key = fileKey(loadedDir);
+        if (loadedKey != null && key != null && !loadedKey.equals(key)) {
+            return true; // the name now belongs to another (newer) generation
+        }
         if (!afterFailure) {
             return false;
         }
@@ -578,6 +585,21 @@ final class ExperienceProjection implements AutoCloseable {
             return !layout.currentDir().map(loadedDir::equals).orElse(false);
         } catch (IOException e) {
             return false;
+        }
+    }
+
+    /**
+     * Identity of a directory without following links: its file key (device and inode where available) and its
+     * creation time, so a recreated directory is distinguished even if the file system reuses the inode. Null
+     * when the file system exposes no file key (the existence check then applies alone).
+     */
+    private static Object fileKey(Path dir) {
+        try {
+            var a = Files.readAttributes(dir, java.nio.file.attribute.BasicFileAttributes.class,
+                    LinkOption.NOFOLLOW_LINKS);
+            return a.fileKey() == null ? null : List.of(a.fileKey(), a.creationTime());
+        } catch (IOException e) {
+            return null;
         }
     }
 

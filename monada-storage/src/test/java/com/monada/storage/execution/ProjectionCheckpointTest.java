@@ -327,4 +327,16 @@ class ProjectionCheckpointTest {
             java.util.Locale.setDefault(java.util.Locale.Category.FORMAT, saved);
         }
     }
+
+    @Test
+    void exhaustedGenerationNumbersFallBackToTheSmallestFreeName() throws IOException {
+        ProjectionLayout layout = ProjectionLayout.of(root, ScopeId.of("scope-1"));
+        Files.createDirectories(layout.scopeDir().resolve("projection-000001"));
+        Files.createDirectories(layout.scopeDir().resolve("projection-999999999999999999"));
+        Path next = layout.nextGenerationDir();
+        assertEquals("projection-000002", next.getFileName().toString());
+        Files.createDirectories(next);
+        layout.publish(next); // the fallback name is a valid generation name
+        assertEquals(Optional.of(next), layout.currentDir());
+    }
 }

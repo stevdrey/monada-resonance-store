@@ -926,9 +926,12 @@ order, duplicate projection, unknown retirement) stops reading and makes it `INC
   the published one (all of them when nothing is published), invalid entries and a leftover temporary
   pointer. The host calls it when no read-only snapshot of the scope is open. A snapshot whose generation is
   reclaimed anyway reports `MISSING` ("was reclaimed (pruneProjection); reopen the snapshot") from both
-  `projectionStatus` and `recall` (no hits), never `INCOMPATIBLE`; the check reads no file content. With an unreadable pointer it deletes nothing and says to rebuild first.
+  `projectionStatus` and `recall` (no hits), never `INCOMPATIBLE`; the check reads no file content and
+  compares the directory's identity (file key and creation time), so a later generation reusing the name is
+  never mistaken for the snapshot's. With an unreadable pointer it deletes nothing and says to rebuild first.
   Generation entries are enumerated without resolving links: only real directories count as generations,
-  numbering skips every name already present (links included), and entries that are links or files are
+  numbering skips every name already present (links included; if numbers above the largest entry are
+  exhausted, the smallest free number is used), and entries that are links or files are
   removed after publication (the link itself, never its target), so a rebuild recovers from them.
   Publication is the commit point: deleting generations or entries afterwards (in a rebuild or a prune) is
   best effort, so a cleanup failure never throws; it is reported in the diagnostics of the status that
@@ -1002,7 +1005,10 @@ try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
 
 Verification: `./gradlew :monada-storage:test`, `./gradlew :monada-api:test`,
 `./gradlew :monada-evaluation:test`, `./gradlew test`, `./gradlew verifyLibraryConsumer`. Per-query top-K
-evidence for the isolation fixture is printed by `ExperienceRecallIsolationReportTest`.
+evidence for the isolation fixture comes from `ExperienceRecallIsolationReportTest`, which is also the
+recall regression gate: it compares every query's top-K refs and similarities with an embedded protected
+baseline, prints a baseline-vs-candidate table and fails on any reordering, changed similarity, cross-scope hit
+or drop in the protected aggregate metrics (Hit@1, MRR, Recall@3 over annotated queries).
 
 ## Acceptance Criteria
 

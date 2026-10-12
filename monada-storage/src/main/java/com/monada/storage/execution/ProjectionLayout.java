@@ -46,6 +46,8 @@ public final class ProjectionLayout {
     public static final String GENERATION_PREFIX = "projection-";
     private static final Pattern GENERATION_NAME = Pattern.compile("projection-([0-9]{6,18})");
     private static final int MAX_POINTER_BYTES = 64;
+    /** Largest generation number a name can carry (18 digits). */
+    static final long MAX_GENERATION = 999_999_999_999_999_999L;
     public static final String MEMORY_DIR = "memory";
     /** Atom segment a projection memory's manifest must name (manifest 0.4 default). */
     public static final String ATOM_SEGMENT = "atoms/segment-000001.log";
@@ -169,6 +171,19 @@ public final class ProjectionLayout {
     public Path nextGenerationDir() throws LedgerException {
         List<Path> existing = generationEntries();
         long next = existing.isEmpty() ? 1 : generationNumber(existing.get(existing.size() - 1)) + 1;
+        if (next > MAX_GENERATION) {
+            // Numbers above the largest entry are exhausted (only a damaged or crafted entry gets here): take the
+            // smallest free number instead, so a rebuild can always publish. Snapshots detect a reused name by
+            // directory identity, not by name.
+            java.util.Set<Long> used = new java.util.HashSet<>();
+            for (Path p : existing) {
+                used.add(generationNumber(p));
+            }
+            next = 1;
+            while (used.contains(next)) {
+                next++;
+            }
+        }
         return paths.contained(scopeDir.resolve(GENERATION_PREFIX + String.format(Locale.ROOT, "%06d", next)));
     }
 
