@@ -1294,9 +1294,9 @@ is the executable example of the boundary (section 21.6).
 ExportRequest first = ExportRequest.first(scope, ExportCutoff.atSequence(cutoff), 100, ExportView.ADAPTER_READY,
         ExportEvidencePolicy.requiring(QualityDimension.SECURITY));          // extra gates are optional
 ExperienceSamplePage page = memory.exportSamples(first);
-ExperienceSamplePage next = memory.exportSamples(ExportRequest.resume(page.next().get(), 100));
-String json = ExperienceSampleJson.toJson(page);                              // canonical rendering
+String json = ExperienceSampleJson.toJson(page);                              // canonical rendering of this page
 String digest = page.digest();                                                // SHA-256 of that rendering
+ExperienceSamplePage next = memory.exportSamples(ExportRequest.resume(page.next().get(), 100)); // while hasMore
 ```
 
 | Type | Role |
@@ -1333,8 +1333,10 @@ read-only instances. It needs no current projection and never writes one.
   `<sequence>:<ledger payload digest>` + LF for sequences `1..cutoff`, using the payload digest the ledger line itself
   carries, so a different ledger prefix can never share a checkpoint.
 - `ProjectionStamp(formatVersion, textScheme, state, coversCutoff)` names the projection that serves recall (`1`,
-  `summary-text-v1`). Samples are never derived from the projection, so only this stamp differs between a `MISSING`
-  and a `CURRENT` projection of the same ledger.
+  `summary-text-v1`). Only `formatVersion` and `textScheme` are in the canonical JSON and digest; `state` and
+  `coversCutoff` are the projection's live status when the page was read and change when it is rebuilt, so they stay
+  out of the reproducibility fingerprint. Samples are never derived from the projection: a `MISSING` and a `CURRENT`
+  projection of the same ledger give the same canonical page and digest.
 - The same scope, cutoff sequence and options give byte-identical pages and digests after reopen, on writable and
   read-only instances, and independently of page size (the samples are equal; only the page boundaries differ).
 
@@ -1415,7 +1417,7 @@ only, so annotations can never change it. `summary()` prints one deterministic l
 ```
 
 The command opens the ledger read-only (nothing is created or locked), exits 1 on a usage or ledger error, and prints
-`summary` or the canonical JSON pages. It has no price book, so its cost column reflects usage coverage only.
+`summary` or one JSON array of the canonical pages (a single valid document, whatever the page count). It has no price book, so its cost column reflects usage coverage only.
 
 ### 21.6 Consumer example
 

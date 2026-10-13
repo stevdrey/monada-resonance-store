@@ -147,7 +147,8 @@ class ExperienceSampleExportTest {
             // samples come from the ledger alone: only the projection stamp differs
             assertEquals(missing.samples(), current.samples());
             assertEquals(missing.ledger(), current.ledger());
-            assertNotEquals(missing.digest(), current.digest());
+            assertEquals(missing.digest(), current.digest()); // live projection state is outside the fingerprint
+            assertNotEquals(missing.projection(), current.projection());
         }
     }
 
@@ -480,6 +481,52 @@ class ExperienceSampleExportTest {
             assertFalse(diagnostic.attempts().get(0).evidence().get(0).observations().get(0).policyMatches());
             assertEquals(1, diagnostic.diagnostics().get().ignoredObservations().size());
             assertTrue(diagnostic.diagnostics().get().ignoredObservations().get(0).reason().contains("policy gates v2"));
+        }
+    }
+
+    @Test
+    void aReusedObservationInstanceDoesNotChangeTheDiagnosticExportAcrossReopen() {
+        String live;
+        try (ExecutionMemory m = ExecutionMemory.open(root, S1)) {
+            SampleLedger ledger = new SampleLedger(m, S1, "p");
+            SampleLedger.Exec e = ledger.exec("t", "x", TESTS).attempt(A1, 1, Optional.empty());
+            var shared = SampleLedger.observation(QualityDimension.TESTS, ObservationState.PASS, "1");
+            for (int i = 1; i <= 2; i++) { // the very same immutable instance in two evidence events
+                java.time.Instant t = ledger.now().plusSeconds(i);
+                ledger.record(new com.monada.core.execution.ExecutionEvent.EvidenceRecorded(
+                        com.monada.core.execution.EventEnvelope.original(EventId.of("shared-" + i), S1, e.task, e.id,
+                                A1, t, t), List.of(shared), List.of()));
+            }
+            e.finish(A1, AttemptResult.COMPLETED);
+            e.outcome(Outcome.accepted(OutcomeOrigin.VALIDATED, A1));
+            var request = ExportRequest.first(S1, ExportCutoff.latest(), 5, ExportView.DIAGNOSTIC,
+                    ExportEvidencePolicy.executionPolicyOnly());
+            live = digestOf(exportAll(m, request));
+            var ignored = byExecution(samples(exportAll(m, request)), "x").diagnostics().get().ignoredObservations();
+            assertEquals(1, ignored.size());
+            assertEquals(EventId.of("shared-1"), ignored.get(0).ref().eventId());
+        }
+        try (ExecutionMemory m = ExecutionMemory.openReadOnly(root, S1)) {
+            assertEquals(live, digestOf(exportAll(m, ExportRequest.first(S1, ExportCutoff.latest(), 5,
+                    ExportView.DIAGNOSTIC, ExportEvidencePolicy.executionPolicyOnly()))));
+        }
+    }
+
+    @Test
+    void aPinnedCursorPageIsIdenticalBeforeAndAfterAProjectionRebuild() {
+        try (ExecutionMemory m = ExecutionMemory.open(root, S1)) {
+            new SampleLedger(m, S1, "p").standardRun();
+        }
+        Experiences.removeProjection(root, S1);
+        try (ExecutionMemory m = ExecutionMemory.open(root, S1)) {
+            ExperienceSamplePage first = m.exportSamples(ExportRequest.firstPage(S1, 3));
+            ExportCursor cursor = first.next().get();
+            ExperienceSamplePage before = m.exportSamples(ExportRequest.resume(cursor, 3));
+            m.rebuildProjection(S1);
+            ExperienceSamplePage after = m.exportSamples(ExportRequest.resume(cursor, 3));
+            assertEquals(before.digest(), after.digest());
+            assertEquals(ExperienceSampleJson.toJson(before), ExperienceSampleJson.toJson(after));
+            assertEquals(first.digest(), m.exportSamples(ExportRequest.firstPage(S1, 3)).digest());
         }
     }
 

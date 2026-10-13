@@ -105,7 +105,7 @@ records), #96 (ledger), #97 (facade), #98 (projections/recall), #99 (calculators
 | --- | --- | --- |
 | `com.monada.core.execution` | `monada-core` | Immutable IDs and domain records |
 | `com.monada.storage.execution` | `monada-storage` | Ledger manifest, record codec, replay, audit |
-| `com.monada.api.execution` | `monada-api` | `ExecutionMemory` facade, derived acceptance, history (implemented, #97); projections and recall (implemented, #98); export (planned) |
+| `com.monada.api.execution` | `monada-api` | `ExecutionMemory` facade, derived acceptance, history (implemented, #97); projections and recall (implemented, #98); sample export (implemented, #101) |
 | `com.monada.evaluation.execution` | `monada-evaluation` | Usage/cost calculators, comparison/Pareto reports, export annotations (evaluation only) |
 
 Core types (`com.monada.core.execution`): `ScopeId`, `TaskId`, `ExecutionId`, `AttemptId`, `EventId`,

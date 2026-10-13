@@ -24,7 +24,7 @@ import java.util.Optional;
  * <p>Optional properties: {@code monada.execution.cutoff} (ledger sequence, default latest),
  * {@code monada.execution.pageSize} (default 100), {@code monada.execution.view} ({@code ADAPTER_READY} or
  * {@code DIAGNOSTIC}), {@code monada.execution.gates} (comma separated extra gate dimensions) and
- * {@code monada.execution.output} ({@code summary}, the default, or {@code json} for the canonical pages). The
+ * {@code monada.execution.output} ({@code summary}, the default, or {@code json} for one JSON array of the canonical pages). The
  * ledger is opened read-only: nothing is created, locked or written. Prices are a library-level input, so the
  * command line reports cost as unavailable or partial unless an embedding application supplies a price book.
  * Exit code 0 on success, 1 on a usage or ledger error.
@@ -38,6 +38,14 @@ public final class ExperienceExportMain {
         System.getProperties().stringPropertyNames().stream().filter(k -> k.startsWith("monada.execution."))
                 .forEach(k -> props.put(k, System.getProperty(k)));
         System.exit(run(props, System.out, System.err));
+    }
+
+    /** One valid JSON document: an array holding the canonical page objects in order, indented by two spaces. */
+    static String jsonArray(ExperienceExportReport report) {
+        return report.pages().stream()
+                .map(p -> ExperienceSampleJson.toJson(p).stripTrailing().lines().map(l -> "  " + l)
+                        .collect(java.util.stream.Collectors.joining("\n")))
+                .collect(java.util.stream.Collectors.joining(",\n", "[\n", "\n]\n"));
     }
 
     static int run(Map<String, String> props, PrintStream out, PrintStream err) {
@@ -74,7 +82,7 @@ public final class ExperienceExportMain {
                         ExportRequest.first(scopeId, cutoff, pageSize, view, new ExportEvidencePolicy(gates)),
                         PriceBook.empty(), Optional.empty());
                 if (output.equals("json")) {
-                    report.pages().forEach(p -> out.print(ExperienceSampleJson.toJson(p)));
+                    out.print(jsonArray(report));
                 } else {
                     out.println("note: no price book on the command line; cost shows usage coverage only");
                     out.print(report.summary());

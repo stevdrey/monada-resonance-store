@@ -80,8 +80,7 @@ public final class ExperienceSampleJson {
                 "ledger", obj("cutoffSequence", p.ledger().cutoffSequence(),
                         "prefixDigest", p.ledger().prefixDigest()),
                 "projection", obj("formatVersion", (long) p.projection().formatVersion(),
-                        "textScheme", p.projection().textScheme(), "state", name(p.projection().state()),
-                        "coversCutoff", p.projection().coversCutoff()),
+                        "textScheme", p.projection().textScheme()),
                 "samples", list(p.samples(), ExperienceSampleJson::sample),
                 "hasMore", p.hasMore(), "nextCursor", p.next().map(ExportCursor::token).orElse(null));
     }

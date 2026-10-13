@@ -151,7 +151,7 @@ final class SampleBuilder {
                     } else if (!acceptedAttempt.get().equals(e.getKey())) {
                         reason = "evidence of attempt " + e.getKey() + ", not of the accepted attempt "
                                 + acceptedAttempt.get();
-                    } else if (effectiveObs.get(obs.dimension()) != obs) {
+                    } else if (effectiveFact.get(obs.dimension()) != f) {
                         reason = "overridden by a later applicable " + obs.dimension() + " observation";
                     }
                     if (reason != null) {

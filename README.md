@@ -116,10 +116,13 @@ try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
 ExportRequest request = ExportRequest.first(scope, ExportCutoff.atSequence(cutoff), 100,
         ExportView.ADAPTER_READY, ExportEvidencePolicy.executionPolicyOnly());
 ExperienceSamplePage page = memory.exportSamples(request);
-while (page.hasMore()) {
+while (true) {
+    String json = ExperienceSampleJson.toJson(page);   // canonical, inspectable, digestible: handle every page
+    if (!page.hasMore()) {
+        break;
+    }
     page = memory.exportSamples(ExportRequest.resume(page.next().get(), 100));
 }
-String json = ExperienceSampleJson.toJson(page);   // canonical, inspectable, digestible
 ```
 
 The export reads memory only: it writes no ledger, projection or feedback file, keeps no hidden cursor (the `ExportCursor` token is stateless and carries the cutoff, view and gates) and never calls `feedback()`. The same scope, cutoff sequence and options give byte-identical pages after reopen. Recalled similarity is not part of a sample, and cost or Pareto annotations come from `monada-evaluation` (`ExperienceExportReport`), never from `monada-api`. A read-only command prints a summary or the canonical JSON of a ledger:

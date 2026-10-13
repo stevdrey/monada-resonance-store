@@ -13,7 +13,7 @@ import java.util.Optional;
  * byte-identical {@link ExperienceSampleJson#toJson canonical rendering}.
  *
  * <p>{@code ledger} identifies the exact ledger prefix the samples were derived from. {@code projection} names
- * the projection format that serves recall for the scope; samples are derived from the ledger alone, never from
+ * the projection format that serves recall for the scope (its live state is informational and outside the canonical rendering); samples are derived from the ledger alone, never from
  * the projection, and the export never writes it. {@code next} is present exactly when {@code hasMore}.
  */
 public record ExperienceSamplePage(String schema, ScopeId scope, ExportView view,
@@ -32,7 +32,12 @@ public record ExperienceSamplePage(String schema, ScopeId scope, ExportView view
         }
     }
 
-    /** {@code coversCutoff}: the projection has projected every ledger event up to the cutoff. */
+    /**
+     * {@code formatVersion} and {@code textScheme} are fixed versions and part of the canonical rendering.
+     * {@code state} and {@code coversCutoff} (the projection has projected every ledger event up to the cutoff)
+     * are the projection's <b>live</b> status when the page was read: they change when the projection is rebuilt,
+     * so they are deliberately <b>not</b> part of the canonical JSON or its digest.
+     */
     public record ProjectionStamp(int formatVersion, String textScheme, ProjectionStatus.State state,
                                   boolean coversCutoff) {
         public ProjectionStamp {

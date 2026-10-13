@@ -243,8 +243,12 @@ class ExperienceExportReportTest {
         assertEquals(0, ExperienceExportMain.run(jsonProps, new PrintStream(json, true, StandardCharsets.UTF_8),
                 new PrintStream(err, true, StandardCharsets.UTF_8)));
         String body = json.toString(StandardCharsets.UTF_8);
-        assertTrue(body.startsWith("{\n  \"schema\": \"execution-sample/1\""), body);
-        assertTrue(body.contains("\"view\": \"DIAGNOSTIC\"") && body.contains("\"additionalGates\": [\n    \"SECURITY\""));
+        // two pages -> one valid document: an array, never consecutive top-level objects
+        assertTrue(body.startsWith("[\n  {\n    \"schema\": \"execution-sample/1\""), body);
+        assertTrue(body.endsWith("  }\n]\n"), body);
+        assertEquals(2, body.split("\n  \\{\n", -1).length - 1);
+        assertEquals(1, body.split("\n  \\},\n  \\{\n", -1).length - 1);
+        assertTrue(body.contains("\"view\": \"DIAGNOSTIC\"") && body.contains("\"additionalGates\": [\n      \"SECURITY\""));
 
         // a pinned cutoff reproduces the same export
         List<String> outputs = new ArrayList<>();
