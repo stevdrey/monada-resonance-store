@@ -176,7 +176,7 @@ deterministic reconciliation. Incompatible projections are reported, never rewri
 
 Packages: `com.monada.core.execution`, `com.monada.storage.execution` and `com.monada.api.execution`
 (implemented) and the evaluation-only `com.monada.evaluation.execution` (usage and hypothetical-cost
-calculators, #99; comparison and export annotations are planned). The extension is additive: atom, vector, feedback and manifest formats, `KnowledgeAtom` identity, ranking and query-key
+calculators, #99; evidence-gated comparison and Pareto diagnostics, #100; export annotations are planned). The extension is additive: atom, vector, feedback and manifest formats, `KnowledgeAtom` identity, ranking and query-key
 defaults, and existing public signatures stay unchanged.
 
 ### Execution Ledger Audit
