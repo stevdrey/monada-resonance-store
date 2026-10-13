@@ -27,7 +27,8 @@ import java.util.TreeSet;
 
 /**
  * Checks that an {@link ExecutionView} says what its own history says, because the view's constructor is public.
- * Scope and execution id are taken from every event; task, provenance, policy, current outcome and derived
+ * The history must obey the ledger's ordering and reference rules ({@link HistoryStructure}). Scope, execution id
+ * and task are taken from every event; task, provenance, policy, current outcome and derived
  * acceptance are re-derived from the effective events with the rules of contract section 8 and must be equal.
  * A comparison trusts these fields for comparability and eligibility, so a substituted one is rejected.
  */
@@ -51,6 +52,7 @@ final class ViewVerifier {
                         + entry.event().envelope().taskId() + ", not to " + view.task());
             }
         }
+        HistoryStructure.verify(view.history());
         ExecutionStarted started = null;
         Optional<Outcome> outcome = Optional.empty();
         Map<AttemptId, AttemptFinished> finishes = new HashMap<>();

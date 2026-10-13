@@ -234,4 +234,56 @@ class ComparisonAmbiguityTest {
         org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
                 () -> ComparisonCandidate.of(v.history().get(0).event().scopeId(), forged, book(usd()), List.of()));
     }
+
+    private static com.monada.api.execution.ExecutionView withHistory(com.monada.api.execution.ExecutionView v,
+                                                                      List<com.monada.api.execution.HistoryEntry> h) {
+        return new com.monada.api.execution.ExecutionView(v.id(), v.task(), v.taskSummary(), v.provenance(),
+                v.policy(), v.currentOutcome(), v.acceptance(), v.attempts(), h);
+    }
+
+    @Test
+    void structurallyInvalidHistoriesAreRejectedBeforeSummarizing() {
+        ComparisonFixtures f = new ComparisonFixtures(root);
+        Run run = f.valid("exec-a", 10_000, 1_000, 10);
+        var v = run.view();
+        run.close();
+        ScopeId scope = v.history().get(0).event().scopeId();
+        var stage = v.history().stream()
+                .filter(e -> e.event() instanceof com.monada.core.execution.ExecutionEvent.StageRecorded)
+                .findFirst().orElseThrow();
+        var original = (com.monada.core.execution.ExecutionEvent.StageRecorded) stage.event();
+        var env = original.envelope();
+
+        // 1. a stage for an attempt that was never started
+        var ghost = new com.monada.core.execution.EventEnvelope(env.eventId(), env.scopeId(), env.taskId(),
+                env.executionId(), Optional.of(com.monada.core.execution.AttemptId.of("a9")), env.revision(),
+                env.supersedes(), env.occurredAt(), env.recordedAt());
+        List<com.monada.api.execution.HistoryEntry> ghosted = new ArrayList<>();
+        for (var e : v.history()) {
+            ghosted.add(e == stage ? new com.monada.api.execution.HistoryEntry(e.sequence(),
+                    com.monada.core.execution.ExecutionEvent.StageRecorded.measured(ghost, original.stage(),
+                            original.route(), original.startedAt(), original.endedAt(), original.usage(),
+                            original.artifacts())) : e);
+        }
+        // 2. a fresh stage appended after the attempt finished
+        var late = new com.monada.core.execution.EventEnvelope(com.monada.core.execution.EventId.of("late-stage"),
+                env.scopeId(), env.taskId(), env.executionId(), env.attemptId(), 1, Optional.empty(),
+                env.occurredAt(), env.recordedAt());
+        List<com.monada.api.execution.HistoryEntry> appended = new ArrayList<>(v.history());
+        appended.add(new com.monada.api.execution.HistoryEntry(v.history().get(v.history().size() - 1).sequence() + 1,
+                com.monada.core.execution.ExecutionEvent.StageRecorded.measured(late, "late", original.route(),
+                        original.startedAt(), original.endedAt(), original.usage(), original.artifacts())));
+        // 3. sequences out of order, 4. duplicate event id
+        List<com.monada.api.execution.HistoryEntry> reversed = new ArrayList<>(v.history());
+        java.util.Collections.reverse(reversed);
+        List<com.monada.api.execution.HistoryEntry> duplicated = new ArrayList<>(v.history());
+        duplicated.add(new com.monada.api.execution.HistoryEntry(
+                v.history().get(v.history().size() - 1).sequence() + 1, stage.event()));
+
+        for (var history : List.of(ghosted, appended, reversed, duplicated)) {
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                    () -> ComparisonCandidate.of(scope, withHistory(v, history), book(usd()), List.of()));
+        }
+        assertTrue(ComparisonCandidate.of(scope, v, book(usd()), List.of()).summary().acceptance().isValidatedAcceptance());
+    }
 }
