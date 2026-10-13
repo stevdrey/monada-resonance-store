@@ -1165,6 +1165,11 @@ views as caller-owned data, so views must come from `ExecutionMemory.loadExecuti
 facade-issued snapshot or digest) needs a `monada-api` change and is out of scope for #100; it is recorded as a
 follow-up.
 
+The two re-implemented rule sets that verification needs (ledger ordering and reference rules in `HistoryStructure`,
+acceptance derivation in `ViewVerifier`) are private to `monada-storage` and `monada-api`. `ViewLedgerParityTest` keeps
+them aligned: every event the real ledger accepts must be accepted with an identical acceptance, and every event it
+rejects must make a view built from the extended history fail. A shared public validator is part of the follow-up.
+
 ### 20.2 Comparability
 
 Direct comparison requires exact equality of scope, task, `sourceRevision`, `contextFingerprint`,
@@ -1199,7 +1204,7 @@ Each objective reads one metric from the chain up to the acceptance cutoff:
 | --- | --- | --- |
 | `Cost(currency)` | `CurrencyCost.unrounded()` of that currency, exact `BigDecimal` | cost not `AVAILABLE` (`INCOMPLETE_COST`, with the section 8 reasons); chain priced in more than one currency or in another one (`MIXED_CURRENCY`); one chain mixes pricing assumptions, or the two sides use different `PriceSnapshot.assumptions` (`MIXED_PRICING_ASSUMPTIONS`) |
 | `Effort`, `WallClock` | `TimeSummary` seconds | absent (`MISSING_TIME`) |
-| `Measured(dimension, unit)` | effective observation value | no value (`MISSING_MEASUREMENT`); another unit, or another evaluator, version or source on the two sides (`INCOMMENSURABLE_AXIS`) |
+| `Measured(dimension, unit)` | value of the effective observation, only when its state is `PASS` | no value (`MISSING_MEASUREMENT`); a value whose observation is `FAIL`, `UNKNOWN` or `NOT_APPLICABLE` (`UNRELIABLE_MEASUREMENT`); another unit, or another evaluator, version or source on the two sides (`INCOMMENSURABLE_AXIS`) |
 
 A declared zero (every stage `NO_BILLABLE_USAGE`) is exactly 0 and carries no pricing assumption. Different
 models are expected to use different snapshots; only the **assumptions text** must be identical, so callers
@@ -1225,8 +1230,10 @@ For two comparable executions (`PairwiseComparison.Conclusion`):
 `ParetoGroup` (per comparable group):
 
 - `excluded`: ineligible executions with their exclusion reasons;
-- `unassessed`: eligible, but with an incomplete or incommensurable measurement on a declared objective, or no
-  declared objective; they are neither on the front nor dominated, and every reason is listed;
+- `unassessed`: eligible, but with an incomplete, unreliable or incommensurable measurement on a declared objective, or no
+  declared objective, or part of a dominance cycle (`DOMINANCE_CYCLE`: tolerances make dominance non-transitive, so A can
+  dominate B, B dominate C and C dominate A; members of such a cycle with no dominator outside it are not reported as
+  worse than anyone); they are neither on the front nor dominated, and every reason is listed;
 - `dominated`: dominated by the listed executions through a conclusive pairwise `DOMINATES`. Domination stays conclusive when
   the execution is also incommensurable with another member; those reasons are kept in `unresolved` so none is lost;
 - `front`: the remaining assessable executions, each conclusive against every other assessable one. This holds even when a pair is already a `TRADEOFF`: an inconclusive third objective keeps both out of the front.
@@ -1245,7 +1252,8 @@ the front holds several executions and there is no automatic winner.
   preferred execution or none. It is attached to its pair as given; it changes no gate, objective result or conclusion.
   Store creates no judgments and calls no judge.
 - `Participant.resources` keeps cost status and reasons, the number of chain stages and how many are covered, the
-  distinct price snapshots (id, version, provider, model, currency, source, assumptions) and ignored duplicate events.
+  distinct price snapshots (id, version, provider, model, currency, source, assumptions). Candidates are built from
+  verified histories, which cannot contain duplicate event ids (they are rejected), so no ignored-duplicates list is kept.
   `Participant.gates` keeps every dimension's evidence with evaluator, policy, source and artifacts.
 
 ### 20.7 Compatibility and verification

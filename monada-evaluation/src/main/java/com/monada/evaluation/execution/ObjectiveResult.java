@@ -22,7 +22,7 @@ public record ObjectiveResult(Objective objective, Verdict verdict, Optional<Big
 
     public enum Code {
         INCOMPLETE_COST, MIXED_CURRENCY, MIXED_PRICING_ASSUMPTIONS, MISSING_TIME, MISSING_MEASUREMENT,
-        INCOMMENSURABLE_AXIS, NO_OBJECTIVES_DECLARED
+        INCOMMENSURABLE_AXIS, UNRELIABLE_MEASUREMENT, NO_OBJECTIVES_DECLARED, DOMINANCE_CYCLE
     }
 
     public record Reason(Side side, Code code, String detail) {

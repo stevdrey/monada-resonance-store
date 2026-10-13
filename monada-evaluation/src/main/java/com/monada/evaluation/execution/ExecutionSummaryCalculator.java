@@ -34,8 +34,12 @@ public final class ExecutionSummaryCalculator {
         Objects.requireNonNull(view, "view");
         Objects.requireNonNull(prices, "prices");
         Objects.requireNonNull(actualBilled, "actualBilled");
+        return summarize(view, prices, actualBilled, ChainResolver.resolve(view.history()));
+    }
 
-        ChainResolver.Resolved resolved = ChainResolver.resolve(view.history());
+    /** Same as the public entry point for a history that was already resolved (avoids resolving it twice). */
+    static ExecutionSummary summarize(ExecutionView view, PriceBook prices, List<ActualBilledAmount> actualBilled,
+                                      ChainResolver.Resolved resolved) {
         Optional<ChainResolver.Effective> outcomeEvent = resolved.effective().stream()
                 .filter(e -> e.event() instanceof OutcomeRecorded)
                 .max(Comparator.comparingLong(ChainResolver.Effective::sequence));

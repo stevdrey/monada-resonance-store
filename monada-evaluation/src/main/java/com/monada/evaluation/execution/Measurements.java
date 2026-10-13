@@ -1,5 +1,6 @@
 package com.monada.evaluation.execution;
 
+import com.monada.core.execution.ObservationState;
 import com.monada.core.execution.QualityObservation;
 import com.monada.evaluation.execution.ComparisonPolicy.Metric;
 import com.monada.evaluation.execution.ObjectiveResult.Code;
@@ -96,6 +97,10 @@ final class Measurements {
                     "no measured " + metric.dimension() + " value on the accepted attempt");
         }
         QualityObservation o = observed.get().observation();
+        if (o.state() != ObservationState.PASS) {
+            return Reading.gap(Code.UNRELIABLE_MEASUREMENT, metric.dimension() + " has a measured value but its state is "
+                    + o.state() + " (" + o.evaluatorId() + "@" + o.evaluatorVersion() + "), not PASS");
+        }
         String unit = o.unit().orElseThrow();
         if (!unit.equals(metric.unit())) {
             return Reading.gap(Code.INCOMMENSURABLE_AXIS,

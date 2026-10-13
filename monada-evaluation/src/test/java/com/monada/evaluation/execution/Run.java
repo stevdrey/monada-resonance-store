@@ -91,6 +91,16 @@ final class Run implements AutoCloseable {
         return id(prefix + "-" + (++counter));
     }
 
+    /** Records {@code event} if the real ledger accepts it; empty when the ledger rejects it or reports a conflict. */
+    Optional<Long> tryRecord(ExecutionEvent event) {
+        try {
+            RecordResult result = memory.record(event);
+            return result.status() == RecordResult.Status.APPENDED ? Optional.of(result.sequence()) : Optional.empty();
+        } catch (com.monada.storage.execution.LedgerRejectedException e) {
+            return Optional.empty();
+        }
+    }
+
     long record(ExecutionEvent event) {
         RecordResult result = memory.record(event);
         assertEquals(RecordResult.Status.APPENDED, result.status(), String.valueOf(result.reason()));

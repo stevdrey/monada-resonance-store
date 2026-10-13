@@ -14,6 +14,7 @@ import com.monada.evaluation.execution.PairwiseComparison.Basis;
 import com.monada.evaluation.execution.PairwiseComparison.Conclusion;
 import com.monada.evaluation.execution.PairwiseComparison.Winner;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -51,7 +52,8 @@ public final class ExecutionComparator {
             throw new IllegalArgumentException("cannot compare an execution with itself: " + left.ref());
         }
         requireKnown(judgments, Set.of(left.ref(), right.ref()));
-        return pair(evaluate(left, policy), evaluate(right, policy), policy, judgments);
+        return pair(evaluate(left, policy), evaluate(right, policy), policy,
+                judgments.stream().filter(j -> j.judges(left.ref(), right.ref())).sorted().toList());
     }
 
     public static PairwiseComparison compare(ComparisonCandidate left, ComparisonCandidate right,
@@ -75,11 +77,19 @@ public final class ExecutionComparator {
         }
         requireKnown(judgments, known);
 
+        Map<Key, List<PairwiseJudgment>> judgmentsByPair = new TreeMap<>();
+        for (PairwiseJudgment j : judgments) {
+            judgmentsByPair.computeIfAbsent(Key.of(j.first(), j.second()), k -> new ArrayList<>()).add(j);
+        }
+        judgmentsByPair.values().forEach(Collections::sort);
+
         List<PairwiseComparison> pairs = new ArrayList<>();
         Map<Key, PairwiseComparison> byPair = new TreeMap<>();
         for (int i = 0; i < all.size(); i++) {
             for (int j = i + 1; j < all.size(); j++) {
-                PairwiseComparison p = pair(all.get(i), all.get(j), policy, judgments);
+                Key pairKey = Key.of(all.get(i).participant().ref(), all.get(j).participant().ref());
+                PairwiseComparison p = pair(all.get(i), all.get(j), policy,
+                        judgmentsByPair.getOrDefault(pairKey, List.of()));
                 pairs.add(p);
                 byPair.put(new Key(p.left().ref(), p.right().ref()), p);
             }
@@ -105,6 +115,11 @@ public final class ExecutionComparator {
     }
 
     private record Key(ExecutionRef left, ExecutionRef right) implements Comparable<Key> {
+        /** Order-insensitive key of an unordered pair. */
+        static Key of(ExecutionRef a, ExecutionRef b) {
+            return a.compareTo(b) < 0 ? new Key(a, b) : new Key(b, a);
+        }
+
         @Override
         public int compareTo(Key other) {
             int c = left.compareTo(other.left);
@@ -136,8 +151,7 @@ public final class ExecutionComparator {
         Participant left = l.participant();
         Participant right = r.participant();
         Comparability comparability = Comparability.of(left.key(), right.key());
-        List<PairwiseJudgment> mine = judgments.stream().filter(j -> j.judges(left.ref(), right.ref()))
-                .sorted().toList();
+        List<PairwiseJudgment> mine = judgments;
         if (!comparability.isComparable()) {
             return new PairwiseComparison(left, right, comparability, Conclusion.NOT_COMPARABLE, Optional.empty(),
                     List.of(), mine, INTERPRETATION);
@@ -231,8 +245,37 @@ public final class ExecutionComparator {
                 front.add(ref);
             }
         }
+        // Tolerances make dominance non-transitive, so it can cycle (A beats B beats C beats A). A dominated member
+        // with no chain of dominators reaching a non-dominated one is not "worse than another": it is unassessed.
+        Set<ExecutionRef> dominatedRefs = new HashSet<>();
+        dominated.forEach(d -> dominatedRefs.add(d.execution()));
+        Set<ExecutionRef> grounded = new HashSet<>();
+        boolean grew = true;
+        while (grew) {
+            grew = false;
+            for (Dominated d : dominated) {
+                if (!grounded.contains(d.execution()) && d.dominatedBy().stream()
+                        .anyMatch(x -> !dominatedRefs.contains(x) || grounded.contains(x))) {
+                    grounded.add(d.execution());
+                    grew = true;
+                }
+            }
+        }
+        List<Dominated> kept = new ArrayList<>();
+        List<ExecutionRef> cycle = dominated.stream().map(Dominated::execution).filter(r -> !grounded.contains(r)).toList();
+        for (Dominated d : dominated) {
+            if (grounded.contains(d.execution())) {
+                kept.add(d);
+            } else {
+                List<Reason> reasons = new ArrayList<>();
+                reasons.add(new Reason(Side.BOTH, Code.DOMINANCE_CYCLE, "dominance within tolerance forms a cycle among "
+                        + cycle + "; none of them is shown to be worse than a non-dominated execution"));
+                reasons.addAll(d.unresolved());
+                unassessed.add(new Unassessed(d.execution(), reasons));
+            }
+        }
         unassessed.sort(Comparator.comparing(Unassessed::execution));
-        return new ParetoGroup(key, refs, front, dominated, unassessed, excluded);
+        return new ParetoGroup(key, refs, front, kept, unassessed, excluded);
     }
 
     private static List<Reason> ownGaps(Evaluated e, ComparisonPolicy policy) {
@@ -250,6 +293,6 @@ public final class ExecutionComparator {
     }
 
     private static PairwiseComparison lookup(Map<Key, PairwiseComparison> byPair, ExecutionRef a, ExecutionRef b) {
-        return byPair.get(a.compareTo(b) < 0 ? new Key(a, b) : new Key(b, a));
+        return byPair.get(Key.of(a, b));
     }
 }

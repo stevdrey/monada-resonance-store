@@ -37,7 +37,7 @@ final class ViewVerifier {
     private ViewVerifier() {
     }
 
-    static void verify(ScopeId scope, ExecutionView view) {
+    static ChainResolver.Resolved verify(ScopeId scope, ExecutionView view) {
         if (view.history().isEmpty()) {
             throw new IllegalArgumentException("the view has no history, so it cannot be verified");
         }
@@ -57,7 +57,8 @@ final class ViewVerifier {
         Optional<Outcome> outcome = Optional.empty();
         Map<AttemptId, AttemptFinished> finishes = new HashMap<>();
         Map<AttemptId, List<EvidenceRecorded>> evidence = new HashMap<>();
-        for (ChainResolver.Effective e : ChainResolver.resolve(view.history()).effective()) {
+        ChainResolver.Resolved resolved = ChainResolver.resolve(view.history());
+        for (ChainResolver.Effective e : resolved.effective()) {
             switch (e.event()) {
                 case ExecutionStarted s -> started = s;
                 case OutcomeRecorded o -> outcome = Optional.of(o.outcome());
@@ -77,6 +78,7 @@ final class ViewVerifier {
         require(outcome.equals(view.currentOutcome()), "current outcome", view);
         require(derive(started.policy(), outcome, finishes, evidence).equals(view.acceptance()),
                 "derived acceptance", view);
+        return resolved;
     }
 
     private static void require(boolean consistent, String field, ExecutionView view) {

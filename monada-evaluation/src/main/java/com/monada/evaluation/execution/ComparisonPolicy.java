@@ -2,7 +2,6 @@ package com.monada.evaluation.execution;
 
 import com.monada.core.execution.QualityDimension;
 import java.math.BigDecimal;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.Currency;
 import java.util.EnumSet;
@@ -84,9 +83,5 @@ public record ComparisonPolicy(Set<QualityDimension> mandatoryGates, List<Object
                 throw new IllegalArgumentException("duplicate objective id: " + objective.id());
             }
         }
-    }
-
-    public static ComparisonPolicy of(Collection<QualityDimension> gates, List<Objective> objectives) {
-        return new ComparisonPolicy(Set.copyOf(gates), objectives);
     }
 }

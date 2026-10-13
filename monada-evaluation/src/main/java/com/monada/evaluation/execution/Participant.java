@@ -1,7 +1,6 @@
 package com.monada.evaluation.execution;
 
 import com.monada.api.execution.DerivedAcceptance;
-import com.monada.core.execution.EventId;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
@@ -25,11 +24,10 @@ public record Participant(ExecutionRef ref, Comparability.Key key, DerivedAccept
     /** Coverage of the resource chain behind the cost: what was priced, what was not and why. */
     public record ResourceCoverage(ChainScope chainScope, CostToAcceptedOutcome.Status costStatus,
                                    List<CostReason> costReasons, int chainStages, int coveredStages,
-                                   List<PricingBasis> pricing, List<EventId> ignoredDuplicateEvents) {
+                                   List<PricingBasis> pricing) {
         public ResourceCoverage {
             costReasons = List.copyOf(costReasons);
             pricing = List.copyOf(pricing);
-            ignoredDuplicateEvents = List.copyOf(ignoredDuplicateEvents);
         }
 
         static ResourceCoverage of(ExecutionSummary s) {
@@ -39,7 +37,7 @@ public record Participant(ExecutionRef ref, Comparability.Key key, DerivedAccept
                     .distinct().sorted(PricingBasis.ORDER).toList();
             return new ResourceCoverage(s.chainScope(), s.cost().status(), s.cost().reasons(),
                     s.chainStages().size(), (int) s.chainStages().stream().filter(StageUsageCost::covered).count(),
-                    pricing, s.ignoredDuplicateEvents());
+                    pricing);
         }
     }
 

@@ -30,8 +30,11 @@ public final class ComparisonCandidate {
                                          List<ActualBilledAmount> actualBilled) {
         Objects.requireNonNull(scope, "scope");
         Objects.requireNonNull(view, "view");
-        ViewVerifier.verify(scope, view);
-        return new ComparisonCandidate(scope, view, ExecutionSummaryCalculator.summarize(view, prices, actualBilled));
+        Objects.requireNonNull(prices, "prices");
+        Objects.requireNonNull(actualBilled, "actualBilled");
+        ChainResolver.Resolved resolved = ViewVerifier.verify(scope, view);
+        return new ComparisonCandidate(scope, view,
+                ExecutionSummaryCalculator.summarize(view, prices, actualBilled, resolved));
     }
 
     public ScopeId scope() {
