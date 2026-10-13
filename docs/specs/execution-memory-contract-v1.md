@@ -1156,6 +1156,15 @@ ComparisonReport report = ExecutionComparator.report(List.of(a, b, c), policy, j
 | `ComparisonReport`, `ParetoGroup` | Deterministic report: participants, all pairs, one Pareto analysis per comparable group |
 | `PairwiseJudgment` | Evaluator-supplied preference with judge, version, source, rubric and evidence |
 
+**Trust boundary.** `ComparisonCandidate.of` rejects views that contradict themselves (identity, task, provenance,
+policy, outcome, acceptance, ledger ordering and references), but it cannot prove that a caller-built `ExecutionView`
+is the facade's complete, unaltered snapshot: `ExecutionView` and `HistoryEntry` have public constructors in
+`monada-api`, and a history whose stage usage was lowered or whose stage was removed is still internally consistent.
+Like the rest of the library (section 8: Store validates structure, not truth), the comparison treats the supplied
+views as caller-owned data, so views must come from `ExecutionMemory.loadExecution`. Making views unforgeable (a
+facade-issued snapshot or digest) needs a `monada-api` change and is out of scope for #100; it is recorded as a
+follow-up.
+
 ### 20.2 Comparability
 
 Direct comparison requires exact equality of scope, task, `sourceRevision`, `contextFingerprint`,

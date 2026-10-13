@@ -10,6 +10,9 @@ import java.util.Objects;
  * the view and the {@link ExecutionSummary} computed from that very view. There is no public constructor, so a
  * summary can never be paired with a view it was not computed from, and {@link #of} rejects a view whose scope,
  * task, provenance, policy, outcome or derived acceptance disagree with its own history.
+ *
+ * <p>It cannot authenticate the view: a hand-built view whose history was altered consistently (for example lower
+ * stage usage) passes. Views must come from {@code ExecutionMemory.loadExecution} (contract section 20, trust boundary).
  */
 public final class ComparisonCandidate {
     private final ScopeId scope;
