@@ -110,3 +110,10 @@ tasks.register<JavaExec>("runExecutionSampleExport") {
         .filter { it.startsWith("monada.execution.") }
         .associateWith { System.getProperty(it) }
 }
+
+tasks.register<JavaExec>("runForgeExperienceEvaluation") {
+    description = "Run the reproducible Forge experience-memory evaluation: hard correctness gates plus exploratory retrieval quality (no Forge, network or provider required)"
+    group = "application"
+    mainClass.set("com.monada.evaluation.execution.ForgeExperienceEvaluationMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}

@@ -1,0 +1,20 @@
+# execution | scope | task | task summary | sourceRevision | context SHA | constraints | mandatory gates | outcome | expected label | expected acceptance
+# outcome: ACCEPTED_VALIDATED:<attempt ordinal> | ACCEPTED_IMPORTED:<attempt ordinal> | REJECTED_VALIDATED | NONE
+a-inv1|alpha|task-invoice-null|Fix null pointer in invoice totals calculation|rev-a1|ctx-3f9a01|constraints-a|TESTS|ACCEPTED_VALIDATED:2|SUCCESS|VALIDATED_ACCEPTED
+a-inv2|alpha|task-invoice-null|Fix null pointer in invoice totals calculation|rev-a1|ctx-3f9a01|constraints-a|TESTS|ACCEPTED_VALIDATED:1|SUCCESS|VALIDATED_ACCEPTED
+a-inv3|alpha|task-invoice-null|Fix null pointer in invoice totals calculation|rev-a1|ctx-77c2de|constraints-a|TESTS|ACCEPTED_VALIDATED:1|SUCCESS|VALIDATED_ACCEPTED
+a-page|alpha|task-search-page|Add pagination to customer search endpoint|rev-a1|ctx-3f9a01|constraints-a|TESTS,ARCHITECTURE|ACCEPTED_VALIDATED:3|SUCCESS|VALIDATED_ACCEPTED
+a-tokens|alpha|task-token-rotation|Rotate expired API tokens in session store|rev-a1|ctx-3f9a01|constraints-a|TESTS|ACCEPTED_VALIDATED:1|UNLABELED|ACCEPTED_UNVALIDATED
+a-yaml|alpha|task-settings-yaml|Migrate settings schema from properties files to yaml|rev-a1|ctx-3f9a01|constraints-a|TESTS|ACCEPTED_VALIDATED:1|SUCCESS|VALIDATED_ACCEPTED
+a-export|alpha|task-report-export|Speed up report export for large tenants|rev-a1|ctx-3f9a01|constraints-a|TESTS|REJECTED_VALIDATED|FAILURE|NOT_ACCEPTED
+a-import|alpha|task-timezone-test|Fix flaky timezone test in the scheduling module|rev-a1|ctx-3f9a01|constraints-a|TESTS|ACCEPTED_IMPORTED:1|UNLABELED|ACCEPTED_UNVALIDATED
+a-tz|alpha|task-calendar-locale|Localize calendar month names for the reminder emails|rev-a1|ctx-3f9a01|constraints-a|TESTS|ACCEPTED_VALIDATED:1|SUCCESS|VALIDATED_ACCEPTED
+b-inv|beta|task-invoice-null|Fix null pointer in invoice totals calculation|rev-a1|ctx-3f9a01|constraints-a|TESTS|ACCEPTED_VALIDATED:1|SUCCESS|VALIDATED_ACCEPTED
+b-dedup|beta|task-event-dedup|Deduplicate events in the ingestion pipeline|rev-b1|ctx-b10001|constraints-b|TESTS|ACCEPTED_VALIDATED:2|SUCCESS|VALIDATED_ACCEPTED
+b-dark|beta|task-dark-mode|Add dark mode toggle to the settings screen|rev-b1|ctx-b10001|constraints-b|TESTS|ACCEPTED_VALIDATED:1|SUCCESS|VALIDATED_ACCEPTED
+b-cold|beta|task-cold-start|Reduce cold start time of the notification worker|rev-b1|ctx-b10001|constraints-b|TESTS|ACCEPTED_VALIDATED:1|SUCCESS|VALIDATED_ACCEPTED
+b-cold2|beta|task-cold-start|Reduce cold start time of the notification worker|rev-b1|ctx-b10001|constraints-b|TESTS|ACCEPTED_VALIDATED:2|SUCCESS|VALIDATED_ACCEPTED
+b-webhook|beta|task-webhook-retry|Retry failed webhook deliveries with exponential backoff|rev-b1|ctx-b10001|constraints-b|TESTS|REJECTED_VALIDATED|FAILURE|NOT_ACCEPTED
+b-page|beta|task-search-page|Add pagination to customer search endpoint|rev-b1|ctx-b10001|constraints-b|TESTS|ACCEPTED_VALIDATED:1|SUCCESS|VALIDATED_ACCEPTED
+b-backup|beta|task-backup-encryption|Encrypt nightly backups at rest|rev-b1|ctx-b10001|constraints-b|TESTS,SECURITY|ACCEPTED_VALIDATED:1|UNLABELED|ACCEPTED_UNVALIDATED
+b-tokens|beta|task-token-rotation|Rotate expired API tokens in session store|rev-b1|ctx-b10001|constraints-b|TESTS|ACCEPTED_VALIDATED:1|SUCCESS|VALIDATED_ACCEPTED

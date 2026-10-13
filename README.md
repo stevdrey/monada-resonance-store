@@ -85,6 +85,7 @@ The project requires **JDK 27** (Gradle toolchain `27`) and builds with the vers
 ./gradlew :monada-evaluation:runProjectMemory -q
 ./gradlew :monada-evaluation:runSpeechModalityComparison -q
 ./gradlew :monada-evaluation:runSpeechHybridSweep -q
+./gradlew :monada-evaluation:runForgeExperienceEvaluation -q
 ./gradlew :monada-speech:test
 ./gradlew :monada-speech:runSpeechImport
 ./gradlew :monada-speech:runSpeechEvaluation
@@ -133,6 +134,21 @@ The export reads memory only: it writes no ledger, projection or feedback file, 
 
 Contract, labels, limits and a consumer example: [`docs/specs/execution-memory-contract-v1.md`](docs/specs/execution-memory-contract-v1.md) section 21. Wiring the export into Neuron or Forge is future cross-repository work; nothing here trains a router or adapts anything.
 
+### Forge Experience Evaluation
+
+`runForgeExperienceEvaluation` is the decision gate for the embedded experience layer: it shows, with a small synthetic and manually judged corpus, that experiences can be recorded, reopened, reconciled, recalled, summarized, compared and exported reproducibly and without crossing projects. It needs no Forge installation, no network and no paid provider, and it claims no routing benefit.
+
+```bash
+./gradlew :monada-evaluation:runForgeExperienceEvaluation -q
+```
+
+- **Fixture** (`monada-evaluation/src/main/resources/com/monada/evaluation/execution/forge-experience-v1/`, version `1`): 25 experiences (one experience is one attempt) in two opaque projects, 14 judged queries (direct, paraphrase, multi-relevant, confusable, same-summary/different-attempt, stale revision, missing evidence, no-relevant, blank), failed → repair → review/QA → accepted chains, comparable and incomparable executions, a revision-2 correction, fixed IDs, times, context SHAs and a fixed price snapshot. Relevance and expected values are reviewed data, never produced by a model or a provider.
+- **Hard correctness gates** (any failure turns the decision into `GAPS_REQUIRE_FOLLOW_UP` and the command exits `1`): G1 zero foreign-scope leakage (recall, load, export, and rejected cross-scope probes), G2 no invalid success label (labels equal the judged labels, `SUCCESS` only for validated acceptance with passing gates), G3 exact reference consistency (every recalled and exported reference loads its exact ledger event at its latest revision), G4 replay and idempotency (re-recording is `IDEMPOTENT`; reopen, replay and a second rebuild leave views, export digests and rankings unchanged), G5 hand-verified chain usage and `CostToAcceptedOutcome`, G6 judged comparable/incomparable conclusions, G7 identical content from two fresh runs.
+- **Exploratory quality** (Precision/Recall/Hit/MRR at K=1,3,5, per-query top-K, missing-relevant diagnosis, worst-case gaps): reported, never enforced, never frozen as a protected baseline, and it does not influence the decision. Queries with an empty relevant set (`NO_RELEVANT`, `BLANK`) are listed but excluded from every denominator; a blank query must return no hits. A failed experience may be relevant; it stays labelled `FAILURE`.
+- **Decision**: `READY_FOR_HOST_ADAPTER_EXPERIMENT` only authorizes a bounded host-adapter experiment. Elapsed timing is printed last, in its own section, because it is the only nondeterministic output.
+
+The same flow is exercised by `ForgeExperienceEvaluationTest` and `ForgeGatesTest` (which break each judged expectation and check that the matching gate fails), and a reduced scenario (two projects, record → reopen → reconcile → scoped recall → export, no foreign leakage, no success without validated evidence) runs against the published artifacts in the isolated consumers of `integration-tests/library-consumer`. Observed gaps and the next bounded experiment are recorded in [`docs/roadmap.md`](docs/roadmap.md). Limits: the corpus is tiny and synthetic, so quality numbers say nothing statistical; the default exact lexical encoding is not tuned for paraphrase; the evaluation does not change any encoder, ranking or query-key default.
+
 ## Library Consumption
 
 The six production modules (`monada-core`, `monada-encoder`, `monada-storage`, `monada-index`, `monada-learning`, `monada-api`) are published as Maven artifacts under `com.monada:<module>:0.1.0-SNAPSHOT`, with sources jars, POM + Gradle Module Metadata, Apache-2.0 license information and stable `Automatic-Module-Name` entries (`com.monada.core`, ..., `com.monada.api`). Consumers declare only `com.monada:monada-api`; `monada-evaluation` and `monada-speech` are not published.
@@ -142,7 +158,7 @@ The six production modules (`monada-core`, `monada-encoder`, `monada-storage`, `
 ./gradlew verifyLibraryConsumer
 ```
 
-The first command publishes into the temporary local repository `build/verification-repo` (no remote registry or credentials). The second publishes and then runs the isolated class-path and JPMS consumer build in `integration-tests/library-consumer`, which resolves only from that repository and runs an open → remember → recall → reopen smoke test plus an `ExecutionMemory` record → retry → history → close → reopen → load smoke test. See [`docs/specs/library-consumption.md`](docs/specs/library-consumption.md) for the dependency graph, limits and future work.
+The first command publishes into the temporary local repository `build/verification-repo` (no remote registry or credentials). The second publishes and then runs the isolated class-path and JPMS consumer build in `integration-tests/library-consumer`, which resolves only from that repository and runs an open → remember → recall → reopen smoke test plus an `ExecutionMemory` record → retry → history → close → reopen → load smoke test and a two-project Forge scenario (record → reopen → reconcile → scoped recall → export). See [`docs/specs/library-consumption.md`](docs/specs/library-consumption.md) for the dependency graph, limits and future work.
 
 ## Storage Integrity Audit and Diagnostics
 

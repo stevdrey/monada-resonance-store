@@ -4,6 +4,28 @@ import com.monada.api.MonadaMemory;
 import com.monada.api.MonadaMemoryOptions;
 import com.monada.api.execution.ExecutionMemory;
 import com.monada.api.execution.RecordResult;
+import com.monada.api.execution.ExperienceHit;
+import com.monada.api.execution.ExperienceSample;
+import com.monada.api.execution.ExportRequest;
+import com.monada.api.execution.ProjectionStatus;
+import com.monada.core.execution.ArtifactRef;
+import com.monada.core.execution.AttemptReason;
+import com.monada.core.execution.AttemptResult;
+import com.monada.core.execution.EventEnvelope;
+import com.monada.core.execution.ExecutionEvent.AttemptFinished;
+import com.monada.core.execution.ExecutionEvent.AttemptStarted;
+import com.monada.core.execution.ExecutionEvent.EvidenceRecorded;
+import com.monada.core.execution.ExecutionEvent.StageRecorded;
+import com.monada.core.execution.ObservationSource;
+import com.monada.core.execution.ObservationState;
+import com.monada.core.execution.Outcome;
+import com.monada.core.execution.OutcomeOrigin;
+import com.monada.core.execution.QualityObservation;
+import com.monada.core.execution.RouteDescriptor;
+import com.monada.core.execution.UsageCounter;
+import com.monada.core.execution.UsageKind;
+import java.util.Optional;
+import java.util.OptionalDouble;
 import com.monada.core.execution.AttemptId;
 import com.monada.core.execution.EvaluationPolicy;
 import com.monada.core.execution.EventId;
@@ -47,6 +69,7 @@ public final class ConsumerSmoke {
         try {
             runSmoke(root);
             runExecutionSmoke(root.resolve("execution"));
+            runForgeScenario(root.resolve("forge"));
         } catch (Throwable failure) {
             // Keep the smoke failure primary; a cleanup error is attached instead of masking it.
             try {
@@ -100,6 +123,94 @@ public final class ConsumerSmoke {
             expect(reopened.loadAttempt(scope, execution, AttemptId.of("none")).isEmpty(), "unknown attempt");
         }
         System.out.println("[smoke] execution record -> idempotent retry -> history -> close -> reopen -> load: OK");
+    }
+
+    /**
+     * A small synthetic Forge-style scenario against the published artifacts only: two opaque projects, record,
+     * close, reopen, reconcile the projection, scoped recall, exact load and export. It mirrors the hard gates of
+     * the in-repository evaluation (no foreign-scope leakage, no success label without validated evidence).
+     */
+    private static void runForgeScenario(Path root) {
+        ScopeId alpha = ScopeId.of("project-alpha");
+        ScopeId beta = ScopeId.of("project-beta");
+        String summary = "Fix null pointer in invoice totals calculation";
+        try (ExecutionMemory memory = ExecutionMemory.open(root, alpha)) {
+            recordExecution(memory, alpha, "ok", summary, true, true);
+            recordExecution(memory, alpha, "noev", summary, false, true);
+        }
+        try (ExecutionMemory memory = ExecutionMemory.open(root, beta)) {
+            recordExecution(memory, beta, "other", summary, true, false);
+        }
+
+        try (ExecutionMemory reopened = ExecutionMemory.open(root, alpha)) { // reopen and reconcile
+            ProjectionStatus status = reopened.rebuildProjection(alpha);
+            expectForge(status.isCurrent(), "projection current after rebuild");
+            List<ExperienceHit> hits = reopened.recall(alpha, summary, 10).hits();
+            expectForge(!hits.isEmpty(), "recall returns experiences");
+            for (ExperienceHit hit : hits) {
+                expectForge(hit.ref().scope().equals(alpha), "no foreign-scope hit");
+                expectForge(reopened.loadEvent(alpha, hit.ref().eventId(), hit.ref().revision())
+                        .filter(hit.event()::equals).isPresent(), "hit loads the exact ledger event");
+            }
+            expectForge(rejected(() -> reopened.recall(beta, summary, 10)), "foreign scope recall rejected");
+
+            List<ExperienceSample> samples = reopened.exportSamples(ExportRequest.firstPage(alpha, 10)).samples();
+            expectForge(samples.size() == 2, "export holds only the scope's executions");
+            for (ExperienceSample sample : samples) {
+                expectForge(sample.execution().scope().equals(alpha), "export sample scope");
+                boolean validated = sample.executionId().value().equals("exec-ok");
+                expectForge(validated == (sample.label() == ExperienceSample.Label.SUCCESS),
+                        "SUCCESS only with validated evidence: " + sample.executionId().value() + " " + sample.label());
+            }
+        }
+        System.out.println("[smoke] forge scenario: record -> reopen -> reconcile -> scoped recall -> export: OK");
+    }
+
+    private static void recordExecution(ExecutionMemory memory, ScopeId scope, String name, String summary,
+                                        boolean withEvidence, boolean validatedOutcome) {
+        TaskId task = TaskId.of("task-" + name);
+        ExecutionId exec = ExecutionId.of("exec-" + name);
+        AttemptId attempt = AttemptId.of("a1");
+        Instant at = Instant.parse("2026-01-01T00:00:00Z");
+        memory.record(ExecutionEvent.executionStarted(EventId.of(name + ".start"), scope, task, exec,
+                new SourceProvenance("rev-1", "ctx-1", "constraints-1"),
+                new EvaluationPolicy("forge-gates", "1", Set.of(QualityDimension.TESTS)), summary, at));
+        memory.record(new AttemptStarted(EventEnvelope.original(EventId.of(name + ".att"), scope, task, exec, attempt,
+                at, at), 1, Optional.empty(), AttemptReason.INITIAL));
+        memory.record(StageRecorded.measured(EventEnvelope.original(EventId.of(name + ".stage"), scope, task, exec,
+                attempt, at.plusSeconds(10), at.plusSeconds(10)), "implement",
+                new RouteDescriptor("worker", Optional.empty(), Optional.empty(), Optional.empty(),
+                        com.monada.core.execution.BillingMode.UNKNOWN), at, at.plusSeconds(10),
+                List.of(UsageCounter.reported(UsageKind.INPUT_TOKENS, 1000, "smoke")), List.of()));
+        if (withEvidence) {
+            memory.record(new EvidenceRecorded(EventEnvelope.original(EventId.of(name + ".ev"), scope, task, exec,
+                    attempt, at.plusSeconds(10), at.plusSeconds(10)), List.of(new QualityObservation(
+                    QualityDimension.TESTS, ObservationState.PASS, OptionalDouble.empty(), Optional.empty(), "smoke",
+                    "1", "forge-gates", "1", ObservationSource.TOOL, List.of(ArtifactRef.of("report", "r-" + name)),
+                    Optional.empty())), List.of()));
+        }
+        memory.record(new AttemptFinished(EventEnvelope.original(EventId.of(name + ".fin"), scope, task, exec,
+                attempt, at.plusSeconds(10), at.plusSeconds(10)), AttemptResult.COMPLETED,
+                Optional.of("Guarded the invoice line list before summing totals"),
+                Optional.of("Cover optional lines when totals are computed")));
+        memory.record(ExecutionEvent.outcomeRecorded(EventId.of(name + ".out"), scope, task, exec,
+                Outcome.accepted(validatedOutcome ? OutcomeOrigin.VALIDATED : OutcomeOrigin.IMPORTED_CLAIM, attempt),
+                at.plusSeconds(10)));
+    }
+
+    private static boolean rejected(Runnable call) {
+        try {
+            call.run();
+            return false;
+        } catch (IllegalArgumentException expected) {
+            return true;
+        }
+    }
+
+    private static void expectForge(boolean condition, String label) {
+        if (!condition) {
+            throw new IllegalStateException("forge scenario failed: " + label);
+        }
     }
 
     private static void expect(boolean condition, String label) {

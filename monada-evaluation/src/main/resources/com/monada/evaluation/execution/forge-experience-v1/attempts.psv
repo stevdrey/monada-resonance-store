@@ -1,0 +1,28 @@
+# One row per attempt = one experience (an ATTEMPT_FINISHED fact). Experience id = <execution>/a<ordinal>.
+# execution | ordinal | reason | result | solution | lesson | input tokens | output tokens | start s | end s | evidence | revised solution | revised lesson
+# evidence: DIMENSION=STATE;DIMENSION=STATE or - for none. revised columns: - or text of a revision-2 correction of the finish.
+a-inv1|1|INITIAL|FAILED|Added a null check on the invoice line list before summing totals|Tests still failed because discount lines can also be null|8000|800|0|20|TESTS=FAIL|-|-
+a-inv1|2|REPAIR|COMPLETED|Guarded both the line list and the discount lines and applied a rounding guard for empty invoices|Always cover optional discount lines when totals are computed|6000|600|30|50|TESTS=PASS|-|-
+a-inv2|1|INITIAL|COMPLETED|Defaulted missing invoice lines to an empty list inside the totals calculator|Prefer empty collections over null for invoice lines|5000|500|0|15|TESTS=PASS|-|-
+a-inv3|1|INITIAL|COMPLETED|Rewrote the totals calculator with Optional wrappers around every invoice field|Wrapping every field is verbose and slower than a single guard|20000|2000|0|60|TESTS=PASS|-|-
+a-page|1|INITIAL|FAILED|Added offset and limit parameters to the customer search endpoint|Offset paging returned duplicates when customers were inserted during paging|12000|1500|0|30|TESTS=FAIL|-|-
+a-page|2|REPAIR|COMPLETED|Switched the customer search endpoint to keyset pagination with a stable sort|Keyset paging needs a unique tiebreaker column in the sort order|9000|1000|40|70|TESTS=PASS|-|-
+a-page|3|REVIEW_FOLLOW_UP|COMPLETED|Moved the cursor encoding into a reusable pagination helper after review and QA|Keep cursor encoding out of controllers so every endpoint can reuse it|5000|500|80|95|TESTS=PASS;ARCHITECTURE=PASS|-|-
+a-tokens|1|INITIAL|COMPLETED|Added a scheduled job that deletes expired API tokens from the session store|Run the token cleanup in small batches to avoid long locks|3000|300|0|10|-|-|-
+a-yaml|1|INITIAL|COMPLETED|Replaced the properties parser with an xml based settings loader|Keep the migration idempotent so it can run twice|7000|700|0|25|TESTS=PASS|Replaced the properties parser with a yaml loader that preserves comments|Keep the migration idempotent and preserve comments so it can run twice
+a-export|1|INITIAL|FAILED|Streamed report rows to the export file instead of buffering the whole tenant|Streaming helped memory but the export still timed out for large tenants|10000|1200|0|40|TESTS=FAIL|-|-
+a-export|2|RETRY|FAILED|Parallelized report export per tenant partition with a thread pool|Parallel export overloaded the database connection pool for large tenants|11000|1300|50|100|TESTS=FAIL|-|-
+a-import|1|INITIAL|COMPLETED|Pinned the scheduling tests to a fixed clock and zone|Flaky timezone tests need an injected clock rather than the system zone|2000|200|0|8|TESTS=PASS|-|-
+a-tz|1|INITIAL|COMPLETED|Loaded month names from the locale bundle for the reminder emails|Format dates with the recipient locale and never the server default|2500|250|0|12|TESTS=PASS|-|-
+b-inv|1|INITIAL|COMPLETED|Guarded the invoice line list and discount lines before summing totals|Shared invoice rules still need project specific tests|4000|400|0|12|TESTS=PASS|-|-
+b-dedup|1|INITIAL|FAILED|Dropped duplicate events using an in memory set of event identifiers|The in memory set lost duplicates after a restart of the ingestion pipeline|10000|1000|0|30|TESTS=FAIL|-|-
+b-dedup|2|REPAIR|COMPLETED|Persisted event identifiers in a bounded store so deduplication survives restarts|Bound the dedup store with a retention window to keep it small|8000|800|40|75|TESTS=PASS|-|-
+b-dark|1|INITIAL|COMPLETED|Added a dark mode toggle that persists the theme preference on the settings screen|Read the system theme as the default before the user chooses|3000|300|0|10|TESTS=PASS|-|-
+b-cold|1|INITIAL|COMPLETED|Lazy loaded the template engine to shorten notification worker cold start|Measure cold start with a fixed benchmark before and after the change|6000|600|0|20|TESTS=PASS|-|-
+b-cold2|1|INITIAL|FAILED|Preloaded all templates at startup to shorten notification worker cold start|Preloading every template made cold start slower|6000|600|0|20|TESTS=FAIL|-|-
+b-cold2|2|REPAIR|COMPLETED|Lazy loaded templates and cached compiled bytecode for the notification worker|Cache compiled templates on disk between worker restarts|7000|700|30|60|TESTS=PASS|-|-
+b-webhook|1|INITIAL|FAILED|Retried failed webhook deliveries immediately in a loop|Immediate retries hammered the receiver and caused rate limiting|4000|400|0|10|TESTS=FAIL|-|-
+b-webhook|2|RETRY|FAILED|Retried webhook deliveries with exponential backoff but without jitter|Backoff without jitter makes retries arrive in synchronized bursts|5000|500|15|30|TESTS=FAIL|-|-
+b-page|1|INITIAL|COMPLETED|Added page and size parameters to the customer search endpoint|Cap the page size to protect the search index|4500|450|0|14|TESTS=PASS|-|-
+b-backup|1|INITIAL|COMPLETED|Encrypted nightly backups with a key stored next to the archive|A key stored beside the backup defeats encryption at rest|5000|500|0|25|TESTS=PASS;SECURITY=FAIL|-|-
+b-tokens|1|INITIAL|COMPLETED|Expired API tokens are removed from the session store by a nightly job|Delete tokens in batches and log the number removed|2500|250|0|9|TESTS=PASS|-|-
