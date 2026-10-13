@@ -98,6 +98,14 @@ final class ForgeSampleChecks {
         String exec = sample.executionId().value();
         ForgeFixture.Execution judged = fixture.execution(exec);
 
+        // Eligibility is true exactly for the labels a consumer can learn from: SUCCESS and FAILURE (section 21).
+        boolean learnable = sample.label() == ExperienceSample.Label.SUCCESS
+                || sample.label() == ExperienceSample.Label.FAILURE;
+        if (sample.eligibility().eligible() != learnable) {
+            violations.add(exec + ": " + sample.label() + " sample is " + (sample.eligibility().eligible()
+                    ? "marked eligible" : "marked ineligible " + sample.eligibility().reasons().stream()
+                    .map(r -> r.code().name()).toList()) + " but eligibility must be " + learnable);
+        }
         if (!sample.group().equals(expectedGroup(judged))) {
             violations.add(exec + ": group " + sample.group() + " but derived " + expectedGroup(judged));
         }
@@ -180,18 +188,28 @@ final class ForgeSampleChecks {
      * correction itself, otherwise its effective payload), the enclosing attempt and the content the origin claims.
      */
     record Expectation(EventKind kind, boolean outer, AttemptRule attempt, Predicate<ExecutionEvent> content,
-                       String description) {
+                       String description, java.util.OptionalLong sequence) {
         static Expectation of(EventKind kind, AttemptRule attempt) {
-            return new Expectation(kind, false, attempt, e -> true, "any content");
+            return new Expectation(kind, false, attempt, e -> true, "any content", java.util.OptionalLong.empty());
         }
 
         static Expectation of(EventKind kind, AttemptRule attempt, Predicate<ExecutionEvent> content,
                               String description) {
-            return new Expectation(kind, false, attempt, content, description);
+            return new Expectation(kind, false, attempt, content, description, java.util.OptionalLong.empty());
         }
 
         static Expectation correction(AttemptRule attempt) {
-            return new Expectation(EventKind.CORRECTION, true, attempt, e -> true, "any content");
+            return new Expectation(EventKind.CORRECTION, true, attempt, e -> true, "any content",
+                    java.util.OptionalLong.empty());
+        }
+
+        /** The same expectation, also requiring the ledger sequence the sample states for this fact. */
+        Expectation at(long sequence) {
+            return new Expectation(kind, outer, attempt, content, description, java.util.OptionalLong.of(sequence));
+        }
+
+        Expectation at(java.util.OptionalLong sequence) {
+            return new Expectation(kind, outer, attempt, content, description, sequence);
         }
     }
 
@@ -221,6 +239,10 @@ final class ForgeSampleChecks {
         if (!expectation.content().test(effective(outer))) {
             violations.add(what + " does not carry " + expectation.description());
         }
+        if (expectation.sequence().isPresent() && expectation.sequence().getAsLong() != entry.sequence()) {
+            violations.add(what + " states ledger sequence " + expectation.sequence().getAsLong()
+                    + " but the event is at sequence " + entry.sequence());
+        }
         return violations;
     }
 
@@ -230,6 +252,42 @@ final class ForgeSampleChecks {
 
     static Predicate<ExecutionEvent> finishedWith(Optional<com.monada.core.execution.AttemptResult> result) {
         return e -> e instanceof AttemptFinished f && result.map(r -> r == f.result()).orElse(true);
+    }
+
+    static Predicate<ExecutionEvent> finishedWithSolution(com.monada.core.execution.AttemptResult result,
+                                                          String solution) {
+        return e -> e instanceof AttemptFinished f && f.result() == result
+                && f.solutionSummary().equals(Optional.of(solution));
+    }
+
+    static Predicate<ExecutionEvent> recordedOutcome(com.monada.core.execution.Outcome outcome) {
+        return e -> e instanceof ExecutionEvent.OutcomeRecorded o && o.outcome().equals(outcome);
+    }
+
+    /**
+     * The sample exposes one revision per corrected attempt finish of the fixture, each pointing at the finish the
+     * sample exports for that attempt; an execution the fixture never corrects exposes none.
+     */
+    static List<String> revisionCountViolations(ForgeFixture fixture, ExperienceSample sample) {
+        List<String> violations = new ArrayList<>();
+        String exec = sample.executionId().value();
+        List<ForgeFixture.Attempt> corrected = fixture.attemptsOf(exec).stream()
+                .filter(ForgeFixture.Attempt::revised).toList();
+        if (sample.revisions().size() != corrected.size()) {
+            violations.add(exec + ": sample exposes " + sample.revisions().size() + " revisions but the fixture "
+                    + "corrects " + corrected.size() + " attempts");
+        }
+        for (ForgeFixture.Attempt fa : corrected) {
+            Optional<ExperienceSample.SampleAttempt> attempt = sample.attempts().stream()
+                    .filter(a -> a.ordinal() == fa.ordinal()).findFirst();
+            boolean linked = attempt.flatMap(ExperienceSample.SampleAttempt::finish)
+                    .map(finish -> sample.revisions().stream().anyMatch(r -> r.effective().equals(finish)))
+                    .orElse(false);
+            if (!linked) {
+                violations.add(fa.experienceId() + ": no exported revision corrects this attempt's finish");
+            }
+        }
+        return violations;
     }
 
     static Predicate<ExecutionEvent> stageNamed(String name) {

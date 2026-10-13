@@ -59,11 +59,15 @@ public final class ForgeExperienceEvaluator {
     private ForgeExperienceEvaluator() {
     }
 
-    /** Evaluates {@code fixture} using fresh stores below {@code workDir} (created if missing). */
+    /**
+     * Evaluates {@code fixture} using two fresh stores created below {@code workDir} (which is created if missing).
+     * Every call gets its own {@code run-*} directories, so calling it again with the same {@code workDir} never
+     * sees the ledgers of an earlier call; the caller owns {@code workDir} and removes it.
+     */
     public static ForgeEvaluationReport evaluate(ForgeFixture fixture, Path workDir) {
-        Run first = runOnce(fixture, workDir.resolve("run-1"));
+        Run first = runOnce(fixture, freshRunDirectory(workDir));
         try {
-            Run second = runOnce(fixture, workDir.resolve("run-2"));
+            Run second = runOnce(fixture, freshRunDirectory(workDir));
             try {
                 List<ForgeGate> gates = new ArrayList<>(first.gates);
                 gates.add(determinismGate(first, second));
@@ -75,6 +79,15 @@ public final class ForgeExperienceEvaluator {
             }
         } finally {
             first.snapshot.close();
+        }
+    }
+
+    private static Path freshRunDirectory(Path workDir) {
+        try {
+            Files.createDirectories(workDir);
+            return Files.createTempDirectory(workDir, "run-");
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
     }
 
@@ -373,9 +386,6 @@ public final class ForgeExperienceEvaluator {
                     if (sample.acceptance() != DerivedAcceptance.Status.VALIDATED_ACCEPTED) {
                         violations.add(exec + ": SUCCESS without a validated acceptance (" + sample.acceptance() + ")");
                     }
-                    if (!sample.eligibility().eligible()) {
-                        violations.add(exec + ": SUCCESS on an ineligible sample");
-                    }
                     // the hand-listed ordinals stay as an independent contrast to the derived ones
                     Integer ordinal = fixture.expectations().successOrdinals().get(exec);
                     if (ordinal != null && (sample.successOrdinal().isEmpty()
@@ -410,6 +420,52 @@ public final class ForgeExperienceEvaluator {
 
     // --- G3: exact reference consistency --------------------------------------------------------------
 
+    /**
+     * What a recalled hit must be (section 18.1): the exact ledger event of one {@code ATTEMPT_FINISHED} fact, of
+     * the right attempt, at the latest revision of the fixture, carrying the attempt's result and latest solution.
+     * The hit's own event is validated, so a projection that maps an atom to another valid event of the same
+     * attempt (a stage, the start) is a violation even though that event loads and its coordinates match.
+     */
+    static List<String> hitViolations(ForgeFixture fixture, ExecutionMemory memory, ScopeId scope, String queryId,
+                                      ExperienceHit h) {
+        List<String> violations = new ArrayList<>();
+        ExperienceRef ref = h.ref();
+        Optional<HistoryEntry> exact = memory.loadEvent(scope, ref.eventId(), ref.revision());
+        if (exact.isEmpty() || !exact.get().equals(h.event())) {
+            violations.add(queryId + ": hit " + ref.eventId().value() + " r" + ref.revision()
+                    + " does not equal the exact ledger load");
+        }
+        exact.ifPresent(entry -> violations.addAll(coordinateViolations(queryId + ": hit", scope, ref, entry)));
+        AttemptId attempt = ref.attempt().orElse(null);
+        if (attempt == null) {
+            violations.add(queryId + ": hit without an attempt");
+            return violations;
+        }
+        String id = ForgeFixtureRecorder.experienceId(ref.execution().value(), attempt);
+        ForgeFixture.Attempt fixtureAttempt = fixture.attempts().stream()
+                .filter(a -> a.experienceId().equals(id)).findFirst().orElse(null);
+        if (fixtureAttempt == null) {
+            violations.add(queryId + ": hit " + id + " is not in the fixture");
+            return violations;
+        }
+        int expectedRevision = fixtureAttempt.revised() ? 2 : 1;
+        if (ref.revision() != expectedRevision) {
+            violations.add(queryId + ": " + id + " recalled at revision " + ref.revision() + ", latest is "
+                    + expectedRevision);
+        }
+        String expectedSolution = fixtureAttempt.revised() ? fixtureAttempt.revisedSolution()
+                : fixtureAttempt.solution();
+        violations.addAll(ForgeSampleChecks.factViolations(queryId + ": hit " + id, Expectation.of(
+                EventKind.ATTEMPT_FINISHED, AttemptRule.of(attempt), ForgeSampleChecks.finishedWithSolution(
+                        com.monada.core.execution.AttemptResult.valueOf(fixtureAttempt.result()), expectedSolution),
+                "result " + fixtureAttempt.result() + " and the latest solution"), h.event()));
+        Optional<AttemptView> view = memory.loadAttempt(scope, ref.execution(), attempt);
+        if (view.isEmpty() || !view.get().solutionSummary().equals(Optional.of(expectedSolution))) {
+            violations.add(queryId + ": " + id + " loads a different solution than its latest revision");
+        }
+        return violations;
+    }
+
     private static ForgeGate referenceGate(ForgeFixture fixture, Snapshot s) {
         List<String> violations = new ArrayList<>();
         int hitsChecked = 0;
@@ -419,36 +475,7 @@ public final class ForgeExperienceEvaluator {
             ExecutionMemory memory = s.memories.get(q.scopeKey());
             for (ExperienceHit h : s.hits.get(q.id())) {
                 hitsChecked++;
-                ExperienceRef ref = h.ref();
-                Optional<HistoryEntry> exact = memory.loadEvent(scope, ref.eventId(), ref.revision());
-                if (exact.isEmpty() || !exact.get().equals(h.event())) {
-                    violations.add(q.id() + ": hit " + ref.eventId().value() + " r" + ref.revision()
-                            + " does not equal the exact ledger load");
-                }
-                exact.ifPresent(entry -> violations.addAll(coordinateViolations(q.id() + ": hit", scope, ref, entry)));
-                AttemptId attempt = ref.attempt().orElse(null);
-                if (attempt == null) {
-                    violations.add(q.id() + ": hit without an attempt");
-                    continue;
-                }
-                String id = ForgeFixtureRecorder.experienceId(ref.execution().value(), attempt);
-                ForgeFixture.Attempt fixtureAttempt = fixture.attempts().stream()
-                        .filter(a -> a.experienceId().equals(id)).findFirst().orElse(null);
-                if (fixtureAttempt == null) {
-                    violations.add(q.id() + ": hit " + id + " is not in the fixture");
-                    continue;
-                }
-                int expectedRevision = fixtureAttempt.revised() ? 2 : 1;
-                if (ref.revision() != expectedRevision) {
-                    violations.add(q.id() + ": " + id + " recalled at revision " + ref.revision() + ", latest is "
-                            + expectedRevision);
-                }
-                Optional<AttemptView> view = memory.loadAttempt(scope, ref.execution(), attempt);
-                String expectedSolution = fixtureAttempt.revised() ? fixtureAttempt.revisedSolution()
-                        : fixtureAttempt.solution();
-                if (view.isEmpty() || !view.get().solutionSummary().equals(Optional.of(expectedSolution))) {
-                    violations.add(q.id() + ": " + id + " loads a different solution than its latest revision");
-                }
+                violations.addAll(hitViolations(fixture, memory, scope, q.id(), h));
             }
         }
         Map<String, Integer> categories = new java.util.TreeMap<>();
@@ -468,11 +495,7 @@ public final class ForgeExperienceEvaluator {
                 violations.addAll(referenceViolations(memory, scope, sample));
                 violations.addAll(chronologyViolations(fixture, memory, scope, sample));
                 String exec = sample.executionId().value();
-                boolean hasCorrection = fixture.attemptsOf(exec).stream().anyMatch(ForgeFixture.Attempt::revised);
-                if (hasCorrection != !sample.revisions().isEmpty()) {
-                    violations.add(exec + ": revisions " + (sample.revisions().isEmpty() ? "missing" : "present")
-                            + " but the fixture " + (hasCorrection ? "corrects" : "never corrects") + " this execution");
-                }
+                violations.addAll(ForgeSampleChecks.revisionCountViolations(fixture, sample));
                 if (fixture.execution(exec).outcome() != ForgeFixture.OutcomeKind.NONE && sample.outcome().isEmpty()) {
                     violations.add(exec + ": the recorded outcome is missing from the export");
                 }
@@ -516,27 +539,30 @@ public final class ForgeExperienceEvaluator {
                     "result " + a.result().map(Enum::name).orElse("<any>")))));
             a.stages().forEach(st -> refs.add(new LabelledRef("stage", st.ref(), Expectation.of(
                     EventKind.STAGE_RECORDED, inAttempt, ForgeSampleChecks.stageNamed(st.stage()),
-                    "stage " + st.stage()))));
+                    "stage " + st.stage()).at(st.sequence()))));
             a.evidence().forEach(ev -> refs.add(new LabelledRef("evidence", ev.ref(),
-                    Expectation.of(EventKind.EVIDENCE_RECORDED, inAttempt))));
+                    Expectation.of(EventKind.EVIDENCE_RECORDED, inAttempt).at(ev.sequence()))));
         }
-        sample.outcome().ifPresent(o -> refs.add(new LabelledRef("outcome", o.ref(),
-                Expectation.of(EventKind.OUTCOME_RECORDED, AttemptRule.none()))));
+        sample.outcome().ifPresent(o -> refs.add(new LabelledRef("outcome", o.ref(), Expectation.of(
+                EventKind.OUTCOME_RECORDED, AttemptRule.none(), ForgeSampleChecks.recordedOutcome(o.outcome()),
+                "the exported outcome " + o.outcome()).at(o.sequence()))));
         // gate evidence comes from the accepted attempt and must observe the gate's own dimension
         AttemptRule accepted = sample.attempts().stream().filter(ExperienceSample.SampleAttempt::accepted).findFirst()
                 .map(a -> AttemptRule.of(a.id())).orElse(AttemptRule.any());
         sample.gates().forEach(g -> g.ref().ifPresent(r -> refs.add(new LabelledRef("gate", r, Expectation.of(
                 EventKind.EVIDENCE_RECORDED, accepted, ForgeSampleChecks.observing(g.dimension()),
-                "an observation of " + g.dimension())))));
+                "an observation of " + g.dimension()).at(g.sequence())))));
         for (ExperienceSample.Revision r : sample.revisions()) {
-            refs.add(new LabelledRef("revision.effective", r.effective(), Expectation.correction(AttemptRule.any())));
+            refs.add(new LabelledRef("revision.effective", r.effective(),
+                    Expectation.correction(AttemptRule.any()).at(r.sequence())));
             r.superseded().forEach(sup -> refs.add(new LabelledRef("revision.superseded", sup,
                     Expectation.of(sup.revision() == 1 ? kindOfSuperseded(sample, r) : EventKind.CORRECTION,
                             AttemptRule.any()))));
         }
         sample.diagnostics().ifPresent(d -> {
-            d.outcomeHistory().forEach(o -> refs.add(new LabelledRef("diagnostics.outcome", o.ref(),
-                    Expectation.of(EventKind.OUTCOME_RECORDED, AttemptRule.none()))));
+            d.outcomeHistory().forEach(o -> refs.add(new LabelledRef("diagnostics.outcome", o.ref(), Expectation.of(
+                    EventKind.OUTCOME_RECORDED, AttemptRule.none(), ForgeSampleChecks.recordedOutcome(o.outcome()),
+                    "the exported outcome " + o.outcome()).at(o.sequence()))));
             d.ignoredObservations().forEach(i -> refs.add(new LabelledRef("diagnostics.ignored", i.ref(),
                     Expectation.of(EventKind.EVIDENCE_RECORDED, AttemptRule.any()))));
         });
@@ -595,6 +621,19 @@ public final class ForgeExperienceEvaluator {
                 }
             }
         }
+        violations.addAll(revisionViolations(memory, scope, sample));
+        return violations;
+    }
+
+    /**
+     * Revisions keep their whole history: each revision must correct a fact the sample exports, replace the same
+     * kind of event, and retain every predecessor, in order, down to revision 1. The chain is walked through the
+     * ledger ({@code supersedes} of each event), so a dropped, reordered or foreign predecessor is a violation and
+     * an empty {@code superseded} list is not skipped.
+     */
+    static List<String> revisionViolations(ExecutionMemory memory, ScopeId scope, ExperienceSample sample) {
+        List<String> violations = new ArrayList<>();
+        String exec = sample.executionId().value();
         Set<ExperienceRef> exportedFacts = new java.util.HashSet<>();
         for (LabelledRef labelled : exportedReferences(sample)) {
             if (!labelled.origin().startsWith("revision.")) {
@@ -602,29 +641,43 @@ public final class ForgeExperienceEvaluator {
             }
         }
         for (ExperienceSample.Revision r : sample.revisions()) {
-            if (!exportedFacts.contains(r.effective())) {
-                violations.add(exec + ": revision " + r.effective().eventId().value() + " r"
-                        + r.effective().revision() + " corrects a fact the sample does not export");
+            ExperienceRef effective = r.effective();
+            if (!exportedFacts.contains(effective)) {
+                violations.add(exec + ": revision " + effective.eventId().value() + " r" + effective.revision()
+                        + " corrects a fact the sample does not export");
             }
-            memory.loadEvent(scope, r.effective().eventId(), r.effective().revision()).ifPresent(entry -> {
-                if (entry.event() instanceof com.monada.core.execution.ExecutionEvent.Correction c) {
-                    Optional<com.monada.core.execution.EventId> named = c.envelope().supersedes();
-                    if (!r.superseded().isEmpty() && (named.isEmpty()
-                            || !named.get().equals(r.superseded().get(0).eventId())
-                            || r.superseded().get(0).revision() != r.effective().revision() - 1)) {
-                        violations.add(exec + ": the first superseded revision is not the one the correction names");
-                    }
-                    EventKind replaced = ForgeSampleChecks.kindOf(c);
-                    EventKind expected = kindOfSuperseded(sample, r);
-                    if (replaced != expected) {
-                        violations.add(exec + ": revision replaces a " + replaced + " but corrects a " + expected);
-                    }
+            int predecessors = effective.revision() - 1;
+            if (r.superseded().size() != predecessors) {
+                violations.add(exec + ": revision " + effective.eventId().value() + " r" + effective.revision()
+                        + " retains " + r.superseded().size() + " of its " + predecessors + " predecessors");
+            }
+            Optional<HistoryEntry> head = memory.loadEvent(scope, effective.eventId(), effective.revision());
+            if (head.isPresent() && head.get().event() instanceof com.monada.core.execution.ExecutionEvent.Correction c) {
+                EventKind replaced = ForgeSampleChecks.kindOf(c);
+                EventKind expected = kindOfSuperseded(sample, r);
+                if (replaced != expected) {
+                    violations.add(exec + ": revision replaces a " + replaced + " but corrects a " + expected);
                 }
-            });
+                Optional<com.monada.core.execution.EventId> named = c.envelope().supersedes();
+                int revision = effective.revision() - 1;
+                for (int i = 0; i < r.superseded().size(); i++) {
+                    ExperienceRef sup = r.superseded().get(i);
+                    if (named.isEmpty() || !named.get().equals(sup.eventId()) || sup.revision() != revision) {
+                        violations.add(exec + ": predecessor " + (i + 1) + " of " + effective.eventId().value()
+                                + " is " + sup.eventId().value() + " r" + sup.revision() + " but the ledger chain has "
+                                + named.map(com.monada.core.execution.EventId::value).orElse("<none>") + " r"
+                                + revision);
+                        break;
+                    }
+                    Optional<HistoryEntry> previous = memory.loadEvent(scope, sup.eventId(), sup.revision());
+                    named = previous.flatMap(h -> h.event().envelope().supersedes());
+                    revision--;
+                }
+            }
             for (ExperienceRef superseded : r.superseded()) {
-                if (superseded.revision() >= r.effective().revision()) {
+                if (superseded.revision() >= effective.revision()) {
                     violations.add(exec + ": superseded " + superseded.eventId().value() + " r" + superseded.revision()
-                            + " is not older than the effective r" + r.effective().revision());
+                            + " is not older than the effective r" + effective.revision());
                 }
             }
         }
@@ -1004,16 +1057,45 @@ public final class ForgeExperienceEvaluator {
     // --- corpus listing -------------------------------------------------------------------------------
 
     private static List<ForgeCorpusLine> corpus(ForgeFixture fixture, Snapshot s) {
+        Map<String, AnnotatedSample> exported = new LinkedHashMap<>();
+        s.exports.values().forEach(e -> e.samples().forEach(a -> exported.putIfAbsent(
+                a.sample().executionId().value(), a)));
+        return corpusLines(fixture, exported, attemptResults(s));
+    }
+
+    /**
+     * One line per experience built from what the export reports: label, acceptance and cost of the exported
+     * sample. The judged value is shown only beside a value that differs from it, and an execution the export
+     * lacks is marked MISSING, so a failing gate is never hidden behind rows that display the expected values.
+     */
+    static List<ForgeCorpusLine> corpusLines(ForgeFixture fixture, Map<String, AnnotatedSample> exported,
+                                             Map<String, String> attemptResults) {
         List<ForgeCorpusLine> lines = new ArrayList<>();
-        Map<String, String> results = attemptResults(s);
         for (ForgeFixture.Attempt a : fixture.attempts()) {
             ForgeFixture.Execution e = fixture.execution(a.execution());
-            ExecutionSummary summary = s.summaries.get(e.id());
-            String cost = summary.cost().status() == CostToAcceptedOutcome.Status.AVAILABLE
-                    ? summary.cost().amounts().get(0).amount().toPlainString() + " USD" : "unavailable";
-            lines.add(new ForgeCorpusLine(a.experienceId(), e.scopeKey(), results.getOrDefault(a.experienceId(),
-                    "UNKNOWN"), e.expectedLabel(), e.expectedAcceptance(), cost));
+            AnnotatedSample sample = exported.get(e.id());
+            String label;
+            String acceptance;
+            String cost;
+            if (sample == null) {
+                label = observed("MISSING", e.expectedLabel());
+                acceptance = observed("MISSING", e.expectedAcceptance());
+                cost = "MISSING";
+            } else {
+                label = observed(sample.sample().label().name(), e.expectedLabel());
+                acceptance = observed(sample.sample().acceptance().name(), e.expectedAcceptance());
+                cost = sample.cost().status() == CostToAcceptedOutcome.Status.AVAILABLE
+                        ? sample.cost().amounts().get(0).amount().toPlainString() + " USD"
+                        : sample.cost().status() == CostToAcceptedOutcome.Status.UNAVAILABLE ? "unavailable"
+                        : sample.cost().status().name().toLowerCase(java.util.Locale.ROOT);
+            }
+            lines.add(new ForgeCorpusLine(a.experienceId(), e.scopeKey(),
+                    attemptResults.getOrDefault(a.experienceId(), "UNKNOWN"), label, acceptance, cost));
         }
         return lines;
+    }
+
+    private static String observed(String actual, String judged) {
+        return actual.equals(judged) ? actual : actual + " (judged " + judged + ")";
     }
 }

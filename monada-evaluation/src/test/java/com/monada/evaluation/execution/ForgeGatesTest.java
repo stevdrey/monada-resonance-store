@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.monada.api.execution.DerivedAcceptance;
 import com.monada.api.execution.ExecutionMemory;
 import com.monada.api.execution.ExperienceHit;
 import com.monada.api.execution.ExperienceSample;
@@ -862,6 +863,247 @@ class ForgeGatesTest {
                 assertEquals(3, (more.size() + 3) / 4);
                 assertFalse(ForgeSampleChecks.exportMembershipViolations(fixture, "alpha", more).isEmpty());
             }
+        } finally {
+            memory[0].close();
+        }
+    }
+
+    // --- #6 fresh stores on every evaluate call ---------------------------------------------------------
+
+    @Test
+    void evaluatingTwiceInTheSameWorkDirectoryNeverSeesTheEarlierLedgers() throws Exception {
+        ForgeEvaluationReport first = ForgeExperienceEvaluator.evaluate(fixture, work);
+        ForgeEvaluationReport second = ForgeExperienceEvaluator.evaluate(fixture, work);
+        assertEquals(Decision.READY_FOR_HOST_ADAPTER_EXPERIMENT, first.decision());
+        assertEquals(Decision.READY_FOR_HOST_ADAPTER_EXPERIMENT, second.decision(), second.render());
+        assertEquals(first.render(), second.render());
+        try (var runs = java.nio.file.Files.list(work)) {
+            assertEquals(4, runs.filter(p -> p.getFileName().toString().startsWith("run-")).count());
+        }
+        // a missing work directory is created
+        ForgeEvaluationReport created = ForgeExperienceEvaluator.evaluate(fixture, work.resolve("not/yet/there"));
+        assertEquals(first.render(), created.render());
+    }
+
+    // --- #5 the corpus section shows what the export reports ---------------------------------------------
+
+    @Test
+    void theCorpusSectionShowsObservedLabelsAndMarksDifferencesAndMissingSamples(@TempDir Path root) {
+        ExecutionMemory[] memory = new ExecutionMemory[1];
+        try {
+            List<ExperienceSample> samples = alphaSamples(root, memory);
+            Map<String, AnnotatedSample> exported = new java.util.LinkedHashMap<>();
+            PriceBook prices = PriceBook.of(List.of(ForgeFixtureRecorder.priceSnapshot(fixture)));
+            for (ExperienceSample sample : samples) {
+                exported.put(sample.executionId().value(), new AnnotatedSample(sample,
+                        ExecutionSummaryCalculator.summarize(memory[0].loadExecution(
+                                ForgeFixtureRecorder.scope(fixture, "alpha"), sample.executionId()).orElseThrow(),
+                                prices, List.of()).cost(), AnnotatedSample.Placement.notRequested()));
+            }
+            Map<String, String> results = new HashMap<>();
+            fixture.attempts().forEach(a -> results.put(a.experienceId(), a.result()));
+
+            // real data: observed == judged, so no suffix anywhere for alpha
+            List<ForgeEvaluationReport.ForgeCorpusLine> real = ForgeExperienceEvaluator.corpusLines(fixture,
+                    exported, results);
+            real.stream().filter(l -> l.scopeKey().equals("alpha")).forEach(l -> {
+                assertFalse(l.label().contains("judged"), l.toString());
+                assertFalse(l.acceptance().contains("judged"), l.toString());
+            });
+
+            // the export regressed: a judged SUCCESS comes back UNLABELED
+            ExperienceSample inv2 = sampleOf(samples, "a-inv2");
+            ExperienceSample regressed = new ExperienceSample(inv2.execution(), inv2.taskSummary(), inv2.provenance(),
+                    inv2.policy(), inv2.requiredGates(), inv2.outcome(), DerivedAcceptance.Status.ACCEPTED_UNVALIDATED,
+                    ExperienceSample.Label.UNLABELED, java.util.OptionalInt.empty(), inv2.group(), inv2.eligibility(),
+                    inv2.gates(), inv2.attempts(), inv2.revisions(), inv2.firstSequence(), inv2.lastSequence(),
+                    inv2.diagnostics());
+            Map<String, AnnotatedSample> broken = new java.util.LinkedHashMap<>(exported);
+            broken.put("a-inv2", new AnnotatedSample(regressed, exported.get("a-inv2").cost(),
+                    AnnotatedSample.Placement.notRequested()));
+            broken.remove("a-tz"); // and one execution is gone from the export
+            List<ForgeEvaluationReport.ForgeCorpusLine> lines = ForgeExperienceEvaluator.corpusLines(fixture, broken,
+                    results);
+            var inv2Line = lines.stream().filter(l -> l.experienceId().equals("a-inv2/a1")).findFirst().orElseThrow();
+            assertEquals("UNLABELED (judged SUCCESS)", inv2Line.label());
+            assertEquals("ACCEPTED_UNVALIDATED (judged VALIDATED_ACCEPTED)", inv2Line.acceptance());
+            var tzLine = lines.stream().filter(l -> l.experienceId().equals("a-tz/a1")).findFirst().orElseThrow();
+            assertEquals("MISSING (judged SUCCESS)", tzLine.label());
+            assertEquals("MISSING", tzLine.cost());
+        } finally {
+            memory[0].close();
+        }
+    }
+
+    // --- #1 a recalled hit must be the ATTEMPT_FINISHED fact ----------------------------------------------
+
+    @Test
+    void aRecalledHitThatAddressesAnotherEventOfTheSameAttemptIsAViolation(@TempDir Path root) {
+        ScopeId alpha = ForgeFixtureRecorder.scope(fixture, "alpha");
+        try (ExecutionMemory memory = ExecutionMemory.open(root, alpha)) {
+            ForgeFixtureRecorder.recordScope(memory, fixture, "alpha");
+            memory.rebuildProjection(alpha);
+            List<ExperienceHit> hits = memory.recall(alpha, "Fix null pointer in invoice totals", 10).hits();
+            ExperienceHit real = hits.stream().filter(h -> h.ref().execution().value().equals("a-inv2")).findFirst()
+                    .orElseThrow();
+            assertEquals(List.of(), ForgeExperienceEvaluator.hitViolations(fixture, memory, alpha, "Q", real));
+
+            // genuine events of the same attempt: its stage and its start, with a matching ref and event
+            for (String suffix : List.of("a1.stage", "a1.start")) {
+                var entry = memory.loadEvent(alpha, EventId.of("a-inv2." + suffix), 1).orElseThrow();
+                ExperienceRef ref = new ExperienceRef(real.ref().scope(), real.ref().task(), real.ref().execution(),
+                        real.ref().attempt(), entry.event().eventId(), 1);
+                ExperienceHit forged = new ExperienceHit(ref, real.atomId(), real.similarity(), entry,
+                        real.projectionVersion(), real.coveredSequence());
+                List<String> v = ForgeExperienceEvaluator.hitViolations(fixture, memory, alpha, "Q", forged);
+                assertTrue(v.stream().anyMatch(x -> x.contains("but must address ATTEMPT_FINISHED")), suffix + v);
+            }
+
+            // the finish of another attempt of the same execution is rejected by the attempt rule
+            ScopeId probe = alpha;
+            var other = memory.loadEvent(probe, EventId.of("a-inv1.a1.fin"), 1).orElseThrow();
+            ExperienceRef foreignRef = new ExperienceRef(real.ref().scope(), real.ref().task(), real.ref().execution(),
+                    real.ref().attempt(), other.event().eventId(), 1);
+            ExperienceHit foreign = new ExperienceHit(foreignRef, real.atomId(), real.similarity(), other,
+                    real.projectionVersion(), real.coveredSequence());
+            assertFalse(ForgeExperienceEvaluator.hitViolations(fixture, memory, alpha, "Q", foreign).isEmpty());
+        }
+    }
+
+    // --- #2 the exported outcome must be the one the ledger holds ------------------------------------------
+
+    @Test
+    void anExportedOutcomeThatDisagreesWithItsLedgerEventIsAViolation(@TempDir Path root) {
+        ExecutionMemory[] memory = new ExecutionMemory[1];
+        try {
+            ExperienceSample yaml = sampleOf(alphaSamples(root, memory), "a-yaml");
+            ScopeId alpha = ForgeFixtureRecorder.scope(fixture, "alpha");
+            ExperienceSample.OutcomeFact real = yaml.outcome().orElseThrow();
+            // accepted -> rejected, accepted-by-claim, and a displaced ledger sequence
+            for (var forgedOutcome : List.of(
+                    com.monada.core.execution.Outcome.rejected(com.monada.core.execution.OutcomeOrigin.VALIDATED),
+                    com.monada.core.execution.Outcome.accepted(com.monada.core.execution.OutcomeOrigin.IMPORTED_CLAIM,
+                            real.outcome().acceptedAttempt().orElseThrow()))) {
+                List<String> v = ForgeExperienceEvaluator.referenceViolations(memory[0], alpha, withOutcome(yaml,
+                        Optional.of(new ExperienceSample.OutcomeFact(real.ref(), real.sequence(), forgedOutcome))));
+                assertTrue(v.stream().anyMatch(x -> x.contains("does not carry the exported outcome")), v.toString());
+            }
+            List<String> shifted = ForgeExperienceEvaluator.referenceViolations(memory[0], alpha, withOutcome(yaml,
+                    Optional.of(new ExperienceSample.OutcomeFact(real.ref(), real.sequence() + 1, real.outcome()))));
+            assertTrue(shifted.stream().anyMatch(x -> x.contains("states ledger sequence")), shifted.toString());
+
+            // the same holds for a stage whose stated sequence is off
+            ExperienceSample.SampleStage st = yaml.attempts().get(0).stages().get(0);
+            ExperienceSample off = withAttempt(yaml, 0, a -> withStages(a, List.of(new ExperienceSample.SampleStage(
+                    st.ref(), st.sequence() + 5, st.stage(), st.route(), st.startedAt(), st.endedAt(),
+                    st.usageDeclaration(), st.justification(), st.usage(), st.artifacts()))));
+            assertTrue(ForgeExperienceEvaluator.referenceViolations(memory[0], alpha, off).stream()
+                    .anyMatch(x -> x.contains("states ledger sequence")));
+        } finally {
+            memory[0].close();
+        }
+    }
+
+    @Test
+    void theDiagnosticViewPassesTheSameReferenceChecks(@TempDir Path root) {
+        ScopeId alpha = ForgeFixtureRecorder.scope(fixture, "alpha");
+        try (ExecutionMemory memory = ExecutionMemory.open(root, alpha)) {
+            ForgeFixtureRecorder.recordScope(memory, fixture, "alpha");
+            memory.rebuildProjection(alpha);
+            List<ExperienceSample> samples = memory.exportSamples(ExportRequest.first(alpha,
+                    com.monada.api.execution.ExportCutoff.latest(), 50, com.monada.api.execution.ExportView.DIAGNOSTIC,
+                    com.monada.api.execution.ExportEvidencePolicy.executionPolicyOnly())).samples();
+            assertEquals(9, samples.size());
+            int diagnosticRefs = 0;
+            for (ExperienceSample sample : samples) {
+                assertTrue(sample.diagnostics().isPresent());
+                diagnosticRefs += ForgeExperienceEvaluator.exportedReferences(sample).stream()
+                        .filter(r -> r.origin().startsWith("diagnostics.")).count();
+                assertEquals(List.of(), ForgeExperienceEvaluator.referenceViolations(memory, alpha, sample),
+                        sample.executionId().value());
+            }
+            assertTrue(diagnosticRefs > 0, "the diagnostic references are exercised");
+        }
+    }
+
+    // --- #3 a revision keeps its whole history --------------------------------------------------------------
+
+    @Test
+    void aRevisionThatDropsOrReplacesItsPredecessorsIsAViolation(@TempDir Path root) {
+        ExecutionMemory[] memory = new ExecutionMemory[1];
+        try {
+            ExperienceSample yaml = sampleOf(alphaSamples(root, memory), "a-yaml");
+            ScopeId alpha = ForgeFixtureRecorder.scope(fixture, "alpha");
+            ExperienceSample.Revision real = yaml.revisions().get(0);
+            assertEquals(List.of(), ForgeExperienceEvaluator.revisionViolations(memory[0], alpha, yaml));
+            assertEquals(List.of(), ForgeSampleChecks.revisionCountViolations(fixture, yaml));
+
+            // the whole superseded list is dropped: nothing left to validate used to mean nothing was reported
+            ExperienceSample dropped = withRevisions(yaml, List.of(new ExperienceSample.Revision(real.effective(),
+                    real.sequence(), real.justification(), List.of())));
+            List<String> v = ForgeExperienceEvaluator.revisionViolations(memory[0], alpha, dropped);
+            assertTrue(v.stream().anyMatch(x -> x.contains("retains 0 of its 1 predecessors")), v.toString());
+
+            // a predecessor that is a genuine event, but not the one the ledger chain names
+            ExperienceRef wrong = ref(real.effective(), "a-yaml.a1.stage", 1);
+            ExperienceSample replaced = withRevisions(yaml, List.of(new ExperienceSample.Revision(real.effective(),
+                    real.sequence(), real.justification(), List.of(wrong))));
+            assertTrue(ForgeExperienceEvaluator.revisionViolations(memory[0], alpha, replaced).stream()
+                    .anyMatch(x -> x.contains("predecessor 1 of")), "replaced predecessor");
+
+            // the revisions of the execution are missing altogether (the fixture corrects one attempt)
+            ExperienceSample none = withRevisions(yaml, List.of());
+            assertTrue(ForgeSampleChecks.revisionCountViolations(fixture, none).stream()
+                    .anyMatch(x -> x.contains("0 revisions but the fixture corrects 1")));
+            // and an execution that the fixture never corrects must not invent one
+            ExperienceSample inv2 = sampleOf(alphaSamples2(root), "a-inv2");
+            assertEquals(List.of(), ForgeSampleChecks.revisionCountViolations(fixture, inv2));
+            assertFalse(ForgeSampleChecks.revisionCountViolations(fixture, withRevisions(inv2,
+                    List.of(real))).isEmpty());
+        } finally {
+            memory[0].close();
+        }
+    }
+
+    private List<ExperienceSample> alphaSamples2(Path root) {
+        ScopeId alpha = ForgeFixtureRecorder.scope(fixture, "alpha");
+        try (ExecutionMemory m = ExecutionMemory.openReadOnly(root, alpha)) {
+            return m.exportSamples(ExportRequest.firstPage(alpha, 50)).samples();
+        }
+    }
+
+    // --- #4 eligibility follows the label ---------------------------------------------------------------------
+
+    private static ExperienceSample withEligibility(ExperienceSample x, ExperienceSample.Eligibility eligibility) {
+        return new ExperienceSample(x.execution(), x.taskSummary(), x.provenance(), x.policy(), x.requiredGates(),
+                x.outcome(), x.acceptance(), x.label(), x.successOrdinal(), x.group(), eligibility, x.gates(),
+                x.attempts(), x.revisions(), x.firstSequence(), x.lastSequence(), x.diagnostics());
+    }
+
+    @Test
+    void eligibilityMustBeTrueExactlyForSuccessAndFailureLabels(@TempDir Path root) {
+        ExecutionMemory[] memory = new ExecutionMemory[1];
+        try {
+            List<ExperienceSample> samples = alphaSamples(root, memory);
+            ExperienceSample.Reason reason = new ExperienceSample.Reason(
+                    ExperienceSample.EligibilityCode.OUTCOME_PENDING, Optional.empty(), "forged");
+            ExperienceSample failure = sampleOf(samples, "a-export");
+            ExperienceSample unlabeled = sampleOf(samples, "a-tokens");
+            ExperienceSample success = sampleOf(samples, "a-inv2");
+            assertEquals(ExperienceSample.Label.FAILURE, failure.label());
+            assertEquals(ExperienceSample.Label.UNLABELED, unlabeled.label());
+            for (ExperienceSample real : List.of(failure, unlabeled, success)) {
+                assertEquals(List.of(), ForgeSampleChecks.successViolations(fixture, real), real.executionId().value());
+            }
+            // a valid negative example excluded by an adapter, a non-example offered as one, a success excluded
+            assertTrue(ForgeSampleChecks.successViolations(fixture, withEligibility(failure,
+                    new ExperienceSample.Eligibility(false, List.of(reason)))).stream()
+                    .anyMatch(v -> v.contains("FAILURE sample is marked ineligible") && v.contains("must be true")));
+            assertTrue(ForgeSampleChecks.successViolations(fixture, withEligibility(unlabeled,
+                    new ExperienceSample.Eligibility(true, List.of()))).stream()
+                    .anyMatch(v -> v.contains("UNLABELED sample is marked eligible") && v.contains("must be false")));
+            assertFalse(ForgeSampleChecks.successViolations(fixture, withEligibility(success,
+                    new ExperienceSample.Eligibility(false, List.of(reason)))).isEmpty());
         } finally {
             memory[0].close();
         }
