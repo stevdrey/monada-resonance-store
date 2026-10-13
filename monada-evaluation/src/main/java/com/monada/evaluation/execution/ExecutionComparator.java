@@ -217,7 +217,8 @@ public final class ExecutionComparator {
                 PairwiseComparison p = lookup(byPair, ref, other.participant().ref());
                 if (p.dominates(other.participant().ref())) {
                     dominators.add(other.participant().ref());
-                } else if (p.conclusion() == Conclusion.INCONCLUSIVE) {
+                } else {
+                    // Also when the pair is already a tradeoff: front members must be conclusive on every objective.
                     p.objectives().stream().filter(o -> o.verdict() == Verdict.INCONCLUSIVE)
                             .forEach(o -> o.reasons().forEach(undecided::add));
                 }

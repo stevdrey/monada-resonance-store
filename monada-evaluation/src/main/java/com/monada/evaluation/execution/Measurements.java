@@ -20,12 +20,13 @@ final class Measurements {
     record Gap(Code code, String detail) {
     }
 
-    record Reading(Optional<BigDecimal> value, Optional<String> basis, List<Gap> gaps) {
+    record Reading(Optional<BigDecimal> value, Optional<List<String>> basis, List<Gap> gaps) {
         Reading {
+            basis = basis.map(List::copyOf);
             gaps = List.copyOf(gaps);
         }
 
-        static Reading of(BigDecimal value, Optional<String> basis) {
+        static Reading of(BigDecimal value, Optional<List<String>> basis) {
             return new Reading(Optional.of(value), basis, List.of());
         }
 
@@ -75,7 +76,7 @@ final class Measurements {
         }
         // A declared zero (every stage NO_BILLABLE_USAGE) has no currency and no assumptions: it is exactly 0.
         BigDecimal value = cost.amounts().isEmpty() ? BigDecimal.ZERO : cost.amounts().get(0).unrounded();
-        return Reading.of(value, assumptions.isEmpty() ? Optional.empty() : Optional.of(assumptions.first()));
+        return Reading.of(value, assumptions.isEmpty() ? Optional.empty() : Optional.of(List.of(assumptions.first())));
     }
 
     private static Reading time(Optional<Duration> duration, TimeSummary time) {
@@ -101,6 +102,6 @@ final class Measurements {
                     metric.dimension() + " is measured in " + unit + ", objective expects " + metric.unit());
         }
         return Reading.of(BigDecimal.valueOf(o.measuredValue().getAsDouble()),
-                Optional.of(o.evaluatorId() + "@" + o.evaluatorVersion() + "/" + o.source()));
+                Optional.of(List.of(o.evaluatorId(), o.evaluatorVersion(), o.source().name())));
     }
 }

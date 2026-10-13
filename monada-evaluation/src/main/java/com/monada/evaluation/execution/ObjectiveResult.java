@@ -53,7 +53,7 @@ public record ObjectiveResult(Objective objective, Verdict verdict, Optional<Big
             Code code = objective.metric() instanceof ComparisonPolicy.Metric.Cost
                     ? Code.MIXED_PRICING_ASSUMPTIONS : Code.INCOMMENSURABLE_AXIS;
             reasons.add(new Reason(Side.BOTH, code,
-                    "left basis [" + left.basis().get() + "] differs from right basis [" + right.basis().get() + "]"));
+                    "left basis " + left.basis().get() + " differs from right basis " + right.basis().get()));
         }
         if (!reasons.isEmpty()) {
             return new ObjectiveResult(objective, Verdict.INCONCLUSIVE, left.value(), right.value(), reasons);

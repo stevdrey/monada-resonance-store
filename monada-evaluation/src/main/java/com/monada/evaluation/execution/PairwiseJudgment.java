@@ -29,7 +29,9 @@ public record PairwiseJudgment(ExecutionRef first, ExecutionRef second, QualityD
             .thenComparing(PairwiseJudgment::judgeVersion)
             .thenComparing(PairwiseJudgment::source)
             .thenComparing(PairwiseJudgment::rubric)
-            .thenComparing(j -> j.preferred().map(ExecutionRef::toString).orElse(""))
+            .thenComparing(PairwiseJudgment::preferred, Comparator.comparing(
+                    (Optional<ExecutionRef> o) -> o.isPresent()).thenComparing(o -> o.orElse(null),
+                    Comparator.nullsFirst(Comparator.<ExecutionRef>naturalOrder())))
             .thenComparing(PairwiseJudgment::evidence, PairwiseJudgment::compareEvidence);
 
     private static final Comparator<ArtifactRef> EVIDENCE_ORDER = Comparator.comparing(ArtifactRef::kind)
