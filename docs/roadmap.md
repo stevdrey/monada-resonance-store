@@ -112,7 +112,7 @@ Expected scope and implementation order:
 - #97 caller-owned `ExecutionMemory` facade with idempotent recording and revisions — depends on #94, #95, #96 (implemented: one scope per instance, ledger-backed history; see contract section 17);
 - #98 scoped ledger-derived projections and bounded recall — depends on #97 (implemented: per-scope projection generations, explicit rebuild and prune, recall regression gate; see contract section 18);
 - #99 attempt-chain usage and hypothetical `CostToAcceptedOutcome` calculators (`monada-evaluation`) — depends on #95, #97 (implemented: pure `ExecutionSummaryCalculator` with provenance-split usage, decimal hypothetical cost, explicit completeness, effort vs wall-clock and per-dimension gate evidence; see contract section 19);
-- #100 evidence-gated pairwise comparison and Pareto diagnostics — depends on #99;
+- #100 evidence-gated pairwise comparison and Pareto diagnostics (`monada-evaluation`) — depends on #99 (implemented: pure `ExecutionComparator` with comparability reasons, caller-defined gate eligibility, explicit `INCONCLUSIVE` dimensions, conservative Pareto groups and no automatic winner on tradeoffs; observational evidence only, not a production default; see contract section 20);
 - #101 bounded provenance-preserving sample export — depends on #97, #98, #99, #100;
 - #102 reproducible end-to-end Forge experience evaluation and isolation gates — depends on #94, #96–#101.
 

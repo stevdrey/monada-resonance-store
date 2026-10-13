@@ -55,13 +55,28 @@ final class Run implements AutoCloseable {
             Optional.empty(), BillingMode.API_METERED);
 
     private final ExecutionMemory memory;
+    private final ScopeId scope;
+    private final TaskId task;
+    private final ExecutionId exec;
     private int counter;
 
     Run(Path root, Set<QualityDimension> mandatory) {
-        memory = ExecutionMemory.open(root, SCOPE);
-        record(ExecutionEvent.executionStarted(id("start"), SCOPE, TASK, EXEC,
-                new SourceProvenance("rev-1", "ctx-1", "constraints-1"),
-                new EvaluationPolicy("policy", "1", mandatory), "Fix the bug", T0));
+        this(root, SCOPE, TASK, EXEC, new SourceProvenance("rev-1", "ctx-1", "constraints-1"),
+                new EvaluationPolicy("policy", "1", mandatory));
+    }
+
+    /** A run with explicit identity, provenance and policy (used to build comparable or incomparable pairs). */
+    Run(Path root, ScopeId scope, TaskId task, ExecutionId exec, SourceProvenance provenance,
+        EvaluationPolicy policy) {
+        this.scope = scope;
+        this.task = task;
+        this.exec = exec;
+        memory = ExecutionMemory.open(root, scope);
+        record(ExecutionEvent.executionStarted(id("start"), scope, task, exec, provenance, policy, "Fix the bug", T0));
+    }
+
+    ScopeId scope() {
+        return scope;
     }
 
     static Instant at(long seconds) {
@@ -83,7 +98,7 @@ final class Run implements AutoCloseable {
     }
 
     Run attempt(AttemptId attempt, int ordinal, AttemptReason reason, Optional<AttemptId> previous) {
-        record(new AttemptStarted(EventEnvelope.original(nextId("att"), SCOPE, TASK, EXEC, attempt, T0, T0),
+        record(new AttemptStarted(EventEnvelope.original(nextId("att"), scope, task, exec, attempt, T0, T0),
                 ordinal, previous, reason));
         return this;
     }
@@ -100,7 +115,7 @@ final class Run implements AutoCloseable {
     EventId stage(AttemptId attempt, String name, RouteDescriptor route, long start, long end,
                   UsageCounter... usage) {
         EventId id = nextId("stage");
-        record(StageRecorded.measured(EventEnvelope.original(id, SCOPE, TASK, EXEC, attempt, at(end), at(end)),
+        record(StageRecorded.measured(EventEnvelope.original(id, scope, task, exec, attempt, at(end), at(end)),
                 name, route, at(start), at(end), List.of(usage), List.of()));
         return id;
     }
@@ -111,7 +126,7 @@ final class Run implements AutoCloseable {
 
     EventId noBillable(AttemptId attempt, String name, long start, long end) {
         EventId id = nextId("stage");
-        record(StageRecorded.noBillableUsage(EventEnvelope.original(id, SCOPE, TASK, EXEC, attempt, at(end), at(end)),
+        record(StageRecorded.noBillableUsage(EventEnvelope.original(id, scope, task, exec, attempt, at(end), at(end)),
                 name, RouteDescriptor.workerOnly("local"), at(start), at(end), "deterministic local check",
                 List.of()));
         return id;
@@ -130,7 +145,7 @@ final class Run implements AutoCloseable {
 
     EventId evidence(AttemptId attempt, QualityObservation... observations) {
         EventId id = nextId("evidence");
-        record(new EvidenceRecorded(EventEnvelope.original(id, SCOPE, TASK, EXEC, attempt, T0, T0),
+        record(new EvidenceRecorded(EventEnvelope.original(id, scope, task, exec, attempt, T0, T0),
                 List.of(observations), List.of()));
         return id;
     }
@@ -142,7 +157,7 @@ final class Run implements AutoCloseable {
 
     EventId finishEvent(AttemptId attempt, AttemptResult result) {
         EventId id = nextId("fin");
-        record(new AttemptFinished(EventEnvelope.original(id, SCOPE, TASK, EXEC, attempt, T0, T0),
+        record(new AttemptFinished(EventEnvelope.original(id, scope, task, exec, attempt, T0, T0),
                 result, Optional.empty(), Optional.empty()));
         return id;
     }
@@ -150,27 +165,27 @@ final class Run implements AutoCloseable {
     /** Correction (revision {@code revision}) of {@code target}, replacing a finish with {@code result}. */
     EventId correctFinish(EventId target, int revision, AttemptId attempt, AttemptResult result) {
         EventId id = nextId("corr");
-        EventEnvelope outer = new EventEnvelope(id, SCOPE, TASK, EXEC, Optional.of(attempt), revision,
+        EventEnvelope outer = new EventEnvelope(id, scope, task, exec, Optional.of(attempt), revision,
                 Optional.of(target), T0, T0);
         AttemptFinished replacement = new AttemptFinished(
-                EventEnvelope.original(id, SCOPE, TASK, EXEC, attempt, T0, T0), result, Optional.empty(),
+                EventEnvelope.original(id, scope, task, exec, attempt, T0, T0), result, Optional.empty(),
                 Optional.empty());
         record(new Correction(outer, replacement, "attempt re-assessed"));
         return id;
     }
 
     long outcome(Outcome outcome) {
-        return record(ExecutionEvent.outcomeRecorded(nextId("outcome"), SCOPE, TASK, EXEC, outcome, T0));
+        return record(ExecutionEvent.outcomeRecorded(nextId("outcome"), scope, task, exec, outcome, T0));
     }
 
     /** Correction (revision {@code revision}) of {@code target}, replacing a stage with {@code replacement}. */
     EventId correctStage(EventId target, int revision, AttemptId attempt, String name, long start, long end,
                       UsageCounter... usage) {
         EventId id = nextId("corr");
-        EventEnvelope outer = new EventEnvelope(id, SCOPE, TASK, EXEC, Optional.of(attempt), revision,
+        EventEnvelope outer = new EventEnvelope(id, scope, task, exec, Optional.of(attempt), revision,
                 Optional.of(target), at(end), at(end));
         StageRecorded replacement = StageRecorded.measured(
-                EventEnvelope.original(id, SCOPE, TASK, EXEC, attempt, at(end), at(end)), name, ROUTE, at(start),
+                EventEnvelope.original(id, scope, task, exec, attempt, at(end), at(end)), name, ROUTE, at(start),
                 at(end), List.of(usage), List.of());
         record(new Correction(outer, replacement, "usage corrected"));
         return id;
@@ -178,20 +193,20 @@ final class Run implements AutoCloseable {
 
     EventId correctEvidence(EventId target, int revision, AttemptId attempt, QualityObservation... observations) {
         EventId id = nextId("corr");
-        EventEnvelope outer = new EventEnvelope(id, SCOPE, TASK, EXEC, Optional.of(attempt), revision,
+        EventEnvelope outer = new EventEnvelope(id, scope, task, exec, Optional.of(attempt), revision,
                 Optional.of(target), T0, T0);
         EvidenceRecorded replacement = new EvidenceRecorded(
-                EventEnvelope.original(id, SCOPE, TASK, EXEC, attempt, T0, T0), List.of(observations), List.of());
+                EventEnvelope.original(id, scope, task, exec, attempt, T0, T0), List.of(observations), List.of());
         record(new Correction(outer, replacement, "re-run"));
         return id;
     }
 
     ExecutionView view() {
-        return memory.loadExecution(SCOPE, EXEC).orElseThrow();
+        return memory.loadExecution(scope, exec).orElseThrow();
     }
 
     long sequenceOf(EventId id) {
-        return memory.loadEvent(SCOPE, id).orElseThrow().sequence();
+        return memory.loadEvent(scope, id).orElseThrow().sequence();
     }
 
     @Override

@@ -3,8 +3,8 @@
 Status: accepted contract. The immutable domain records (section 15, issue #95) and the ledger with
 replay and read-only audit (section 16, issue #96), the `ExecutionMemory` facade (section 17,
 issue #97), scoped projections with bounded recall (section 18, issue #98) and the usage and
-hypothetical-cost calculators (section 19, issue #99) are implemented; comparison and export remain
-future work. Decision record: [ADR 0004](../adr/0004-embedded-execution-memory.md). Issue: #93 (Forge Integration 1/10).
+hypothetical-cost calculators (section 19, issue #99) and the evidence-gated comparison with Pareto
+diagnostics (section 20, issue #100) are implemented; export remains future work. Decision record: [ADR 0004](../adr/0004-embedded-execution-memory.md). Issue: #93 (Forge Integration 1/10).
 
 This document is the normative v1 contract that issues #94–#102 implement. Later issues may refine
 exact Java signatures and the byte-level payload codec, but must not change the semantics defined here
@@ -65,7 +65,8 @@ Define, without implementing, the v1 semantics for:
 - `monada-learning`: no.
 - `monada-api`: yes — `com.monada.api.execution` facade, derived acceptance and history (#97, implemented); projections and bounded recall (#98, implemented, section 18); export (#101, later).
 - `monada-evaluation`: yes — `com.monada.evaluation.execution` usage/cost calculators (#99, implemented,
-  section 19); comparison, export annotations and end-to-end gates (#100, #101, #102, later).
+  section 19) and evidence-gated comparison (#100, implemented, section 20); export annotations and
+  end-to-end gates (#101, #102, later).
 - `monada-speech`: no.
 
 `monada-api` must never depend on `monada-evaluation`. The documented dependency direction is unchanged.
@@ -435,7 +436,7 @@ version.
 - Pareto diagnostics use only eligible, complete, commensurable measurements under caller-declared
   objectives, directions and tolerances. When tradeoffs remain there is no automatic winner.
 - Results are observational evidence for that corpus, not causal or general model-superiority claims.
-- Comparison lives in `monada-evaluation` only (#100).
+- Comparison lives in `monada-evaluation` only (#100, implemented: section 20).
 
 ## 11. Projections and Bounded Recall
 
@@ -541,7 +542,7 @@ version must be rejected by v1 readers rather than reinterpreted.
 | #97 | `ExecutionMemory` facade: idempotent recording, revisions, history | `monada-api` | #94, #95, #96 |
 | #98 | Scoped projections and bounded recall | `monada-api` | #97 |
 | #99 | Attempt-chain usage and hypothetical `CostToAcceptedOutcome` calculators (**implemented**, section 19) | `monada-evaluation` | #95, #97 |
-| #100 | Evidence-gated pairwise comparison and Pareto diagnostics | `monada-evaluation` | #99 |
+| #100 | Evidence-gated pairwise comparison and Pareto diagnostics (**implemented**, section 20) | `monada-evaluation` | #99 |
 | #101 | Bounded provenance-preserving sample export (+ evaluation annotations) | `monada-api`, `monada-evaluation` | #97, #98, #99, #100 |
 | #102 | Reproducible end-to-end Forge experience evaluation and isolation gates | `monada-evaluation` | #94, #96–#101 |
 
@@ -1062,7 +1063,7 @@ s.cost().status();      // AVAILABLE | PARTIAL | UNAVAILABLE   (basis: HYPOTHETI
   `chainStages` so no work is hidden, `postAcceptanceStages` is empty and the cost is `UNAVAILABLE`.
   `ExecutionSummary.chainScope()` says which case applies: `UP_TO_ACCEPTANCE` or `ALL_RECORDED_NO_ACCEPTANCE`.
   Consumers must not treat the `chain*` fields of an `ALL_RECORDED_NO_ACCEPTANCE` summary as an accepted chain
-  (for example when comparing in #100).
+  (the comparison of section 20 treats such an execution as not eligible).
 - Correction resolution mirrors the facade's own (`ExecutionViews`, package-private in `monada-api`) and is
   kept honest by `ChainScopeGatesAndParityTest`, which compares the resolved effective stages, evidence and
   outcome with the facade's `ExecutionView` after multi-revision corrections.
@@ -1122,6 +1123,136 @@ No persisted format, public signature or default changes. Verification: `./gradl
 QA, accepted, plus one post-acceptance stage) is documented in `AttemptChainSummaryTest`: total 0.1365 USD
 (reported 0.0865, estimated 0.05), reported as `0.136500`, effort 180 s, wall-clock 170 s, active 170 s,
 overlap 10 s. Wiring calculators into Forge or Neuron is future cross-repository work.
+
+## 20. Evidence-gated Comparison and Pareto Diagnostics (issue #100)
+
+Implements section 10 in `com.monada.evaluation.execution` (`monada-evaluation` only; no change to
+`monada-core`, `monada-api`, storage formats, `EvaluationComparator`, retrieval metrics, routing, learning or
+defaults). The code is pure: no clock, file, network, provider or judge; it ranks no model and trains nothing.
+Results are **observational evidence about the supplied executions**, not causal and not a general claim about
+any model (`ExecutionComparator.INTERPRETATION` is carried by every pairwise result and report).
+
+### 20.1 Public API
+
+```java
+ComparisonCandidate a = ComparisonCandidate.of(scope, viewA, prices, List.of());   // runs the #99 summary
+ComparisonCandidate b = ComparisonCandidate.of(scope, viewB, prices, List.of());
+ComparisonPolicy policy = new ComparisonPolicy(Set.of(QualityDimension.TESTS), List.of(
+        new Objective("cost", new Metric.Cost(Currency.getInstance("USD")), Direction.MINIMIZE, new BigDecimal("0.001")),
+        new Objective("effort", new Metric.Effort(), Direction.MINIMIZE, BigDecimal.ZERO)));
+PairwiseComparison pair = ExecutionComparator.compare(a, b, policy);          // one pair
+ComparisonReport report = ExecutionComparator.report(List.of(a, b, c), policy, judgments); // every pair + Pareto
+```
+
+| Type | Role |
+| --- | --- |
+| `ComparisonCandidate` | Caller scope + `ExecutionView` + its `ExecutionSummary` (a view does not carry its scope) |
+| `ComparisonPolicy`, `Objective`, `Metric` | Caller-declared mandatory gates and objectives: `Cost(currency)`, `Effort`, `WallClock`, `Measured(dimension, unit)`; direction and tolerance per objective. No defaults, no weights |
+| `Comparability` | `NOT_COMPARABLE` reasons, one `Mismatch(field, left, right)` per field |
+| `Eligibility` | Exclusion reasons; empty means eligible |
+| `ObjectiveResult` | `LEFT_BETTER`, `RIGHT_BETTER`, `TIE` or `INCONCLUSIVE` with reasons, both values |
+| `PairwiseComparison` | Conclusion, optional winner and its basis, all objective results, judgments |
+| `Participant` | Acceptance, eligibility, gate evidence with provenance, resource-chain coverage |
+| `ComparisonReport`, `ParetoGroup` | Deterministic report: participants, all pairs, one Pareto analysis per comparable group |
+| `PairwiseJudgment` | Evaluator-supplied preference with judge, version, source, rubric and evidence |
+
+### 20.2 Comparability
+
+Direct comparison requires exact equality of scope, task, `sourceRevision`, `contextFingerprint`,
+`constraintsFingerprint`, evaluation policy id and policy version. Every differing field is reported as its own
+`Mismatch` (`SCOPE`, `TASK`, `SOURCE_REVISION`, `CONTEXT_FINGERPRINT`, `CONSTRAINTS_FINGERPRINT`, `POLICY_ID`,
+`POLICY_VERSION`). A `NOT_COMPARABLE` pair has no objective results and no winner: nothing is compared across
+different starting conditions. In a report, executions are grouped by these seven values; each group has its own
+Pareto analysis and no group is ranked against another.
+
+### 20.3 Eligibility
+
+An execution is eligible for a validated winner or a Pareto front only if **all** hold:
+
+1. its derived acceptance is `VALIDATED_ACCEPTED` (an accepted outcome alone, an imported claim or an
+   unfinished accepted attempt is `NOT_VALIDATED_ACCEPTED`) and its cutoff is derivable
+   (`CUTOFF_UNDERIVABLE` otherwise);
+2. for every dimension of the **caller's** `mandatoryGates` the effective observation of the accepted attempt is
+   `PASS` or a justified `NOT_APPLICABLE`. `FAIL` is `GATE_FAIL`, `UNKNOWN` is `GATE_UNKNOWN` and no applicable
+   evidence is `GATE_MISSING`. The caller's set is checked in addition to the execution policy's own mandatory set.
+
+Measured values (lines of code, complexity, maintainability index, dependency counts) and evaluator judgments
+never satisfy or waive a gate. Low cost never compensates for an exclusion. An excluded execution still gets
+objective results for display, but `PairwiseComparison.informationalOnly()` is true and it is never a winner. Cost
+of an execution without validated acceptance is `UNAVAILABLE` (section 8) and therefore shows as inconclusive, not
+as cheap.
+
+### 20.4 Objectives, tolerance and `INCONCLUSIVE`
+
+Each objective reads one metric from the chain up to the acceptance cutoff:
+
+| Metric | Value | Inconclusive when (reason code) |
+| --- | --- | --- |
+| `Cost(currency)` | `CurrencyCost.unrounded()` of that currency, exact `BigDecimal` | cost not `AVAILABLE` (`INCOMPLETE_COST`, with the section 8 reasons); chain priced in more than one currency or in another one (`MIXED_CURRENCY`); one chain mixes pricing assumptions, or the two sides use different `PriceSnapshot.assumptions` (`MIXED_PRICING_ASSUMPTIONS`) |
+| `Effort`, `WallClock` | `TimeSummary` seconds | absent (`MISSING_TIME`) |
+| `Measured(dimension, unit)` | effective observation value | no value (`MISSING_MEASUREMENT`); another unit, or another evaluator, version or source on the two sides (`INCOMMENSURABLE_AXIS`) |
+
+A declared zero (every stage `NO_BILLABLE_USAGE`) is exactly 0 and carries no pricing assumption. Different
+models are expected to use different snapshots; only the **assumptions text** must be identical, so callers
+that want cost comparable across models keep it identical. `|left - right| <= tolerance` is a `TIE`; otherwise the
+better side follows the direction. Tolerances make dominance a pairwise relation that is not claimed to be
+transitive. Values are never combined across objectives.
+
+### 20.5 Conclusions, winner and Pareto
+
+For two comparable executions (`PairwiseComparison.Conclusion`):
+
+| Conclusion | Condition | Winner |
+| --- | --- | --- |
+| `NOT_COMPARABLE` | any section 20.2 mismatch | none |
+| `NO_ELIGIBLE_EXECUTION` | neither side eligible | none |
+| `ONLY_LEFT_ELIGIBLE` / `ONLY_RIGHT_ELIGIBLE` | exactly one side eligible | that side, basis `ONLY_ELIGIBLE` (says nothing about cost or quality) |
+| `NO_OBJECTIVES` | both eligible, policy declares none | none |
+| `TRADEOFF` | each side is better on some conclusive objective (stands even if another objective is inconclusive) | none |
+| `INCONCLUSIVE` | no tradeoff, but some objective is inconclusive | none |
+| `LEFT_DOMINATES` / `RIGHT_DOMINATES` | every objective conclusive; one side is better on at least one and the other on none | that side, basis `DOMINANCE` |
+| `EQUIVALENT` | every objective conclusive and tied | none |
+
+`ParetoGroup` (per comparable group):
+
+- `excluded`: ineligible executions with their exclusion reasons;
+- `unassessed`: eligible, but with an incomplete or incommensurable measurement on a declared objective, or no
+  declared objective; they are neither on the front nor dominated, and every reason is listed;
+- `dominated`: dominated by the listed executions through a conclusive pairwise `DOMINATES`;
+- `front`: the remaining assessable executions, each conclusive against every other assessable one.
+
+Mixed currencies or pricing assumptions therefore produce `unassessed`, never a total order. When tradeoffs remain,
+the front holds several executions and there is no automatic winner.
+
+### 20.6 Determinism, judgments, coverage
+
+- Participants and pairs are ordered by `ExecutionRef` (execution id, then scope as tiebreak because execution ids
+  are unique per scope only); groups by the seven comparability values; judgments by pair, dimension, judge,
+  version, source and rubric. Input collection order, including judgments, never changes the report
+  (`ComparisonOrderAndValidationTest` shuffles). Duplicate executions, unknown judgment targets, an empty gate set,
+  duplicate objective ids and negative tolerances are rejected before comparing.
+- `PairwiseJudgment` requires judge id and version, rubric and at least one evidence reference, and names a
+  preferred execution or none. It is attached to its pair as given; it changes no gate, objective result or conclusion.
+  Store creates no judgments and calls no judge.
+- `Participant.resources` keeps cost status and reasons, the number of chain stages and how many are covered, the
+  distinct price snapshots (id, version, provider, model, currency, source, assumptions) and ignored duplicate events.
+  `Participant.gates` keeps every dimension's evidence with evaluator, policy, source and artifacts.
+
+### 20.7 Compatibility and verification
+
+No persisted format, public signature, ranking default or quality-policy default changes, and nothing feeds
+retrieval feedback, routing or learning. This is experimental evaluation evidence, distinct from protected
+correctness gates and not a supported production default. Consumer wiring in Forge or Neuron is future
+cross-repository work. Retrieval metrics are not involved, so no per-query ranking evidence applies.
+
+Verification: `./gradlew :monada-evaluation:test`, `./gradlew test`, `./gradlew verifyLibraryConsumer`.
+`ExecutionComparatorTest` records real executions in temporary directories and hand-computes (USD per 1M tokens:
+input 2, output 10): a cheap execution failing `TESTS` (0.003, not a cost to an accepted outcome) beside a direct
+accepted one (10,000 in / 1,000 out = 0.03 USD, 10 s) and an accepted repair (0.03 + 0.06 = 0.09 USD, 10 s + 30 s =
+40 s), where direct dominates repaired and the cheap one is excluded; a tradeoff (0.04 USD / 10 s against 0.02 USD /
+60 s) with no winner; a three-execution front (0.02 / 30 s, 0.04 / 10 s, 0.05 / 40 s) where the third is dominated by
+both; a tie exactly at tolerance; incomplete usage; mixed currency and mixed pricing assumptions; and one case per
+comparability field.
 
 ## Acceptance Criteria
 
