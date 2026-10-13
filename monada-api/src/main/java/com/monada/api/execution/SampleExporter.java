@@ -78,7 +78,7 @@ final class SampleExporter {
                 : java.util.Optional.empty();
         return new ExperienceSamplePage(ExperienceSamplePage.SCHEMA, scope, view,
                 gates.isEmpty() ? List.of() : List.copyOf(EnumSet.copyOf(gates)),
-                new LedgerCheckpoint(cutoff, prefixDigest(all, cutoff)),
+                new LedgerCheckpoint(cutoff, prefixDigest(all, Math.toIntExact(cutoff))),
                 new ProjectionStamp(ProjectionCheckpoint.FORMAT_VERSION, ProjectionCheckpoint.TEXT_SCHEME,
                         projection.state(), projection.coveredSequence() >= cutoff),
                 samples, hasMore, next);
@@ -105,7 +105,7 @@ final class SampleExporter {
     }
 
     /** SHA-256 over {@code <sequence>:<payload digest> LF} for sequences 1..upTo (see {@link LedgerCheckpoint}). */
-    private synchronized String prefixDigest(List<HistoryEntry> all, long upTo) {
+    private synchronized String prefixDigest(List<HistoryEntry> all, int upTo) {
         while (payloadDigests.size() < upTo) {
             payloadDigests.add(ProjectionCheckpoint.ledgerDigest(all.get(payloadDigests.size()).event()));
         }
