@@ -66,7 +66,12 @@ class ComparisonOrderAndValidationTest {
                 new PairwiseJudgment(a, b, QualityDimension.ARCHITECTURE, Optional.of(a), "j1", "1",
                         ObservationSource.HUMAN, "rubric A", List.of(ArtifactRef.of("review", "1"))),
                 new PairwiseJudgment(b, a, QualityDimension.MAINTAINABILITY, Optional.empty(), "j2", "1",
-                        ObservationSource.MODEL_JUDGE, "rubric B", List.of(ArtifactRef.of("review", "2"))));
+                        ObservationSource.MODEL_JUDGE, "rubric B", List.of(ArtifactRef.of("review", "2"))),
+                // identical to the first except for its evidence: only the evidence tiebreaker orders them
+                new PairwiseJudgment(a, b, QualityDimension.ARCHITECTURE, Optional.of(a), "j1", "1",
+                        ObservationSource.HUMAN, "rubric A", List.of(ArtifactRef.of("review", "0"))),
+                new PairwiseJudgment(a, b, QualityDimension.ARCHITECTURE, Optional.of(a), "j1", "1",
+                        ObservationSource.HUMAN, "rubric A", List.of(ArtifactRef.of("review", "1"), ArtifactRef.of("log", "z"))));
 
         ComparisonReport expected = ExecutionComparator.report(list, POLICY_2D, judgments);
 
@@ -84,6 +89,11 @@ class ComparisonOrderAndValidationTest {
                 expected.participants().stream().limit(2).map(p -> p.ref().scope().value()).toList());
         assertEquals(2, expected.groups().size(), "the other task forms its own group");
         assertEquals(10, expected.pairs().size());
+        PairwiseComparison ab = expected.pairs().stream()
+                .filter(p -> p.left().ref().equals(a) && p.right().ref().equals(b)).findFirst().orElseThrow();
+        assertEquals(4, ab.judgments().size());
+        assertEquals(List.of("0", "1", "1"), ab.judgments().stream().filter(j -> j.judgeId().equals("j1"))
+                .map(j -> j.evidence().get(0).reference()).toList()); // evidence alone orders the three j1 entries
     }
 
     @Test
@@ -106,7 +116,8 @@ class ComparisonOrderAndValidationTest {
         assertThrows(IllegalArgumentException.class, () -> new Metric.Measured(QualityDimension.COMPLEXITY, " "));
         assertThrows(IllegalArgumentException.class, () -> ExecutionComparator.report(List.of(a, a), POLICY_2D));
         assertThrows(IllegalArgumentException.class, () -> ExecutionComparator.compare(a, a, POLICY_2D));
-        assertThrows(IllegalArgumentException.class, () -> new ComparisonCandidate(ScopeId.of("scope-1"), a.view(), b.summary()));
+        assertThrows(NullPointerException.class, () -> ComparisonCandidate.of(null, a.view(), book(usd()), List.of()));
+        assertThrows(NullPointerException.class, () -> ComparisonCandidate.of(ScopeId.of("scope-1"), null, book(usd()), List.of()));
 
         ExecutionRef known = a.ref();
         ExecutionRef unknown = new ExecutionRef(ScopeId.of("scope-1"), ExecutionId.of("nobody"));

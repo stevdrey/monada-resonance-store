@@ -1135,7 +1135,7 @@ any model (`ExecutionComparator.INTERPRETATION` is carried by every pairwise res
 ### 20.1 Public API
 
 ```java
-ComparisonCandidate a = ComparisonCandidate.of(scope, viewA, prices, List.of());   // runs the #99 summary
+ComparisonCandidate a = ComparisonCandidate.of(scope, viewA, prices, List.of());   // summarizes viewA (#99)
 ComparisonCandidate b = ComparisonCandidate.of(scope, viewB, prices, List.of());
 ComparisonPolicy policy = new ComparisonPolicy(Set.of(QualityDimension.TESTS), List.of(
         new Objective("cost", new Metric.Cost(Currency.getInstance("USD")), Direction.MINIMIZE, new BigDecimal("0.001")),
@@ -1146,7 +1146,7 @@ ComparisonReport report = ExecutionComparator.report(List.of(a, b, c), policy, j
 
 | Type | Role |
 | --- | --- |
-| `ComparisonCandidate` | Caller scope + `ExecutionView` + its `ExecutionSummary` (a view does not carry its scope) |
+| `ComparisonCandidate` | Caller scope + `ExecutionView` + the `ExecutionSummary` computed from that view; only `of(...)` builds it, so a summary cannot be paired with another view (a view does not carry its scope) |
 | `ComparisonPolicy`, `Objective`, `Metric` | Caller-declared mandatory gates and objectives: `Cost(currency)`, `Effort`, `WallClock`, `Measured(dimension, unit)`; direction and tolerance per objective. No defaults, no weights |
 | `Comparability` | `NOT_COMPARABLE` reasons, one `Mismatch(field, left, right)` per field |
 | `Eligibility` | Exclusion reasons; empty means eligible |
@@ -1228,7 +1228,7 @@ the front holds several executions and there is no automatic winner.
 
 - Participants and pairs are ordered by `ExecutionRef` (execution id, then scope as tiebreak because execution ids
   are unique per scope only); groups by the seven comparability values; judgments by pair, dimension, judge,
-  version, source and rubric. Input collection order, including judgments, never changes the report
+  version, source, rubric, preference and evidence references. Input collection order, including judgments, never changes the report
   (`ComparisonOrderAndValidationTest` shuffles). Duplicate executions, unknown judgment targets, an empty gate set,
   duplicate objective ids and negative tolerances are rejected before comparing.
 - `PairwiseJudgment` requires judge id and version, rubric and at least one evidence reference, and names a

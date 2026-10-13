@@ -7,22 +7,38 @@ import java.util.Objects;
 
 /**
  * One execution offered for comparison: the caller-owned scope (an {@link ExecutionView} does not carry it),
- * the view and the {@link ExecutionSummary} computed from that same view.
+ * the view and the {@link ExecutionSummary} computed from that very view. There is no public constructor, so a
+ * summary can never be paired with a view it was not computed from.
  */
-public record ComparisonCandidate(ScopeId scope, ExecutionView view, ExecutionSummary summary) {
-    public ComparisonCandidate {
-        Objects.requireNonNull(scope, "scope");
-        Objects.requireNonNull(view, "view");
-        Objects.requireNonNull(summary, "summary");
-        if (!summary.execution().equals(view.id()) || !summary.acceptance().equals(view.acceptance())) {
-            throw new IllegalArgumentException("the summary was not computed from this execution view");
-        }
+public final class ComparisonCandidate {
+    private final ScopeId scope;
+    private final ExecutionView view;
+    private final ExecutionSummary summary;
+
+    private ComparisonCandidate(ScopeId scope, ExecutionView view, ExecutionSummary summary) {
+        this.scope = scope;
+        this.view = view;
+        this.summary = summary;
     }
 
-    /** Summarizes {@code view} with the given prices; the usual way to build a candidate. */
+    /** Summarizes {@code view} with the given prices and binds the result to it. */
     public static ComparisonCandidate of(ScopeId scope, ExecutionView view, PriceBook prices,
                                          List<ActualBilledAmount> actualBilled) {
+        Objects.requireNonNull(scope, "scope");
+        Objects.requireNonNull(view, "view");
         return new ComparisonCandidate(scope, view, ExecutionSummaryCalculator.summarize(view, prices, actualBilled));
+    }
+
+    public ScopeId scope() {
+        return scope;
+    }
+
+    public ExecutionView view() {
+        return view;
+    }
+
+    public ExecutionSummary summary() {
+        return summary;
     }
 
     public ExecutionRef ref() {

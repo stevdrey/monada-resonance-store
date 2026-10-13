@@ -29,7 +29,21 @@ public record PairwiseJudgment(ExecutionRef first, ExecutionRef second, QualityD
             .thenComparing(PairwiseJudgment::judgeVersion)
             .thenComparing(PairwiseJudgment::source)
             .thenComparing(PairwiseJudgment::rubric)
-            .thenComparing(j -> j.preferred().map(ExecutionRef::toString).orElse(""));
+            .thenComparing(j -> j.preferred().map(ExecutionRef::toString).orElse(""))
+            .thenComparing(PairwiseJudgment::evidence, PairwiseJudgment::compareEvidence);
+
+    private static final Comparator<ArtifactRef> EVIDENCE_ORDER = Comparator.comparing(ArtifactRef::kind)
+            .thenComparing(ArtifactRef::reference).thenComparing(a -> a.digest().orElse(""));
+
+    private static int compareEvidence(List<ArtifactRef> a, List<ArtifactRef> b) {
+        for (int i = 0; i < Math.min(a.size(), b.size()); i++) {
+            int c = EVIDENCE_ORDER.compare(a.get(i), b.get(i));
+            if (c != 0) {
+                return c;
+            }
+        }
+        return Integer.compare(a.size(), b.size());
+    }
 
     public PairwiseJudgment {
         Objects.requireNonNull(first, "first");

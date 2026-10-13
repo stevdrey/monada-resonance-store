@@ -129,7 +129,7 @@ Facade operations (`com.monada.api.execution.ExecutionMemory`, `AutoCloseable`):
 | `exportSamples(ExportRequest)` | `ExportPage` (read-only, versioned) (planned, #101) |
 
 The facade has no cost or comparison operation. Evaluation-side code (`monada-evaluation`, #99/#100)
-reads facade views and computes `ExecutionSummary` / `CostToAcceptedOutcome` (implemented, #99) and comparisons (planned, #100);
+reads facade views and computes `ExecutionSummary` / `CostToAcceptedOutcome` (implemented, #99) and evidence-gated comparisons / Pareto diagnostics (implemented, #100);
 `monada-api` never depends on `monada-evaluation`.
 
 Example host usage (compiles against the shipped #97/#98 surface; `exportSamples` is planned and therefore
