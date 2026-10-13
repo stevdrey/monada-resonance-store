@@ -1146,7 +1146,7 @@ ComparisonReport report = ExecutionComparator.report(List.of(a, b, c), policy, j
 
 | Type | Role |
 | --- | --- |
-| `ComparisonCandidate` | Caller scope + `ExecutionView` + the `ExecutionSummary` computed from that view; only `of(...)` builds it, so a summary cannot be paired with another view (a view does not carry its scope) |
+| `ComparisonCandidate` | Caller scope + `ExecutionView` + the `ExecutionSummary` computed from that view; only `of(...)` builds it, so a summary cannot be paired with another view (a view does not carry its scope). `of` rejects a view whose events belong to another scope or execution, or whose task, provenance, policy, current outcome or derived acceptance differ from what its own history derives (section 8 rules) |
 | `ComparisonPolicy`, `Objective`, `Metric` | Caller-declared mandatory gates and objectives: `Cost(currency)`, `Effort`, `WallClock`, `Measured(dimension, unit)`; direction and tolerance per objective. No defaults, no weights |
 | `Comparability` | `NOT_COMPARABLE` reasons, one `Mismatch(field, left, right)` per field |
 | `Eligibility` | Exclusion reasons; empty means eligible |

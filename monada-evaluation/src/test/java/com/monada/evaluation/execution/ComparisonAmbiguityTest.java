@@ -157,4 +157,54 @@ class ComparisonAmbiguityTest {
         org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
                 () -> ComparisonCandidate.of(ScopeId.of("other-scope"), view, book(usd()), List.of()));
     }
+
+    @Test
+    void viewsWhoseFieldsDisagreeWithTheirHistoryAreRejected() {
+        ComparisonFixtures f = new ComparisonFixtures(root);
+        Run run = f.cheapWithTests("exec-a", ObservationState.FAIL); // recorded ACCEPTED but not validated
+        var v = run.view();
+        run.close();
+        var forgedAcceptance = new com.monada.api.execution.DerivedAcceptance(
+                com.monada.api.execution.DerivedAcceptance.Status.VALIDATED_ACCEPTED, List.of());
+        var views = List.of(
+                new com.monada.api.execution.ExecutionView(v.id(), com.monada.core.execution.TaskId.of("task-9"),
+                        v.taskSummary(), v.provenance(), v.policy(), v.currentOutcome(), v.acceptance(), v.attempts(), v.history()),
+                new com.monada.api.execution.ExecutionView(v.id(), v.task(), v.taskSummary(),
+                        new com.monada.core.execution.SourceProvenance("rev-9", "ctx-1", "constraints-1"), v.policy(),
+                        v.currentOutcome(), v.acceptance(), v.attempts(), v.history()),
+                new com.monada.api.execution.ExecutionView(v.id(), v.task(), v.taskSummary(), v.provenance(),
+                        new com.monada.core.execution.EvaluationPolicy("policy", "2", Set.of(QualityDimension.TESTS)),
+                        v.currentOutcome(), v.acceptance(), v.attempts(), v.history()),
+                new com.monada.api.execution.ExecutionView(v.id(), v.task(), v.taskSummary(), v.provenance(), v.policy(),
+                        v.currentOutcome(), forgedAcceptance, v.attempts(), v.history()),
+                new com.monada.api.execution.ExecutionView(v.id(), v.task(), v.taskSummary(), v.provenance(), v.policy(),
+                        Optional.empty(), v.acceptance(), v.attempts(), v.history()));
+        for (var forged : views) {
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                    () -> ComparisonCandidate.of(v.history().get(0).event().scopeId(), forged, book(usd()), List.of()));
+        }
+        // The untouched view is accepted and keeps its honest, non-eligible acceptance.
+        assertTrue(!ComparisonCandidate.of(v.history().get(0).event().scopeId(), v, book(usd()), List.of())
+                .summary().acceptance().isValidatedAcceptance());
+    }
+
+    @Test
+    void honestViewsWithCorrectionsAndLaterEvidencePassVerification() {
+        ComparisonFixtures f = new ComparisonFixtures(root);
+        Run run = f.run("exec-a");
+        run.initial(A1);
+        run.stage(A1, "work", 0, 10, usage(1_000, 100));
+        var ev = run.evidence(A1, QualityDimension.TESTS, ObservationState.PASS);
+        var fin = run.finishEvent(A1, AttemptResult.FAILED);
+        run.correctFinish(fin, 2, A1, AttemptResult.COMPLETED);
+        run.outcome(Outcome.accepted(OutcomeOrigin.VALIDATED, A1));
+        var failed = run.correctEvidence(ev, 2, A1,
+                observation(QualityDimension.TESTS, ObservationState.FAIL, OptionalDouble.empty(), Optional.empty()));
+        run.correctEvidence(failed, 3, A1,
+                observation(QualityDimension.TESTS, ObservationState.PASS, OptionalDouble.empty(), Optional.empty()));
+
+        var candidate = candidate(run);
+
+        assertTrue(candidate.summary().acceptance().isValidatedAcceptance());
+    }
 }
