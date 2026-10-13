@@ -207,4 +207,31 @@ class ComparisonAmbiguityTest {
 
         assertTrue(candidate.summary().acceptance().isValidatedAcceptance());
     }
+
+    @Test
+    void anEventOfAnotherTaskInsideTheHistoryIsRejected() {
+        ComparisonFixtures f = new ComparisonFixtures(root);
+        Run run = f.valid("exec-a", 10_000, 1_000, 10);
+        var v = run.view();
+        run.close();
+        List<com.monada.api.execution.HistoryEntry> history = new ArrayList<>();
+        for (var entry : v.history()) {
+            if (entry.event() instanceof com.monada.core.execution.ExecutionEvent.AttemptFinished fin) {
+                var e = fin.envelope();
+                var foreign = new com.monada.core.execution.EventEnvelope(e.eventId(), e.scopeId(),
+                        com.monada.core.execution.TaskId.of("task-9"), e.executionId(), e.attemptId(), e.revision(),
+                        e.supersedes(), e.occurredAt(), e.recordedAt());
+                history.add(new com.monada.api.execution.HistoryEntry(entry.sequence(),
+                        new com.monada.core.execution.ExecutionEvent.AttemptFinished(foreign, fin.result(),
+                                fin.solutionSummary(), fin.lessonSummary())));
+            } else {
+                history.add(entry);
+            }
+        }
+        var forged = new com.monada.api.execution.ExecutionView(v.id(), v.task(), v.taskSummary(), v.provenance(),
+                v.policy(), v.currentOutcome(), v.acceptance(), v.attempts(), history);
+
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> ComparisonCandidate.of(v.history().get(0).event().scopeId(), forged, book(usd()), List.of()));
+    }
 }

@@ -46,6 +46,10 @@ final class ViewVerifier {
                         + entry.event().scopeId() + ", execution " + entry.event().executionId()
                         + ") does not belong to " + scope + "/" + view.id());
             }
+            if (!entry.event().envelope().taskId().equals(view.task())) {
+                throw new IllegalArgumentException("event " + entry.event().eventId() + " belongs to task "
+                        + entry.event().envelope().taskId() + ", not to " + view.task());
+            }
         }
         ExecutionStarted started = null;
         Optional<Outcome> outcome = Optional.empty();
