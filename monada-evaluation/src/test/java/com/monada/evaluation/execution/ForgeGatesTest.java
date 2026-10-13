@@ -6,6 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.monada.api.execution.ExecutionMemory;
 import com.monada.api.execution.ExperienceHit;
+import com.monada.api.execution.ExperienceSample;
+import com.monada.api.execution.ExportRequest;
+import com.monada.api.execution.ProjectionStatus;
+import com.monada.core.execution.EventId;
+import com.monada.core.execution.ExperienceRef;
+import com.monada.core.execution.ScopeId;
 import com.monada.evaluation.execution.ForgeEvaluationReport.Decision;
 import java.math.BigDecimal;
 import java.nio.file.Path;
@@ -13,6 +19,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -43,9 +50,9 @@ class ForgeGatesTest {
     @Test
     void aWrongHandVerifiedCostFailsTheAccountingGate() {
         Map<String, ForgeFixture.ExpectedChain> chains = new HashMap<>(fixture.expectations().chains());
-        chains.put("a-inv1", new ForgeFixture.ExpectedChain(14000, 1400, new BigDecimal("0.041")));
-        ForgeFixture.Expectations e = new ForgeFixture.Expectations(chains, fixture.expectations().unavailableCosts(),
-                fixture.expectations().successOrdinals(), fixture.expectations().comparisons());
+        chains.put("a-inv1", new ForgeFixture.ExpectedChain(14000, 1400, Optional.of(new BigDecimal("0.041"))));
+        ForgeFixture.Expectations e = new ForgeFixture.Expectations(chains, fixture.expectations().successOrdinals(),
+                fixture.expectations().comparisons());
         ForgeEvaluationReport report = ForgeExperienceEvaluator.evaluate(with(fixture.executions(), e), work);
         assertOnlyFailed(report, ForgeGate.RESOURCE_ACCOUNTING);
         assertTrue(gate(report, ForgeGate.RESOURCE_ACCOUNTING).details().stream()
@@ -54,14 +61,34 @@ class ForgeGatesTest {
 
     @Test
     void aCostJudgedUnavailableButComputedFailsTheAccountingGate() {
-        Set<String> unavailable = new java.util.HashSet<>(fixture.expectations().unavailableCosts());
-        unavailable.add("a-inv1");
         Map<String, ForgeFixture.ExpectedChain> chains = new HashMap<>(fixture.expectations().chains());
-        chains.remove("a-inv1");
-        ForgeFixture.Expectations e = new ForgeFixture.Expectations(chains, unavailable,
-                fixture.expectations().successOrdinals(), fixture.expectations().comparisons());
+        chains.put("a-inv1", new ForgeFixture.ExpectedChain(14000, 1400, Optional.empty()));
+        ForgeFixture.Expectations e = new ForgeFixture.Expectations(chains, fixture.expectations().successOrdinals(),
+                fixture.expectations().comparisons());
         assertOnlyFailed(ForgeExperienceEvaluator.evaluate(with(fixture.executions(), e), work),
                 ForgeGate.RESOURCE_ACCOUNTING);
+    }
+
+    @Test
+    void wrongUsageOfAnExecutionWithoutCostIsStillCaught() {
+        // a-export has no validated acceptance, so its cost is unavailable; its token totals must still be right
+        Map<String, ForgeFixture.ExpectedChain> chains = new HashMap<>(fixture.expectations().chains());
+        assertEquals(21000, chains.get("a-export").inputTokens());
+        assertTrue(chains.get("a-export").cost().isEmpty());
+        chains.put("a-export", new ForgeFixture.ExpectedChain(10000, 1200, Optional.empty())); // first attempt only
+        ForgeFixture.Expectations e = new ForgeFixture.Expectations(chains, fixture.expectations().successOrdinals(),
+                fixture.expectations().comparisons());
+        ForgeEvaluationReport report = ForgeExperienceEvaluator.evaluate(with(fixture.executions(), e), work);
+        assertOnlyFailed(report, ForgeGate.RESOURCE_ACCOUNTING);
+        assertTrue(gate(report, ForgeGate.RESOURCE_ACCOUNTING).details().stream()
+                .anyMatch(d -> d.contains("a-export") && d.contains("21000/2500") && d.contains("10000/1200")),
+                gate(report, ForgeGate.RESOURCE_ACCOUNTING).details().toString());
+    }
+
+    @Test
+    void everyExecutionHasHandVerifiedUsage() {
+        assertEquals(fixture.executions().size(), fixture.expectations().chains().size());
+        assertEquals(5, fixture.expectations().unavailableCosts().size());
     }
 
     @Test
@@ -85,8 +112,8 @@ class ForgeGatesTest {
     void aWrongSuccessOrdinalFailsTheSuccessGate() {
         Map<String, Integer> ordinals = new HashMap<>(fixture.expectations().successOrdinals());
         ordinals.put("a-inv2", 1);
-        ForgeFixture.Expectations e = new ForgeFixture.Expectations(fixture.expectations().chains(),
-                fixture.expectations().unavailableCosts(), ordinals, fixture.expectations().comparisons());
+        ForgeFixture.Expectations e = new ForgeFixture.Expectations(fixture.expectations().chains(), ordinals,
+                fixture.expectations().comparisons());
         assertOnlyFailed(ForgeExperienceEvaluator.evaluate(with(fixture.executions(), e), work),
                 ForgeGate.NO_INVALID_SUCCESS);
     }
@@ -101,7 +128,7 @@ class ForgeGatesTest {
         comparisons.set(1, new ForgeFixture.ExpectedComparison(second.leftScope(), second.left(),
                 second.rightScope(), second.right(), second.conclusion(), Set.of("TASK")));
         ForgeFixture.Expectations e = new ForgeFixture.Expectations(fixture.expectations().chains(),
-                fixture.expectations().unavailableCosts(), fixture.expectations().successOrdinals(), comparisons);
+                fixture.expectations().successOrdinals(), comparisons);
         ForgeEvaluationReport report = ForgeExperienceEvaluator.evaluate(with(fixture.executions(), e), work);
         assertOnlyFailed(report, ForgeGate.COMPARISON);
         assertEquals(2, gate(report, ForgeGate.COMPARISON).details().stream()
@@ -184,5 +211,157 @@ class ForgeGatesTest {
         assertEquals(1.0 / 6.0, result.reciprocalRank(), 1e-12);
         assertEquals("ranked #6, outside the top 5", result.missing().get("a-page/a2"));
         assertEquals("not retrieved within the recall limit of 6 hits", result.missing().get("a-page/a1"));
+    }
+
+    // --- G3: every exported reference is verified -----------------------------------------------------
+
+    private List<ExperienceSample> alphaSamples(Path root, ExecutionMemory[] holder) {
+        ScopeId alpha = ForgeFixtureRecorder.scope(fixture, "alpha");
+        ExecutionMemory memory = ExecutionMemory.open(root, alpha);
+        holder[0] = memory;
+        ForgeFixtureRecorder.recordScope(memory, fixture, "alpha");
+        memory.rebuildProjection(alpha);
+        return memory.exportSamples(ExportRequest.firstPage(alpha, 50)).samples();
+    }
+
+    private static ExperienceSample sampleOf(List<ExperienceSample> samples, String execution) {
+        return samples.stream().filter(x -> x.executionId().value().equals(execution)).findFirst().orElseThrow();
+    }
+
+    private static ExperienceSample withOutcome(ExperienceSample x, Optional<ExperienceSample.OutcomeFact> outcome) {
+        return new ExperienceSample(x.execution(), x.taskSummary(), x.provenance(), x.policy(), x.requiredGates(),
+                outcome, x.acceptance(), x.label(), x.successOrdinal(), x.group(), x.eligibility(), x.gates(),
+                x.attempts(), x.revisions(), x.firstSequence(), x.lastSequence(), x.diagnostics());
+    }
+
+    private static ExperienceSample withRevisions(ExperienceSample x, List<ExperienceSample.Revision> revisions) {
+        return new ExperienceSample(x.execution(), x.taskSummary(), x.provenance(), x.policy(), x.requiredGates(),
+                x.outcome(), x.acceptance(), x.label(), x.successOrdinal(), x.group(), x.eligibility(), x.gates(),
+                x.attempts(), revisions, x.firstSequence(), x.lastSequence(), x.diagnostics());
+    }
+
+    private static ExperienceRef ref(ExperienceRef like, String eventId, int revision) {
+        return new ExperienceRef(like.scope(), like.task(), like.execution(), like.attempt(), EventId.of(eventId),
+                revision);
+    }
+
+    @Test
+    void exportedReferencesCoverTheOutcomeAndTheRevisionHistory(@TempDir Path root) {
+        ExecutionMemory[] memory = new ExecutionMemory[1];
+        try {
+            ExperienceSample yaml = sampleOf(alphaSamples(root, memory), "a-yaml");
+            Map<String, Long> origins = new java.util.TreeMap<>();
+            ForgeExperienceEvaluator.exportedReferences(yaml).forEach(r -> origins.merge(r.origin(), 1L, Long::sum));
+            assertEquals(1L, origins.get("outcome"));
+            assertEquals(1L, origins.get("revision.effective"));
+            assertEquals(1L, origins.get("revision.superseded"));
+            assertTrue(origins.containsKey("gate"));
+            assertEquals(List.of(), ForgeExperienceEvaluator.referenceViolations(memory[0],
+                    ForgeFixtureRecorder.scope(fixture, "alpha"), yaml));
+        } finally {
+            memory[0].close();
+        }
+    }
+
+    @Test
+    void anOutcomeReferenceThatDoesNotResolveIsAViolation(@TempDir Path root) {
+        ExecutionMemory[] memory = new ExecutionMemory[1];
+        try {
+            ExperienceSample yaml = sampleOf(alphaSamples(root, memory), "a-yaml");
+            ExperienceSample.OutcomeFact real = yaml.outcome().orElseThrow();
+            ExperienceSample forged = withOutcome(yaml, Optional.of(new ExperienceSample.OutcomeFact(
+                    ref(real.ref(), "no-such-event", 1), real.sequence(), real.outcome())));
+            List<String> violations = ForgeExperienceEvaluator.referenceViolations(memory[0],
+                    ForgeFixtureRecorder.scope(fixture, "alpha"), forged);
+            assertEquals(1, violations.size(), violations.toString());
+            assertTrue(violations.get(0).contains("outcome ref no-such-event") && violations.get(0).contains("does not resolve"));
+        } finally {
+            memory[0].close();
+        }
+    }
+
+    @Test
+    void anOutcomeReferenceThatAddressesAnotherKindOfEventOrExecutionIsAViolation(@TempDir Path root) {
+        ExecutionMemory[] memory = new ExecutionMemory[1];
+        try {
+            List<ExperienceSample> samples = alphaSamples(root, memory);
+            ScopeId alpha = ForgeFixtureRecorder.scope(fixture, "alpha");
+            ExperienceSample yaml = sampleOf(samples, "a-yaml");
+            ExperienceSample.OutcomeFact real = yaml.outcome().orElseThrow();
+            // it resolves, belongs to the execution, but is the start of the execution, not an outcome
+            ExperienceSample notAnOutcome = withOutcome(yaml, Optional.of(new ExperienceSample.OutcomeFact(
+                    yaml.execution(), real.sequence(), real.outcome())));
+            List<String> v1 = ForgeExperienceEvaluator.referenceViolations(memory[0], alpha, notAnOutcome);
+            assertEquals(1, v1.size(), v1.toString());
+            assertTrue(v1.get(0).contains("does not address an outcome"));
+            // it resolves, but to the outcome of a different execution
+            ExperienceSample.OutcomeFact other = sampleOf(samples, "a-inv2").outcome().orElseThrow();
+            ExperienceSample foreign = withOutcome(yaml, Optional.of(new ExperienceSample.OutcomeFact(
+                    other.ref(), real.sequence(), real.outcome())));
+            List<String> v2 = ForgeExperienceEvaluator.referenceViolations(memory[0], alpha, foreign);
+            assertEquals(1, v2.size(), v2.toString());
+            assertTrue(v2.get(0).contains("resolves to another execution"));
+        } finally {
+            memory[0].close();
+        }
+    }
+
+    @Test
+    void brokenRevisionProvenanceIsAViolation(@TempDir Path root) {
+        ExecutionMemory[] memory = new ExecutionMemory[1];
+        try {
+            ExperienceSample yaml = sampleOf(alphaSamples(root, memory), "a-yaml");
+            ScopeId alpha = ForgeFixtureRecorder.scope(fixture, "alpha");
+            ExperienceSample.Revision real = yaml.revisions().get(0);
+            // a superseded revision that is not older than the effective one
+            ExperienceSample notOlder = withRevisions(yaml, List.of(new ExperienceSample.Revision(real.effective(),
+                    real.sequence(), real.justification(), List.of(real.effective()))));
+            assertTrue(ForgeExperienceEvaluator.referenceViolations(memory[0], alpha, notOlder).stream()
+                    .anyMatch(v -> v.contains("is not older than the effective")));
+            // a superseded revision that does not exist, and an effective revision that does not exist
+            ExperienceSample dangling = withRevisions(yaml, List.of(new ExperienceSample.Revision(
+                    ref(real.effective(), "ghost", 2), real.sequence(), real.justification(),
+                    List.of(ref(real.effective(), "ghost-original", 1)))));
+            List<String> violations = ForgeExperienceEvaluator.referenceViolations(memory[0], alpha, dangling);
+            assertTrue(violations.stream().anyMatch(v -> v.contains("revision.effective ref ghost")), violations.toString());
+            assertTrue(violations.stream().anyMatch(v -> v.contains("revision.superseded ref ghost-original")),
+                    violations.toString());
+        } finally {
+            memory[0].close();
+        }
+    }
+
+    // --- G4: the second rebuild is verified -----------------------------------------------------------
+
+    @Test
+    void aProjectionThatIsNotCurrentOrNotFullyCoveredIsAViolation() {
+        assertEquals(List.of(), ForgeExperienceEvaluator.projectionViolations("x",
+                new ProjectionStatus(ProjectionStatus.State.CURRENT, 70, 70, 1, List.of())));
+        for (ProjectionStatus.State state : List.of(ProjectionStatus.State.STALE, ProjectionStatus.State.MISSING,
+                ProjectionStatus.State.INCOMPATIBLE)) {
+            List<String> v = ForgeExperienceEvaluator.projectionViolations("second rebuild",
+                    new ProjectionStatus(state, 70, 70, 1, List.of("why")));
+            assertEquals(1, v.size(), state.toString());
+            assertTrue(v.get(0).contains("second rebuild") && v.get(0).contains(state.name()));
+        }
+        List<String> shortCover = ForgeExperienceEvaluator.projectionViolations("second rebuild",
+                new ProjectionStatus(ProjectionStatus.State.CURRENT, 60, 70, 1, List.of()));
+        assertEquals(1, shortCover.size());
+        assertTrue(shortCover.get(0).contains("covers 60 of 70"));
+        // stale AND short is reported twice, so neither symptom hides the other
+        assertEquals(2, ForgeExperienceEvaluator.projectionViolations("x",
+                new ProjectionStatus(ProjectionStatus.State.STALE, 60, 70, 1, List.of())).size());
+    }
+
+    // --- report text does not depend on the platform ---------------------------------------------------
+
+    @Test
+    void reportTextNeverUsesThePlatformLineSeparator() {
+        ForgeEvaluationReport report = ForgeExperienceEvaluator.evaluate(fixture, work);
+        assertFalse(report.render().contains("\r"));
+        assertFalse(report.renderTiming().contains("\r"));
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> ForgeEvaluationReport.fmt("line%n"));
+        assertEquals("a 1\n", ForgeEvaluationReport.fmt("a %d\n", 1));
     }
 }

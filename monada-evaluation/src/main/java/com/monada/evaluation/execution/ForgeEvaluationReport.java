@@ -67,13 +67,13 @@ public record ForgeEvaluationReport(String fixtureVersion, String provenance, in
         out.append("== Corpus labels (attempt = what this attempt did; label/acceptance/cost = its execution, "
                 + "contract section 8) ==\n");
         for (ForgeCorpusLine c : corpus) {
-            out.append(String.format(Locale.ROOT, "  %-12s %-5s attempt=%-9s label=%-9s acceptance=%-20s cost=%s%n",
+            out.append(fmt("  %-12s %-5s attempt=%-9s label=%-9s acceptance=%-20s cost=%s\n",
                     c.experienceId(), c.scopeKey(), c.attemptResult(), c.label(), c.acceptance(), c.cost()));
         }
 
         out.append("\n== Hard correctness gates (protected semantics: any failure blocks the decision) ==\n");
         for (ForgeGate g : gates) {
-            out.append(String.format(Locale.ROOT, "  [%s] %s — %s%n", g.passed() ? "PASS" : "FAIL", g.id(), g.name()));
+            out.append(fmt("  [%s] %s — %s\n", g.passed() ? "PASS" : "FAIL", g.id(), g.name()));
             for (String d : g.details()) {
                 out.append("        ").append(d).append('\n');
             }
@@ -101,7 +101,7 @@ public record ForgeEvaluationReport(String fixtureVersion, String provenance, in
 
     private void appendQuery(StringBuilder out, ForgeQueryResult q) {
         ForgeFixture.Query query = q.query();
-        out.append(String.format(Locale.ROOT, "%nQuery %s [%s, %s] \"%s\"%n", query.id(), query.kind(),
+        out.append(fmt("\nQuery %s [%s, %s] \"%s\"\n", query.id(), query.kind(),
                 query.scopeKey(), query.text().isBlank() ? "<blank>" : query.text()));
         out.append("  Judgment: ").append(query.judgment()).append('\n');
         out.append("  Relevant: ").append(query.relevant().isEmpty() ? "(none)" : String.join(", ",
@@ -111,7 +111,7 @@ public record ForgeEvaluationReport(String fixtureVersion, String provenance, in
         int shown = Math.min(q.ranked().size(), 5);
         for (int i = 0; i < shown; i++) {
             RankedHit h = q.ranked().get(i);
-            out.append(String.format(Locale.ROOT, "  #%d %-12s sim=%.4f attempt=%-9s execution=%-9s rev=%d%s%n",
+            out.append(fmt("  #%d %-12s sim=%.4f attempt=%-9s execution=%-9s rev=%d%s\n",
                     h.rank(), h.experienceId(), h.similarity(), h.attemptResult(), h.label(), h.revision(),
                     h.relevant() ? " RELEVANT" : ""));
         }
@@ -122,10 +122,10 @@ public record ForgeEvaluationReport(String fixtureVersion, String provenance, in
             return;
         }
         for (int k : q.metricKs()) {
-            out.append(String.format(Locale.ROOT, "  @%d precision=%.4f recall=%.4f hit=%.0f%n", k,
+            out.append(fmt("  @%d precision=%.4f recall=%.4f hit=%.0f\n", k,
                     q.precision().get(k), q.recall().get(k), q.hit().get(k)));
         }
-        out.append(String.format(Locale.ROOT, "  Reciprocal rank=%.4f%n", q.reciprocalRank()));
+        out.append(fmt("  Reciprocal rank=%.4f\n", q.reciprocalRank()));
         if (q.missing().isEmpty()) {
             out.append("  Missing relevant (outside top ").append(q.metricKs().get(q.metricKs().size() - 1))
                     .append("): none\n");
@@ -139,18 +139,18 @@ public record ForgeEvaluationReport(String fixtureVersion, String provenance, in
 
     private void appendAggregates(StringBuilder out) {
         List<ForgeQueryResult> scored = scoredQueries();
-        out.append(String.format(Locale.ROOT, "%nAggregates over %d scored queries (%d excluded: no relevant set)%n",
+        out.append(fmt("\nAggregates over %d scored queries (%d excluded: no relevant set)\n",
                 scored.size(), queries.size() - scored.size()));
         if (scored.isEmpty()) {
             return;
         }
         List<Integer> ks = scored.get(0).metricKs();
         for (int k : ks) {
-            out.append(String.format(Locale.ROOT, "  @%d  avg precision=%.4f  avg recall=%.4f  avg hit=%.4f%n", k,
+            out.append(fmt("  @%d  avg precision=%.4f  avg recall=%.4f  avg hit=%.4f\n", k,
                     mean(scored, q -> q.precision().get(k)), mean(scored, q -> q.recall().get(k)),
                     mean(scored, q -> q.hit().get(k))));
         }
-        out.append(String.format(Locale.ROOT, "  MRR=%.4f%n", mean(scored, ForgeQueryResult::reciprocalRank)));
+        out.append(fmt("  MRR=%.4f\n", mean(scored, ForgeQueryResult::reciprocalRank)));
         out.append("Worst cases (lowest value; first query in fixture order on ties):\n");
         for (int k : ks) {
             out.append(worst("Precision@" + k, scored, q -> q.precision().get(k)));
@@ -169,7 +169,7 @@ public record ForgeEvaluationReport(String fixtureVersion, String provenance, in
             }
         }
         double best = scored.stream().mapToDouble(f).max().orElse(0);
-        return String.format(Locale.ROOT, "  %-14s worst=%.4f (%s)  best=%.4f  gap=%.4f%n", metric,
+        return fmt("  %-14s worst=%.4f (%s)  best=%.4f  gap=%.4f\n", metric,
                 f.applyAsDouble(worst), worst.query().id(), best, best - f.applyAsDouble(worst));
     }
 
@@ -178,11 +178,22 @@ public record ForgeEvaluationReport(String fixtureVersion, String provenance, in
         return queries.stream().mapToDouble(f).average().orElse(0);
     }
 
+    /**
+     * The only place that formats report text. {@code %n} expands to the platform line separator, which would make
+     * the same input render differently on Windows, so a format that uses it is rejected; write {@code \n}.
+     */
+    static String fmt(String format, Object... args) {
+        if (format.contains("%n")) {
+            throw new IllegalArgumentException("use \\n, not %n: report text must not depend on the platform");
+        }
+        return String.format(Locale.ROOT, format, args);
+    }
+
     /** Elapsed wall-clock timing. Nondeterministic by nature and never part of {@link #render()}. */
     public String renderTiming() {
         StringBuilder out = new StringBuilder("== Elapsed timing (nondeterministic; excluded from every gate) ==\n");
         new LinkedHashMap<>(elapsedNanos).forEach((phase, nanos) -> out.append(String.format(Locale.ROOT,
-                "  %-24s %.1f ms%n", phase, nanos / 1_000_000.0)));
+                "  %-24s %.1f ms\n", phase, nanos / 1_000_000.0)));
         return out.toString();
     }
 

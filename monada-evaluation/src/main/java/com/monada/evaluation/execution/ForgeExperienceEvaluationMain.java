@@ -33,7 +33,7 @@ public final class ForgeExperienceEvaluationMain {
             work = Files.createTempDirectory("forge-experience-evaluation");
             ForgeEvaluationReport report = ForgeExperienceEvaluator.evaluate(ForgeFixture.load(), work);
             out.print(report.render());
-            out.println();
+            out.print("\n");
             out.print(report.renderTiming());
             return report.allGatesPassed() ? 0 : 1;
         } catch (IOException e) {

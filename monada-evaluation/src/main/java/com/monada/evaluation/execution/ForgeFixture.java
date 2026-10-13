@@ -77,11 +77,22 @@ public record ForgeFixture(String version, String provenance, Map<String, String
                                      String conclusion, Set<String> mismatchFields) {
     }
 
-    public record ExpectedChain(long inputTokens, long outputTokens, BigDecimal cost) {
+    /** Hand-verified chain usage; {@code cost} is empty when the cost to an accepted outcome is UNAVAILABLE. */
+    public record ExpectedChain(long inputTokens, long outputTokens, java.util.Optional<BigDecimal> cost) {
     }
 
-    public record Expectations(Map<String, ExpectedChain> chains, Set<String> unavailableCosts,
-                               Map<String, Integer> successOrdinals, List<ExpectedComparison> comparisons) {
+    public record Expectations(Map<String, ExpectedChain> chains, Map<String, Integer> successOrdinals,
+                               List<ExpectedComparison> comparisons) {
+        /** Executions judged to have no cost to an accepted outcome. */
+        public Set<String> unavailableCosts() {
+            Set<String> out = new LinkedHashSet<>();
+            chains.forEach((id, c) -> {
+                if (c.cost().isEmpty()) {
+                    out.add(id);
+                }
+            });
+            return out;
+        }
     }
 
     public ForgeFixture {
@@ -170,19 +181,16 @@ public record ForgeFixture(String version, String provenance, Map<String, String
             throw new UncheckedIOException(e);
         }
         Map<String, ExpectedChain> chains = new TreeMap<>();
-        Set<String> unavailable = new LinkedHashSet<>();
         Map<String, Integer> ordinals = new TreeMap<>();
         Map<Integer, ExpectedComparison> comparisons = new TreeMap<>();
         for (String key : new TreeMap<>(p).keySet().stream().map(String::valueOf).toList()) {
             String value = p.getProperty(key).trim();
             if (key.startsWith("chain.") && key.endsWith(".cost")) {
                 String exec = key.substring("chain.".length(), key.length() - ".cost".length());
-                if (value.equals("UNAVAILABLE")) {
-                    unavailable.add(exec);
-                } else {
-                    chains.put(exec, new ExpectedChain(Long.parseLong(require(p, "chain." + exec + ".input")),
-                            Long.parseLong(require(p, "chain." + exec + ".output")), new BigDecimal(value)));
-                }
+                chains.put(exec, new ExpectedChain(Long.parseLong(require(p, "chain." + exec + ".input")),
+                        Long.parseLong(require(p, "chain." + exec + ".output")),
+                        value.equals("UNAVAILABLE") ? java.util.Optional.empty()
+                                : java.util.Optional.of(new BigDecimal(value))));
             } else if (key.startsWith("ordinal.")) {
                 ordinals.put(key.substring("ordinal.".length()), Integer.parseInt(value));
             } else if (key.startsWith("comparison.")) {
@@ -198,7 +206,7 @@ public record ForgeFixture(String version, String provenance, Map<String, String
                         new ExpectedComparison(left[0], left[1], right[0], right[1], f[2].trim(), fields));
             }
         }
-        return new Expectations(Map.copyOf(chains), Set.copyOf(unavailable), Map.copyOf(ordinals),
+        return new Expectations(Map.copyOf(chains), Map.copyOf(ordinals),
                 List.copyOf(comparisons.values()));
     }
 
@@ -267,8 +275,10 @@ public record ForgeFixture(String version, String provenance, Map<String, String
         for (String exec : expectations.chains().keySet()) {
             execution(exec);
         }
-        for (String exec : expectations.unavailableCosts()) {
-            execution(exec);
+        for (Execution e : executions) {
+            if (!expectations.chains().containsKey(e.id())) {
+                throw new IllegalStateException("no hand-verified usage for execution " + e.id());
+            }
         }
         for (ExpectedComparison c : expectations.comparisons()) {
             scopeId(c.leftScope());

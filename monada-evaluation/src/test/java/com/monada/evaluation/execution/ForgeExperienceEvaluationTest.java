@@ -96,27 +96,31 @@ class ForgeExperienceEvaluationTest {
     }
 
     @Test
-    void chainCostsAreIndependentlyRecomputedFromTheFixture() {
+    void chainUsageAndCostsAreIndependentlyRecomputedFromTheFixture() {
         // recompute every chain from the raw attempt rows, without the library's calculators
         for (var exec : fixture.executions()) {
             var expected = fixture.expectations().chains().get(exec.id());
-            if (expected == null) {
-                continue;
-            }
+            boolean validated = exec.outcome() == ForgeFixture.OutcomeKind.ACCEPTED_VALIDATED
+                    && exec.expectedAcceptance().equals("VALIDATED_ACCEPTED");
             long in = 0;
             long out = 0;
             for (var a : fixture.attemptsOf(exec.id())) {
-                if (a.ordinal() <= exec.outcomeAttempt()) {
+                // a validated acceptance ends the chain at the accepted attempt; otherwise every attempt counts
+                if (!validated || a.ordinal() <= exec.outcomeAttempt()) {
                     in += a.inputTokens();
                     out += a.outputTokens();
                 }
             }
-            BigDecimal cost = BigDecimal.valueOf(in).multiply(fixture.price().input())
-                    .add(BigDecimal.valueOf(out).multiply(fixture.price().output()))
-                    .divide(BigDecimal.valueOf(fixture.price().unitSize()));
             assertEquals(expected.inputTokens(), in, exec.id());
             assertEquals(expected.outputTokens(), out, exec.id());
-            assertEquals(0, expected.cost().compareTo(cost), exec.id() + " " + cost);
+            if (validated) {
+                BigDecimal cost = BigDecimal.valueOf(in).multiply(fixture.price().input())
+                        .add(BigDecimal.valueOf(out).multiply(fixture.price().output()))
+                        .divide(BigDecimal.valueOf(fixture.price().unitSize()));
+                assertEquals(0, expected.cost().orElseThrow().compareTo(cost), exec.id() + " " + cost);
+            } else {
+                assertTrue(expected.cost().isEmpty(), exec.id() + " has no validated acceptance, so no cost");
+            }
         }
     }
 
