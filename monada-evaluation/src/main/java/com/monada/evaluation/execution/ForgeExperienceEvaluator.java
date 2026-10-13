@@ -31,6 +31,7 @@ import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Currency;
 import java.util.LinkedHashMap;
@@ -49,7 +50,8 @@ import java.util.TreeSet;
  * no network, no provider and no Forge installation.
  */
 public final class ForgeExperienceEvaluator {
-    private static final int EXPORT_PAGE_SIZE = 10;
+    /** Below the nine executions of each project, so every export must traverse continuation pages. */
+    private static final int EXPORT_PAGE_SIZE = 4;
 
     private ForgeExperienceEvaluator() {
     }
@@ -428,6 +430,7 @@ public final class ForgeExperienceEvaluator {
                     violations.add(q.id() + ": hit " + ref.eventId().value() + " r" + ref.revision()
                             + " does not equal the exact ledger load");
                 }
+                exact.ifPresent(entry -> violations.addAll(coordinateViolations(q.id() + ": hit", scope, ref, entry)));
                 AttemptId attempt = ref.attempt().orElse(null);
                 if (attempt == null) {
                     violations.add(q.id() + ": hit without an attempt");
@@ -454,9 +457,13 @@ public final class ForgeExperienceEvaluator {
             }
         }
         Map<String, Integer> categories = new java.util.TreeMap<>();
+        List<String> pages = new ArrayList<>();
         for (String scopeKey : fixture.scopeIds().keySet()) {
             ScopeId scope = ForgeFixtureRecorder.scope(fixture, scopeKey);
             ExecutionMemory memory = s.memories.get(scopeKey);
+            violations.addAll(paginationViolations(memory, scope, s.exports.get(scopeKey), EXPORT_PAGE_SIZE,
+                    fixture.executionsOf(scopeKey).size()));
+            pages.add(scopeKey + "=" + s.exports.get(scopeKey).pages().size());
             for (AnnotatedSample annotated : s.exports.get(scopeKey).samples()) {
                 ExperienceSample sample = annotated.sample();
                 for (LabelledRef labelled : exportedReferences(sample)) {
@@ -464,6 +471,7 @@ public final class ForgeExperienceEvaluator {
                     categories.merge(labelled.origin(), 1, Integer::sum);
                 }
                 violations.addAll(referenceViolations(memory, scope, sample));
+                violations.addAll(chronologyViolations(fixture, memory, scope, sample));
                 String exec = sample.executionId().value();
                 boolean hasCorrection = fixture.attemptsOf(exec).stream().anyMatch(ForgeFixture.Attempt::revised);
                 if (hasCorrection != !sample.revisions().isEmpty()) {
@@ -484,7 +492,8 @@ public final class ForgeExperienceEvaluator {
             }
         }
         List<String> evidence = List.of("recalled hits resolved exactly: " + hitsChecked + "; export references "
-                + "resolved: " + refsChecked + " " + categories + "; inconsistent references: " + violations.size());
+                + "resolved: " + refsChecked + " " + categories + "; export pages at size " + EXPORT_PAGE_SIZE + ": " + pages
+                + " (paged export equals the unpaged export); inconsistent references: " + violations.size());
         return ForgeGate.of(ForgeGate.EXACT_REFERENCES,
                 "every recalled and exported reference loads the exact ledger event at its latest revision",
                 violations, evidence);
@@ -535,10 +544,16 @@ public final class ForgeExperienceEvaluator {
             String what = exec + ": " + labelled.origin() + " ref " + ref.eventId().value() + " r" + ref.revision();
             if (exact.isEmpty()) {
                 violations.add(what + " does not resolve");
-            } else if (!exact.get().event().envelope().executionId().equals(sample.executionId())) {
-                violations.add(what + " resolves to another execution");
-            } else if (labelled.origin().equals("outcome") && !isOutcome(exact.get().event())) {
-                violations.add(what + " does not address an outcome");
+            } else {
+                List<String> coordinates = new ArrayList<>(coordinateViolations(what, scope, ref, exact.get()));
+                // a reference can match its own event perfectly and still belong to another execution than the sample
+                if (!ref.execution().equals(sample.executionId())) {
+                    coordinates.add(what + " resolves to another execution (" + ref.execution().value() + ")");
+                }
+                violations.addAll(coordinates);
+                if (coordinates.isEmpty() && labelled.origin().equals("outcome") && !isOutcome(exact.get().event())) {
+                    violations.add(what + " does not address an outcome");
+                }
             }
         }
         for (ExperienceSample.Revision r : sample.revisions()) {
@@ -548,6 +563,148 @@ public final class ForgeExperienceEvaluator {
                             + " is not older than the effective r" + r.effective().revision());
                 }
             }
+        }
+        return violations;
+    }
+
+    /**
+     * Compares every coordinate of {@code ref} (scope, task, execution, attempt, event id, revision) with the
+     * envelope of the ledger event it resolved to. Loading by event id and revision alone would accept a reference
+     * whose other coordinates are wrong, so none of them is taken on trust.
+     */
+    static List<String> coordinateViolations(String what, ScopeId queriedScope, ExperienceRef ref, HistoryEntry entry) {
+        var envelope = entry.event().envelope();
+        List<String> violations = new ArrayList<>();
+        String label = what + " " + ref.eventId().value() + " r" + ref.revision();
+        if (!ref.scope().equals(queriedScope)) {
+            violations.add(label + ": scope " + ref.scope().value() + " is not the scope " + queriedScope.value());
+        }
+        if (!ref.scope().equals(envelope.scopeId())) {
+            violations.add(label + ": scope " + ref.scope().value() + " but the ledger event is in "
+                    + envelope.scopeId().value());
+        }
+        if (!ref.task().equals(envelope.taskId())) {
+            violations.add(label + ": task " + ref.task().value() + " but the ledger event is of "
+                    + envelope.taskId().value());
+        }
+        if (!ref.execution().equals(envelope.executionId())) {
+            violations.add(label + ": execution " + ref.execution().value() + " but the ledger event is of "
+                    + envelope.executionId().value());
+        }
+        if (!ref.attempt().equals(envelope.attemptId())) {
+            violations.add(label + ": attempt " + ref.attempt().map(AttemptId::value).orElse("<none>")
+                    + " but the ledger event is of " + envelope.attemptId().map(AttemptId::value).orElse("<none>"));
+        }
+        if (!ref.eventId().equals(envelope.eventId())) {
+            violations.add(label + ": event id differs from the ledger event " + envelope.eventId().value());
+        }
+        if (ref.revision() != envelope.revision()) {
+            violations.add(label + ": revision " + ref.revision() + " but the ledger event is r"
+                    + envelope.revision());
+        }
+        return violations;
+    }
+
+    /**
+     * The persisted chronology of a sample must be the fixture's: each attempt start and each stage carry the
+     * declared start and end instants (a repair declared to start 30 s later must not be stored at midnight).
+     */
+    static List<String> chronologyViolations(ForgeFixture fixture, ExecutionMemory memory, ScopeId scope,
+                                             ExperienceSample sample) {
+        List<String> violations = new ArrayList<>();
+        String exec = sample.executionId().value();
+        for (ForgeFixture.Attempt fa : fixture.attemptsOf(exec)) {
+            sample.attempts().stream().filter(a -> a.ordinal() == fa.ordinal()).findFirst().ifPresent(a -> {
+                Instant begin = ForgeFixtureRecorder.T0.plusSeconds(fa.startSeconds());
+                Instant end = ForgeFixtureRecorder.T0.plusSeconds(fa.endSeconds());
+                memory.loadEvent(scope, a.start().eventId(), a.start().revision()).ifPresent(entry -> {
+                    var envelope = entry.event().envelope();
+                    if (!envelope.occurredAt().equals(begin) || !envelope.recordedAt().equals(begin)) {
+                        violations.add(fa.experienceId() + ": attempt start stored at " + envelope.occurredAt() + "/"
+                                + envelope.recordedAt() + " but declared " + begin);
+                    }
+                });
+                for (ExperienceSample.SampleStage stage : a.stages()) {
+                    if (!stage.startedAt().equals(begin) || !stage.endedAt().equals(end)) {
+                        violations.add(fa.experienceId() + ": stage " + stage.startedAt() + ".." + stage.endedAt()
+                                + " but declared " + begin + ".." + end);
+                    }
+                }
+            });
+        }
+        return violations;
+    }
+
+    /**
+     * A paged export must traverse as many pages as the page size demands (so a continuation is really exercised)
+     * and must carry exactly the samples, in the same order, as one unpaged export of the same scope and cutoff.
+     */
+    static List<String> paginationViolations(ExecutionMemory memory, ScopeId scope, ExperienceExportReport report,
+                                             int pageSize, int executions) {
+        List<String> violations = new ArrayList<>();
+        int expectedPages = (executions + pageSize - 1) / pageSize;
+        if (report.pages().size() != expectedPages) {
+            violations.add(scope.value() + ": export used " + report.pages().size() + " pages, expected "
+                    + expectedPages + " for " + executions + " executions at page size " + pageSize);
+        }
+        if (report.pages().size() < 2) {
+            violations.add(scope.value() + ": the export never traversed a continuation page");
+        }
+        List<ExperienceSample> unpaged = memory.exportSamples(ExportRequest.firstPage(scope, 50)).samples();
+        List<ExperienceSample> paged = report.samples().stream().map(AnnotatedSample::sample).toList();
+        if (!unpaged.equals(paged)) {
+            violations.add(scope.value() + ": the paged export differs from the unpaged export in content or order");
+        }
+        return violations;
+    }
+
+    /**
+     * Recomputes the chain usage from the usage values the export itself carries. The chain ends at the accepted
+     * attempt for a validated acceptance and covers every attempt otherwise. Every counter must be REPORTED.
+     */
+    static List<String> exportedUsageViolations(ExperienceSample sample, ForgeFixture.ExpectedChain expected,
+                                                int expectedStages) {
+        List<String> violations = new ArrayList<>();
+        String exec = sample.executionId().value();
+        int cap = Integer.MAX_VALUE;
+        if (sample.acceptance() == DerivedAcceptance.Status.VALIDATED_ACCEPTED) {
+            cap = sample.attempts().stream().filter(ExperienceSample.SampleAttempt::accepted)
+                    .mapToInt(ExperienceSample.SampleAttempt::ordinal).min().orElse(Integer.MAX_VALUE);
+        }
+        long input = 0;
+        long output = 0;
+        int stages = 0;
+        for (ExperienceSample.SampleAttempt a : sample.attempts()) {
+            if (a.ordinal() > cap) {
+                continue;
+            }
+            for (ExperienceSample.SampleStage stage : a.stages()) {
+                stages++;
+                for (ExperienceSample.SampleUsage u : stage.usage()) {
+                    boolean recorded = u.kind() == UsageKind.INPUT_TOKENS || u.kind() == UsageKind.OUTPUT_TOKENS;
+                    if (recorded) {
+                        if (u.state() != ExperienceSample.UsageState.REPORTED || u.value().isEmpty()) {
+                            violations.add(exec + ": exported " + u.kind() + " of stage " + stage.stage() + " is "
+                                    + u.state() + " without a reported value");
+                        } else if (u.kind() == UsageKind.INPUT_TOKENS) {
+                            input += u.value().getAsLong();
+                        } else {
+                            output += u.value().getAsLong();
+                        }
+                    } else if (u.state() != ExperienceSample.UsageState.NOT_MEASURED || u.value().isPresent()) {
+                        // the fixture records no other counter: it must stay not-measured, never a number or zero
+                        violations.add(exec + ": exported " + u.kind() + " of stage " + stage.stage() + " is "
+                                + u.state() + " " + u.value() + " but the fixture never recorded it");
+                    }
+                }
+            }
+        }
+        if (input != expected.inputTokens() || output != expected.outputTokens()) {
+            violations.add(exec + ": exported chain usage " + input + "/" + output + " but hand-verified "
+                    + expected.inputTokens() + "/" + expected.outputTokens());
+        }
+        if (stages != expectedStages) {
+            violations.add(exec + ": export carries " + stages + " chain stages but the summary has " + expectedStages);
         }
         return violations;
     }
@@ -668,7 +825,8 @@ public final class ForgeExperienceEvaluator {
             evidence.add(String.format(java.util.Locale.ROOT, "%-9s chain tokens %d/%d, %s (stages %d)",
                     e.id(), in, out, costText, summary.chainStages().size()));
         }
-        // The export carries the same numbers.
+        // The export carries the same numbers: its own usage values are recomputed, not just its cost.
+        int exportChecked = 0;
         for (ExperienceExportReport report : s.exports.values()) {
             for (AnnotatedSample annotated : report.samples()) {
                 String exec = annotated.sample().executionId().value();
@@ -676,8 +834,16 @@ public final class ForgeExperienceEvaluator {
                 if (!annotated.cost().equals(viaSummary)) {
                     violations.add(exec + ": export cost differs from the summary cost");
                 }
+                ForgeFixture.ExpectedChain expected = fixture.expectations().chains().get(exec);
+                if (expected != null) {
+                    exportChecked++;
+                    violations.addAll(exportedUsageViolations(annotated.sample(), expected,
+                            s.summaries.get(exec).chainStages().size()));
+                }
             }
         }
+        evidence.add("usage recomputed from the exported samples' own stage counters: " + exportChecked
+                + " executions");
         evidence.add(0, "chains with usage checked against hand-verified totals: " + fixture.executions().size()
                 + " (" + available + " with a cost, " + unavailable + " with an unavailable cost)");
         return ForgeGate.of(ForgeGate.RESOURCE_ACCOUNTING,

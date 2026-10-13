@@ -102,8 +102,9 @@ final class ForgeFixtureRecorder {
                 String prefix = e.id() + "." + attempt.value();
                 Optional<AttemptId> previous = a.ordinal() == 1 ? Optional.empty()
                         : Optional.of(attemptId(a.ordinal() - 1));
+                Instant begin = T0.plusSeconds(a.startSeconds()); // the declared chronology, not midnight
                 events.add(new AttemptStarted(EventEnvelope.original(EventId.of(prefix + ".start"), scope, task, exec,
-                        attempt, T0, T0), a.ordinal(), previous, AttemptReason.valueOf(a.reason())));
+                        attempt, begin, begin), a.ordinal(), previous, AttemptReason.valueOf(a.reason())));
                 Instant end = T0.plusSeconds(a.endSeconds());
                 events.add(StageRecorded.measured(EventEnvelope.original(EventId.of(prefix + ".stage"), scope, task,
                         exec, attempt, end, end), stageName(a.reason()), route(fixture),
