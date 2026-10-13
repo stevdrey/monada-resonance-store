@@ -1,9 +1,12 @@
 package com.monada.evaluation.execution;
 
+import com.monada.api.execution.ExecutionMemory;
+import com.monada.api.execution.ExecutionView;
 import com.monada.api.execution.DerivedAcceptance;
 import com.monada.api.execution.ExperienceSample;
 import com.monada.api.execution.HistoryEntry;
 import com.monada.core.execution.AttemptId;
+import com.monada.core.execution.EvaluationPolicy;
 import com.monada.core.execution.EventKind;
 import com.monada.core.execution.ExecutionEvent;
 import com.monada.core.execution.ExecutionEvent.AttemptFinished;
@@ -13,6 +16,7 @@ import com.monada.core.execution.ExecutionEvent.EvidenceRecorded;
 import com.monada.core.execution.ExecutionEvent.StageRecorded;
 import com.monada.core.execution.QualityDimension;
 import com.monada.core.execution.QualityObservation;
+import com.monada.core.execution.ScopeId;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
@@ -106,6 +110,9 @@ final class ForgeSampleChecks {
                     ? "marked eligible" : "marked ineligible " + sample.eligibility().reasons().stream()
                     .map(r -> r.code().name()).toList()) + " but eligibility must be " + learnable);
         }
+        violations.addAll(eligibilityReasonViolations(exec, judged, sample));
+        violations.addAll(acceptedMarkerViolations(judged, sample));
+        violations.addAll(gateStateViolations(exec, sample));
         if (!sample.group().equals(expectedGroup(judged))) {
             violations.add(exec + ": group " + sample.group() + " but derived " + expectedGroup(judged));
         }
@@ -244,6 +251,158 @@ final class ForgeSampleChecks {
                     + " but the event is at sequence " + entry.sequence());
         }
         return violations;
+    }
+
+
+    // --- eligibility reasons, accepted marker, gate states, evidence, sequence bounds --------------------
+
+    /**
+     * The reasons an ineligible sample gives are the consumer-facing explanation for excluding it, so they are
+     * compared with the reasons judged by hand in the fixture (as {@code CODE} or {@code CODE(DIMENSION)}; the free
+     * text detail is ignored), with multiplicity. An eligible sample must give none.
+     */
+    static List<String> eligibilityReasonViolations(String exec, ForgeFixture.Execution judged,
+                                                    ExperienceSample sample) {
+        List<String> actual = sample.eligibility().reasons().stream()
+                .map(r -> r.code().name() + r.dimension().map(d -> "(" + d + ")").orElse("")).sorted().toList();
+        List<String> expected = judged.expectedReasons().stream().sorted().toList();
+        List<String> violations = new ArrayList<>();
+        if (!actual.equals(expected)) {
+            violations.add(exec + ": eligibility reasons " + actual + " but judged " + expected);
+        }
+        return violations;
+    }
+
+    /**
+     * Only the attempt named by an accepted outcome is marked {@code accepted} (an imported claim names one too);
+     * every attempt of a rejected, pending or outcome-less execution is unmarked. Derived from the fixture outcome.
+     */
+    static List<String> acceptedMarkerViolations(ForgeFixture.Execution judged, ExperienceSample sample) {
+        boolean namesAttempt = judged.outcome() == ForgeFixture.OutcomeKind.ACCEPTED_VALIDATED
+                || judged.outcome() == ForgeFixture.OutcomeKind.ACCEPTED_IMPORTED;
+        List<String> violations = new ArrayList<>();
+        for (ExperienceSample.SampleAttempt a : sample.attempts()) {
+            boolean expected = namesAttempt && a.ordinal() == judged.outcomeAttempt();
+            if (a.accepted() != expected) {
+                violations.add(judged.id() + "/" + a.id().value() + ": attempt is "
+                        + (a.accepted() ? "marked" : "not marked") + " accepted but the judged outcome "
+                        + judged.outcome() + (namesAttempt ? ":" + judged.outcomeAttempt() : "") + " says it should "
+                        + (expected ? "be" : "not be"));
+            }
+        }
+        return violations;
+    }
+
+    /** A gate's state must follow the observation that backs it; without an observation it is MISSING. */
+    static List<String> gateStateViolations(String exec, ExperienceSample sample) {
+        List<String> violations = new ArrayList<>();
+        for (ExperienceSample.Gate g : sample.gates()) {
+            if (g.observation().isEmpty()) {
+                if (g.state() != ExperienceSample.GateState.MISSING) {
+                    violations.add(exec + ": gate " + g.dimension() + " is " + g.state() + " without an observation");
+                }
+                continue;
+            }
+            ExperienceSample.GateState expected = switch (g.observation().get().state()) {
+                case PASS -> ExperienceSample.GateState.PASS;
+                case NOT_APPLICABLE -> ExperienceSample.GateState.NOT_APPLICABLE;
+                case FAIL -> ExperienceSample.GateState.FAIL;
+                case UNKNOWN -> ExperienceSample.GateState.UNKNOWN;
+            };
+            if (g.state() != expected) {
+                violations.add(exec + ": gate " + g.dimension() + " is " + g.state() + " but its observation is "
+                        + g.observation().get().state());
+            }
+        }
+        return violations;
+    }
+
+    /**
+     * The evidence exported for each attempt is the evidence the fixture records for it: the same dimensions in the
+     * same states, and nothing for an attempt that has none (rejected samples have no gates, so this is the only
+     * place their evidence is compared with the judged data).
+     */
+    static List<String> evidenceStateViolations(ForgeFixture fixture, ExperienceSample sample) {
+        List<String> violations = new ArrayList<>();
+        String exec = sample.executionId().value();
+        for (ForgeFixture.Attempt fa : fixture.attemptsOf(exec)) {
+            sample.attempts().stream().filter(a -> a.ordinal() == fa.ordinal()).findFirst().ifPresent(a -> {
+                Map<QualityDimension, String> exported = new TreeMap<>();
+                for (ExperienceSample.SampleEvidence ev : a.evidence()) {
+                    for (ExperienceSample.SampleObservation o : ev.observations()) {
+                        if (o.policyMatches()) {
+                            exported.put(o.observation().dimension(), o.observation().state().name());
+                        }
+                    }
+                }
+                if (!exported.equals(new TreeMap<>(fa.evidence()))) {
+                    violations.add(fa.experienceId() + ": exported evidence " + exported + " but the fixture records "
+                            + new TreeMap<>(fa.evidence()));
+                }
+            });
+        }
+        return violations;
+    }
+
+    /** {@code firstSequence} and {@code lastSequence} are the first and last ledger sequence of the execution. */
+    static List<String> sequenceBoundsViolations(ExecutionMemory memory, ScopeId scope, ExperienceSample sample) {
+        List<String> violations = new ArrayList<>();
+        ExecutionView view = memory.loadExecution(scope, sample.executionId()).orElse(null);
+        if (view == null || view.history().isEmpty()) {
+            violations.add(sample.executionId().value() + ": the execution has no ledger history");
+            return violations;
+        }
+        long first = view.history().stream().mapToLong(HistoryEntry::sequence).min().orElseThrow();
+        long last = view.history().stream().mapToLong(HistoryEntry::sequence).max().orElseThrow();
+        if (sample.firstSequence() != first || sample.lastSequence() != last) {
+            violations.add(sample.executionId().value() + ": sequence bounds " + sample.firstSequence() + ".."
+                    + sample.lastSequence() + " but the ledger history spans " + first + ".." + last);
+        }
+        return violations;
+    }
+
+    // --- payload predicates: what the sample states must be what the ledger event holds -------------------
+
+    static Predicate<ExecutionEvent> startedAs(ExperienceSample.SampleAttempt a) {
+        return e -> e instanceof AttemptStarted s && s.ordinal() == a.ordinal() && s.reason() == a.reason()
+                && s.previousAttempt().equals(a.previousAttempt());
+    }
+
+    static Predicate<ExecutionEvent> finishedAs(ExperienceSample.SampleAttempt a) {
+        return e -> e instanceof AttemptFinished f && a.result().map(r -> r == f.result()).orElse(false)
+                && f.solutionSummary().equals(a.solutionSummary()) && f.lessonSummary().equals(a.lessonSummary());
+    }
+
+    static Predicate<ExecutionEvent> stageAs(ExperienceSample.SampleStage st) {
+        return e -> e instanceof StageRecorded s && s.stage().equals(st.stage()) && s.route().equals(st.route())
+                && s.startedAt().equals(st.startedAt()) && s.endedAt().equals(st.endedAt())
+                && s.usageDeclaration() == st.usageDeclaration() && s.justification().equals(st.justification())
+                && s.artifacts().equals(st.artifacts());
+    }
+
+    /**
+     * Exported evidence equals the ledger's: the same observations (those recorded under the execution's policy in
+     * the adapter view, all of them in the diagnostic view, each flagged with whether it matches the policy) and the
+     * same artifacts.
+     */
+    static Predicate<ExecutionEvent> evidenceAs(ExperienceSample.SampleEvidence ev, EvaluationPolicy policy,
+                                                boolean diagnosticView) {
+        return e -> {
+            if (!(e instanceof EvidenceRecorded er)) {
+                return false;
+            }
+            List<ExperienceSample.SampleObservation> expected = er.observations().stream()
+                    .map(o -> new ExperienceSample.SampleObservation(o, o.policyId().equals(policy.id())
+                            && o.policyVersion().equals(policy.version())))
+                    .filter(o -> diagnosticView || o.policyMatches()).toList();
+            return ev.observations().equals(expected) && ev.artifacts().equals(er.artifacts());
+        };
+    }
+
+    /** The gate's observation is one the ledger event holds, for the gate's own dimension. */
+    static Predicate<ExecutionEvent> gateEvidenceAs(ExperienceSample.Gate g) {
+        return e -> e instanceof EvidenceRecorded er && er.observations().stream()
+                .anyMatch(o -> o.dimension() == g.dimension() && g.observation().map(o::equals).orElse(true));
     }
 
     static Predicate<ExecutionEvent> startedWithOrdinal(int ordinal) {

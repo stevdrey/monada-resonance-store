@@ -53,7 +53,7 @@ public record ForgeFixture(String version, String provenance, Map<String, String
     public record Execution(String id, String scopeKey, String task, String summary, String sourceRevision,
                             String contextFingerprint, String constraintsFingerprint,
                             Set<QualityDimension> mandatory, OutcomeKind outcome, int outcomeAttempt,
-                            String expectedLabel, String expectedAcceptance) {
+                            String expectedLabel, String expectedAcceptance, Set<String> expectedReasons) {
     }
 
     public record Attempt(String execution, int ordinal, String reason, String result, String solution,
@@ -146,11 +146,12 @@ public record ForgeFixture(String version, String provenance, Map<String, String
                 .map(Integer::valueOf).toList();
 
         List<Execution> executions = new ArrayList<>();
-        for (String[] f : rows("executions.psv", 11)) {
+        for (String[] f : rows("executions.psv", 12)) {
             String[] outcome = f[8].split(":");
             executions.add(new Execution(f[0], f[1], f[2], f[3], f[4], f[5], f[6], dimensions(f[7]),
                     OutcomeKind.valueOf(outcome[0]), outcome.length > 1 ? Integer.parseInt(outcome[1]) : 0,
-                    f[9], f[10]));
+                    f[9], f[10], f[11].equals("-") ? Set.of()
+                    : new LinkedHashSet<>(Arrays.stream(f[11].split(",")).map(String::trim).toList())));
         }
         List<Attempt> attempts = new ArrayList<>();
         for (String[] f : rows("attempts.psv", 13)) {
@@ -226,6 +227,11 @@ public record ForgeFixture(String version, String provenance, Map<String, String
         unique(attempts.stream().map(Attempt::experienceId).toList(), "experience");
         unique(queries.stream().map(Query::id).toList(), "query");
         for (Execution e : executions) {
+            boolean learnable = e.expectedLabel().equals("SUCCESS") || e.expectedLabel().equals("FAILURE");
+            if (learnable != e.expectedReasons().isEmpty()) {
+                throw new IllegalStateException("execution " + e.id() + ": eligibility reasons must be given exactly "
+                        + "for samples that are not SUCCESS or FAILURE");
+            }
             scopeId(e.scopeKey());
             if (attemptsOf(e.id()).isEmpty()) {
                 throw new IllegalStateException("execution without attempts: " + e.id());
