@@ -58,6 +58,7 @@ final class Run implements AutoCloseable {
     private final ScopeId scope;
     private final TaskId task;
     private final ExecutionId exec;
+    private final String idPrefix;
     private int counter;
 
     Run(Path root, Set<QualityDimension> mandatory) {
@@ -68,11 +69,18 @@ final class Run implements AutoCloseable {
     /** A run with explicit identity, provenance and policy (used to build comparable or incomparable pairs). */
     Run(Path root, ScopeId scope, TaskId task, ExecutionId exec, SourceProvenance provenance,
         EvaluationPolicy policy) {
+        this(root, scope, task, exec, provenance, policy, "");
+    }
+
+    /** As above, with event ids prefixed so that several executions can share one scope of one ledger. */
+    Run(Path root, ScopeId scope, TaskId task, ExecutionId exec, SourceProvenance provenance,
+        EvaluationPolicy policy, String idPrefix) {
+        this.idPrefix = idPrefix;
         this.scope = scope;
         this.task = task;
         this.exec = exec;
         memory = ExecutionMemory.open(root, scope);
-        record(ExecutionEvent.executionStarted(id("start"), scope, task, exec, provenance, policy, "Fix the bug", T0));
+        record(ExecutionEvent.executionStarted(id(idPrefix + "start"), scope, task, exec, provenance, policy, "Fix the bug", T0));
     }
 
     ScopeId scope() {
@@ -88,7 +96,7 @@ final class Run implements AutoCloseable {
     }
 
     EventId nextId(String prefix) {
-        return id(prefix + "-" + (++counter));
+        return id(idPrefix + prefix + "-" + (++counter));
     }
 
     /** Records {@code event} if the real ledger accepts it; empty when the ledger rejects it or reports a conflict. */
