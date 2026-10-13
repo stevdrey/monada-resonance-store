@@ -4,7 +4,7 @@ Status: accepted contract. The immutable domain records (section 15, issue #95) 
 replay and read-only audit (section 16, issue #96), the `ExecutionMemory` facade (section 17,
 issue #97), scoped projections with bounded recall (section 18, issue #98) and the usage and
 hypothetical-cost calculators (section 19, issue #99) and the evidence-gated comparison with Pareto
-diagnostics (section 20, issue #100) are implemented; export remains future work. Decision record: [ADR 0004](../adr/0004-embedded-execution-memory.md). Issue: #93 (Forge Integration 1/10).
+diagnostics (section 20, issue #100) and the bounded sample export (section 21, issue #101) are implemented. Decision record: [ADR 0004](../adr/0004-embedded-execution-memory.md). Issue: #93 (Forge Integration 1/10).
 
 This document is the normative v1 contract that issues #94–#102 implement. Later issues may refine
 exact Java signatures and the byte-level payload codec, but must not change the semantics defined here
@@ -615,8 +615,8 @@ Future consumer integration in Monada Forge and Monada Neuron remains future cro
 
 Package `com.monada.storage.execution` (`monada-storage`). Scope: one writable ledger per scope with
 append, exact lookup, deterministic replay and read-only audit. The `ExecutionMemory` facade was added
-afterwards by #97 (section 17). Out of scope and still future work: projections, recall, export, segment
-rollover, compaction and explicit repair.
+afterwards by #97 (section 17). Out of scope for #96 (projections, recall and export were added later by #98 and #101,
+sections 18 and 21) and still future work: segment rollover, compaction and explicit repair.
 
 ### 16.1 Public API
 

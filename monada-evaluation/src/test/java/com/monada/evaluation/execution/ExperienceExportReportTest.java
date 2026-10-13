@@ -157,6 +157,15 @@ class ExperienceExportReportTest {
     }
 
     @Test
+    void aContinuationRequestCannotBuildACompleteReport() {
+        try (ExecutionMemory m = ExecutionMemory.openReadOnly(root, SCOPE)) {
+            var cursor = m.exportSamples(everything(1)).next().get();
+            assertThrows(IllegalArgumentException.class, () -> ExperienceExportReport.build(m,
+                    ExportRequest.resume(cursor, 1), book(usd()), Optional.of(policy())));
+        }
+    }
+
+    @Test
     void costIsComputedAsOfTheExportCutoff() {
         try (ExecutionMemory m = ExecutionMemory.openReadOnly(root, SCOPE)) {
             ExperienceExportReport beforeAcceptance = ExperienceExportReport.build(m,

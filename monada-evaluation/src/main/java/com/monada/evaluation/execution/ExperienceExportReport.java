@@ -41,7 +41,8 @@ public record ExperienceExportReport(ScopeId scope, List<ExperienceSamplePage> p
 
     /**
      * Pages through the whole export that starts with {@code first} and annotates each sample as of the cutoff the
-     * first page resolved. {@code policy} is optional: without it every placement is {@code NOT_REQUESTED}.
+     * first page resolved. {@code first} must be a first-page request ({@link ExportRequest#first}), never a
+     * {@link ExportRequest#resume} continuation. {@code policy} is optional: without it every placement is {@code NOT_REQUESTED}.
      */
     public static ExperienceExportReport build(ExecutionMemory memory, ExportRequest first, PriceBook prices,
                                                Optional<ComparisonPolicy> policy) {
@@ -49,6 +50,10 @@ public record ExperienceExportReport(ScopeId scope, List<ExperienceSamplePage> p
         Objects.requireNonNull(first, "first");
         Objects.requireNonNull(prices, "prices");
         Objects.requireNonNull(policy, "policy");
+        if (first.cursor().isPresent()) {
+            throw new IllegalArgumentException("a complete report starts from a first-page request, not from a "
+                    + "continuation: it would annotate only the remaining pages");
+        }
         List<ExperienceSamplePage> pages = new ArrayList<>();
         ExperienceSamplePage page = memory.exportSamples(first);
         pages.add(page);
