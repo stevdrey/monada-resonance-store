@@ -1,15 +1,16 @@
 package com.monada.api.execution;
 
+import com.monada.api.execution.EffectiveFacts.Fact;
 import com.monada.api.execution.ExperienceSample.Diagnostics;
 import com.monada.api.execution.ExperienceSample.Eligibility;
 import com.monada.api.execution.ExperienceSample.EligibilityCode;
 import com.monada.api.execution.ExperienceSample.Gate;
 import com.monada.api.execution.ExperienceSample.GateState;
+import com.monada.api.execution.ExperienceSample.Group;
 import com.monada.api.execution.ExperienceSample.IgnoredObservation;
 import com.monada.api.execution.ExperienceSample.Label;
 import com.monada.api.execution.ExperienceSample.OutcomeFact;
 import com.monada.api.execution.ExperienceSample.Reason;
-import com.monada.api.execution.ExperienceSample.Revision;
 import com.monada.api.execution.ExperienceSample.SampleAttempt;
 import com.monada.api.execution.ExperienceSample.SampleEvidence;
 import com.monada.api.execution.ExperienceSample.SampleObservation;
@@ -18,17 +19,13 @@ import com.monada.api.execution.ExperienceSample.SampleUsage;
 import com.monada.api.execution.ExperienceSample.UsageState;
 import com.monada.core.execution.AttemptId;
 import com.monada.core.execution.AttemptResult;
-import com.monada.core.execution.EventId;
-import com.monada.core.execution.ExecutionEvent;
 import com.monada.core.execution.ExecutionEvent.AttemptFinished;
 import com.monada.core.execution.ExecutionEvent.AttemptStarted;
-import com.monada.core.execution.ExecutionEvent.Correction;
 import com.monada.core.execution.ExecutionEvent.EvidenceRecorded;
 import com.monada.core.execution.ExecutionEvent.ExecutionStarted;
 import com.monada.core.execution.ExecutionEvent.OutcomeRecorded;
 import com.monada.core.execution.ExecutionEvent.StageRecorded;
 import com.monada.core.execution.ExecutionId;
-import com.monada.core.execution.ExperienceRef;
 import com.monada.core.execution.Outcome;
 import com.monada.core.execution.OutcomeOrigin;
 import com.monada.core.execution.OutcomeStatus;
@@ -39,82 +36,41 @@ import com.monada.core.execution.UsageCounter;
 import com.monada.core.execution.UsageDeclaration;
 import com.monada.core.execution.UsageKind;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.EnumSet;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
 
 /**
- * Derives one {@link ExperienceSample} from the ledger entries of one execution up to the export cutoff. The
- * facts are resolved with the same rules as the facade's views (contract sections 6 and 8): a corrected event is
- * replaced by its latest revision, the outcome with the highest sequence is current and later applicable
- * evidence overrides earlier. The derived acceptance is taken from {@link ExecutionViews} itself, and the sample
- * fails loudly if its own label derivation ever disagrees with it.
+ * Derives one {@link ExperienceSample} from the ledger entries of one execution up to the export cutoff. Facts come
+ * from {@link EffectiveFacts}, the same resolution {@link ExecutionViews} uses, and the derived acceptance is taken
+ * from {@link ExecutionViews} itself. If the sample's own label derivation ever disagrees with it, the sample is
+ * exported {@code UNLABELED} with an {@code INCONSISTENT_DERIVATION} reason instead of failing the whole page.
  */
 final class SampleBuilder {
-    /** An effective (latest-revision) fact: where it sits in the ledger, what it says and its exact reference. */
-    private record Fact(HistoryEntry entry, ExecutionEvent event, ExperienceRef ref) {
-        long sequence() {
-            return entry.sequence();
-        }
-    }
-
     private SampleBuilder() {
     }
 
     /** {@code history}: every entry of the execution with sequence at most the cutoff, in sequence order. */
     static ExperienceSample build(ScopeId scope, ExecutionId id, List<HistoryEntry> history, ExportView view,
                                   Set<QualityDimension> additionalGates) {
-        ExecutionView ev = ExecutionViews.execution(history, id).orElseThrow();
-        Map<EventId, HistoryEntry> byId = new HashMap<>();
-        Set<EventId> superseded = new HashSet<>();
         for (HistoryEntry h : history) {
             if (!h.event().scopeId().equals(scope)) {
                 throw new IllegalStateException("event " + h.event().eventId() + " belongs to scope "
                         + h.event().scopeId() + ", not " + scope);
             }
-            byId.put(h.event().eventId(), h);
-            h.event().envelope().supersedes().ifPresent(superseded::add);
         }
-
-        Fact started = null;
-        List<Fact> outcomes = new ArrayList<>();
-        Map<AttemptId, Fact> starts = new LinkedHashMap<>();
-        Map<AttemptId, Fact> finishes = new LinkedHashMap<>();
-        Map<AttemptId, List<Fact>> stages = new LinkedHashMap<>();
-        Map<AttemptId, List<Fact>> evidence = new LinkedHashMap<>();
-        List<Revision> revisions = new ArrayList<>();
-        for (HistoryEntry h : history) {
-            if (superseded.contains(h.event().eventId())) {
-                continue;
-            }
-            ExecutionEvent outer = h.event();
-            ExecutionEvent effective = outer instanceof Correction c ? c.replacement() : outer;
-            Fact fact = new Fact(h, effective, new ExperienceRef(scope, outer.envelope().taskId(), id,
-                    outer.envelope().attemptId(), outer.eventId(), outer.envelope().revision()));
-            if (outer instanceof Correction c) {
-                revisions.add(new Revision(fact.ref(), h.sequence(), c.justification(), chain(scope, id, outer, byId)));
-            }
-            switch (effective) {
-                case ExecutionStarted e -> started = fact;
-                case OutcomeRecorded e -> outcomes.add(fact);
-                case AttemptStarted e -> starts.put(e.envelope().attemptId().get(), fact);
-                case AttemptFinished e -> finishes.put(e.envelope().attemptId().get(), fact);
-                case StageRecorded e -> stages.computeIfAbsent(e.envelope().attemptId().get(),
-                        k -> new ArrayList<>()).add(fact);
-                case EvidenceRecorded e -> evidence.computeIfAbsent(e.envelope().attemptId().get(),
-                        k -> new ArrayList<>()).add(fact);
-                case Correction e -> throw new IllegalStateException("nested correction");
-            }
-        }
+        ExecutionView ev = ExecutionViews.execution(history, id).orElseThrow();
+        EffectiveFacts facts = new EffectiveFacts(history);
+        Fact started = facts.started();
         ExecutionStarted start = (ExecutionStarted) started.event();
 
+        List<Fact> outcomes = facts.outcomes();
         Optional<Fact> current = outcomes.isEmpty() ? Optional.empty() : Optional.of(outcomes.get(outcomes.size() - 1));
         Optional<Outcome> outcome = current.map(f -> ((OutcomeRecorded) f.event()).outcome());
         Optional<AttemptId> acceptedAttempt = outcome.flatMap(Outcome::acceptedAttempt);
@@ -125,7 +81,7 @@ final class SampleBuilder {
         // Applicable evidence of the accepted attempt: later applicable observations override earlier ones.
         Map<QualityDimension, QualityObservation> effectiveObs = new EnumMap<>(QualityDimension.class);
         Map<QualityDimension, Fact> effectiveFact = new EnumMap<>(QualityDimension.class);
-        for (Map.Entry<AttemptId, List<Fact>> e : evidence.entrySet()) {
+        for (Map.Entry<AttemptId, List<Fact>> e : facts.evidence().entrySet()) {
             if (acceptedAttempt.filter(e.getKey()::equals).isEmpty()) {
                 continue;
             }
@@ -139,7 +95,7 @@ final class SampleBuilder {
             }
         }
         List<IgnoredObservation> ignored = new ArrayList<>();
-        for (Map.Entry<AttemptId, List<Fact>> e : evidence.entrySet()) {
+        for (Map.Entry<AttemptId, List<Fact>> e : facts.evidence().entrySet()) {
             for (Fact f : e.getValue()) {
                 for (QualityObservation obs : ((EvidenceRecorded) f.event()).observations()) {
                     String reason = null;
@@ -162,7 +118,6 @@ final class SampleBuilder {
         }
 
         List<Gate> gates = new ArrayList<>();
-        List<Reason> reasons = new ArrayList<>();
         if (acceptedAttempt.isPresent()) {
             for (QualityDimension d : QualityDimension.values()) {
                 QualityObservation obs = effectiveObs.get(d);
@@ -183,6 +138,7 @@ final class SampleBuilder {
         }
 
         DerivedAcceptance.Status status = ev.acceptance().status();
+        List<Reason> reasons = new ArrayList<>();
         Label label;
         switch (status) {
             case PENDING -> {
@@ -190,13 +146,26 @@ final class SampleBuilder {
                 reasons.add(new Reason(EligibilityCode.OUTCOME_PENDING, Optional.empty(),
                         outcome.isEmpty() ? "no outcome recorded" : "current outcome is PENDING"));
             }
-            case NOT_ACCEPTED -> label = Label.FAILURE;
+            case NOT_ACCEPTED -> {
+                // A negative example must be a validated, non-cancelled verdict: a cancellation says nothing about
+                // the route and an imported claim was never validated under the execution's policy.
+                Outcome o = outcome.get();
+                if (o.status() == OutcomeStatus.CANCELLED) {
+                    reasons.add(new Reason(EligibilityCode.OUTCOME_CANCELLED, Optional.empty(),
+                            "outcome is CANCELLED: a cancellation is not a verdict on the route"));
+                }
+                if (o.origin() == OutcomeOrigin.IMPORTED_CLAIM) {
+                    reasons.add(new Reason(EligibilityCode.OUTCOME_IMPORTED_CLAIM, Optional.empty(),
+                            "outcome is an imported claim, not a validated outcome"));
+                }
+                label = reasons.isEmpty() ? Label.FAILURE : Label.UNLABELED;
+            }
             case ACCEPTED_UNVALIDATED, VALIDATED_ACCEPTED -> {
                 if (outcome.get().origin() == OutcomeOrigin.IMPORTED_CLAIM) {
                     reasons.add(new Reason(EligibilityCode.OUTCOME_IMPORTED_CLAIM, Optional.empty(),
                             "outcome is an imported claim, not a validated outcome"));
                 }
-                Fact finish = finishes.get(acceptedAttempt.get());
+                Fact finish = facts.finishes().get(acceptedAttempt.get());
                 if (finish == null) {
                     reasons.add(new Reason(EligibilityCode.ACCEPTED_ATTEMPT_UNFINISHED, Optional.empty(),
                             "accepted attempt " + acceptedAttempt.get() + " is not finished"));
@@ -221,30 +190,32 @@ final class SampleBuilder {
                         default -> { }
                     }
                 }
-                label = reasons.isEmpty() ? Label.SUCCESS : Label.UNLABELED;
                 boolean structural = reasons.stream().anyMatch(r -> r.code() == EligibilityCode.OUTCOME_IMPORTED_CLAIM
                         || r.code() == EligibilityCode.ACCEPTED_ATTEMPT_UNFINISHED
                         || r.code() == EligibilityCode.ACCEPTED_ATTEMPT_NOT_COMPLETED);
                 if (status == DerivedAcceptance.Status.VALIDATED_ACCEPTED && structural
                         || status == DerivedAcceptance.Status.ACCEPTED_UNVALIDATED && reasons.isEmpty()) {
-                    throw new IllegalStateException("sample derivation " + reasons + " disagrees with derived "
-                            + "acceptance " + status + " " + ev.acceptance().reasons());
+                    reasons.add(new Reason(EligibilityCode.INCONSISTENT_DERIVATION, Optional.empty(),
+                            "sample derivation " + List.copyOf(reasons) + " disagrees with derived acceptance "
+                                    + status + " " + ev.acceptance().reasons()));
                 }
+                label = reasons.isEmpty() ? Label.SUCCESS : Label.UNLABELED;
             }
             default -> throw new IllegalStateException("unexpected acceptance " + status);
         }
 
         boolean diagnostic = view == ExportView.DIAGNOSTIC;
         List<SampleAttempt> attempts = new ArrayList<>();
-        starts.values().stream().sorted(java.util.Comparator.comparingInt(f -> ((AttemptStarted) f.event()).ordinal()))
+        facts.starts().values().stream()
+                .sorted(Comparator.comparingInt(f -> ((AttemptStarted) f.event()).ordinal()))
                 .forEach(sf -> {
                     AttemptStarted s = (AttemptStarted) sf.event();
                     AttemptId aid = s.envelope().attemptId().get();
-                    Optional<Fact> fin = Optional.ofNullable(finishes.get(aid));
-                    List<SampleStage> sampleStages = stages.getOrDefault(aid, List.of()).stream()
+                    Optional<Fact> fin = Optional.ofNullable(facts.finishes().get(aid));
+                    List<SampleStage> sampleStages = facts.stages().getOrDefault(aid, List.of()).stream()
                             .map(SampleBuilder::stage).toList();
                     List<SampleEvidence> sampleEvidence = new ArrayList<>();
-                    for (Fact f : evidence.getOrDefault(aid, List.of())) {
+                    for (Fact f : facts.evidence().getOrDefault(aid, List.of())) {
                         EvidenceRecorded er = (EvidenceRecorded) f.event();
                         List<SampleObservation> obs = er.observations().stream()
                                 .map(o -> new SampleObservation(o, matches(start, o)))
@@ -268,27 +239,20 @@ final class SampleBuilder {
                 : Optional.empty();
         return new ExperienceSample(started.ref(), start.taskSummary(), start.provenance(), start.policy(),
                 List.copyOf(required), current.map(f -> new OutcomeFact(f.ref(), f.sequence(),
-                        ((OutcomeRecorded) f.event()).outcome())), status, label,
-                new Eligibility(reasons.isEmpty(), reasons), gates, attempts, revisions,
+                        ((OutcomeRecorded) f.event()).outcome())), status, label, OptionalInt.empty(), groupOf(start),
+                new Eligibility(reasons.isEmpty(), reasons), gates, attempts, facts.revisions(),
                 history.get(0).sequence(), history.get(history.size() - 1).sequence(), diagnostics);
+    }
+
+    /** The repeat-detection key of an execution (see {@link Group}), also usable without building a sample. */
+    static Group groupOf(ExecutionStarted start) {
+        return new Group(start.envelope().taskId(), start.provenance().sourceRevision(),
+                start.provenance().contextFingerprint(), start.provenance().constraintsFingerprint(),
+                start.policy().id(), start.policy().version());
     }
 
     private static boolean matches(ExecutionStarted start, QualityObservation obs) {
         return obs.policyId().equals(start.policy().id()) && obs.policyVersion().equals(start.policy().version());
-    }
-
-    /** References of the revisions a correction replaced, oldest first (the correction itself excluded). */
-    private static List<ExperienceRef> chain(ScopeId scope, ExecutionId id, ExecutionEvent correction,
-                                             Map<EventId, HistoryEntry> byId) {
-        List<ExperienceRef> older = new ArrayList<>();
-        Optional<EventId> target = correction.envelope().supersedes();
-        while (target.isPresent()) {
-            ExecutionEvent e = byId.get(target.get()).event();
-            older.add(0, new ExperienceRef(scope, e.envelope().taskId(), id, e.envelope().attemptId(), e.eventId(),
-                    e.envelope().revision()));
-            target = e.envelope().supersedes();
-        }
-        return older;
     }
 
     private static SampleStage stage(Fact f) {

@@ -12,7 +12,6 @@ import com.monada.core.execution.ScopeId;
 import com.monada.core.execution.UsageKind;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -59,13 +58,14 @@ class AdapterConsumerExampleTest {
                     ExportEvidencePolicy.executionPolicyOnly())));
 
             // 2. the adapter's own policy: eligible samples become rows, the rest is kept with its reasons
-            List<Row> rows = all.stream().filter(s -> s.eligibility().eligible()).map(AdapterConsumerExampleTest::toRow)
-                    .toList();
+            // (a success counts once per group of repeated work: keep successOrdinal 1 only)
+            List<Row> rows = all.stream().filter(s -> s.eligibility().eligible())
+                    .filter(s -> s.successOrdinal().orElse(1) == 1).map(AdapterConsumerExampleTest::toRow).toList();
             List<String> skipped = all.stream().filter(s -> !s.eligibility().eligible())
                     .map(s -> s.executionId().value() + ": " + s.eligibility().reasons().get(0).code()).toList();
 
-            assertEquals(List.of("x-ok:SUCCESS:worker-b/large:false", "x-rej:FAILURE:worker-a/small:false",
-                    "x-ok2:SUCCESS:worker-a/small:true"),
+            // x-ok2 repeats the validated work of x-ok (successOrdinal 2), so this consumer drops it
+            assertEquals(List.of("x-ok:SUCCESS:worker-b/large:false", "x-rej:FAILURE:worker-a/small:false"),
                     rows.stream().map(r -> r.execution() + ":" + r.label() + ":" + r.route() + ":"
                             + r.usageFullyKnown()).toList());
             assertEquals(List.of("x-pending: OUTCOME_PENDING", "x-unk: GATE_UNKNOWN",
@@ -79,7 +79,6 @@ class AdapterConsumerExampleTest {
 
             // 4. Store did nothing on the consumer's behalf: no append, no feedback, no projection change
             assertEquals(sequenceBefore, memory.history(SCOPE).highWatermark());
-            assertEquals(Optional.empty(), memory.recall(SCOPE, "   ", 1).hits().stream().findFirst());
         }
     }
 }

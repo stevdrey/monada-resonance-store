@@ -12,12 +12,14 @@ import com.monada.core.execution.QualityDimension;
 import com.monada.core.execution.QualityObservation;
 import com.monada.core.execution.RouteDescriptor;
 import com.monada.core.execution.SourceProvenance;
+import com.monada.core.execution.TaskId;
 import com.monada.core.execution.UsageDeclaration;
 import com.monada.core.execution.UsageKind;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.OptionalLong;
 
 /**
@@ -44,6 +46,8 @@ public record ExperienceSample(
         Optional<OutcomeFact> outcome,
         DerivedAcceptance.Status acceptance,
         Label label,
+        OptionalInt successOrdinal,
+        Group group,
         Eligibility eligibility,
         List<Gate> gates,
         List<SampleAttempt> attempts,
@@ -60,7 +64,12 @@ public record ExperienceSample(
         Objects.requireNonNull(outcome, "outcome");
         Objects.requireNonNull(acceptance, "acceptance");
         Objects.requireNonNull(label, "label");
+        Objects.requireNonNull(successOrdinal, "successOrdinal");
+        Objects.requireNonNull(group, "group");
         Objects.requireNonNull(eligibility, "eligibility");
+        if (successOrdinal.isPresent() && label != Label.SUCCESS) {
+            throw new IllegalArgumentException("only a SUCCESS sample has a successOrdinal");
+        }
         Objects.requireNonNull(diagnostics, "diagnostics");
         requiredGates = List.copyOf(requiredGates);
         gates = List.copyOf(gates);
@@ -72,13 +81,39 @@ public record ExperienceSample(
         return execution.execution();
     }
 
+    /** The same sample with its position among the group's successes (used by the exporter). */
+    ExperienceSample withSuccessOrdinal(int ordinal) {
+        return new ExperienceSample(execution, taskSummary, provenance, policy, requiredGates, outcome, acceptance,
+                label, OptionalInt.of(ordinal), group, eligibility, gates, attempts, revisions, firstSequence,
+                lastSequence, diagnostics);
+    }
+
     /** Structural verdict. {@code UNLABELED} samples are exported, never dropped, with their reasons. */
     public enum Label { SUCCESS, FAILURE, UNLABELED }
 
     /** Why a sample cannot (or can) be used as a labelled example. */
     public enum EligibilityCode {
-        OUTCOME_PENDING, OUTCOME_IMPORTED_CLAIM, ACCEPTED_ATTEMPT_UNFINISHED, ACCEPTED_ATTEMPT_NOT_COMPLETED,
-        GATE_FAIL, GATE_UNKNOWN, GATE_MISSING
+        OUTCOME_PENDING, OUTCOME_CANCELLED, OUTCOME_IMPORTED_CLAIM, ACCEPTED_ATTEMPT_UNFINISHED,
+        ACCEPTED_ATTEMPT_NOT_COMPLETED, GATE_FAIL, GATE_UNKNOWN, GATE_MISSING, INCONSISTENT_DERIVATION
+    }
+
+    /**
+     * What makes two executions repeats of one piece of work: the same task started from the same source
+     * revision, context and constraints under the same evaluation policy (the comparability key of section 10
+     * without the scope). Several validated executions of one group are distinct facts, so Store marks them
+     * ({@link #successOrdinal}) and never hides them; a consumer that wants one example per group keeps the
+     * sample whose ordinal is 1.
+     */
+    public record Group(TaskId task, String sourceRevision, String contextFingerprint,
+                        String constraintsFingerprint, String policyId, String policyVersion) {
+        public Group {
+            Objects.requireNonNull(task, "task");
+            Objects.requireNonNull(sourceRevision, "sourceRevision");
+            Objects.requireNonNull(contextFingerprint, "contextFingerprint");
+            Objects.requireNonNull(constraintsFingerprint, "constraintsFingerprint");
+            Objects.requireNonNull(policyId, "policyId");
+            Objects.requireNonNull(policyVersion, "policyVersion");
+        }
     }
 
     /** Effective state of one gate dimension; {@code MISSING} means no applicable observation exists. */

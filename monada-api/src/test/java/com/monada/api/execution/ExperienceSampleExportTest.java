@@ -170,8 +170,6 @@ class ExperienceSampleExportTest {
         // the failed first attempt is visible but is not a success
         assertEquals(List.of(false, true), ok.attempts().stream().map(SampleAttempt::accepted).toList());
         assertEquals(Optional.of(AttemptResult.FAILED), ok.attempts().get(0).result());
-        assertEquals(1, all.stream().filter(s -> s.execution().task().value().equals("t-ok") && s.label() == Label.SUCCESS
-                && s.executionId().value().equals("x-ok")).count());
 
         ExperienceSample rejected = byExecution(all, "x-rej");
         assertEquals(Label.FAILURE, rejected.label());
@@ -422,6 +420,143 @@ class ExperienceSampleExportTest {
     }
 
     @Test
+    void onlyValidatedNonCancelledNegativesAreFailureExamples() {
+        List<ExperienceSample> all;
+        try (ExecutionMemory m = ExecutionMemory.open(root, S1)) {
+            SampleLedger l = new SampleLedger(m, S1, "p");
+            String[] names = {"validated-rejected", "validated-failed", "claim-rejected", "claim-failed",
+                    "cancelled", "claim-cancelled"};
+            Outcome[] outcomes = {Outcome.rejected(OutcomeOrigin.VALIDATED), Outcome.failed(OutcomeOrigin.VALIDATED),
+                    Outcome.rejected(OutcomeOrigin.IMPORTED_CLAIM), Outcome.failed(OutcomeOrigin.IMPORTED_CLAIM),
+                    Outcome.cancelled(OutcomeOrigin.VALIDATED), Outcome.cancelled(OutcomeOrigin.IMPORTED_CLAIM)};
+            for (int i = 0; i < names.length; i++) {
+                SampleLedger.Exec e = l.exec("t-" + names[i], names[i], TESTS).attempt(A1, 1, Optional.empty());
+                e.finish(A1, AttemptResult.COMPLETED);
+                e.outcome(outcomes[i]);
+            }
+            all = samples(exportAll(m, ExportRequest.firstPage(S1, 100)));
+        }
+        for (String ok : List.of("validated-rejected", "validated-failed")) {
+            ExperienceSample s = byExecution(all, ok);
+            assertEquals(Label.FAILURE, s.label(), ok);
+            assertTrue(s.eligibility().eligible());
+            assertEquals(DerivedAcceptance.Status.NOT_ACCEPTED, s.acceptance());
+        }
+        for (String claim : List.of("claim-rejected", "claim-failed")) {
+            ExperienceSample s = byExecution(all, claim);
+            assertEquals(Label.UNLABELED, s.label(), claim);
+            assertEquals(List.of(EligibilityCode.OUTCOME_IMPORTED_CLAIM),
+                    s.eligibility().reasons().stream().map(r -> r.code()).toList());
+            assertEquals(DerivedAcceptance.Status.NOT_ACCEPTED, s.acceptance()); // the claim stays visible
+        }
+        assertEquals(List.of(EligibilityCode.OUTCOME_CANCELLED), byExecution(all, "cancelled").eligibility()
+                .reasons().stream().map(r -> r.code()).toList());
+        assertEquals(Label.UNLABELED, byExecution(all, "cancelled").label());
+        assertEquals(List.of(EligibilityCode.OUTCOME_CANCELLED, EligibilityCode.OUTCOME_IMPORTED_CLAIM),
+                byExecution(all, "claim-cancelled").eligibility().reasons().stream().map(r -> r.code()).toList());
+        assertEquals(com.monada.core.execution.OutcomeStatus.CANCELLED,
+                byExecution(all, "cancelled").outcome().get().outcome().status());
+    }
+
+    @Test
+    void repeatedValidatedExecutionsOfOneGroupAreMarkedNotHidden() {
+        List<ExperienceSample> all;
+        try (ExecutionMemory m = ExecutionMemory.open(root, S1)) {
+            new SampleLedger(m, S1, "p").standardRun(); // x-ok and x-ok2 are both validated runs of task t-ok
+            all = samples(exportAll(m, ExportRequest.firstPage(S1, 100)));
+            // the ordinal does not depend on how the export is paged
+            for (int size = 1; size <= 7; size++) {
+                assertEquals(all, samples(exportAll(m, ExportRequest.firstPage(S1, size))), "page size " + size);
+            }
+        }
+        assertEquals(7, all.size()); // nothing is hidden
+        assertEquals(java.util.OptionalInt.of(1), byExecution(all, "x-ok").successOrdinal());
+        assertEquals(java.util.OptionalInt.of(2), byExecution(all, "x-ok2").successOrdinal());
+        assertEquals(byExecution(all, "x-ok").group(), byExecution(all, "x-ok2").group());
+        assertEquals("t-ok", byExecution(all, "x-ok").group().task().value());
+        assertEquals(List.of("x-ok", "x-ok2"), all.stream().filter(s -> s.successOrdinal().isPresent())
+                .map(s -> s.executionId().value()).toList());
+        assertTrue(all.stream().filter(s -> s.label() != Label.SUCCESS).allMatch(s -> s.successOrdinal().isEmpty()));
+        assertNotEquals(byExecution(all, "x-ok").group(), byExecution(all, "x-rej").group());
+    }
+
+    @Test
+    void successOrdinalsFollowTheGatesAndTheCutoff() {
+        long[] mark = new long[1];
+        try (ExecutionMemory m = ExecutionMemory.open(root, S1)) {
+            SampleLedger l = new SampleLedger(m, S1, "p");
+            for (String name : List.of("first", "second")) {
+                SampleLedger.Exec e = l.exec("t", name, TESTS).attempt(A1, 1, Optional.empty());
+                e.evidence(A1, QualityDimension.TESTS, ObservationState.PASS, "1");
+                e.finish(A1, AttemptResult.COMPLETED);
+                e.outcome(Outcome.accepted(OutcomeOrigin.VALIDATED, A1));
+                if (name.equals("first")) {
+                    mark[0] = m.history(S1).highWatermark();
+                }
+            }
+        }
+        long afterFirst = mark[0];
+        try (ExecutionMemory m = ExecutionMemory.openReadOnly(root, S1)) {
+            var asOfFirst = samples(exportAll(m, ExportRequest.first(S1, ExportCutoff.atSequence(afterFirst), 10,
+                    ExportView.ADAPTER_READY, ExportEvidencePolicy.executionPolicyOnly())));
+            assertEquals(List.of(java.util.OptionalInt.of(1)), asOfFirst.stream().map(s -> s.successOrdinal()).toList());
+            var latest = samples(exportAll(m, ExportRequest.firstPage(S1, 10)));
+            assertEquals(List.of(java.util.OptionalInt.of(1), java.util.OptionalInt.of(2)),
+                    latest.stream().map(s -> s.successOrdinal()).toList());
+            // a stricter gate removes the successes, so no ordinal remains
+            var strict = samples(exportAll(m, ExportRequest.first(S1, ExportCutoff.latest(), 10,
+                    ExportView.ADAPTER_READY, ExportEvidencePolicy.requiring(QualityDimension.SECURITY))));
+            assertTrue(strict.stream().allMatch(s -> s.successOrdinal().isEmpty() && s.label() == Label.UNLABELED));
+        }
+    }
+
+    @Test
+    void aCursorIssuedForAnotherLedgerHistoryIsRejected() throws IOException {
+        ExportCursor foreign;
+        try (ExecutionMemory m = ExecutionMemory.open(root, S1)) {
+            new SampleLedger(m, S1, "p").standardRun();
+            foreign = m.exportSamples(ExportRequest.firstPage(S1, 2)).next().get();
+        }
+        Path other = Files.createDirectory(root.resolve("other"));
+        try (ExecutionMemory m = ExecutionMemory.open(other, S1)) {
+            new SampleLedger(m, S1, "q").standardRun(); // same shape and length, different events
+            assertThrows(IllegalArgumentException.class, () -> m.exportSamples(ExportRequest.resume(foreign, 2)));
+        }
+        // the same history accepts it, also after reopen
+        try (ExecutionMemory m = ExecutionMemory.openReadOnly(root, S1)) {
+            assertEquals(2, m.exportSamples(ExportRequest.resume(foreign, 2)).samples().size());
+        }
+        // tokens of the previous format are not accepted
+        assertThrows(IllegalArgumentException.class, () -> ExportCursor.parse(java.util.Base64.getUrlEncoder()
+                .withoutPadding().encodeToString("x1|7|2|ADAPTER_READY|-|scope-1".getBytes())));
+    }
+
+    @Test
+    void incrementalPrefixDigestEqualsTheDirectDigestForEveryCutoff() {
+        HistoryIndex index = new HistoryIndex();
+        try (ExecutionMemory m = ExecutionMemory.open(root, S1)) {
+            new SampleLedger(m, S1, "p").standardRun();
+            m.history(S1).entries().forEach(h -> index.add(h.sequence(), h.event()));
+        }
+        int n = index.all().size();
+        assertTrue(n > 20, "enough events to cross several saved states");
+        SampleExporter direct = new SampleExporter(1_000_000); // never saves a state: hashes from scratch
+        SampleExporter saving = new SampleExporter(3);
+        List<Integer> order = new java.util.ArrayList<>();
+        for (int i = n; i >= 0; i--) { // descending first: reuse of saved states must not depend on the order
+            order.add(i);
+        }
+        for (int i = 0; i <= n; i++) {
+            order.add(i);
+        }
+        for (int upTo : order) {
+            assertEquals(direct.prefixDigest(index.all(), upTo), saving.prefixDigest(index.all(), upTo), "upTo " + upTo);
+        }
+        assertEquals(64, saving.prefixDigest(index.all(), n).length());
+        assertNotEquals(saving.prefixDigest(index.all(), n), saving.prefixDigest(index.all(), n - 1));
+    }
+
+    @Test
     void cursorsAreStatelessOpaqueAndRejectTampering() {
         try (ExecutionMemory m = ExecutionMemory.open(root, S1)) {
             new SampleLedger(m, S1, "p").standardRun();
@@ -448,7 +583,7 @@ class ExperienceSampleExportTest {
                     java.util.Base64.getUrlEncoder().withoutPadding().encodeToString("x9|1|0|ADAPTER_READY|-|s".getBytes())));
             // a cursor beyond this ledger is rejected
             assertThrows(IllegalArgumentException.class, () -> m.exportSamples(ExportRequest.resume(
-                    new ExportCursor(S1, 10_000, 0, ExportView.ADAPTER_READY, java.util.Set.of()), 2)));
+                    new ExportCursor(S1, 10_000, 0, ExportView.ADAPTER_READY, java.util.Set.of(), "0".repeat(64)), 2)));
             // bounded pages
             assertThrows(IllegalArgumentException.class, () -> ExportRequest.firstPage(S1, 0));
             assertThrows(IllegalArgumentException.class, () -> m.exportSamples(ExportRequest.firstPage(S1, 501)));

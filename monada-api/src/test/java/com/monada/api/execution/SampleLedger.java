@@ -183,7 +183,7 @@ final class SampleLedger {
         ok.outcome(Outcome.accepted(com.monada.core.execution.OutcomeOrigin.VALIDATED, A2));
 
         Exec rejected = exec("t-rej", "x-rej", TESTS).attempt(A1, 1, Optional.empty());
-        rejected.stage(rejected.id.equals(ExecutionId.of("x-rej")) ? A1 : A1, CHEAP, in(10));
+        rejected.stage(A1, CHEAP, in(10));
         rejected.finish(A1, AttemptResult.COMPLETED);
         rejected.outcome(Outcome.rejected(com.monada.core.execution.OutcomeOrigin.VALIDATED));
 

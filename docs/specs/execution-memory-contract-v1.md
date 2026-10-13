@@ -1305,7 +1305,7 @@ ExperienceSamplePage next = memory.exportSamples(ExportRequest.resume(page.next(
 | `ExportCutoff` | `latest()`, `atSequence(n)` or `recordedUpTo(instant)` (section 21.3) |
 | `ExportView` | `ADAPTER_READY` (default for consumers) or `DIAGNOSTIC` (section 21.4) |
 | `ExportEvidencePolicy` | Extra gate dimensions on top of each execution's own mandatory dimensions; it can only tighten a label |
-| `ExportCursor` | Opaque, stateless token `x1`: scope, resolved cutoff sequence, start sequence of the last returned execution, view, gates |
+| `ExportCursor` | Opaque, stateless token `x2`: scope, resolved cutoff sequence, start sequence of the last returned execution, view, gates and the digest of the ledger prefix it was issued for |
 | `ExperienceSamplePage` | `schema`, scope, view, gates, `LedgerCheckpoint`, `ProjectionStamp`, samples, `hasMore`, `next` |
 | `ExperienceSample` | One execution as of the cutoff (section 21.4) |
 | `ExperienceSampleJson` | Canonical JSON and digest |
@@ -1327,11 +1327,14 @@ read-only instances. It needs no current projection and never writes one.
   so the order is stable and the cursor needs only that sequence (`afterStartSequence`).
 - The cursor is the history snapshot rule of section 12 with the cutoff as high-watermark: a continuation returns
   the same page whatever was appended meanwhile; a cursor of another scope, beyond the ledger, malformed or of
-  another token version is rejected before anything is read. Options cannot drift: the `ExportRequest` constructor
+  another token version is rejected before anything is read. The token carries the `prefixDigest` of the ledger
+  prefix it was issued for, so a cursor resumed against a different ledger history (another or replaced ledger of the
+  same scope) is rejected, never answered with a page of another snapshot. Options cannot drift: the `ExportRequest` constructor
   rejects a view or gate set that disagrees with the cursor.
 - `LedgerCheckpoint(cutoffSequence, prefixDigest)`: `prefixDigest` is SHA-256 (hex) over the lines
   `<sequence>:<ledger payload digest>` + LF for sequences `1..cutoff`, using the payload digest the ledger line itself
-  carries, so a different ledger prefix can never share a checkpoint.
+  carries, so a different ledger prefix can never share a checkpoint. The instance saves SHA-256 states every 1,024
+  sequences, so a paged export hashes the ledger once, not once per page.
 - `ProjectionStamp(formatVersion, textScheme, state, coversCutoff)` names the projection that serves recall (`1`,
   `summary-text-v1`). Only `formatVersion` and `textScheme` are in the canonical JSON and digest; `state` and
   `coversCutoff` are the projection's live status when the page was read and change when it is rebuilt, so they stay
@@ -1351,14 +1354,16 @@ sequence it uses. All text is caller-approved summaries; artifacts are opaque re
 | Label | Condition |
 | --- | --- |
 | `SUCCESS` | Derived acceptance `VALIDATED_ACCEPTED` **and** every additional gate of the export is `PASS` or justified `NOT_APPLICABLE` |
-| `FAILURE` | Current outcome `REJECTED`, `FAILED` or `CANCELLED` (`NOT_ACCEPTED`) |
-| `UNLABELED` | Anything else: pending or no outcome, imported claim, unfinished or not-completed accepted attempt, a required gate that is `FAIL`, `UNKNOWN` or has no applicable evidence |
+| `FAILURE` | Current outcome `REJECTED` or `FAILED` with origin `VALIDATED` (derived `NOT_ACCEPTED`) |
+| `UNLABELED` | Anything else: pending or no outcome, a `CANCELLED` outcome (a cancellation is not a verdict on the route), any imported claim whether positive or negative, an unfinished or not-completed accepted attempt, a required gate that is `FAIL`, `UNKNOWN` or has no applicable evidence |
 
 `eligibility.eligible` is true exactly for `SUCCESS` and `FAILURE`. An ineligible sample is **exported, never
-dropped**, with reasons (`OUTCOME_PENDING`, `OUTCOME_IMPORTED_CLAIM`, `ACCEPTED_ATTEMPT_UNFINISHED`,
+dropped**, with reasons (`OUTCOME_PENDING`, `OUTCOME_CANCELLED`, `OUTCOME_IMPORTED_CLAIM`, `ACCEPTED_ATTEMPT_UNFINISHED`,
 `ACCEPTED_ATTEMPT_NOT_COMPLETED`, `GATE_FAIL`, `GATE_UNKNOWN`, `GATE_MISSING` with the dimension). The label never
-claims more than the section 8 derivation: the builder reuses the facade's own `DerivedAcceptance` and fails loudly
-if its reasons ever disagree with it. A `SUCCESS` label is a structural verdict under the evidence policy, not a
+claims more than the section 8 derivation: the builder reuses the facade's own `DerivedAcceptance`, and if its reasons
+ever disagree with it the sample is exported `UNLABELED` with `INCONSISTENT_DERIVATION` (a defensive path that valid
+ledgers do not reach) instead of failing the page. Facts are resolved by one shared `EffectiveFacts` that the
+facade's views also use, so samples and views cannot resolve corrections differently. A `SUCCESS` label is a structural verdict under the evidence policy, not a
 quality score or a recommendation; low cost or a high similarity never changes it.
 
 `gates` (only when the outcome is `ACCEPTED`) has one entry per required dimension plus every dimension with an
@@ -1377,8 +1382,12 @@ attempt, same policy id and version, latest effective sequence). Measured values
 exactly one effective ref per fact, and `revisions` lists the superseded refs (oldest first) so old and new revisions
 are never two independent successes. Retries and repairs are attempts of one execution; only the accepted attempt is
 marked `accepted`, and the failed ones keep their `FAILED`/`CANCELLED` result. An idempotent retry of `record` writes
-nothing, so it cannot change an export. Two distinct executions of the same task are distinct facts; deduplicating
-across executions is the consumer's policy, not Store's.
+nothing, so it cannot change an export. Two distinct executions of the same task are distinct facts, so they are
+**marked, never hidden**: every sample carries its `group` (task, source revision, context and constraints
+fingerprints, policy id and version, i.e. the section 10 comparability key without the scope) and a `SUCCESS` sample
+the `successOrdinal` among the group's successes in start order as of the cutoff and gates. A consumer that wants
+one example per repeated piece of work keeps `successOrdinal == 1`; ordinals do not depend on page size. The first
+export per (cutoff, gates) labels every execution of the scope once to compute them.
 
 **Usage provenance.** Each stage lists one `SampleUsage` per `UsageKind`, in enum order: `REPORTED` or `ESTIMATED`
 (with value, a known zero stays `0`), `UNKNOWN` (no value), `NOT_MEASURED` (counter absent) or
@@ -1422,7 +1431,7 @@ The command opens the ledger read-only (nothing is created or locked), exits 1 o
 ### 21.6 Consumer example
 
 `AdapterConsumerExampleTest` (`monada-api`, fixture-driven, no Neuron, Forge or network): it pins a cutoff, pulls
-bounded pages, turns eligible samples into plain rows (label, route of the accepted attempt, whether input and output
+bounded pages, keeps repeated validated work once (`successOrdinal == 1`), turns eligible samples into plain rows (label, route of the accepted attempt, whether input and output
 usage is fully known, exact source ref) and keeps ineligible ones aside with their first reason. It makes no
 adaptation decision and asserts that the ledger did not move. A Neuron adapter would do the same in its own repository
 and add its own policy on top; wiring it is future cross-repository work.
@@ -1436,9 +1445,13 @@ and add its own policy on top; wiring it is future cross-repository work.
   retrieval ranking and the protected baselines are untouched, so no per-query ranking evidence applies.
 - Page size bounds the number of samples, not their size: a sample holds every event of its execution up to the
   cutoff, so a very long execution makes a large sample (per event limits of section 3 still apply).
-- Each page scans the ledger from the cursor to the cutoff and hashes the prefix digests up to the cutoff (cached
-  per instance), so a full export is `O(pages x ledger size)` in time; the instance already keeps the whole ledger
-  index in memory. A single scope per instance, as in sections 17 and 18.
+- Each page scans the ledger from the cursor to the cutoff; the prefix digest is incremental (saved SHA-256 states) and the
+  success index is computed once per (cutoff, gates), so the main cost per page is the scan, `O(pages x ledger size)`
+  in the worst case; the instance already keeps the whole ledger index in memory.
+- `ExperienceExportReport` derives each execution up to three times (sample, as-of view, comparison candidate); it
+  retains candidates only when a comparison policy is given. The evaluation module keeps its own correction
+  resolution (`ChainResolver`) because `EffectiveFacts` is package-private to `monada-api`; `ChainScopeGatesAndParityTest`
+  and `ViewLedgerParityTest` keep them aligned. A single scope per instance, as in sections 17 and 18.
 - Samples show the **effective** facts as of the cutoff; the full correction history is available through `history`
   and `loadEvent`. Recalled similarity is not part of a sample: join `recall` hits to samples by execution id.
 - Evidence about retrieval quality is not involved. The export is experimental evaluation input and does not authorize

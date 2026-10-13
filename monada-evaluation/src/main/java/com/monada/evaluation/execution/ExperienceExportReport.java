@@ -65,19 +65,26 @@ public record ExperienceExportReport(ScopeId scope, List<ExperienceSamplePage> p
         long cutoff = pages.get(0).ledger().cutoffSequence();
 
         List<ExperienceSample> exported = pages.stream().flatMap(p -> p.samples().stream()).toList();
+        // A candidate is kept only when a comparison needs the whole corpus; otherwise it is summarized and dropped.
         List<ComparisonCandidate> candidates = new ArrayList<>();
+        List<CostToAcceptedOutcome> costs = new ArrayList<>();
+        List<ExecutionRef> refs = new ArrayList<>();
         for (ExperienceSample s : exported) {
             ExecutionView view = memory.loadExecution(scope, s.executionId(), cutoff).orElseThrow();
-            candidates.add(ComparisonCandidate.of(scope, view, prices, List.of()));
+            ComparisonCandidate candidate = ComparisonCandidate.of(scope, view, prices, List.of());
+            costs.add(candidate.summary().cost());
+            refs.add(candidate.ref());
+            if (policy.isPresent()) {
+                candidates.add(candidate);
+            }
         }
         Optional<ComparisonReport> report = policy.map(p -> ExecutionComparator.report(candidates, p));
         Map<ExecutionRef, Placement> placements = report.map(ExperienceExportReport::placements).orElse(Map.of());
 
         List<AnnotatedSample> annotated = new ArrayList<>();
         for (int i = 0; i < exported.size(); i++) {
-            ComparisonCandidate c = candidates.get(i);
-            annotated.add(new AnnotatedSample(exported.get(i), c.summary().cost(),
-                    placements.getOrDefault(c.ref(), Placement.notRequested())));
+            annotated.add(new AnnotatedSample(exported.get(i), costs.get(i),
+                    placements.getOrDefault(refs.get(i), Placement.notRequested())));
         }
         return new ExperienceExportReport(scope, pages, annotated, report, digestOf(pages));
     }
