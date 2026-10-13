@@ -4,7 +4,7 @@ Status: accepted contract. The immutable domain records (section 15, issue #95) 
 replay and read-only audit (section 16, issue #96), the `ExecutionMemory` facade (section 17,
 issue #97), scoped projections with bounded recall (section 18, issue #98) and the usage and
 hypothetical-cost calculators (section 19, issue #99) and the evidence-gated comparison with Pareto
-diagnostics (section 20, issue #100) are implemented; export remains future work. Decision record: [ADR 0004](../adr/0004-embedded-execution-memory.md). Issue: #93 (Forge Integration 1/10).
+diagnostics (section 20, issue #100) and the bounded sample export (section 21, issue #101) are implemented. Decision record: [ADR 0004](../adr/0004-embedded-execution-memory.md). Issue: #93 (Forge Integration 1/10).
 
 This document is the normative v1 contract that issues #94–#102 implement. Later issues may refine
 exact Java signatures and the byte-level payload codec, but must not change the semantics defined here
@@ -63,10 +63,10 @@ Define, without implementing, the v1 semantics for:
 - `monada-storage`: yes — `com.monada.storage.execution` ledger, codec, replay, audit (#96, implemented).
 - `monada-index`: no — projections reuse `LinearScanResonanceIndex` unchanged.
 - `monada-learning`: no.
-- `monada-api`: yes — `com.monada.api.execution` facade, derived acceptance and history (#97, implemented); projections and bounded recall (#98, implemented, section 18); export (#101, later).
+- `monada-api`: yes — `com.monada.api.execution` facade, derived acceptance and history (#97, implemented); projections and bounded recall (#98, implemented, section 18); sample export (#101, implemented, section 21).
 - `monada-evaluation`: yes — `com.monada.evaluation.execution` usage/cost calculators (#99, implemented,
-  section 19) and evidence-gated comparison (#100, implemented, section 20); export annotations and
-  end-to-end gates (#101, #102, later).
+  section 19), evidence-gated comparison (#100, implemented, section 20) and export annotations and
+  tool (#101, implemented, section 21); end-to-end gates (#102, later).
 - `monada-speech`: no.
 
 `monada-api` must never depend on `monada-evaluation`. The documented dependency direction is unchanged.
@@ -494,7 +494,8 @@ retired atoms, status rules and limits).
   appended. The cursor returns `[3]` with `hasMore = false`, and returns `[3]` again if reused. A new
   call without a cursor returns `[1, 2]` with `hw=4`.
 
-`exportSamples(ExportRequest)` is read-only and versioned (`execution-sample/1`):
+`exportSamples(ExportRequest)` is read-only and versioned (`execution-sample/1`; implemented in #101, see section 21 for
+the exact shapes and the clarifications):
 
 - The request names an explicit scope, a cutoff (ledger sequence or `recordedAt`), page size (1–500),
   cursor, evidence policy, and view (`ADAPTER_READY` or `DIAGNOSTIC`).
@@ -543,7 +544,7 @@ version must be rejected by v1 readers rather than reinterpreted.
 | #98 | Scoped projections and bounded recall | `monada-api` | #97 |
 | #99 | Attempt-chain usage and hypothetical `CostToAcceptedOutcome` calculators (**implemented**, section 19) | `monada-evaluation` | #95, #97 |
 | #100 | Evidence-gated pairwise comparison and Pareto diagnostics (**implemented**, section 20) | `monada-evaluation` | #99 |
-| #101 | Bounded provenance-preserving sample export (+ evaluation annotations) | `monada-api`, `monada-evaluation` | #97, #98, #99, #100 |
+| #101 | Bounded provenance-preserving sample export (+ evaluation annotations) (**implemented**, section 21) | `monada-api`, `monada-evaluation` | #97, #98, #99, #100 |
 | #102 | Reproducible end-to-end Forge experience evaluation and isolation gates | `monada-evaluation` | #94, #96–#101 |
 
 Consumer integration inside Monada Forge and Monada Neuron is future cross-repository work and is not
@@ -614,8 +615,8 @@ Future consumer integration in Monada Forge and Monada Neuron remains future cro
 
 Package `com.monada.storage.execution` (`monada-storage`). Scope: one writable ledger per scope with
 append, exact lookup, deterministic replay and read-only audit. The `ExecutionMemory` facade was added
-afterwards by #97 (section 17). Out of scope and still future work: projections, recall, export, segment
-rollover, compaction and explicit repair.
+afterwards by #97 (section 17). Out of scope for #96 (projections, recall and export were added later by #98 and #101,
+sections 18 and 21) and still future work: segment rollover, compaction and explicit repair.
 
 ### 16.1 Public API
 
@@ -1271,6 +1272,208 @@ accepted one (10,000 in / 1,000 out = 0.03 USD, 10 s) and an accepted repair (0.
 60 s) with no winner; a three-execution front (0.02 / 30 s, 0.04 / 10 s, 0.05 / 40 s) where the third is dominated by
 both; a tie exactly at tolerance; incomplete usage; mixed currency and mixed pricing assumptions; and one case per
 comparability field.
+
+## 21. Bounded Sample Export (issue #101)
+
+Implements section 12 in `com.monada.api.execution` (`monada-api`: the export, its records and the canonical JSON) and
+`com.monada.evaluation.execution` (`monada-evaluation`: cost and comparison annotations and a read-only command). No
+persisted format, existing signature, default, retrieval metric or storage file changes; the only additions to existing
+types are `ExecutionMemory.exportSamples` and `ExecutionMemory.loadExecution(scope, execution, cutoffSequence)`.
+Nothing is converted into retrieval feedback, nothing is trained or routed, and no transcript or secret is exported.
+
+### 21.1 Ownership
+
+Store owns persistent execution memory and hands out **neutral observations**. A Neuron adapter (in its own
+repository) decides what to learn from them; Forge collects and judges evidence. This repository contains no
+adaptation, routing or scoring code, no Neuron or Forge dependency and no network call. `AdapterConsumerExampleTest`
+is the executable example of the boundary (section 21.6).
+
+### 21.2 API
+
+```java
+ExportRequest first = ExportRequest.first(scope, ExportCutoff.atSequence(cutoff), 100, ExportView.ADAPTER_READY,
+        ExportEvidencePolicy.requiring(QualityDimension.SECURITY));          // extra gates are optional
+ExperienceSamplePage page = memory.exportSamples(first);
+String json = ExperienceSampleJson.toJson(page);                              // canonical rendering of this page
+String digest = page.digest();                                                // SHA-256 of that rendering
+ExperienceSamplePage next = memory.exportSamples(ExportRequest.resume(page.next().get(), 100)); // while hasMore
+```
+
+| Type | Role |
+| --- | --- |
+| `ExportRequest` | Scope, cutoff, page size, view, evidence policy; `first(...)` for a first page, `resume(cursor, pageSize)` for the next. A resumed request cannot carry a cutoff and its view and gates always come from the cursor |
+| `ExportCutoff` | `latest()`, `atSequence(n)` or `recordedUpTo(instant)` (section 21.3) |
+| `ExportView` | `ADAPTER_READY` (default for consumers) or `DIAGNOSTIC` (section 21.4) |
+| `ExportEvidencePolicy` | Extra gate dimensions on top of each execution's own mandatory dimensions; it can only tighten a label |
+| `ExportCursor` | Opaque, stateless token `x2`: scope, resolved cutoff sequence, start sequence of the last returned execution, view, gates and the digest of the ledger prefix it was issued for |
+| `ExperienceSamplePage` | `schema`, scope, view, gates, `LedgerCheckpoint`, `ProjectionStamp`, samples, `hasMore`, `next` |
+| `ExperienceSample` | One execution as of the cutoff (section 21.4) |
+| `ExperienceSampleJson` | Canonical JSON and digest |
+
+`pageSize` is 1..`ExecutionMemoryConfig.maxPageSize` (default 500, hard limit 500). The export works on writable and
+read-only instances. It needs no current projection and never writes one.
+
+### 21.3 Cutoff, order, cursor and reproducibility
+
+- A sample is derived from the **ledger prefix `1..cutoff`** only: events and corrections recorded later are invisible.
+  An execution is exported when its first event has a sequence `<= cutoff`.
+- `atSequence(n)` requires `0 <= n <=` the last sequence (`IllegalArgumentException` otherwise); `0` is an empty page.
+  `recordedUpTo(t)` resolves to the longest prefix whose events were **all** recorded at or before `t`: it stops at
+  the first event recorded later. A correction carries its own `recordedAt` (it need not equal the original's).
+  Because later appends can extend a prefix that reaches the end of the ledger, hosts that need repeatable exports pin
+  `page.ledger().cutoffSequence()`. The first page of a `latest()` or `recordedUpTo` export reports the resolved
+  sequence and the cursor freezes it.
+- Executions are ordered by the ledger sequence of their first event. Appends cannot reorder or insert before it,
+  so the order is stable and the cursor needs only that sequence (`afterStartSequence`).
+- The cursor is the history snapshot rule of section 12 with the cutoff as high-watermark: a continuation returns
+  the same page whatever was appended meanwhile; a cursor of another scope, beyond the ledger, malformed or of
+  another token version is rejected before anything is read. The token carries the `prefixDigest` of the ledger
+  prefix it was issued for, so a cursor resumed against a different ledger history (another or replaced ledger of the
+  same scope) is rejected, never answered with a page of another snapshot. Options cannot drift: the `ExportRequest` constructor
+  rejects a view or gate set that disagrees with the cursor.
+- `LedgerCheckpoint(cutoffSequence, prefixDigest)`: `prefixDigest` is SHA-256 (hex) over the lines
+  `<sequence>:<ledger payload digest>` + LF for sequences `1..cutoff`, using the payload digest the ledger line itself
+  carries, so a different ledger prefix can never share a checkpoint. The instance saves SHA-256 states every 1,024
+  sequences, so a paged export hashes the ledger once, not once per page.
+- `ProjectionStamp(formatVersion, textScheme, state, coversCutoff)` names the projection that serves recall (`1`,
+  `summary-text-v1`). Only `formatVersion` and `textScheme` are in the canonical JSON and digest; `state` and
+  `coversCutoff` are the projection's live status when the page was read and change when it is rebuilt, so they stay
+  out of the reproducibility fingerprint. Samples are never derived from the projection: a `MISSING` and a `CURRENT`
+  projection of the same ledger give the same canonical page and digest.
+- The same scope, cutoff sequence and options give byte-identical pages and digests after reopen, on writable and
+  read-only instances, and independently of page size (the samples are equal; only the page boundaries differ).
+
+### 21.4 Samples, labels and eligibility
+
+Every sample carries: the `ExperienceRef` of the execution start (latest revision), task summary, provenance,
+policy, required gates, current outcome with origin (an imported claim stays distinguishable) and its ref, the
+derived acceptance, the label, the eligibility, per-dimension gates, attempts (route, stages, usage, evidence,
+result, solution and lesson summaries, each with its `ExperienceRef`), revisions, and the first and last ledger
+sequence it uses. All text is caller-approved summaries; artifacts are opaque references, never dereferenced.
+
+| Label | Condition |
+| --- | --- |
+| `SUCCESS` | Derived acceptance `VALIDATED_ACCEPTED` **and** every additional gate of the export is `PASS` or justified `NOT_APPLICABLE` |
+| `FAILURE` | Current outcome `REJECTED` or `FAILED` with origin `VALIDATED` (derived `NOT_ACCEPTED`) |
+| `UNLABELED` | Anything else: pending or no outcome, a `CANCELLED` outcome (a cancellation is not a verdict on the route), any imported claim whether positive or negative, an unfinished or not-completed accepted attempt, a required gate that is `FAIL`, `UNKNOWN` or has no applicable evidence |
+
+`eligibility.eligible` is true exactly for `SUCCESS` and `FAILURE`. An ineligible sample is **exported, never
+dropped**, with reasons (`OUTCOME_PENDING`, `OUTCOME_CANCELLED`, `OUTCOME_IMPORTED_CLAIM`, `ACCEPTED_ATTEMPT_UNFINISHED`,
+`ACCEPTED_ATTEMPT_NOT_COMPLETED`, `GATE_FAIL`, `GATE_UNKNOWN`, `GATE_MISSING` with the dimension). The label never
+claims more than the section 8 derivation: the builder reuses the facade's own `DerivedAcceptance`, and if its reasons
+ever disagree with it the sample is exported `UNLABELED` with `INCONSISTENT_DERIVATION` (a defensive path that valid
+ledgers do not reach) instead of failing the page. Facts are resolved by one shared `EffectiveFacts` that the
+facade's views also use, so samples and views cannot resolve corrections differently. A `SUCCESS` label is a structural verdict under the evidence policy, not a
+quality score or a recommendation; low cost or a high similarity never changes it.
+
+`gates` (only when the outcome is `ACCEPTED`) has one entry per required dimension plus every dimension with an
+applicable observation, in enum order: state `PASS`, `NOT_APPLICABLE`, `FAIL`, `UNKNOWN` or `MISSING`, with the
+effective observation, its ref and ledger sequence. Applicability and override rules are those of section 8 (accepted
+attempt, same policy id and version, latest effective sequence). Measured values never satisfy a gate.
+
+**Views.** Both views use the same labels, so `UNKNOWN` mandatory gates are never `SUCCESS` in either.
+
+| | `ADAPTER_READY` | `DIAGNOSTIC` |
+| --- | --- | --- |
+| Observations in attempts | only those recorded under the execution's own policy | all, each flagged `policyMatches` |
+| `diagnostics` | absent | acceptance reasons, every effective outcome event, every ignored observation and why (other policy, other attempt, overridden) |
+
+**Deduplication.** A sample is one execution at its latest revisions. A correction replaces the fact it corrects:
+exactly one effective ref per fact, and `revisions` lists the superseded refs (oldest first) so old and new revisions
+are never two independent successes. Retries and repairs are attempts of one execution; only the accepted attempt is
+marked `accepted`, and the failed ones keep their `FAILED`/`CANCELLED` result. An idempotent retry of `record` writes
+nothing, so it cannot change an export. Two distinct executions of the same task are distinct facts, so they are
+**marked, never hidden**: every sample carries its `group` (task, source revision, context and constraints
+fingerprints, policy id and version, i.e. the section 10 comparability key without the scope) and a `SUCCESS` sample
+the `successOrdinal` among the group's successes in start order as of the cutoff and gates. A consumer that wants
+one example per repeated piece of work keeps `successOrdinal == 1`; ordinals do not depend on page size. The first
+export per (cutoff, gates) labels every execution of the scope once to compute them.
+
+**Usage provenance.** Each stage lists one `SampleUsage` per `UsageKind`, in enum order: `REPORTED` or `ESTIMATED`
+(with value, a known zero stays `0`), `UNKNOWN` (no value), `NOT_MEASURED` (counter absent) or
+`DECLARED_NO_BILLABLE_USAGE` (stage declared nothing billable). None of them is ever rendered as zero.
+
+### 21.5 Canonical JSON and the evaluation tooling
+
+`ExperienceSampleJson.toJson(page)` is JSON with a fixed field order, two-space indentation, LF endings, `null` for an
+absent optional and escaped control characters. It is write-only (no parser is shipped); its SHA-256 is
+`page.digest()`. Example (abridged):
+
+```json
+{
+  "schema": "execution-sample/1",
+  "scope": "demo",
+  "view": "ADAPTER_READY",
+  "ledger": { "cutoffSequence": 25, "prefixDigest": "fd8b0bec..." },
+  "samples": [ { "label": "UNLABELED", "eligibility": { "eligible": false,
+      "reasons": [ { "code": "GATE_UNKNOWN", "dimension": "TESTS", "detail": "TESTS effective observation is UNKNOWN" } ] } } ],
+  "hasMore": true,
+  "nextCursor": "eDF8..."
+}
+```
+
+`ExperienceExportReport.build(memory, firstRequest, priceBook, Optional<ComparisonPolicy>)` (evaluation only) pages
+through the whole export and adds, beside the unchanged samples: the hypothetical `CostToAcceptedOutcome` as of the
+cutoff (section 19; `UNAVAILABLE`, never zero, without validated acceptance) and, when a `ComparisonPolicy` is given,
+the Pareto placement of each sample (`FRONT`, `DOMINATED`, `UNASSESSED`, `EXCLUDED`, section 20) with
+`ExecutionComparator.INTERPRETATION` (observational evidence, not causal). `exportDigest()` covers the sample pages
+only, so annotations can never change it. `summary()` prints one deterministic line per sample.
+
+```bash
+./gradlew :monada-evaluation:runExecutionSampleExport -Dmonada.execution.dir=<ledger> -Dmonada.execution.scope=<scope> \
+    [-Dmonada.execution.cutoff=<sequence>] [-Dmonada.execution.pageSize=<n>] [-Dmonada.execution.view=DIAGNOSTIC] \
+    [-Dmonada.execution.gates=TESTS,SECURITY] [-Dmonada.execution.output=json]
+```
+
+The command opens the ledger read-only (nothing is created or locked), exits 1 on a usage or ledger error, and prints
+`summary` or one JSON array of the canonical pages (a single valid document, whatever the page count). It has no price book, so its cost column reflects usage coverage only.
+
+### 21.6 Consumer example
+
+`AdapterConsumerExampleTest` (`monada-api`, fixture-driven, no Neuron, Forge or network): it pins a cutoff, pulls
+bounded pages, keeps repeated validated work once (`successOrdinal == 1`), turns eligible samples into plain rows (label, route of the accepted attempt, whether input and output
+usage is fully known, exact source ref) and keeps ineligible ones aside with their first reason. It makes no
+adaptation decision and asserts that the ledger did not move. A Neuron adapter would do the same in its own repository
+and add its own policy on top; wiring it is future cross-repository work.
+
+### 21.7 Compatibility and limits
+
+- No persisted format changes: the export reads the in-memory ledger index of an open instance. Ledgers, projections
+  and ranking-feedback files are byte-identical before and after any export (asserted over every file under the root,
+  with a current projection and its empty feedback log present).
+- `monada-api` still does not depend on `monada-evaluation`. Existing signatures and defaults, `MonadaMemory`, the
+  retrieval ranking and the protected baselines are untouched, so no per-query ranking evidence applies.
+- Page size bounds the number of samples, not their size: a sample holds every event of its execution up to the
+  cutoff, so a very long execution makes a large sample (per event limits of section 3 still apply).
+- Each page scans the ledger from the cursor to the cutoff; the prefix digest is incremental (saved SHA-256 states) and the
+  success index is computed once per (cutoff, gates), so the main cost per page is the scan, `O(pages x ledger size)`
+  in the worst case; the instance already keeps the whole ledger index in memory.
+- `ExperienceExportReport` derives each execution up to three times (sample, as-of view, comparison candidate); it
+  retains candidates only when a comparison policy is given. The evaluation module keeps its own correction
+  resolution (`ChainResolver`) because `EffectiveFacts` is package-private to `monada-api`; `ChainScopeGatesAndParityTest`
+  and `ViewLedgerParityTest` keep them aligned. A single scope per instance, as in sections 17 and 18.
+- Samples show the **effective** facts as of the cutoff; the full correction history is available through `history`
+  and `loadEvent`. Recalled similarity is not part of a sample: join `recall` hits to samples by execution id.
+- Evidence about retrieval quality is not involved. The export is experimental evaluation input and does not authorize
+  a new supported default.
+
+### 21.8 Verification (issue #101)
+
+~~~bash
+./gradlew :monada-api:test
+./gradlew :monada-evaluation:test
+./gradlew test
+./gradlew verifyLibraryConsumer
+./gradlew :monada-evaluation:runExecutionSampleExport -Dmonada.execution.dir=<ledger> -Dmonada.execution.scope=<scope>
+~~~
+
+Tests: `ExperienceSampleExportTest` (reproducibility after reopen on writable and read-only instances, page-size
+independence, byte-identical ledger, projection and feedback files, labels for validated, rejected, pending, unknown
+gate, imported claim and running executions, additional gates, corrections and cutoffs, foreign scope at every page
+boundary, usage provenance, cursor tampering, views, canonical JSON), `AdapterConsumerExampleTest`, and in
+`monada-evaluation` `ExperienceExportReportTest` (hand-computed 0.03 and 0.09 USD chains, Pareto placement, cost as of
+the cutoff, annotation independence, read-only command). Real executions are recorded through `ExecutionMemory` in
+temporary directories; fixtures contain no credentials, providers or private data.
 
 ## Acceptance Criteria
 

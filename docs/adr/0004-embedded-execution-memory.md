@@ -7,7 +7,7 @@ Accepted
 This ADR fixes ownership and contracts. Implemented so far: the domain records (#95), the append-only
 ledger (#96), the `ExecutionMemory` facade for recording, loading and history (#97), per-scope
 projections with bounded recall (#98), the evaluation-side usage and hypothetical-cost calculators (#99), and the
-evidence-gated comparison with Pareto diagnostics (#100). Export is still planned; the
+evidence-gated comparison with Pareto diagnostics (#100), and the bounded, read-only sample export (#101). The
 implementation sequence is tracked in [`docs/roadmap.md`](../roadmap.md) (Forge Integration track, issues
 #93–#102) and the normative v1 contract lives in
 [`docs/specs/execution-memory-contract-v1.md`](../specs/execution-memory-contract-v1.md) (section 17 describes
@@ -105,7 +105,7 @@ records), #96 (ledger), #97 (facade), #98 (projections/recall), #99 (calculators
 | --- | --- | --- |
 | `com.monada.core.execution` | `monada-core` | Immutable IDs and domain records |
 | `com.monada.storage.execution` | `monada-storage` | Ledger manifest, record codec, replay, audit |
-| `com.monada.api.execution` | `monada-api` | `ExecutionMemory` facade, derived acceptance, history (implemented, #97); projections and recall (implemented, #98); export (planned) |
+| `com.monada.api.execution` | `monada-api` | `ExecutionMemory` facade, derived acceptance, history (implemented, #97); projections and recall (implemented, #98); sample export (implemented, #101) |
 | `com.monada.evaluation.execution` | `monada-evaluation` | Usage/cost calculators, comparison/Pareto reports, export annotations (evaluation only) |
 
 Core types (`com.monada.core.execution`): `ScopeId`, `TaskId`, `ExecutionId`, `AttemptId`, `EventId`,
@@ -126,14 +126,13 @@ Facade operations (`com.monada.api.execution.ExecutionMemory`, `AutoCloseable`):
 | `recall(ScopeId, String query, int limit)` | `ExperienceRecall` of `ExperienceHit`, limit 1–50, scope-isolated (implemented, #98) |
 | `projectionStatus(ScopeId)` / `rebuildProjection(ScopeId)` | `ProjectionStatus` (`CURRENT`/`STALE`/`MISSING`/`INCOMPATIBLE`); explicit, deterministic reconciliation (implemented, #98) |
 | `pruneProjection(ScopeId)` | Explicit reclamation of old projection generations (rebuilds already reclaim them; read-only snapshots are frozen in memory) (implemented, #98) |
-| `exportSamples(ExportRequest)` | `ExportPage` (read-only, versioned) (planned, #101) |
+| `exportSamples(ExportRequest)` | `ExperienceSamplePage` (read-only, versioned `execution-sample/1`, stateless cursor, canonical JSON) (implemented, #101) |
 
-The facade has no cost or comparison operation. Evaluation-side code (`monada-evaluation`, #99/#100)
+The facade has no cost or comparison operation (an export carries no cost either; evaluation tooling annotates it). Evaluation-side code (`monada-evaluation`, #99/#100)
 reads facade views and computes `ExecutionSummary` / `CostToAcceptedOutcome` (implemented, #99) and evidence-gated comparisons / Pareto diagnostics (implemented, #100);
 `monada-api` never depends on `monada-evaluation`.
 
-Example host usage (compiles against the shipped #97/#98 surface; `exportSamples` is planned and therefore
-not shown):
+Example host usage (compiles against the shipped #97/#98/#101 surface):
 
 ```java
 ScopeId scope = ScopeId.of("forge-workspace-7f3a");              // opaque, caller-issued
@@ -168,6 +167,11 @@ try (ExecutionMemory memory = ExecutionMemory.open(root, scope, ExecutionMemoryC
     for (ExperienceHit hit : recall.hits()) {
         HistoryEntry finished = hit.event();                     // the exact ledger event and revision
     }
+
+    // Neutral, read-only samples for an adapter: explicit cutoff, bounded pages, stateless cursor.
+    ExperienceSamplePage samples = memory.exportSamples(ExportRequest.first(scope,
+            ExportCutoff.atSequence(page.highWatermark()), 100, ExportView.ADAPTER_READY,
+            ExportEvidencePolicy.executionPolicyOnly()));
 }
 
 // Another component can inspect the same scope while the writer is open (snapshot at open):

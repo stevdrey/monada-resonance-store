@@ -40,38 +40,18 @@ final class ExecutionViews {
         if (history.isEmpty()) {
             return Optional.empty();
         }
-        Set<EventId> superseded = new HashSet<>();
-        for (HistoryEntry r : history) {
-            if (r.event() instanceof Correction c) {
-                superseded.add(c.envelope().supersedes().get());
-            }
-        }
-        ExecutionStarted started = null;
-        Optional<Outcome> outcome = Optional.empty();
+        EffectiveFacts facts = new EffectiveFacts(history);
+        ExecutionStarted started = (ExecutionStarted) facts.started().event();
+        Optional<Outcome> outcome = facts.outcomes().isEmpty() ? Optional.empty()
+                : Optional.of(((OutcomeRecorded) facts.outcomes().get(facts.outcomes().size() - 1).event()).outcome());
         Map<AttemptId, AttemptStarted> starts = new LinkedHashMap<>();
+        facts.starts().forEach((k, v) -> starts.put(k, (AttemptStarted) v.event()));
         Map<AttemptId, AttemptFinished> finishes = new LinkedHashMap<>();
+        facts.finishes().forEach((k, v) -> finishes.put(k, (AttemptFinished) v.event()));
         Map<AttemptId, List<StageRecorded>> stages = new LinkedHashMap<>();
+        facts.stages().forEach((k, v) -> stages.put(k, v.stream().map(f -> (StageRecorded) f.event()).toList()));
         Map<AttemptId, List<EvidenceRecorded>> evidence = new LinkedHashMap<>();
-        for (HistoryEntry r : history) {
-            if (superseded.contains(r.event().eventId())) {
-                continue; // an older revision: kept in history, replaced here by its latest revision
-            }
-            ExecutionEvent effective = r.event() instanceof Correction c ? c.replacement() : r.event();
-            switch (effective) {
-                case ExecutionStarted e -> started = e;
-                case OutcomeRecorded e -> outcome = Optional.of(e.outcome());
-                case AttemptStarted e -> starts.put(e.envelope().attemptId().get(), e);
-                case AttemptFinished e -> finishes.put(e.envelope().attemptId().get(), e);
-                case StageRecorded e ->
-                        stages.computeIfAbsent(e.envelope().attemptId().get(), k -> new ArrayList<>()).add(e);
-                case EvidenceRecorded e ->
-                        evidence.computeIfAbsent(e.envelope().attemptId().get(), k -> new ArrayList<>()).add(e);
-                case Correction e -> throw new IllegalStateException("nested correction");
-            }
-        }
-        if (started == null) {
-            throw new IllegalStateException("execution " + id + " has no EXECUTION_STARTED event");
-        }
+        facts.evidence().forEach((k, v) -> evidence.put(k, v.stream().map(f -> (EvidenceRecorded) f.event()).toList()));
         // Effective ordinal order, not ledger order: a corrected ATTEMPT_STARTED sits at the correction's position.
         List<AttemptStarted> ordered = starts.values().stream()
                 .sorted(Comparator.comparingInt(AttemptStarted::ordinal)).toList();

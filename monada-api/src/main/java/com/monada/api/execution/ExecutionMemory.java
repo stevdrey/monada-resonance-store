@@ -35,7 +35,7 @@ import java.util.Optional;
  * {@link #recall} (contract v1, section 11). The ledger is written first and stays authoritative: a failed
  * projection write never fails or repeats {@link #record}; it leaves {@link #projectionStatus} {@code STALE}
  * until an explicit {@link #rebuildProjection}. It never maps outcomes to ranking feedback, does not change
- * {@code MonadaMemory}, and exposes no cost or export operation.
+ * {@code MonadaMemory}, and exposes no cost calculation (evaluation tooling annotates exports) and no write path for export.
  *
  * <p>Failures: invalid or illegal events throw {@link IllegalArgumentException} before any I/O (the ledger's
  * {@code LedgerRejectedException} category is preserved); I/O and corruption throw {@link UncheckedIOException}.
@@ -47,6 +47,7 @@ public final class ExecutionMemory implements AutoCloseable {
     private final ScopeId scope;
     private final ExecutionMemoryConfig config;
     private final ExperienceProjection projection;
+    private final SampleExporter exporter = new SampleExporter();
     private boolean closed;
 
     private ExecutionMemory(ExecutionLedger ledger, HistoryIndex index, boolean tornTail, ScopeId scope,
@@ -236,6 +237,21 @@ public final class ExecutionMemory implements AutoCloseable {
         return ExecutionViews.execution(index.execution(execution), execution);
     }
 
+    /**
+     * The execution as it was known after ledger sequence {@code cutoffSequence}: later events, including later
+     * corrections, are invisible. Empty when the execution had not started by then. This is the view a sample
+     * export is derived from, for evaluation tooling that annotates exported samples.
+     */
+    public Optional<ExecutionView> loadExecution(ScopeId scope, ExecutionId execution, long cutoffSequence) {
+        requireOpen(scope);
+        Objects.requireNonNull(execution, "execution");
+        if (cutoffSequence < 0 || cutoffSequence > index.all().size()) {
+            throw new IllegalArgumentException("cutoffSequence must be between 0 and " + index.all().size());
+        }
+        return ExecutionViews.execution(index.execution(execution).stream()
+                .filter(e -> e.sequence() <= cutoffSequence).toList(), execution);
+    }
+
     public Optional<AttemptView> loadAttempt(ScopeId scope, ExecutionId execution, AttemptId attempt) {
         requireOpen(scope);
         Objects.requireNonNull(attempt, "attempt");
@@ -309,6 +325,26 @@ public final class ExecutionMemory implements AutoCloseable {
         boolean hasMore = lastReturned < highWatermark;
         return new HistoryPage(page, highWatermark, hasMore,
                 hasMore ? Optional.of(new HistoryCursor(scope, highWatermark, lastReturned)) : Optional.empty());
+    }
+
+    /**
+     * Read-only, versioned export of neutral execution samples (contract v1, section 12; schema
+     * {@value ExperienceSamplePage#SCHEMA}). One sample per execution that started by the cutoff, derived from the
+     * ledger prefix up to the cutoff, in ascending order of the sequence at which each execution started. The page
+     * is bounded by {@code request.pageSize()} (1..{@code maxPageSize}) and its {@link ExportCursor} is a stateless
+     * token: repeating a request, also after reopening the ledger or after later appends, returns the same page.
+     * Samples keep negative and incomplete executions with explicit eligibility reasons, never label a validated
+     * success while a mandatory gate is unknown, and carry the exact {@code ExperienceRef} of every fact.
+     *
+     * <p>The export reads memory only: it writes no ledger, projection or feedback file, creates no export cursor
+     * on disk and never calls {@code feedback()}. It works on writable and read-only instances alike and does not
+     * need the projection to be current. A scope other than the opened one throws
+     * {@link IllegalArgumentException}, as does a cursor of another scope or beyond the ledger.
+     */
+    public ExperienceSamplePage exportSamples(ExportRequest request) {
+        Objects.requireNonNull(request, "request");
+        requireOpen(request.scope());
+        return exporter.export(request, index, projection.status(index.all().size()), config.maxPageSize());
     }
 
     /** Projection state of the scope and the ledger sequence it covers; side-effect free. */

@@ -98,3 +98,15 @@ tasks.register<JavaExec>("runSpeechHybridRobustness") {
     mainClass.set("com.monada.evaluation.speech.SpeechHybridRobustnessMain")
     classpath = sourceSets["main"].runtimeClasspath
 }
+
+tasks.register<JavaExec>("runExecutionSampleExport") {
+    description = "Read-only export of bounded, provenance-preserving execution samples from a ledger (use -Dmonada.execution.dir and -Dmonada.execution.scope)"
+    group = "application"
+    mainClass.set("com.monada.evaluation.execution.ExperienceExportMain")
+    classpath = sourceSets["main"].runtimeClasspath
+    workingDir = rootProject.projectDir
+    systemProperties = System.getProperties()
+        .stringPropertyNames()
+        .filter { it.startsWith("monada.execution.") }
+        .associateWith { System.getProperty(it) }
+}

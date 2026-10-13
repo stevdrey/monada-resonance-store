@@ -102,11 +102,36 @@ try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
 }
 ```
 
-`ExecutionMemory.openReadOnly(root, scope)` gives a lock-free snapshot that can be read next to a live writer (it refuses a damaged ledger instead of serving a truncated history). One scope per writable instance; a second writable open of the same root fails with `ExecutionMemoryLockedException`. Contract and limits: [`docs/specs/execution-memory-contract-v1.md`](docs/specs/execution-memory-contract-v1.md) section 17. Each scope also keeps a derived, rebuildable projection for bounded experience recall: `recall(scope, query, limit)` returns exact ledger references with a similarity score (never a quality signal), `projectionStatus(scope)` reports `CURRENT`/`STALE`/`MISSING`/`INCOMPATIBLE`, and `rebuildProjection(scope)` reconciles explicitly (section 18). Export is future work; `MonadaMemory` is unchanged.
+`ExecutionMemory.openReadOnly(root, scope)` gives a lock-free snapshot that can be read next to a live writer (it refuses a damaged ledger instead of serving a truncated history). One scope per writable instance; a second writable open of the same root fails with `ExecutionMemoryLockedException`. Contract and limits: [`docs/specs/execution-memory-contract-v1.md`](docs/specs/execution-memory-contract-v1.md) section 17. Each scope also keeps a derived, rebuildable projection for bounded experience recall: `recall(scope, query, limit)` returns exact ledger references with a similarity score (never a quality signal), `projectionStatus(scope)` reports `CURRENT`/`STALE`/`MISSING`/`INCOMPATIBLE`, and `rebuildProjection(scope)` reconciles explicitly (section 18). `MonadaMemory` is unchanged.
 
 ```bash
 ./gradlew :monada-api:test
 ```
+
+### Experience Sample Export
+
+`exportSamples(ExportRequest)` hands a host or a Neuron adapter neutral, read-only observations of past executions (schema `execution-sample/1`). One `ExperienceSample` per execution carries the task and provenance, every attempt with its route, stages, usage (unknown and not-measured are explicit, never zero), the effective quality evidence per dimension, the outcome with its origin, and the exact `ExperienceRef` (event and revision) of every fact. It labels each sample `SUCCESS`, `FAILURE` or `UNLABELED` with explicit eligibility reasons: an accepted execution whose mandatory gate is `UNKNOWN`, `FAIL` or missing, an imported claim (positive or negative), a cancellation, an unfinished attempt and a pending outcome are exported, never counted as success or as a failure example. Repeated validated executions of the same work are marked with a `group` and a `successOrdinal` (keep `1` for one example per group), never hidden. Corrections replace the facts they correct and retries stay attempts of one execution, so a success is never counted twice.
+
+```java
+ExportRequest request = ExportRequest.first(scope, ExportCutoff.atSequence(cutoff), 100,
+        ExportView.ADAPTER_READY, ExportEvidencePolicy.executionPolicyOnly());
+ExperienceSamplePage page = memory.exportSamples(request);
+while (true) {
+    String json = ExperienceSampleJson.toJson(page);   // canonical, inspectable, digestible: handle every page
+    if (!page.hasMore()) {
+        break;
+    }
+    page = memory.exportSamples(ExportRequest.resume(page.next().get(), 100));
+}
+```
+
+The export reads memory only: it writes no ledger, projection or feedback file, keeps no hidden cursor (the `ExportCursor` token is stateless and carries the cutoff, view and gates) and never calls `feedback()`. The same scope, cutoff sequence and options give byte-identical pages after reopen. Recalled similarity is not part of a sample, and cost or Pareto annotations come from `monada-evaluation` (`ExperienceExportReport`), never from `monada-api`. A read-only command prints a summary or the canonical JSON of a ledger:
+
+```bash
+./gradlew :monada-evaluation:runExecutionSampleExport -Dmonada.execution.dir=/path/to/ledger -Dmonada.execution.scope=my-scope
+```
+
+Contract, labels, limits and a consumer example: [`docs/specs/execution-memory-contract-v1.md`](docs/specs/execution-memory-contract-v1.md) section 21. Wiring the export into Neuron or Forge is future cross-repository work; nothing here trains a router or adapts anything.
 
 ## Library Consumption
 

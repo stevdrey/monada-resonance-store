@@ -54,4 +54,4 @@ Monada Neuron can consume as neutral exported samples. Store keeps persistence, 
 deterministic calculations; Forge keeps execution and judgment; Neuron keeps adaptation and routing.
 See [ADR 0004](adr/0004-embedded-execution-memory.md). Implemented so far: the domain records, the
 append-only ledger, the `ExecutionMemory` history facade and scoped, bounded experience recall (#95–#98), plus the evaluation-side usage and hypothetical-cost calculators (#99) and the evidence-gated comparison with Pareto diagnostics (#100).
-Sample export and the Forge and Neuron integrations remain planned work.
+Sample export is implemented (contract section 21); the Forge and Neuron integrations remain planned work.

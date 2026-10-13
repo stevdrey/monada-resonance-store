@@ -131,8 +131,8 @@ Speech retrieval quality is guarded by a two-mode benchmark in `com.monada.speec
 Implemented so far: the domain records (`com.monada.core.execution`, #95) and the append-only ledger with
 replay and read-only audit (`com.monada.storage.execution`, #96; see section 16 of the contract), and the
 `ExecutionMemory` facade (`com.monada.api.execution`, #97; one scope per instance, section 17 of the contract),
-and per-scope projections with bounded recall (#98, section 18 of the contract). Export is still planned, and
-consumer (Forge/Neuron) integration is future work. [ADR 0004](adr/0004-embedded-execution-memory.md) and the
+and per-scope projections with bounded recall (#98, section 18 of the contract). Bounded sample export
+(`exportSamples`, #101, section 21 of the contract) is implemented; consumer (Forge/Neuron) integration is future work. [ADR 0004](adr/0004-embedded-execution-memory.md) and the
 [execution memory contract v1](specs/execution-memory-contract-v1.md) define how agent execution
 experiences recorded by Monada Forge become local memory for Forge and Monada Neuron. Store owns the
 ledger, projections, recall and export (plus evaluation-only calculators in `monada-evaluation`); Forge owns execution and evidence judgment; Neuron
@@ -176,7 +176,7 @@ deterministic reconciliation. Incompatible projections are reported, never rewri
 
 Packages: `com.monada.core.execution`, `com.monada.storage.execution` and `com.monada.api.execution`
 (implemented) and the evaluation-only `com.monada.evaluation.execution` (usage and hypothetical-cost
-calculators, #99; evidence-gated comparison and Pareto diagnostics, #100; export annotations are planned). The extension is additive: atom, vector, feedback and manifest formats, `KnowledgeAtom` identity, ranking and query-key
+calculators, #99; evidence-gated comparison and Pareto diagnostics, #100; export annotations and the read-only export command, #101). The extension is additive: atom, vector, feedback and manifest formats, `KnowledgeAtom` identity, ranking and query-key
 defaults, and existing public signatures stay unchanged.
 
 ### Execution Ledger Audit
