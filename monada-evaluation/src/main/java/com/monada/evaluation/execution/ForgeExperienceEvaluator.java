@@ -16,6 +16,9 @@ import com.monada.api.execution.ProjectionStatus;
 import com.monada.api.execution.RecordResult;
 import com.monada.core.execution.AttemptId;
 import com.monada.core.execution.ExecutionId;
+import com.monada.core.execution.EventKind;
+import com.monada.evaluation.execution.ForgeSampleChecks.AttemptRule;
+import com.monada.evaluation.execution.ForgeSampleChecks.Expectation;
 import com.monada.core.execution.ExperienceRef;
 import com.monada.core.execution.QualityDimension;
 import com.monada.core.execution.ScopeId;
@@ -304,13 +307,8 @@ public final class ForgeExperienceEvaluator {
                     violations.add(scopeKey + ": export holds a foreign execution " + sample.executionId().value());
                 }
             }
-            Set<String> exported = new TreeSet<>();
-            s.exports.get(scopeKey).samples().forEach(a -> exported.add(a.sample().executionId().value()));
-            Set<String> expected = new TreeSet<>(fixture.executionsOf(scopeKey).stream()
-                    .map(ForgeFixture.Execution::id).toList());
-            if (!exported.equals(expected)) {
-                violations.add(scopeKey + ": exported executions " + exported + " differ from " + expected);
-            }
+            violations.addAll(ForgeSampleChecks.exportMembershipViolations(fixture, scopeKey,
+                    s.exports.get(scopeKey).samples().stream().map(AnnotatedSample::sample).toList()));
         }
         List<String> evidence = List.of("foreign-scope leakage violations: " + violations.size(),
                 "hits checked: " + hitCount + " over " + fixture.queries().size() + " queries; cross-scope probes "
@@ -369,6 +367,7 @@ public final class ForgeExperienceEvaluator {
                     violations.add(exec + ": acceptance " + sample.acceptance() + " but judged "
                             + expected.expectedAcceptance());
                 }
+                violations.addAll(ForgeSampleChecks.successViolations(fixture, sample));
                 if (sample.label() == ExperienceSample.Label.SUCCESS) {
                     successes++;
                     if (sample.acceptance() != DerivedAcceptance.Status.VALIDATED_ACCEPTED) {
@@ -377,13 +376,7 @@ public final class ForgeExperienceEvaluator {
                     if (!sample.eligibility().eligible()) {
                         violations.add(exec + ": SUCCESS on an ineligible sample");
                     }
-                    for (ExperienceSample.Gate g : sample.gates()) {
-                        if (g.required() && g.state() != ExperienceSample.GateState.PASS
-                                && g.state() != ExperienceSample.GateState.NOT_APPLICABLE) {
-                            violations.add(exec + ": SUCCESS although required gate " + g.dimension() + " is "
-                                    + g.state());
-                        }
-                    }
+                    // the hand-listed ordinals stay as an independent contrast to the derived ones
                     Integer ordinal = fixture.expectations().successOrdinals().get(exec);
                     if (ordinal != null && (sample.successOrdinal().isEmpty()
                             || sample.successOrdinal().getAsInt() != ordinal)) {
@@ -408,7 +401,9 @@ public final class ForgeExperienceEvaluator {
             }
         }
         List<String> evidence = List.of("samples checked: " + checked + "; SUCCESS labels: " + successes
-                + " (judged " + expectedSuccesses + "); invalid success labels: " + violations.size());
+                + " (judged " + expectedSuccesses + "); invalid success labels: " + violations.size(),
+                "group, success ordinal and one passing gate per mandatory dimension derived from the fixture and "
+                        + "checked for every sample");
         return ForgeGate.of(ForgeGate.NO_INVALID_SUCCESS, "no invalid success label; labels equal the judged labels",
                 violations, evidence);
     }
@@ -500,7 +495,7 @@ public final class ForgeExperienceEvaluator {
     }
 
     /** One provenance reference of an exported sample and where in the sample it appears. */
-    record LabelledRef(String origin, ExperienceRef ref) {
+    record LabelledRef(String origin, ExperienceRef ref, ForgeSampleChecks.Expectation expectation) {
     }
 
     /**
@@ -510,24 +505,68 @@ public final class ForgeExperienceEvaluator {
      */
     static List<LabelledRef> exportedReferences(ExperienceSample sample) {
         List<LabelledRef> refs = new ArrayList<>();
-        refs.add(new LabelledRef("execution", sample.execution()));
+        refs.add(new LabelledRef("execution", sample.execution(), Expectation.of(EventKind.EXECUTION_STARTED,
+                AttemptRule.none())));
         for (ExperienceSample.SampleAttempt a : sample.attempts()) {
-            refs.add(new LabelledRef("attempt.start", a.start()));
-            a.finish().ifPresent(r -> refs.add(new LabelledRef("attempt.finish", r)));
-            a.stages().forEach(st -> refs.add(new LabelledRef("stage", st.ref())));
-            a.evidence().forEach(ev -> refs.add(new LabelledRef("evidence", ev.ref())));
+            AttemptRule inAttempt = AttemptRule.of(a.id());
+            refs.add(new LabelledRef("attempt.start", a.start(), Expectation.of(EventKind.ATTEMPT_STARTED, inAttempt,
+                    ForgeSampleChecks.startedWithOrdinal(a.ordinal()), "ordinal " + a.ordinal())));
+            a.finish().ifPresent(r -> refs.add(new LabelledRef("attempt.finish", r, Expectation.of(
+                    EventKind.ATTEMPT_FINISHED, inAttempt, ForgeSampleChecks.finishedWith(a.result()),
+                    "result " + a.result().map(Enum::name).orElse("<any>")))));
+            a.stages().forEach(st -> refs.add(new LabelledRef("stage", st.ref(), Expectation.of(
+                    EventKind.STAGE_RECORDED, inAttempt, ForgeSampleChecks.stageNamed(st.stage()),
+                    "stage " + st.stage()))));
+            a.evidence().forEach(ev -> refs.add(new LabelledRef("evidence", ev.ref(),
+                    Expectation.of(EventKind.EVIDENCE_RECORDED, inAttempt))));
         }
-        sample.outcome().ifPresent(o -> refs.add(new LabelledRef("outcome", o.ref())));
-        sample.gates().forEach(g -> g.ref().ifPresent(r -> refs.add(new LabelledRef("gate", r))));
+        sample.outcome().ifPresent(o -> refs.add(new LabelledRef("outcome", o.ref(),
+                Expectation.of(EventKind.OUTCOME_RECORDED, AttemptRule.none()))));
+        // gate evidence comes from the accepted attempt and must observe the gate's own dimension
+        AttemptRule accepted = sample.attempts().stream().filter(ExperienceSample.SampleAttempt::accepted).findFirst()
+                .map(a -> AttemptRule.of(a.id())).orElse(AttemptRule.any());
+        sample.gates().forEach(g -> g.ref().ifPresent(r -> refs.add(new LabelledRef("gate", r, Expectation.of(
+                EventKind.EVIDENCE_RECORDED, accepted, ForgeSampleChecks.observing(g.dimension()),
+                "an observation of " + g.dimension())))));
         for (ExperienceSample.Revision r : sample.revisions()) {
-            refs.add(new LabelledRef("revision.effective", r.effective()));
-            r.superseded().forEach(sup -> refs.add(new LabelledRef("revision.superseded", sup)));
+            refs.add(new LabelledRef("revision.effective", r.effective(), Expectation.correction(AttemptRule.any())));
+            r.superseded().forEach(sup -> refs.add(new LabelledRef("revision.superseded", sup,
+                    Expectation.of(sup.revision() == 1 ? kindOfSuperseded(sample, r) : EventKind.CORRECTION,
+                            AttemptRule.any()))));
         }
         sample.diagnostics().ifPresent(d -> {
-            d.outcomeHistory().forEach(o -> refs.add(new LabelledRef("diagnostics.outcome", o.ref())));
-            d.ignoredObservations().forEach(i -> refs.add(new LabelledRef("diagnostics.ignored", i.ref())));
+            d.outcomeHistory().forEach(o -> refs.add(new LabelledRef("diagnostics.outcome", o.ref(),
+                    Expectation.of(EventKind.OUTCOME_RECORDED, AttemptRule.none()))));
+            d.ignoredObservations().forEach(i -> refs.add(new LabelledRef("diagnostics.ignored", i.ref(),
+                    Expectation.of(EventKind.EVIDENCE_RECORDED, AttemptRule.any()))));
         });
         return refs;
+    }
+
+    /**
+     * The kind of the original (revision 1) fact a revision replaced: the kind of the exported fact the effective
+     * revision corrects. Falls back to the effective ref's own origin when the fact is not otherwise exported.
+     */
+    private static EventKind kindOfSuperseded(ExperienceSample sample, ExperienceSample.Revision revision) {
+        ExperienceRef effective = revision.effective();
+        for (ExperienceSample.SampleAttempt a : sample.attempts()) {
+            if (a.finish().filter(effective::equals).isPresent()) {
+                return EventKind.ATTEMPT_FINISHED;
+            }
+            if (a.start().equals(effective)) {
+                return EventKind.ATTEMPT_STARTED;
+            }
+            if (a.stages().stream().anyMatch(st -> st.ref().equals(effective))) {
+                return EventKind.STAGE_RECORDED;
+            }
+            if (a.evidence().stream().anyMatch(ev -> ev.ref().equals(effective))) {
+                return EventKind.EVIDENCE_RECORDED;
+            }
+        }
+        if (sample.outcome().filter(o -> o.ref().equals(effective)).isPresent()) {
+            return EventKind.OUTCOME_RECORDED;
+        }
+        return sample.execution().equals(effective) ? EventKind.EXECUTION_STARTED : EventKind.CORRECTION;
     }
 
     /**
@@ -551,12 +590,37 @@ public final class ForgeExperienceEvaluator {
                     coordinates.add(what + " resolves to another execution (" + ref.execution().value() + ")");
                 }
                 violations.addAll(coordinates);
-                if (coordinates.isEmpty() && labelled.origin().equals("outcome") && !isOutcome(exact.get().event())) {
-                    violations.add(what + " does not address an outcome");
+                if (coordinates.isEmpty()) {
+                    violations.addAll(ForgeSampleChecks.factViolations(what, labelled.expectation(), exact.get()));
                 }
             }
         }
+        Set<ExperienceRef> exportedFacts = new java.util.HashSet<>();
+        for (LabelledRef labelled : exportedReferences(sample)) {
+            if (!labelled.origin().startsWith("revision.")) {
+                exportedFacts.add(labelled.ref());
+            }
+        }
         for (ExperienceSample.Revision r : sample.revisions()) {
+            if (!exportedFacts.contains(r.effective())) {
+                violations.add(exec + ": revision " + r.effective().eventId().value() + " r"
+                        + r.effective().revision() + " corrects a fact the sample does not export");
+            }
+            memory.loadEvent(scope, r.effective().eventId(), r.effective().revision()).ifPresent(entry -> {
+                if (entry.event() instanceof com.monada.core.execution.ExecutionEvent.Correction c) {
+                    Optional<com.monada.core.execution.EventId> named = c.envelope().supersedes();
+                    if (!r.superseded().isEmpty() && (named.isEmpty()
+                            || !named.get().equals(r.superseded().get(0).eventId())
+                            || r.superseded().get(0).revision() != r.effective().revision() - 1)) {
+                        violations.add(exec + ": the first superseded revision is not the one the correction names");
+                    }
+                    EventKind replaced = ForgeSampleChecks.kindOf(c);
+                    EventKind expected = kindOfSuperseded(sample, r);
+                    if (replaced != expected) {
+                        violations.add(exec + ": revision replaces a " + replaced + " but corrects a " + expected);
+                    }
+                }
+            });
             for (ExperienceRef superseded : r.superseded()) {
                 if (superseded.revision() >= r.effective().revision()) {
                     violations.add(exec + ": superseded " + superseded.eventId().value() + " r" + superseded.revision()
@@ -659,6 +723,25 @@ public final class ForgeExperienceEvaluator {
     }
 
     /**
+     * A stage exports one entry per usage kind, exactly once, so an unmeasured counter stays explicit instead of
+     * disappearing (sample contract, {@code SampleBuilder.stage}). A missing or repeated kind is a violation.
+     */
+    static List<String> usageKindViolations(String exec, ExperienceSample.SampleStage stage) {
+        List<String> violations = new ArrayList<>();
+        Map<UsageKind, Integer> seen = new java.util.EnumMap<>(UsageKind.class);
+        stage.usage().forEach(u -> seen.merge(u.kind(), 1, Integer::sum));
+        for (UsageKind kind : UsageKind.values()) {
+            int n = seen.getOrDefault(kind, 0);
+            if (n == 0) {
+                violations.add(exec + ": stage " + stage.stage() + " omits the " + kind + " counter");
+            } else if (n > 1) {
+                violations.add(exec + ": stage " + stage.stage() + " exports the " + kind + " counter " + n + " times");
+            }
+        }
+        return violations;
+    }
+
+    /**
      * Recomputes the chain usage from the usage values the export itself carries. The chain ends at the accepted
      * attempt for a validated acceptance and covers every attempt otherwise. Every counter must be REPORTED.
      */
@@ -680,6 +763,7 @@ public final class ForgeExperienceEvaluator {
             }
             for (ExperienceSample.SampleStage stage : a.stages()) {
                 stages++;
+                violations.addAll(usageKindViolations(exec, stage));
                 for (ExperienceSample.SampleUsage u : stage.usage()) {
                     boolean recorded = u.kind() == UsageKind.INPUT_TOKENS || u.kind() == UsageKind.OUTPUT_TOKENS;
                     if (recorded) {

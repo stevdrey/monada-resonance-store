@@ -14,6 +14,7 @@ import com.monada.core.execution.ExecutionId;
 import com.monada.core.execution.TaskId;
 import com.monada.core.execution.EventId;
 import com.monada.core.execution.ExperienceRef;
+import com.monada.core.execution.QualityDimension;
 import com.monada.core.execution.ScopeId;
 import com.monada.evaluation.execution.ForgeEvaluationReport.Decision;
 import java.math.BigDecimal;
@@ -296,7 +297,7 @@ class ForgeGatesTest {
                     yaml.execution(), real.sequence(), real.outcome())));
             List<String> v1 = ForgeExperienceEvaluator.referenceViolations(memory[0], alpha, notAnOutcome);
             assertEquals(1, v1.size(), v1.toString());
-            assertTrue(v1.get(0).contains("does not address an outcome"));
+            assertTrue(v1.get(0).contains("addresses a EXECUTION_STARTED event but must address OUTCOME_RECORDED"), v1.get(0));
             // it resolves, but to the outcome of a different execution
             ExperienceSample.OutcomeFact other = sampleOf(samples, "a-inv2").outcome().orElseThrow();
             ExperienceSample foreign = withOutcome(yaml, Optional.of(new ExperienceSample.OutcomeFact(
@@ -548,5 +549,321 @@ class ForgeGatesTest {
         ForgeEvaluationReport report = ForgeExperienceEvaluator.evaluate(fixture, work);
         assertTrue(gate(report, ForgeGate.EXACT_REFERENCES).details().stream()
                 .anyMatch(d -> d.contains("alpha=3") && d.contains("beta=3")), report.render());
+    }
+
+    // --- G3: each reference addresses the fact it is attached to ---------------------------------------
+
+    private static ExperienceSample withStageRef(ExperienceSample x, int attempt, int stage, ExperienceRef ref) {
+        ExperienceSample.SampleAttempt a = x.attempts().get(attempt);
+        ExperienceSample.SampleStage st = a.stages().get(stage);
+        ExperienceSample.SampleStage forged = new ExperienceSample.SampleStage(ref, st.sequence(), st.stage(),
+                st.route(), st.startedAt(), st.endedAt(), st.usageDeclaration(), st.justification(), st.usage(),
+                st.artifacts());
+        List<ExperienceSample.SampleAttempt> attempts = new ArrayList<>(x.attempts());
+        attempts.set(attempt, withStages(a, List.of(forged)));
+        return withAttempts(x, attempts);
+    }
+
+    private static ExperienceSample withAttempt(ExperienceSample x, int index,
+                                                java.util.function.UnaryOperator<ExperienceSample.SampleAttempt> f) {
+        List<ExperienceSample.SampleAttempt> attempts = new ArrayList<>(x.attempts());
+        attempts.set(index, f.apply(attempts.get(index)));
+        return withAttempts(x, attempts);
+    }
+
+    private static ExperienceSample.SampleAttempt withStart(ExperienceSample.SampleAttempt a, ExperienceRef start) {
+        return new ExperienceSample.SampleAttempt(a.id(), start, a.ordinal(), a.reason(), a.previousAttempt(),
+                a.accepted(), a.result(), a.finish(), a.solutionSummary(), a.lessonSummary(), a.stages(), a.evidence());
+    }
+
+    private static ExperienceSample.SampleAttempt withFinish(ExperienceSample.SampleAttempt a, ExperienceRef finish) {
+        return new ExperienceSample.SampleAttempt(a.id(), a.start(), a.ordinal(), a.reason(), a.previousAttempt(),
+                a.accepted(), a.result(), Optional.of(finish), a.solutionSummary(), a.lessonSummary(), a.stages(),
+                a.evidence());
+    }
+
+    private static ExperienceSample.SampleAttempt withEvidenceRef(ExperienceSample.SampleAttempt a, ExperienceRef ref) {
+        ExperienceSample.SampleEvidence e = a.evidence().get(0);
+        return new ExperienceSample.SampleAttempt(a.id(), a.start(), a.ordinal(), a.reason(), a.previousAttempt(),
+                a.accepted(), a.result(), a.finish(), a.solutionSummary(), a.lessonSummary(), a.stages(),
+                List.of(new ExperienceSample.SampleEvidence(ref, e.sequence(), e.observations(), e.artifacts())));
+    }
+
+    private static ExperienceSample withGateRef(ExperienceSample x, QualityDimension dimension, ExperienceRef ref) {
+        List<ExperienceSample.Gate> gates = new ArrayList<>();
+        for (ExperienceSample.Gate g : x.gates()) {
+            gates.add(g.dimension() != dimension ? g : new ExperienceSample.Gate(g.dimension(), g.required(),
+                    g.state(), g.observation(), Optional.of(ref), g.sequence()));
+        }
+        return new ExperienceSample(x.execution(), x.taskSummary(), x.provenance(), x.policy(), x.requiredGates(),
+                x.outcome(), x.acceptance(), x.label(), x.successOrdinal(), x.group(), x.eligibility(), gates,
+                x.attempts(), x.revisions(), x.firstSequence(), x.lastSequence(), x.diagnostics());
+    }
+
+    @Test
+    void aGenuineReferenceOfTheWrongKindOrAttemptIsAViolation(@TempDir Path root) {
+        ExecutionMemory[] memory = new ExecutionMemory[1];
+        try {
+            List<ExperienceSample> samples = alphaSamples(root, memory);
+            ScopeId alpha = ForgeFixtureRecorder.scope(fixture, "alpha");
+            ExperienceSample page = sampleOf(samples, "a-page"); // 3 attempts, gates TESTS and ARCHITECTURE
+            assertEquals(List.of(), ForgeExperienceEvaluator.referenceViolations(memory[0], alpha, page));
+
+            ExperienceSample.SampleAttempt a1 = page.attempts().get(0);
+            ExperienceSample.SampleAttempt a2 = page.attempts().get(1);
+            ExperienceSample.SampleAttempt a3 = page.attempts().get(2);
+            ExperienceRef stage1 = a1.stages().get(0).ref();
+            ExperienceRef finish1 = a1.finish().orElseThrow();
+
+            // a stage that points at the same attempt's AttemptFinished
+            expectViolation(memory[0], alpha, withStageRef(page, 0, 0, finish1), "addresses a ATTEMPT_FINISHED event but must address STAGE_RECORDED");
+            // an attempt start that points at another attempt's start
+            expectViolation(memory[0], alpha, withAttempt(page, 1, a -> withStart(a, a1.start())),
+                    "belongs to attempt a1 but must belong to a2");
+            // a finish that points at a start, and a start that points at a finish
+            expectViolation(memory[0], alpha, withAttempt(page, 0, a -> withFinish(a, a1.start())),
+                    "addresses a ATTEMPT_STARTED event but must address ATTEMPT_FINISHED");
+            expectViolation(memory[0], alpha, withAttempt(page, 0, a -> withStart(a, finish1)),
+                    "addresses a ATTEMPT_FINISHED event but must address ATTEMPT_STARTED");
+            // a finish of another attempt, with another result
+            expectViolation(memory[0], alpha, withAttempt(page, 1, a -> withFinish(a, finish1)),
+                    "belongs to attempt a1 but must belong to a2");
+            // evidence that points at a stage
+            expectViolation(memory[0], alpha, withAttempt(page, 2, a -> withEvidenceRef(a, a3.stages().get(0).ref())),
+                    "addresses a STAGE_RECORDED event but must address EVIDENCE_RECORDED");
+            // a stage of another attempt, and the ordinal/result/name claimed by the sample must match the event
+            expectViolation(memory[0], alpha, withStageRef(page, 1, 0, stage1), "belongs to attempt a1 but must belong to a2");
+            expectViolation(memory[0], alpha, withAttempt(page, 0, a -> new ExperienceSample.SampleAttempt(a.id(),
+                    a.start(), 2, a.reason(), a.previousAttempt(), a.accepted(), a.result(), a.finish(),
+                    a.solutionSummary(), a.lessonSummary(), a.stages(), a.evidence())), "does not carry ordinal 2");
+            // gates: pointing at a stage, at evidence of a non-accepted attempt, or at evidence lacking the dimension
+            expectViolation(memory[0], alpha, withGateRef(page, QualityDimension.ARCHITECTURE, a3.stages().get(0).ref()),
+                    "addresses a STAGE_RECORDED event but must address EVIDENCE_RECORDED");
+            expectViolation(memory[0], alpha, withGateRef(page, QualityDimension.ARCHITECTURE,
+                    a2.evidence().get(0).ref()), "belongs to attempt a2 but must belong to a3");
+            // a gate of a dimension that the evidence it points at never observed (the fixture's a3 evidence holds
+            // TESTS and ARCHITECTURE only)
+            ExperienceSample.Gate invented = new ExperienceSample.Gate(QualityDimension.SECURITY, false,
+                    ExperienceSample.GateState.PASS, Optional.empty(), Optional.of(a3.evidence().get(0).ref()),
+                    java.util.OptionalLong.empty());
+            List<ExperienceSample.Gate> gates = new ArrayList<>(page.gates());
+            gates.add(invented);
+            expectViolation(memory[0], alpha, withGates(page, gates), "does not carry an observation of SECURITY");
+        } finally {
+            memory[0].close();
+        }
+    }
+
+    private static void expectViolation(ExecutionMemory memory, ScopeId scope, ExperienceSample forged,
+                                        String expectedText) {
+        List<String> violations = ForgeExperienceEvaluator.referenceViolations(memory, scope, forged);
+        assertTrue(violations.stream().anyMatch(v -> v.contains(expectedText)),
+                "expected '" + expectedText + "' in " + violations);
+    }
+
+    @Test
+    void aRevisionMustCorrectAFactTheSampleExportsAndReplaceTheSameKind(@TempDir Path root) {
+        ExecutionMemory[] memory = new ExecutionMemory[1];
+        try {
+            List<ExperienceSample> samples = alphaSamples(root, memory);
+            ScopeId alpha = ForgeFixtureRecorder.scope(fixture, "alpha");
+            ExperienceSample yaml = sampleOf(samples, "a-yaml");
+            ExperienceSample.Revision real = yaml.revisions().get(0);
+            // a revision whose effective ref is not any fact the sample exports (here: no attempt coordinate)
+            ExperienceRef start = yaml.attempts().get(0).start();
+            ExperienceSample notExported = withRevisions(yaml, List.of(new ExperienceSample.Revision(
+                    new ExperienceRef(start.scope(), start.task(), start.execution(), Optional.empty(),
+                            real.effective().eventId(), 2), real.sequence(), real.justification(),
+                    real.superseded())));
+            assertTrue(ForgeExperienceEvaluator.referenceViolations(memory[0], alpha, notExported).stream()
+                    .anyMatch(v -> v.contains("corrects a fact the sample does not export")));
+            // the first superseded revision must be the one the correction names
+            ExperienceSample wrongChain = withRevisions(yaml, List.of(new ExperienceSample.Revision(real.effective(),
+                    real.sequence(), real.justification(), List.of(ref(real.effective(), "a-yaml.a1.start", 1)))));
+            assertFalse(ForgeExperienceEvaluator.referenceViolations(memory[0], alpha, wrongChain).isEmpty());
+        } finally {
+            memory[0].close();
+        }
+    }
+
+    // --- G5: one entry per usage kind -----------------------------------------------------------------
+
+    @Test
+    void everyStageMustExportExactlyOneEntryPerUsageKind(@TempDir Path root) {
+        ExecutionMemory[] memory = new ExecutionMemory[1];
+        try {
+            ExperienceSample inv1 = sampleOf(alphaSamples(root, memory), "a-inv1");
+            ForgeFixture.ExpectedChain expected = fixture.expectations().chains().get("a-inv1");
+            ExperienceSample.SampleStage stage = inv1.attempts().get(1).stages().get(0);
+            assertEquals(com.monada.core.execution.UsageKind.values().length, stage.usage().size());
+
+            List<ExperienceSample.SampleUsage> withoutRequests = stage.usage().stream()
+                    .filter(u -> u.kind() != com.monada.core.execution.UsageKind.REQUESTS).toList();
+            ExperienceSample dropped = withStageUsage(inv1, withoutRequests);
+            List<String> v = ForgeExperienceEvaluator.exportedUsageViolations(dropped, expected, 2);
+            assertEquals(1, v.size(), v.toString());
+            assertTrue(v.get(0).contains("omits the REQUESTS counter"), v.get(0));
+
+            List<ExperienceSample.SampleUsage> doubled = new ArrayList<>(stage.usage());
+            doubled.add(stage.usage().get(0));
+            List<String> v2 = ForgeExperienceEvaluator.exportedUsageViolations(withStageUsage(inv1, doubled), expected, 2);
+            assertTrue(v2.stream().anyMatch(x -> x.contains("exports the INPUT_TOKENS counter 2 times")), v2.toString());
+
+            List<ExperienceSample.SampleUsage> onlyTokens = stage.usage().stream()
+                    .filter(u -> u.kind() == com.monada.core.execution.UsageKind.INPUT_TOKENS
+                            || u.kind() == com.monada.core.execution.UsageKind.OUTPUT_TOKENS).toList();
+            assertEquals(4, ForgeExperienceEvaluator.exportedUsageViolations(withStageUsage(inv1, onlyTokens),
+                    expected, 2).size());
+        } finally {
+            memory[0].close();
+        }
+    }
+
+    private static ExperienceSample withStageUsage(ExperienceSample x, List<ExperienceSample.SampleUsage> usage) {
+        return withAttempt(x, 1, a -> {
+            ExperienceSample.SampleStage st = a.stages().get(0);
+            return withStages(a, List.of(new ExperienceSample.SampleStage(st.ref(), st.sequence(), st.stage(),
+                    st.route(), st.startedAt(), st.endedAt(), st.usageDeclaration(), st.justification(), usage,
+                    st.artifacts())));
+        });
+    }
+
+    // --- G2: mandatory gates, group and ordinal of every sample ----------------------------------------
+
+    @Test
+    void aSuccessMustCarryOnePassingGatePerMandatoryDimension(@TempDir Path root) {
+        ExecutionMemory[] memory = new ExecutionMemory[1];
+        try {
+            ExperienceSample page = sampleOf(alphaSamples(root, memory), "a-page");
+            assertEquals(List.of(), ForgeSampleChecks.successViolations(fixture, page));
+            assertEquals(2, page.gates().stream().filter(ExperienceSample.Gate::required).count());
+
+            ExperienceSample noArchitecture = withGates(page, page.gates().stream()
+                    .filter(g -> g.dimension() != QualityDimension.ARCHITECTURE).toList());
+            assertTrue(ForgeSampleChecks.successViolations(fixture, noArchitecture).stream()
+                    .anyMatch(v -> v.contains("0 required gates for the mandatory dimension ARCHITECTURE")));
+
+            List<ExperienceSample.Gate> doubled = new ArrayList<>(page.gates());
+            doubled.add(page.gates().get(0));
+            assertTrue(ForgeSampleChecks.successViolations(fixture, withGates(page, doubled)).stream()
+                    .anyMatch(v -> v.contains("2 required gates")));
+
+            List<ExperienceSample.Gate> unbacked = new ArrayList<>();
+            for (ExperienceSample.Gate g : page.gates()) {
+                unbacked.add(new ExperienceSample.Gate(g.dimension(), g.required(), g.state(), Optional.empty(),
+                        Optional.empty(), java.util.OptionalLong.empty()));
+            }
+            assertTrue(ForgeSampleChecks.successViolations(fixture, withGates(page, unbacked)).stream()
+                    .anyMatch(v -> v.contains("without the observation that backs it")));
+
+            // the policy itself must match: a sample claiming fewer required gates than the policy mandates
+            ExperienceSample fewerRequired = new ExperienceSample(page.execution(), page.taskSummary(),
+                    page.provenance(), page.policy(), List.of(QualityDimension.TESTS), page.outcome(),
+                    page.acceptance(), page.label(), page.successOrdinal(), page.group(), page.eligibility(),
+                    page.gates(), page.attempts(), page.revisions(), page.firstSequence(), page.lastSequence(),
+                    page.diagnostics());
+            assertTrue(ForgeSampleChecks.successViolations(fixture, fewerRequired).stream()
+                    .anyMatch(v -> v.contains("required gates") && v.contains("mandates")));
+        } finally {
+            memory[0].close();
+        }
+    }
+
+    private static ExperienceSample withGates(ExperienceSample x, List<ExperienceSample.Gate> gates) {
+        return new ExperienceSample(x.execution(), x.taskSummary(), x.provenance(), x.policy(), x.requiredGates(),
+                x.outcome(), x.acceptance(), x.label(), x.successOrdinal(), x.group(), x.eligibility(), gates,
+                x.attempts(), x.revisions(), x.firstSequence(), x.lastSequence(), x.diagnostics());
+    }
+
+    private static ExperienceSample withGroup(ExperienceSample x, ExperienceSample.Group group,
+                                              java.util.OptionalInt ordinal) {
+        return new ExperienceSample(x.execution(), x.taskSummary(), x.provenance(), x.policy(), x.requiredGates(),
+                x.outcome(), x.acceptance(), x.label(), ordinal, group, x.eligibility(), x.gates(), x.attempts(),
+                x.revisions(), x.firstSequence(), x.lastSequence(), x.diagnostics());
+    }
+
+    @Test
+    void groupAndSuccessOrdinalAreDerivedFromTheFixtureForEverySample(@TempDir Path root) {
+        // the hand-listed ordinals agree with the derived ones
+        assertEquals(java.util.Map.of("a-inv1", 1, "a-inv2", 2), java.util.Map.of("a-inv1",
+                ForgeSampleChecks.expectedOrdinals(fixture, "alpha").get("a-inv1"), "a-inv2",
+                ForgeSampleChecks.expectedOrdinals(fixture, "alpha").get("a-inv2")));
+        for (String scopeKey : fixture.scopeIds().keySet()) {
+            fixture.expectations().successOrdinals().forEach((exec, ordinal) -> {
+                if (fixture.execution(exec).scopeKey().equals(scopeKey)) {
+                    assertEquals(ordinal, ForgeSampleChecks.expectedOrdinals(fixture, scopeKey).get(exec), exec);
+                }
+            });
+        }
+        assertEquals(1, ForgeSampleChecks.expectedOrdinals(fixture, "alpha").get("a-inv3")); // other context SHA
+
+        ExecutionMemory[] memory = new ExecutionMemory[1];
+        try {
+            List<ExperienceSample> samples = alphaSamples(root, memory);
+            for (ExperienceSample sample : samples) {
+                assertEquals(List.of(), ForgeSampleChecks.successViolations(fixture, sample),
+                        sample.executionId().value());
+            }
+            ExperienceSample inv1 = sampleOf(samples, "a-inv1");
+            ExperienceSample inv3 = sampleOf(samples, "a-inv3");
+            // grouping that ignores the context SHA would put a-inv3 after a-inv1 and a-inv2 with ordinal 3
+            List<String> v = ForgeSampleChecks.successViolations(fixture,
+                    withGroup(inv3, inv1.group(), java.util.OptionalInt.of(3)));
+            assertTrue(v.stream().anyMatch(x -> x.contains("group")), v.toString());
+            assertTrue(v.stream().anyMatch(x -> x.contains("success ordinal OptionalInt[3] but derived 1")), v.toString());
+            // a repeat that restarts at 1, and a field of the group that differs
+            ExperienceSample inv2 = sampleOf(samples, "a-inv2");
+            assertFalse(ForgeSampleChecks.successViolations(fixture,
+                    withGroup(inv2, inv2.group(), java.util.OptionalInt.of(1))).isEmpty());
+            ExperienceSample.Group g = inv2.group();
+            assertFalse(ForgeSampleChecks.successViolations(fixture, withGroup(inv2,
+                    new ExperienceSample.Group(g.task(), g.sourceRevision(), g.contextFingerprint(),
+                            "other-constraints", g.policyId(), g.policyVersion()), inv2.successOrdinal())).isEmpty());
+            // a non-success sample must not carry an ordinal (the sample constructor already refuses to build one)
+            ExperienceSample tokens = sampleOf(samples, "a-tokens");
+            assertTrue(tokens.successOrdinal().isEmpty());
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                    () -> withGroup(tokens, tokens.group(), java.util.OptionalInt.of(1)));
+        } finally {
+            memory[0].close();
+        }
+    }
+
+    // --- G1: one sample per execution -------------------------------------------------------------------
+
+    @Test
+    void anExportMustHoldExactlyOneSamplePerExecution(@TempDir Path root) {
+        ExecutionMemory[] memory = new ExecutionMemory[1];
+        try {
+            List<ExperienceSample> samples = alphaSamples(root, memory);
+            assertEquals(List.of(), ForgeSampleChecks.exportMembershipViolations(fixture, "alpha", samples));
+
+            List<ExperienceSample> duplicated = new ArrayList<>(samples);
+            duplicated.add(sampleOf(samples, "a-export")); // a non-success duplicate leaves the id set unchanged
+            List<String> v = ForgeSampleChecks.exportMembershipViolations(fixture, "alpha", duplicated);
+            assertTrue(v.stream().anyMatch(x -> x.contains("a-export is exported 2 times")), v.toString());
+            assertTrue(v.stream().anyMatch(x -> x.contains("10 samples for 9 executions")), v.toString());
+
+            List<ExperienceSample> missing = new ArrayList<>(samples);
+            missing.remove(sampleOf(samples, "a-tz"));
+            assertTrue(ForgeSampleChecks.exportMembershipViolations(fixture, "alpha", missing).stream()
+                    .anyMatch(x -> x.contains("a-tz is missing")));
+
+            List<ExperienceSample> swapped = new ArrayList<>(samples);
+            swapped.remove(sampleOf(samples, "a-tz"));
+            swapped.add(sampleOf(samples, "a-tz")); // same members, other order: still valid
+            assertEquals(List.of(), ForgeSampleChecks.exportMembershipViolations(fixture, "alpha", swapped));
+            // one to three extra copies never change the three-page count at page size 4, only the membership check sees them
+            for (int extra = 1; extra <= 3; extra++) {
+                List<ExperienceSample> more = new ArrayList<>(samples);
+                for (int i = 0; i < extra; i++) {
+                    more.add(sampleOf(samples, "a-export"));
+                }
+                assertEquals(3, (more.size() + 3) / 4);
+                assertFalse(ForgeSampleChecks.exportMembershipViolations(fixture, "alpha", more).isEmpty());
+            }
+        } finally {
+            memory[0].close();
+        }
     }
 }
