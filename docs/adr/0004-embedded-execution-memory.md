@@ -5,9 +5,9 @@
 Accepted
 
 This ADR fixes ownership and contracts. Implemented so far: the domain records (#95), the append-only
-ledger (#96), the `ExecutionMemory` facade for recording, loading and history (#97), and per-scope
-projections with bounded recall (#98), and the evaluation-side usage and hypothetical-cost calculators (#99).
-Comparison and export are still planned; the
+ledger (#96), the `ExecutionMemory` facade for recording, loading and history (#97), per-scope
+projections with bounded recall (#98), the evaluation-side usage and hypothetical-cost calculators (#99), and the
+evidence-gated comparison with Pareto diagnostics (#100). Export is still planned; the
 implementation sequence is tracked in [`docs/roadmap.md`](../roadmap.md) (Forge Integration track, issues
 #93–#102) and the normative v1 contract lives in
 [`docs/specs/execution-memory-contract-v1.md`](../specs/execution-memory-contract-v1.md) (section 17 describes
