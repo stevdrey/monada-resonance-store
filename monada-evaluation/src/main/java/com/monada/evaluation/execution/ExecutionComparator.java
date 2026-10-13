@@ -224,7 +224,7 @@ public final class ExecutionComparator {
                 }
             }
             if (!dominators.isEmpty()) {
-                dominated.add(new Dominated(ref, dominators));
+                dominated.add(new Dominated(ref, dominators, undecided));
             } else if (!undecided.isEmpty()) {
                 unassessed.add(new Unassessed(ref, undecided));
             } else {

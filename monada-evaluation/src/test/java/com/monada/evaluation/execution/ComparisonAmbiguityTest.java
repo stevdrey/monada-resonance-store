@@ -119,4 +119,42 @@ class ComparisonAmbiguityTest {
         assertEquals(2, group.unassessed().size());
         assertEquals(ObjectiveResult.Code.INCOMMENSURABLE_AXIS, group.unassessed().get(0).reasons().get(0).code());
     }
+
+    @Test
+    void dominatedExecutionKeepsTheReasonsItIsIncomparableWithAnotherPeer() {
+        ComparisonFixtures f = new ComparisonFixtures(root);
+        var best = candidate(f.valid("exec-a", 10_000, 0, 10));   // 0.02 USD, 10 s
+        var worse = candidate(f.valid("exec-c", 25_000, 0, 40));  // 0.05 USD, 40 s, same pricing assumptions
+        Run other = f.run("exec-b");
+        other.initial(A1);
+        other.stage(A1, "work", route("prov-b", "model-b"), 0, 20, usage(1_000, 0));
+        other.evidence(A1, QualityDimension.TESTS, ObservationState.PASS);
+        other.finish(A1, AttemptResult.COMPLETED);
+        other.outcome(Outcome.accepted(OutcomeOrigin.VALIDATED, A1));
+        var discount = candidate(other, book(usd(), priced("prov-b", "model-b", "USD", "negotiated discount prices")));
+        ComparisonPolicy policy = new ComparisonPolicy(Set.of(QualityDimension.TESTS), List.of(
+                new Objective("cost", new Metric.Cost(USD), Direction.MINIMIZE, BigDecimal.ZERO),
+                new Objective("effort", new Metric.Effort(), Direction.MINIMIZE, BigDecimal.ZERO)));
+
+        ComparisonReport report = ExecutionComparator.report(List.of(best, worse, discount), policy);
+
+        ComparisonReport.ParetoGroup group = report.groups().get(0);
+        assertEquals(1, group.dominated().size());
+        ComparisonReport.Dominated dominated = group.dominated().get(0);
+        assertEquals("exec-c", dominated.execution().execution().value());
+        assertEquals(List.of("exec-a"), dominated.dominatedBy().stream().map(r -> r.execution().value()).toList());
+        assertTrue(dominated.unresolved().stream()
+                .anyMatch(r -> r.code() == ObjectiveResult.Code.MIXED_PRICING_ASSUMPTIONS));
+        assertTrue(group.front().isEmpty());
+    }
+
+    @Test
+    void aScopeThatDoesNotMatchTheViewHistoryIsRejected() {
+        ComparisonFixtures f = new ComparisonFixtures(root);
+        Run run = f.valid("exec-a", 1, 1, 1);
+        var view = run.view();
+        run.close();
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> ComparisonCandidate.of(ScopeId.of("other-scope"), view, book(usd()), List.of()));
+    }
 }

@@ -23,10 +23,15 @@ public record ComparisonReport(String interpretation, ComparisonPolicy policy, L
         }
     }
 
-    /** Dominated on every declared objective (within tolerance) by each of {@code dominatedBy}. */
-    public record Dominated(ExecutionRef execution, List<ExecutionRef> dominatedBy) {
+    /**
+     * Dominated on every declared objective (within tolerance) by each of {@code dominatedBy}. {@code unresolved}
+     * lists the reasons why it is incomparable with other assessable members; domination is conclusive anyway.
+     */
+    public record Dominated(ExecutionRef execution, List<ExecutionRef> dominatedBy,
+                            List<ObjectiveResult.Reason> unresolved) {
         public Dominated {
             dominatedBy = List.copyOf(dominatedBy);
+            unresolved = List.copyOf(unresolved);
         }
     }
 

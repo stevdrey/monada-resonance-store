@@ -1218,7 +1218,8 @@ For two comparable executions (`PairwiseComparison.Conclusion`):
 - `excluded`: ineligible executions with their exclusion reasons;
 - `unassessed`: eligible, but with an incomplete or incommensurable measurement on a declared objective, or no
   declared objective; they are neither on the front nor dominated, and every reason is listed;
-- `dominated`: dominated by the listed executions through a conclusive pairwise `DOMINATES`;
+- `dominated`: dominated by the listed executions through a conclusive pairwise `DOMINATES`. Domination stays conclusive when
+  the execution is also incommensurable with another member; those reasons are kept in `unresolved` so none is lost;
 - `front`: the remaining assessable executions, each conclusive against every other assessable one. This holds even when a pair is already a `TRADEOFF`: an inconclusive third objective keeps both out of the front.
 
 Mixed currencies or pricing assumptions therefore produce `unassessed`, never a total order. When tradeoffs remain,
