@@ -1490,16 +1490,18 @@ behaviour changes, and no protected baseline is added or altered.
 Fixture `forge-experience` version `1` lives in `monada-evaluation/src/main/resources/com/monada/evaluation/execution/forge-experience-v1/`
 (`manifest.properties`, `executions.psv`, `attempts.psv`, `queries.psv`, `expectations.properties`). It is synthetic and
 manually authored and judged: relevance judgments and expected values are reviewed data, never produced by a model or a
-provider. It holds at least 24 experiences and 12 judged queries in at least 2 opaque projects (`ForgeFixture` rejects
-smaller corpora), with fixed identifiers, times, context SHAs and a fixed price snapshot. One experience is one attempt
+provider. It holds at least 24 experiences and 12 judged queries in at least 2 opaque projects (the bundled loader
+`ForgeFixture.load()` rejects smaller corpora; a `ForgeFixture` constructed directly is not validated), with fixed identifiers, times, context SHAs and a fixed price snapshot. One experience is one attempt
 and its id is `<execution>/a<ordinal>`. Query kinds include direct, paraphrase, multi-relevant, confusable,
 same-summary/different-attempt, stale revision, missing evidence, no-relevant and blank.
 
 ### 22.2 Flow
 
 Per project: record through `ExecutionMemory`, close, reopen, reconcile the projection, load exact events, scoped
-recall, usage and hypothetical-cost summary, pairwise comparison, and paged export (page size 4, below the executions of
-each project, so every export traverses continuation pages). The whole flow runs twice in fresh `run-*` directories
+recall, usage and hypothetical-cost summary per execution, and paged export (page size 4, below the executions of
+each project, so every export traverses continuation pages). Pairwise comparison is a separate step over judged
+pairs, which include pairs within a project and a cross-project pair (`alpha:a-inv1` vs `beta:b-inv`, judged
+`NOT_COMPARABLE` with a `SCOPE` mismatch). The whole flow runs twice in fresh `run-*` directories
 under the caller's work directory; the second run only feeds G7.
 
 ### 22.3 Hard gates
@@ -1508,14 +1510,15 @@ under the caller's work directory; the second run only feeds G7.
 | --- | --- |
 | `G1-SCOPE-ISOLATION` | No foreign-scope leakage in recall, load or export; cross-scope probes are rejected |
 | `G2-NO-INVALID-SUCCESS` | No success label without validated evidence; labels equal the judged labels, including recalled hits |
-| `G3-EXACT-REFERENCES` | Every recalled and exported reference loads the exact ledger event at its latest revision; paged export equals the unpaged export |
+| `G3-EXACT-REFERENCES` | Every recalled hit and effective export reference loads the exact ledger event at its latest revision, and every `revision.superseded` reference resolves to its historical, older revision; paged export equals the unpaged export |
 | `G4-REPLAY-IDEMPOTENCY` | Re-recording is idempotent; reopen, replay and rebuild leave views, exports and rankings unchanged |
 | `G5-RESOURCE-ACCOUNTING` | Attempt-chain usage and hypothetical `CostToAcceptedOutcome` equal the hand-verified values, also as exported |
 | `G6-COMPARISON` | Comparable and incomparable executions get the judged conclusion and mismatching fields |
 | `G7-DETERMINISM` | Two fixed-input runs produce identical content, gates, rankings and export digests |
 
-A gate passes exactly when it collected no violation. Gates report violations instead of throwing, so a regression
-always yields a report.
+A gate passes exactly when it collected no violation. Once the snapshots are built, gates report violations instead
+of throwing, so a detected regression yields a report. A failure before that point (for example an execution that
+cannot be loaded after reopen, or an I/O or storage error) propagates as an exception and the command prints no report.
 
 ### 22.4 Gates versus exploratory quality
 
@@ -1530,7 +1533,10 @@ this contract; re-run the command for current output.
 
 Queries with an empty judged relevant set (`NO_RELEVANT`, `BLANK`) are reported but excluded from every metric
 denominator and average. A blank query must return no hits (checked by G1). A failed experience may be relevant to a
-query; it is then labelled as a failure and is never a success.
+query. Labels are per execution: a failed attempt inside an ultimately accepted execution is recalled and exported
+with that execution's `SUCCESS` label, so a host that needs "what failed" must join the attempt result (`FAILED`) to
+the hit; an execution that was not accepted carries `FAILURE`. Success is never labelled without validated evidence
+(G2). See the roadmap gap "Labels are per execution".
 
 ### 22.6 Decision
 
@@ -1538,6 +1544,10 @@ query; it is then labelled as a failure and is never a success.
 | --- | --- |
 | `READY_FOR_HOST_ADAPTER_EXPERIMENT` | All seven gates pass; the command exits 0 |
 | `GAPS_REQUIRE_FOLLOW_UP` | At least one gate fails; the command exits 1 |
+
+Observed outcome for the delivered fixture `forge-experience-v1` (25 experiences, 14 judged queries, 2 projects): all
+seven gates pass and the decision is `READY_FOR_HOST_ADAPTER_EXPERIMENT`. This is a correctness and isolation result
+only; exploratory quality did not take part in it.
 
 The decision only authorizes a bounded host-adapter experiment outside this repository. Elapsed timing is printed
 separately after the report and is the only nondeterministic output.
