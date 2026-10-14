@@ -70,6 +70,20 @@ The project follows a measurement-first path: improve retrieval quality only aft
   parity tests cover fixed-raw, length-prefixed, undeclared-dimension and corrupt stores). Measured `findAll()` p50 at N=10,000 fell
   from ~0.92 s to ~16 ms and linear-scan `search()` p50 from ~0.95 s to ~24 ms; vector load is now ~63-64% of query time, scoring ~18%,
   full sort ~12% (still below the bounded top-K threshold). No cross-search vector cache was added; retaining vectors across searches needs its own invalidation and consistency analysis.
+- Exact bounded top-K experiment (Issue #120): experimental `ExactBoundedTopKSelector` (bounded min-heap over the deduplicated
+  candidates, production comparator score desc / atom id asc) and `ExperimentalBoundedTopKLinearScanIndex` (same scan, threshold and
+  keep-max dedup, selector instead of sort+truncate) live in `monada-index` but are never selected by default; `LinearScanResonanceIndex`
+  is unchanged and pinned by a golden regression test. Seeded property and edge tests (ties at the cut, repeated IDs, negative and
+  signed-zero scores, K>N, inclusive boundary thresholds, no matches, insertion-order permutations) match the full-sort oracle on IDs
+  and score bits. `BoundedTopKExperimentRunner` and CLI `./gradlew :monada-evaluation:runBoundedTopKExperiment -q` reuse the #119
+  configuration (N=100/1,000/5,000/10,000, K=1/5, seed 42, 128 dimensions, 2 warmups, 5 repetitions): 0 parity mismatches over
+  576 selector and 576 search checks; retained candidates per query drop from M (up to 10,000) to K; selection allocation at N=10,000
+  drops from ~132 KB to ~0.1-0.2 KB; isolated selection p50 at N=10,000 falls from ~5.4-6.4 ms to ~0.2-0.3 ms (0.03-0.04x) and
+  end-to-end `search()` p50 from ~32-38 ms to ~25-29 ms (0.76-0.81x) across two runs (AMD Ryzen 7 7730U, Linux 7.2.9, OpenJDK 27,
+  machine under concurrent load, load average ~4-6; exploratory). The end-to-end gain exceeds the ~1.13x Amdahl ceiling implied by
+  the same-session `runScanPhaseBreakdown` sort share (~11-12%; a first loaded run measured 20-23%), so its magnitude is
+  load-sensitive and should be re-measured on an idle machine before any adoption. Decision: `RETAIN_EXPERIMENT` (keep the
+  experimental candidate; no automatic production rollout; adoption needs its own Issue and explicit approval).
 
 ## Near-Term Direction
 
@@ -111,6 +125,9 @@ Non-goals:
 ### Candidate — Bounded top-K scan optimization
 
 Improve scan efficiency only after a measurable baseline shows a real bottleneck.
+
+Status: exact bounded selector evaluated in Issue #120 (`RETAIN_EXPERIMENT`, parity proven, not enabled). Production adoption
+requires a separate Issue, an idle-machine re-measurement, and explicit approval.
 
 ### Track — Forge Integration: embedded execution memory (#93–#102)
 

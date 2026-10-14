@@ -85,6 +85,13 @@ tasks.register<JavaExec>("runVectorLoadBreakdown") {
     classpath = sourceSets["main"].runtimeClasspath
 }
 
+tasks.register<JavaExec>("runBoundedTopKExperiment") {
+    description = "Compare the experimental exact bounded top-K selector against the linear-scan full-sort oracle (exploratory)"
+    group = "application"
+    mainClass.set("com.monada.evaluation.BoundedTopKExperimentMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
 tasks.register<JavaExec>("runProjectMemory") {
     description = "Run the project-memory evaluation dataset built from the repository's own documentation (exploratory)"
     group = "application"
