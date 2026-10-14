@@ -210,7 +210,7 @@ public final class LatencyScaleSweepRunner {
      * Pairs the benchmark memory with an evaluation-only counting probe: a linear-scan index over
      * the same persisted files whose frequency store counts every vector it reads.
      */
-    private record SeededStore(
+    record SeededStore(
             MonadaMemory memory,
             Map<String, String> idToLabel,
             LinearScanResonanceIndex probeIndex,
@@ -220,7 +220,7 @@ public final class LatencyScaleSweepRunner {
      * Populates a fresh benchmark store in $O(N)$ bulk streaming time, bypassing
      * repeated $O(N^2)$ single-atom log reparsing during benchmark setup.
      */
-    private SeededStore seedBenchmarkStore(
+    static SeededStore seedBenchmarkStore(
             EvaluationDataset dataset,
             Path storePath,
             MonadaMemoryOptions options,
@@ -280,7 +280,7 @@ public final class LatencyScaleSweepRunner {
         return new SeededStore(populatedMemory, Collections.unmodifiableMap(idToLabel), probeIndex, probeCounter);
     }
 
-    private String formatAtomLine(KnowledgeAtom atom) {
+    private static String formatAtomLine(KnowledgeAtom atom) {
         String encodedContent = Base64.getEncoder().encodeToString(atom.content().getBytes(StandardCharsets.UTF_8));
         String encodedAliases = atom.aliases().stream()
                 .map(alias -> Base64.getEncoder().encodeToString(alias.getBytes(StandardCharsets.UTF_8)))

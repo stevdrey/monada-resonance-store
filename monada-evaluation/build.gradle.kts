@@ -71,6 +71,13 @@ tasks.register<JavaExec>("runLatencyScaleSweep") {
     classpath = sourceSets["main"].runtimeClasspath
 }
 
+tasks.register<JavaExec>("runScanPhaseBreakdown") {
+    description = "Isolate linear-scan atom load, vector load, scoring, dedup, and full-sort costs before top-K optimization (exploratory)"
+    group = "application"
+    mainClass.set("com.monada.evaluation.ScanPhaseBreakdownMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
 tasks.register<JavaExec>("runProjectMemory") {
     description = "Run the project-memory evaluation dataset built from the repository's own documentation (exploratory)"
     group = "application"
