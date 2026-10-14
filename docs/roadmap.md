@@ -70,6 +70,12 @@ The project follows a measurement-first path: improve retrieval quality only aft
   parity tests cover fixed-raw, length-prefixed, undeclared-dimension and corrupt stores). Measured `findAll()` p50 at N=10,000 fell
   from ~0.92 s to ~16 ms and linear-scan `search()` p50 from ~0.95 s to ~24 ms; vector load is now ~63-64% of query time, scoring ~18%,
   full sort ~12% (still below the bounded top-K threshold). No cross-search vector cache was added; retaining vectors across searches needs its own invalidation and consistency analysis.
+- Speech feature store bulk read (Issue #132): `FileSpeechFeatureStore` (which `SpeechSampleRetriever` loads in full on every query) now
+  reads each vector's values in the same 16 KiB chunks as `FileFrequencyStore` instead of one `readFloat` call per value. Format,
+  dimension-header validation, error messages, last-wins ordering and results are unchanged (existing stores reused); a parity test
+  against a verbatim copy of the previous per-float path covers raw bit patterns, multi-chunk and mixed dimensions, truncation and
+  bad offsets/headers. Generated speech evaluation output is byte-identical. Measured `findAll()` p50 at N=10,000 x 64 dims fell from
+  ~462 ms to ~22 ms (warm page cache, single machine, exploratory).
 
 ## Near-Term Direction
 
