@@ -102,6 +102,14 @@ class ExperimentalBoundedTopKLinearScanIndexTest {
     }
 
     @Test
+    void unboundedTopKReturnsEveryCandidateLikeProduction() throws IOException {
+        // Callers pass Integer.MAX_VALUE to request every candidate; the heap must not size itself by K.
+        for (var threshold : new double[]{Double.NEGATIVE_INFINITY, 0.0}) {
+            assertParity(edgeAtoms(), edgeVectors(), QUERY, Integer.MAX_VALUE, threshold);
+        }
+    }
+
+    @Test
     void duplicateReplacementAndTiesMatchExpectedOrder() throws IOException {
         var results = new ExperimentalBoundedTopKLinearScanIndex(
                 new InMemoryAtomStore(edgeAtoms()), new InMemoryFrequencyStore(edgeVectors()))

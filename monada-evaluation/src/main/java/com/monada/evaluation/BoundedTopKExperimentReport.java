@@ -156,7 +156,7 @@ public record BoundedTopKExperimentReport(
         sb.append("candidate (M per query); the candidate holds at most K at once. Allocation is per selection call\n");
         sb.append(allocationMeasured
                 ? "  (com.sun.management.ThreadMXBean thread-allocated bytes; includes the result list).\n\n"
-                : "  (n/a: per-thread allocation accounting is unavailable on this JVM).\n\n");
+                : "  (n/a: per-thread allocation accounting is unavailable or disabled on this JVM).\n\n");
 
         sb.append("3. Selection Phase Latency p50 / p95 (microseconds per query, same candidates)\n");
         sb.append("------------------------------------------------------------------------------\n");

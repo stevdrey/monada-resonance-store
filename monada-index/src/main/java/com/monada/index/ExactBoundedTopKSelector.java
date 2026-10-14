@@ -35,6 +35,9 @@ public final class ExactBoundedTopKSelector {
             Comparator.comparingDouble(ResonanceResult::score).reversed()
                     .thenComparing(result -> result.atom().id());
 
+    /** Min-heap order: the worst retained candidate (under {@link #RANKING_ORDER}) sits at the head. */
+    private static final Comparator<ResonanceResult> WORST_FIRST = RANKING_ORDER.reversed();
+
     private ExactBoundedTopKSelector() {
     }
 
@@ -52,9 +55,8 @@ public final class ExactBoundedTopKSelector {
         if (topK <= 0) {
             throw new IllegalArgumentException("topK must be greater than zero");
         }
-        // Min-heap under the ranking order: the head is the worst retained candidate.
-        var worstFirst = RANKING_ORDER.reversed();
-        var heap = new PriorityQueue<ResonanceResult>(Math.min(topK, Math.max(1, candidates.size())), worstFirst);
+        // Initial capacity is capped by the candidate count so topK = Integer.MAX_VALUE stays safe.
+        var heap = new PriorityQueue<ResonanceResult>(Math.min(topK, Math.max(1, candidates.size())), WORST_FIRST);
         var offered = 0;
         var peakRetained = 0;
         for (var candidate : candidates) {

@@ -233,8 +233,7 @@ public final class BoundedTopKExperimentRunner {
                         ScanPhaseBreakdownRunner.latency(candidateSel),
                         ScanPhaseBreakdownRunner.latency(productionSearch),
                         ScanPhaseBreakdownRunner.latency(candidateSearch),
-                        allocationMeter.supported() ? median(oracleAlloc) : BoundedTopKExperimentReport.NOT_MEASURED,
-                        allocationMeter.supported() ? median(candidateAlloc) : BoundedTopKExperimentReport.NOT_MEASURED));
+                        allocationP50(oracleAlloc), allocationP50(candidateAlloc)));
             }
         }
 
@@ -323,9 +322,10 @@ public final class BoundedTopKExperimentRunner {
         }
     }
 
-    private static long median(List<Long> samples) {
-        if (samples.isEmpty()) {
-            return 0L;
+    /** Median allocated bytes, or {@link BoundedTopKExperimentReport#NOT_MEASURED} without accounting or samples. */
+    private long allocationP50(List<Long> samples) {
+        if (!allocationMeter.supported() || samples.isEmpty()) {
+            return BoundedTopKExperimentReport.NOT_MEASURED;
         }
         var sorted = new ArrayList<>(samples);
         Collections.sort(sorted);
@@ -393,15 +393,15 @@ public final class BoundedTopKExperimentRunner {
         return sb.toString();
     }
 
-    /** Optional per-thread allocation accounting ({@code com.sun.management.ThreadMXBean}). */
+    /**
+     * Optional per-thread allocation accounting ({@code com.sun.management.ThreadMXBean}). Read-only: when
+     * accounting is unsupported or disabled the figures are reported as not measured, never force-enabled.
+     */
     record AllocationMeter(com.sun.management.ThreadMXBean bean) {
 
         static AllocationMeter create() {
             if (ManagementFactory.getThreadMXBean() instanceof com.sun.management.ThreadMXBean bean
-                    && bean.isThreadAllocatedMemorySupported()) {
-                if (!bean.isThreadAllocatedMemoryEnabled()) {
-                    bean.setThreadAllocatedMemoryEnabled(true);
-                }
+                    && bean.isThreadAllocatedMemorySupported() && bean.isThreadAllocatedMemoryEnabled()) {
                 return new AllocationMeter(bean);
             }
             return new AllocationMeter(null);
