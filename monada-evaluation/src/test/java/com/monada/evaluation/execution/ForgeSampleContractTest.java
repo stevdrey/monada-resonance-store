@@ -227,4 +227,67 @@ class ForgeSampleContractTest {
             }
         }
     }
+
+    @Test
+    void assumption4b_aRecordedCounterKeepsItsValueSourceAndProvenanceAndAbsentOnesDependOnTheDeclaration(
+            @TempDir Path root) {
+        ScopeId scope = ScopeId.of("usage-scope");
+        TaskId task = TaskId.of("usage-task");
+        ExecutionId exec = ExecutionId.of("usage-exec");
+        AttemptId attempt = AttemptId.of("a1");
+        Instant t = Instant.parse("2026-01-01T00:00:00Z");
+        var route = new com.monada.core.execution.RouteDescriptor("worker", Optional.empty(), Optional.empty(),
+                Optional.empty(), com.monada.core.execution.BillingMode.UNKNOWN);
+        try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
+            memory.record(ExecutionEvent.executionStarted(EventId.of("u.start"), scope, task, exec,
+                    new SourceProvenance("r", "c", "k"),
+                    new EvaluationPolicy("forge-gates", "1", Set.of(QualityDimension.TESTS)), "usage contract", t));
+            memory.record(new AttemptStarted(EventEnvelope.original(EventId.of("u.att"), scope, task, exec, attempt,
+                    t, t), 1, Optional.empty(), AttemptReason.INITIAL));
+            memory.record(ExecutionEvent.StageRecorded.measured(EventEnvelope.original(EventId.of("u.measured"), scope,
+                    task, exec, attempt, t, t), "measured", route, t, t, List.of(
+                    com.monada.core.execution.UsageCounter.reported(UsageKind.INPUT_TOKENS, 5, "provider-a"),
+                    com.monada.core.execution.UsageCounter.estimated(UsageKind.OUTPUT_TOKENS, 7, "tokenizer"),
+                    com.monada.core.execution.UsageCounter.unknown(UsageKind.REQUESTS, "not-reported")), List.of()));
+            memory.record(ExecutionEvent.StageRecorded.noBillableUsage(EventEnvelope.original(EventId.of("u.local"),
+                    scope, task, exec, attempt, t, t), "local", route, t, t, "deterministic local check", List.of()));
+
+            var stages = memory.exportSamples(ExportRequest.firstPage(scope, 10)).samples().get(0).attempts().get(0)
+                    .stages();
+            var measured = stages.get(0).usage();
+            assertEquals(List.of(UsageKind.values()), measured.stream().map(ExperienceSample.SampleUsage::kind).toList(),
+                    changed(4, "declaration order"));
+            assertEquals(new ExperienceSample.SampleUsage(UsageKind.INPUT_TOKENS, java.util.OptionalLong.of(5),
+                    ExperienceSample.UsageState.REPORTED, Optional.of("provider-a")), measured.get(0),
+                    changed(4, "a reported counter keeps value and source"));
+            assertEquals(new ExperienceSample.SampleUsage(UsageKind.OUTPUT_TOKENS, java.util.OptionalLong.of(7),
+                    ExperienceSample.UsageState.ESTIMATED, Optional.of("tokenizer")), measured.get(2),
+                    changed(4, "an estimated counter keeps its provenance"));
+            assertEquals(new ExperienceSample.SampleUsage(UsageKind.REQUESTS, java.util.OptionalLong.empty(),
+                    ExperienceSample.UsageState.UNKNOWN, Optional.of("not-reported")), measured.get(4),
+                    changed(4, "an unknown counter has no value but keeps its source"));
+            assertEquals(new ExperienceSample.SampleUsage(UsageKind.CACHED_INPUT_TOKENS, java.util.OptionalLong.empty(),
+                    ExperienceSample.UsageState.NOT_MEASURED, Optional.empty()), measured.get(1),
+                    changed(4, "an absent counter of a measured stage is NOT_MEASURED"));
+            assertTrue(stages.get(1).usage().stream().allMatch(u -> u.state()
+                    == ExperienceSample.UsageState.DECLARED_NO_BILLABLE_USAGE && u.value().isEmpty()
+                    && u.source().isEmpty()), changed(4, "a no-billable stage declares it for every kind"));
+            // the evaluator's expectation is the same list the exporter produced
+            assertEquals(List.of(measured, stages.get(1).usage()), stages.stream().map(st -> st.usage()).toList());
+        }
+    }
+
+    @Test
+    void assumption10_theTaskSummaryProvenanceAndPolicyAreThoseOfTheExecutionStartedEvent(@TempDir Path root) {
+        try (ProjectStore store = ProjectStore.open(root, fixture)) {
+            for (ExperienceSample sample : store.samples()) {
+                var event = store.memory().loadEvent(store.scope(), sample.execution().eventId(),
+                        sample.execution().revision()).orElseThrow().event();
+                var started = (ExecutionEvent.ExecutionStarted) ForgeSampleChecks.effective(event);
+                assertEquals(started.taskSummary(), sample.taskSummary(), changed(10, "task summary"));
+                assertEquals(started.provenance(), sample.provenance(), changed(10, "source provenance"));
+                assertEquals(started.policy(), sample.policy(), changed(10, "evaluation policy"));
+            }
+        }
+    }
 }

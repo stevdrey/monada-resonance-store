@@ -126,6 +126,21 @@ final class ForgeTestSupport {
             return this;
         }
 
+        SampleCopy taskSummary(String v) {
+            taskSummary = v;
+            return this;
+        }
+
+        SampleCopy provenance(SourceProvenance v) {
+            provenance = v;
+            return this;
+        }
+
+        SampleCopy policy(EvaluationPolicy v) {
+            policy = v;
+            return this;
+        }
+
         SampleCopy requiredGates(List<QualityDimension> v) {
             requiredGates = v;
             return this;
@@ -343,7 +358,12 @@ final class ForgeTestSupport {
     }
 
     static ExperienceSample withStageUsage(ExperienceSample x, List<ExperienceSample.SampleUsage> usage) {
-        return withAttempt(x, 1, a -> {
+        return withStageUsage(x, 1, usage);
+    }
+
+    /** The sample with the usage entries of the first stage of attempt {@code attempt} replaced. */
+    static ExperienceSample withStageUsage(ExperienceSample x, int attempt, List<ExperienceSample.SampleUsage> usage) {
+        return withAttempt(x, attempt, a -> {
             ExperienceSample.SampleStage st = a.stages().get(0);
             return withStages(a, List.of(new ExperienceSample.SampleStage(st.ref(), st.sequence(), st.stage(),
                     st.route(), st.startedAt(), st.endedAt(), st.usageDeclaration(), st.justification(), usage,

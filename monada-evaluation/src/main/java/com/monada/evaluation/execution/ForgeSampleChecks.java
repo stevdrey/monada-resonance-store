@@ -13,11 +13,16 @@ import com.monada.core.execution.ExecutionEvent.AttemptFinished;
 import com.monada.core.execution.ExecutionEvent.AttemptStarted;
 import com.monada.core.execution.ExecutionEvent.Correction;
 import com.monada.core.execution.ExecutionEvent.EvidenceRecorded;
+import com.monada.core.execution.ExecutionEvent.ExecutionStarted;
 import com.monada.core.execution.ExecutionEvent.StageRecorded;
+import com.monada.core.execution.SourceProvenance;
+import com.monada.core.execution.UsageCounter;
+import com.monada.core.execution.UsageKind;
 import com.monada.core.execution.QualityDimension;
 import com.monada.core.execution.QualityObservation;
 import com.monada.core.execution.ScopeId;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,8 +47,10 @@ import java.util.function.Predicate;
  *   <li>a gate's state follows the state of its observation, and a gate without observation is MISSING;</li>
  *   <li>the adapter view exports only observations recorded under the execution's own policy; the diagnostic view
  *       exports all of them with a {@code policyMatches} flag and lists the ignored ones;</li>
- *   <li>every stage exports exactly one usage entry per {@code UsageKind}; counters nobody recorded are
- *       NOT_MEASURED with no value;</li>
+ *   <li>every stage exports exactly one usage entry per {@code UsageKind}, in declaration order; a recorded counter
+ *       keeps its value, source and a state taken from its provenance (REPORTED, ESTIMATED, UNKNOWN); a counter nobody
+ *       recorded is NOT_MEASURED, or DECLARED_NO_BILLABLE_USAGE when the stage declares no billable usage, with no
+ *       value and no source;</li>
  *   <li>an ineligible sample explains itself with GATE_MISSING(dimension), GATE_FAIL(dimension) or
  *       OUTCOME_IMPORTED_CLAIM, and eligibility is true exactly for SUCCESS and FAILURE;</li>
  *   <li>every reference addresses the kind of event of its origin (start, finish, stage, evidence, outcome, gate
@@ -51,7 +58,9 @@ import java.util.function.Predicate;
  *   <li>a corrected fact is exported at its latest revision and lists every earlier revision as superseded;</li>
  *   <li>the group is (task, source revision, context, constraints, policy id, policy version) and the success
  *       ordinal is the position among the successes of the group in recording order;</li>
- *   <li>{@code firstSequence} and {@code lastSequence} are the first and last ledger sequence of the execution.</li>
+ *   <li>{@code firstSequence} and {@code lastSequence} are the first and last ledger sequence of the execution;</li>
+ *   <li>{@code taskSummary}, {@code provenance} and {@code policy} are those of the effective
+ *       {@code EXECUTION_STARTED} event the sample's execution reference addresses.</li>
  * </ol>
  */
 final class ForgeSampleChecks {
@@ -143,6 +152,7 @@ final class ForgeSampleChecks {
                     ? "marked eligible" : "marked ineligible " + sample.eligibility().reasons().stream()
                     .map(r -> r.code().name()).toList()) + " but eligibility must be " + learnable);
         }
+        violations.addAll(executionMetadataViolations(judged, sample));
         violations.addAll(eligibilityReasonViolations(exec, judged, sample));
         violations.addAll(acceptedMarkerViolations(judged, sample));
         violations.addAll(gateStateViolations(exec, sample));
@@ -411,7 +421,71 @@ final class ForgeSampleChecks {
         return e -> e instanceof StageRecorded s && s.stage().equals(st.stage()) && s.route().equals(st.route())
                 && s.startedAt().equals(st.startedAt()) && s.endedAt().equals(st.endedAt())
                 && s.usageDeclaration() == st.usageDeclaration() && s.justification().equals(st.justification())
-                && s.artifacts().equals(st.artifacts());
+                && s.artifacts().equals(st.artifacts()) && expectedUsage(s).equals(st.usage());
+    }
+
+    /**
+     * The usage entries the exporter derives from a stage event ({@code SampleBuilder.stage}): one entry per
+     * {@link UsageKind}, in declaration order. A recorded counter keeps its value, its provenance as state
+     * (REPORTED, ESTIMATED or UNKNOWN) and its source; an absent counter is NOT_MEASURED, or
+     * DECLARED_NO_BILLABLE_USAGE when the stage declares no billable usage, with no value and no source. Comparing
+     * each stage with this list verifies how usage is allocated to stages and where it comes from, which the
+     * aggregate totals of G5 cannot (swapping the usage of two attempts keeps every total).
+     */
+    static List<ExperienceSample.SampleUsage> expectedUsage(StageRecorded stage) {
+        Map<UsageKind, UsageCounter> byKind = new EnumMap<>(UsageKind.class);
+        stage.usage().forEach(u -> byKind.put(u.kind(), u));
+        List<ExperienceSample.SampleUsage> usage = new ArrayList<>();
+        for (UsageKind kind : UsageKind.values()) {
+            UsageCounter c = byKind.get(kind);
+            if (c == null) {
+                usage.add(new ExperienceSample.SampleUsage(kind, java.util.OptionalLong.empty(),
+                        stage.usageDeclaration() == com.monada.core.execution.UsageDeclaration.NO_BILLABLE_USAGE
+                                ? ExperienceSample.UsageState.DECLARED_NO_BILLABLE_USAGE
+                                : ExperienceSample.UsageState.NOT_MEASURED, Optional.empty()));
+            } else {
+                usage.add(new ExperienceSample.SampleUsage(kind, c.value(), switch (c.provenance()) {
+                    case REPORTED -> ExperienceSample.UsageState.REPORTED;
+                    case ESTIMATED -> ExperienceSample.UsageState.ESTIMATED;
+                    case UNKNOWN -> ExperienceSample.UsageState.UNKNOWN;
+                }, Optional.of(c.source())));
+            }
+        }
+        return usage;
+    }
+
+    /**
+     * The task summary, source provenance and evaluation policy a sample exports are those of the effective
+     * {@code EXECUTION_STARTED} event it references.
+     */
+    static Predicate<ExecutionEvent> executionStartedAs(ExperienceSample sample) {
+        return e -> e instanceof ExecutionStarted x && x.taskSummary().equals(sample.taskSummary())
+                && x.provenance().equals(sample.provenance()) && x.policy().equals(sample.policy());
+    }
+
+    /**
+     * The same metadata against the fixture, independently of the ledger, so that a drift of the recorder is
+     * caught as well as a drift of the exporter: the judged task summary, the judged source revision, context and
+     * constraints fingerprints, and the policy (fixed id and version, judged mandatory gates).
+     */
+    static List<String> executionMetadataViolations(ForgeFixture.Execution judged, ExperienceSample sample) {
+        List<String> violations = new ArrayList<>();
+        String exec = judged.id();
+        if (!sample.taskSummary().equals(judged.summary())) {
+            violations.add(exec + ": task summary \"" + sample.taskSummary() + "\" but judged \"" + judged.summary()
+                    + "\"");
+        }
+        SourceProvenance expectedProvenance = new SourceProvenance(judged.sourceRevision(),
+                judged.contextFingerprint(), judged.constraintsFingerprint());
+        if (!sample.provenance().equals(expectedProvenance)) {
+            violations.add(exec + ": provenance " + sample.provenance() + " but judged " + expectedProvenance);
+        }
+        EvaluationPolicy expectedPolicy = new EvaluationPolicy(ForgeFixtureRecorder.POLICY_ID,
+                ForgeFixtureRecorder.POLICY_VERSION, judged.mandatory());
+        if (!sample.policy().equals(expectedPolicy)) {
+            violations.add(exec + ": policy " + sample.policy() + " but judged " + expectedPolicy);
+        }
+        return violations;
     }
 
     /**

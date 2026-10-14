@@ -595,7 +595,8 @@ public final class ForgeExperienceEvaluator {
     static List<LabelledRef> exportedReferences(ExperienceSample sample) {
         List<LabelledRef> refs = new ArrayList<>();
         refs.add(new LabelledRef("execution", sample.execution(), Expectation.of(EventKind.EXECUTION_STARTED,
-                AttemptRule.none())));
+                AttemptRule.none(), ForgeSampleChecks.executionStartedAs(sample),
+                "the exported task summary, provenance and policy")));
         for (ExperienceSample.SampleAttempt a : sample.attempts()) {
             AttemptRule inAttempt = AttemptRule.of(a.id());
             refs.add(new LabelledRef("attempt.start", a.start(), Expectation.of(EventKind.ATTEMPT_STARTED, inAttempt,
@@ -607,7 +608,8 @@ public final class ForgeExperienceEvaluator {
                             + "lesson summaries"))));
             a.stages().forEach(st -> refs.add(new LabelledRef("stage", st.ref(), Expectation.of(
                     EventKind.STAGE_RECORDED, inAttempt, ForgeSampleChecks.stageAs(st),
-                    "stage " + st.stage() + " with the exported route, interval, usage declaration and artifacts")
+                    "stage " + st.stage() + " with the exported route, interval, usage declaration, artifacts and "
+                            + "usage counters (value, state and source)")
                     .at(st.sequence()))));
             a.evidence().forEach(ev -> refs.add(new LabelledRef("evidence", ev.ref(), Expectation.of(
                     EventKind.EVIDENCE_RECORDED, inAttempt, ForgeSampleChecks.evidenceAs(ev, sample.policy(),
@@ -735,6 +737,11 @@ public final class ForgeExperienceEvaluator {
             }
             Optional<HistoryEntry> head = memory.loadEvent(scope, effective.eventId(), effective.revision());
             if (head.isPresent() && head.get().event() instanceof com.monada.core.execution.ExecutionEvent.Correction c) {
+                if (!c.justification().equals(r.justification())) {
+                    violations.add(exec + ": revision " + effective.eventId().value() + " r" + effective.revision()
+                            + " states the justification \"" + r.justification() + "\" but the correction says \""
+                            + c.justification() + "\"");
+                }
                 EventKind replaced = ForgeSampleChecks.kindOf(c);
                 EventKind expected = kindOfSuperseded(sample, r);
                 if (replaced != expected) {

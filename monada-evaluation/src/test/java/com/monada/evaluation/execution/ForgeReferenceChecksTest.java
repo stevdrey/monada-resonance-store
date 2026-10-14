@@ -565,7 +565,7 @@ class ForgeReferenceChecksTest {
                     st.route().model(), st.route().effort(), st.route().billingMode()), st.startedAt(), st.endedAt(),
                     st.usageDeclaration(), st.justification(), st.usage(), st.artifacts());
             expectViolation(store.memory(), alpha, withAttempt(inv1, 0, a -> withStages(a, List.of(rerouted))),
-                    "with the exported route, interval, usage declaration and artifacts");
+                    "with the exported route, interval, usage declaration, artifacts and usage counters");
         }
     }
 
@@ -763,6 +763,181 @@ class ForgeReferenceChecksTest {
             assertEquals(ForgeExperienceEvaluator.pageMetadataViolations(memory, alpha, forged),
                     ForgeExperienceEvaluator.pageMetadataViolations(memory, alpha, forged, reference));
             assertFalse(ForgeExperienceEvaluator.pageMetadataViolations(memory, alpha, forged, reference).isEmpty());
+        }
+    }
+
+    // ======================= review of 9c8339e ==================================================================
+
+    // --- stage usage is compared with the referenced StageRecorded event ----------------------------------------
+
+    private static List<ExperienceSample.SampleUsage> usageOf(ExperienceSample sample, int attempt) {
+        return sample.attempts().get(attempt).stages().get(0).usage();
+    }
+
+    @Test
+    void usageSwappedBetweenAttemptsIsCaughtEvenThoughEveryChainTotalIsUnchanged(@TempDir Path root) {
+        try (ProjectStore store = ProjectStore.open(root, fixture)) {
+            ExperienceSample inv1 = sampleOf(store.samples(), "a-inv1"); // attempts 8000/800 and 6000/600
+            ForgeFixture.ExpectedChain expected = fixture.expectations().chains().get("a-inv1");
+            ExperienceSample swapped = withStageUsage(withStageUsage(inv1, 0, usageOf(inv1, 1)), 1, usageOf(inv1, 0));
+            assertEquals(expected.inputTokens(), 14000);
+            // the aggregate check of G5 is blind to the swap: both totals still add up
+            assertEquals(List.of(), ForgeExperienceEvaluator.exportedUsageViolations(swapped, expected, 2));
+            // the per-stage comparison with the ledger is not
+            List<String> violations = ForgeExperienceEvaluator.referenceViolations(store.memory(), store.scope(), swapped);
+            assertEquals(2, violations.stream().filter(v -> v.contains("usage counters (value, state and source)")).count(),
+                    violations.toString());
+            assertEquals(List.of(), ForgeExperienceEvaluator.referenceViolations(store.memory(), store.scope(), inv1));
+        }
+    }
+
+    @Test
+    void aCounterWhoseOnlyChangeIsItsSourceOrItsStateIsAViolation(@TempDir Path root) {
+        try (ProjectStore store = ProjectStore.open(root, fixture)) {
+            ExperienceSample inv1 = sampleOf(store.samples(), "a-inv1");
+            List<ExperienceSample.SampleUsage> real = usageOf(inv1, 0);
+            int input = java.util.stream.IntStream.range(0, real.size())
+                    .filter(i -> real.get(i).kind() == com.monada.core.execution.UsageKind.INPUT_TOKENS).findFirst()
+                    .orElseThrow();
+            ExperienceSample.SampleUsage u = real.get(input);
+            assertEquals(ExperienceSample.UsageState.REPORTED, u.state());
+
+            List<ExperienceSample.SampleUsage> otherSource = new ArrayList<>(real);
+            otherSource.set(input, new ExperienceSample.SampleUsage(u.kind(), u.value(), u.state(),
+                    Optional.of("an invented source")));
+            expectViolation(store.memory(), store.scope(), withStageUsage(inv1, 0, otherSource),
+                    "usage counters (value, state and source)");
+
+            List<ExperienceSample.SampleUsage> estimated = new ArrayList<>(real);
+            estimated.set(input, new ExperienceSample.SampleUsage(u.kind(), u.value(),
+                    ExperienceSample.UsageState.ESTIMATED, u.source()));
+            expectViolation(store.memory(), store.scope(), withStageUsage(inv1, 0, estimated),
+                    "usage counters (value, state and source)");
+
+            List<ExperienceSample.SampleUsage> noSource = new ArrayList<>(real);
+            noSource.set(input, new ExperienceSample.SampleUsage(u.kind(), u.value(), u.state(), Optional.empty()));
+            expectViolation(store.memory(), store.scope(), withStageUsage(inv1, 0, noSource),
+                    "usage counters (value, state and source)");
+        }
+    }
+
+    private static com.monada.core.execution.ExecutionEvent.StageRecorded stageEvent(
+            java.util.function.Function<com.monada.core.execution.EventEnvelope,
+                    com.monada.core.execution.ExecutionEvent.StageRecorded> make) {
+        java.time.Instant t = java.time.Instant.parse("2026-01-01T00:00:00Z");
+        return make.apply(com.monada.core.execution.EventEnvelope.original(EventId.of("s.stage"),
+                ScopeId.of("s"), TaskId.of("t"), ExecutionId.of("e"), AttemptId.of("a1"), t, t));
+    }
+
+    private static final com.monada.core.execution.RouteDescriptor ROUTE = new com.monada.core.execution.RouteDescriptor(
+            "w", Optional.empty(), Optional.empty(), Optional.empty(), com.monada.core.execution.BillingMode.UNKNOWN);
+
+    @Test
+    void theExpectedUsageKeepsTheDistinctionBetweenRecordedAbsentAndNoBillableCounters() {
+        java.time.Instant t = java.time.Instant.parse("2026-01-01T00:00:00Z");
+        var measured = stageEvent(env -> com.monada.core.execution.ExecutionEvent.StageRecorded.measured(env, "work",
+                ROUTE, t, t, List.of(
+                        com.monada.core.execution.UsageCounter.reported(com.monada.core.execution.UsageKind.INPUT_TOKENS, 5, "src-a"),
+                        com.monada.core.execution.UsageCounter.estimated(com.monada.core.execution.UsageKind.OUTPUT_TOKENS, 7, "tok"),
+                        com.monada.core.execution.UsageCounter.unknown(com.monada.core.execution.UsageKind.REQUESTS, "none")),
+                List.of()));
+        List<ExperienceSample.SampleUsage> usage = ForgeSampleChecks.expectedUsage(measured);
+        assertEquals(List.of(com.monada.core.execution.UsageKind.values()),
+                usage.stream().map(ExperienceSample.SampleUsage::kind).toList());
+        assertEquals(new ExperienceSample.SampleUsage(com.monada.core.execution.UsageKind.INPUT_TOKENS,
+                java.util.OptionalLong.of(5), ExperienceSample.UsageState.REPORTED, Optional.of("src-a")), usage.get(0));
+        assertEquals(new ExperienceSample.SampleUsage(com.monada.core.execution.UsageKind.OUTPUT_TOKENS,
+                java.util.OptionalLong.of(7), ExperienceSample.UsageState.ESTIMATED, Optional.of("tok")), usage.get(2));
+        assertEquals(new ExperienceSample.SampleUsage(com.monada.core.execution.UsageKind.REQUESTS,
+                java.util.OptionalLong.empty(), ExperienceSample.UsageState.UNKNOWN, Optional.of("none")), usage.get(4));
+        assertEquals(ExperienceSample.UsageState.NOT_MEASURED, usage.get(1).state()); // absent counter
+        assertTrue(usage.get(1).value().isEmpty() && usage.get(1).source().isEmpty());
+
+        var noBillable = stageEvent(env -> com.monada.core.execution.ExecutionEvent.StageRecorded.noBillableUsage(env,
+                "local", ROUTE, t, t, "deterministic local check", List.of()));
+        assertTrue(ForgeSampleChecks.expectedUsage(noBillable).stream()
+                .allMatch(u -> u.state() == ExperienceSample.UsageState.DECLARED_NO_BILLABLE_USAGE
+                        && u.value().isEmpty() && u.source().isEmpty()));
+
+        // an exported stage built from the event passes; the same stage with the entries of another event does not
+        ExperienceRef stageRef = new ExperienceRef(ScopeId.of("s"), TaskId.of("t"), ExecutionId.of("e"),
+                Optional.of(AttemptId.of("a1")), EventId.of("s.stage"), 1);
+        ExperienceSample.SampleStage exported = new ExperienceSample.SampleStage(stageRef, 1, "work", ROUTE, t, t,
+                measured.usageDeclaration(), measured.justification(), usage, List.of());
+        assertTrue(ForgeSampleChecks.stageAs(exported).test(measured));
+        ExperienceSample.SampleStage wrong = new ExperienceSample.SampleStage(stageRef, 1, "work", ROUTE, t, t,
+                measured.usageDeclaration(), measured.justification(), ForgeSampleChecks.expectedUsage(noBillable),
+                List.of());
+        assertFalse(ForgeSampleChecks.stageAs(wrong).test(measured));
+    }
+
+    // --- the execution metadata is compared with EXECUTION_STARTED --------------------------------------------------
+
+    @Test
+    void everyExecutionMetadataFieldIsComparedWithTheExecutionStartedEvent(@TempDir Path root) {
+        try (ProjectStore store = ProjectStore.open(root, fixture)) {
+            for (ExperienceSample real : store.samples()) { // the unchanged export passes both comparisons
+                assertEquals(List.of(), ForgeExperienceEvaluator.referenceViolations(store.memory(), store.scope(), real));
+                assertEquals(List.of(), ForgeSampleChecks.executionMetadataViolations(
+                        fixture.execution(real.executionId().value()), real), real.executionId().value());
+            }
+            ExperienceSample yaml = sampleOf(store.samples(), "a-yaml");
+            ForgeFixture.Execution judged = fixture.execution("a-yaml");
+            var p = yaml.provenance();
+            var policy = yaml.policy();
+            java.util.Map<String, ExperienceSample> forged = new java.util.LinkedHashMap<>();
+            forged.put("task summary", SampleCopy.of(yaml).taskSummary("a different task summary").build());
+            forged.put("source revision", SampleCopy.of(yaml).provenance(new com.monada.core.execution.SourceProvenance(
+                    "rev-other", p.contextFingerprint(), p.constraintsFingerprint())).build());
+            forged.put("context fingerprint", SampleCopy.of(yaml).provenance(new com.monada.core.execution.SourceProvenance(
+                    p.sourceRevision(), "ctx-other", p.constraintsFingerprint())).build());
+            forged.put("constraints fingerprint", SampleCopy.of(yaml).provenance(new com.monada.core.execution.SourceProvenance(
+                    p.sourceRevision(), p.contextFingerprint(), "constraints-other")).build());
+            forged.put("policy id", SampleCopy.of(yaml).policy(new com.monada.core.execution.EvaluationPolicy("other",
+                    policy.version(), policy.mandatoryDimensions())).build());
+            forged.put("policy version", SampleCopy.of(yaml).policy(new com.monada.core.execution.EvaluationPolicy(
+                    policy.id(), "9", policy.mandatoryDimensions())).build());
+            forged.put("mandatory gates", SampleCopy.of(yaml).policy(new com.monada.core.execution.EvaluationPolicy(
+                    policy.id(), policy.version(), java.util.Set.of(QualityDimension.TESTS, QualityDimension.SECURITY)))
+                    .build());
+            forged.forEach((field, sample) -> {
+                // the genuine execution reference, the group and every other field are kept: only one field differs
+                assertEquals(yaml.execution(), sample.execution(), field);
+                assertEquals(yaml.group(), sample.group(), field);
+                List<String> ledger = ForgeExperienceEvaluator.referenceViolations(store.memory(), store.scope(), sample);
+                assertTrue(ledger.stream().anyMatch(v -> v.contains("does not carry the exported task summary, provenance and policy")),
+                        field + " vs the ledger: " + ledger);
+                assertFalse(ForgeSampleChecks.executionMetadataViolations(judged, sample).isEmpty(),
+                        field + " vs the fixture");
+                // and the check the success gate runs for every sample includes that comparison
+                assertTrue(ForgeSampleChecks.successViolations(fixture, sample).stream()
+                        .anyMatch(v -> v.contains(": task summary") || v.contains(": provenance ")
+                                || v.contains(": policy ")), field + " through successViolations");
+            });
+
+            // the recorder drifted from the fixture while the export still matches the ledger: only the fixture sees it
+            ForgeFixture.Execution drifted = new ForgeFixture.Execution(judged.id(), judged.scopeKey(), judged.task(),
+                    "Fix the yaml loader", judged.sourceRevision(), judged.contextFingerprint(),
+                    judged.constraintsFingerprint(), judged.mandatory(), judged.outcome(), judged.outcomeAttempt(),
+                    judged.expectedLabel(), judged.expectedAcceptance(), judged.expectedReasons());
+            assertEquals(List.of(), ForgeExperienceEvaluator.referenceViolations(store.memory(), store.scope(), yaml));
+            assertEquals(1, ForgeSampleChecks.executionMetadataViolations(drifted, yaml).size());
+        }
+    }
+
+    // --- a revision states the justification of its correction ------------------------------------------------------
+
+    @Test
+    void aRevisionMustStateTheJustificationOfItsCorrection(@TempDir Path root) {
+        try (ProjectStore store = ProjectStore.open(root, fixture)) {
+            ExperienceSample yaml = sampleOf(store.samples(), "a-yaml");
+            ExperienceSample.Revision real = yaml.revisions().get(0);
+            assertEquals("reviewed rewrite of the finish summaries", real.justification());
+            ExperienceSample forged = withRevisions(yaml, List.of(new ExperienceSample.Revision(real.effective(),
+                    real.sequence(), "a made-up justification", real.superseded())));
+            List<String> violations = ForgeExperienceEvaluator.revisionViolations(store.memory(), store.scope(), forged);
+            assertTrue(violations.stream().anyMatch(v -> v.contains("states the justification")), violations.toString());
+            assertEquals(List.of(), ForgeExperienceEvaluator.revisionViolations(store.memory(), store.scope(), yaml));
         }
     }
 }
