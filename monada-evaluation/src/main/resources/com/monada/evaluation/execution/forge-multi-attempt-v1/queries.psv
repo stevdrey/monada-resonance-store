@@ -1,0 +1,13 @@
+# Manually judged queries. relevant = experience ids (<execution>/a<ordinal>) a reviewer judged useful for the query.
+# The relevance marks are shown in the report only: this fixture enforces attempt-level joins, not retrieval quality.
+# id | scope | query text | relevant | judgment
+M01|alpha|Fix CSV import that drops rows with quoted commas|m-repair/a1,m-repair/a2|failed naive split then the accepted quote aware repair of one execution; beta holds the identical summary
+M02|alpha|audit log entries for role changes|m-abandon/a1,m-abandon/a2|the abandoned trigger attempt explains why the accepted retry writes audit entries in the service
+M03|alpha|rate limit the public search API per client|m-chain3/a1,m-chain3/a2,m-chain3/a3|two failed attempts and the accepted sliding window repair of one execution
+M04|alpha|embed fonts in generated PDF invoices|m-unfinished/a1|the failed first attempt; the repair attempt never finished and has nothing to recall
+M05|alpha|warm the product cache after deployment|m-twin-ok/a1,m-twin-ko/a1|two independent executions with identical summaries and texts: one accepted, one rejected
+M06|alpha|soft bounces must not invalidate an address|m-correct/a1,m-correct/a2|the corrected first attempt (now FAILED) and the accepted repair
+M07|beta|Fix CSV import that drops rows with quoted commas|n-repair/a1,n-repair/a2|same summary and texts as alpha m-repair, but this execution was rejected; alpha must never appear
+M08|beta|generate thumbnails for uploaded images|n-abandon/a1,n-abandon/a2|cancelled synchronous attempt and a completed retry whose acceptance is only an imported claim
+M09|beta|reindex the search cluster without downtime|n-cancelled/a1,n-cancelled/a2|two failed attempts of an execution that was cancelled, which is not a verdict
+M10|beta|expire idle user sessions|n-fix/a1,n-fix/a2|failed absolute expiry then the accepted sliding expiry repair

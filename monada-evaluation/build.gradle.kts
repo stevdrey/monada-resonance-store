@@ -139,6 +139,13 @@ tasks.register<JavaExec>("runForgeExperienceEvaluation") {
     classpath = sourceSets["main"].runtimeClasspath
 }
 
+tasks.register<JavaExec>("runMultiAttemptExecutionEvaluation") {
+    description = "Run the multi-attempt evaluation: exact attempt-result joins of recall hits to exported execution samples over fixture forge-multi-attempt-v1 (no Forge, network or provider required)"
+    group = "application"
+    mainClass.set("com.monada.evaluation.execution.MultiAttemptEvaluationMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
 tasks.named<Test>("test") {
     // The cross-JVM determinism test starts child JVMs that run the evaluation command on this runtime classpath.
     doFirst {

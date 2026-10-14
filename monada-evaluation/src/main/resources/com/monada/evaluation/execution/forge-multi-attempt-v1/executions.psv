@@ -1,0 +1,16 @@
+# execution | scope | task | task summary | sourceRevision | context SHA | constraints | mandatory gates | outcome | expected label | expected acceptance | expected eligibility reasons
+# outcome: ACCEPTED_VALIDATED:<attempt ordinal> | ACCEPTED_IMPORTED:<attempt ordinal> | REJECTED_VALIDATED | CANCELLED | NONE
+# Expected label, acceptance and eligibility reasons are judged by hand from contract v1 sections 8 and 21.4; they are
+# the raw per-execution values the export must carry, never reinterpreted per attempt. '-' = eligible (SUCCESS, FAILURE).
+# Recording order is file order; m-correct is followed by m-twin-ko so that the cutoff (manifest) falls between them.
+m-repair|alpha|task-csv-import|Fix CSV import that drops rows with quoted commas|rev-m1|ctx-m00001|constraints-m|TESTS|ACCEPTED_VALIDATED:2|SUCCESS|VALIDATED_ACCEPTED|-
+m-abandon|alpha|task-audit-log|Add audit log entries for role changes|rev-m1|ctx-m00001|constraints-m|TESTS|ACCEPTED_VALIDATED:2|SUCCESS|VALIDATED_ACCEPTED|-
+m-chain3|alpha|task-rate-limit|Rate limit the public search API per client|rev-m1|ctx-m00001|constraints-m|TESTS|ACCEPTED_VALIDATED:3|SUCCESS|VALIDATED_ACCEPTED|-
+m-unfinished|alpha|task-pdf-fonts|Embed missing fonts in generated PDF invoices|rev-m1|ctx-m00001|constraints-m|TESTS|NONE|UNLABELED|PENDING|OUTCOME_PENDING
+m-twin-ok|alpha|task-cache-warmup|Warm the product cache after deployment|rev-m1|ctx-m00001|constraints-m|TESTS|ACCEPTED_VALIDATED:1|SUCCESS|VALIDATED_ACCEPTED|-
+m-correct|alpha|task-email-bounce|Handle bounced emails from the mail provider|rev-m1|ctx-m00001|constraints-m|TESTS|ACCEPTED_VALIDATED:2|SUCCESS|VALIDATED_ACCEPTED|-
+m-twin-ko|alpha|task-cache-warmup|Warm the product cache after deployment|rev-m1|ctx-m00001|constraints-m|TESTS|REJECTED_VALIDATED|FAILURE|NOT_ACCEPTED|-
+n-repair|beta|task-csv-import|Fix CSV import that drops rows with quoted commas|rev-m1|ctx-m00001|constraints-m|TESTS|REJECTED_VALIDATED|FAILURE|NOT_ACCEPTED|-
+n-abandon|beta|task-thumbnails|Generate thumbnails for uploaded images|rev-n1|ctx-n00001|constraints-n|TESTS|ACCEPTED_IMPORTED:2|UNLABELED|ACCEPTED_UNVALIDATED|OUTCOME_IMPORTED_CLAIM
+n-cancelled|beta|task-search-reindex|Reindex the search cluster without downtime|rev-n1|ctx-n00001|constraints-n|TESTS|CANCELLED|UNLABELED|NOT_ACCEPTED|OUTCOME_CANCELLED
+n-fix|beta|task-session-timeout|Expire idle user sessions after thirty minutes|rev-n1|ctx-n00001|constraints-n|TESTS|ACCEPTED_VALIDATED:2|SUCCESS|VALIDATED_ACCEPTED|-
