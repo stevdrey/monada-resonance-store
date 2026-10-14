@@ -178,6 +178,45 @@ class LinearScanResonanceIndexTest {
         assertEquals(List.of("a", "c", "b"), first);
     }
 
+    @Test
+    void productionRankingPathIsPinnedByGoldenOutput() throws IOException {
+        // Regression guard for Issue #120: the production full-sort path must keep these exact
+        // IDs, score bits and order (ties, duplicate replacement, negative/zero similarity, orphans).
+        AtomStore atoms = new InMemoryAtomStore(List.of(
+                atom("h"), atom("g"), atom("f"), atom("e"), atom("d"), atom("c"), atom("b"), atom("a")));
+        FrequencyStore vectors = new InMemoryFrequencyStore(List.of(
+                new StoredVector("b", new FrequencyVector(new float[]{1f, 0f})),
+                new StoredVector("a", new FrequencyVector(new float[]{1f, 0f})),
+                new StoredVector("c", new FrequencyVector(new float[]{0f, 1f})),
+                new StoredVector("d", new FrequencyVector(new float[]{1f, 1f})),
+                new StoredVector("e", new FrequencyVector(new float[]{-1f, 0f})),
+                new StoredVector("f", new FrequencyVector(new float[]{0f, 0f})),
+                new StoredVector("zz-orphan", new FrequencyVector(new float[]{1f, 0f})),
+                new StoredVector("c", new FrequencyVector(new float[]{3f, 1f})),
+                new StoredVector("a", new FrequencyVector(new float[]{0f, 1f})),
+                new StoredVector("g", new FrequencyVector(new float[]{-1f, 1f})),
+                new StoredVector("h", new FrequencyVector(new float[]{0f, 1f}))
+        ));
+        LinearScanResonanceIndex index = new LinearScanResonanceIndex(atoms, vectors);
+        FrequencyVector query = new FrequencyVector(new float[]{1f, 0f});
+
+        List<ResonanceResult> all = index.search(query, 10, Double.NEGATIVE_INFINITY);
+        assertEquals(List.of("a", "b", "c", "d", "f", "h", "g", "e"),
+                all.stream().map(r -> r.atom().id()).toList());
+        double[] expectedScores = {
+                1.0, 1.0, 3.0 / Math.sqrt(10.0), 1.0 / Math.sqrt(2.0), 0.0, 0.0, -1.0 / Math.sqrt(2.0), -1.0};
+        for (var i = 0; i < expectedScores.length; i++) {
+            assertEquals(Double.doubleToLongBits(expectedScores[i]), Double.doubleToLongBits(all.get(i).score()),
+                    "score bits at " + i);
+        }
+
+        assertEquals(List.of("a", "b", "c"),
+                index.search(query, 3, Double.NEGATIVE_INFINITY).stream().map(r -> r.atom().id()).toList());
+        assertEquals(List.of("a", "b", "c"),
+                index.search(query, 10, 3.0 / Math.sqrt(10.0)).stream().map(r -> r.atom().id()).toList());
+        assertEquals(List.of(), index.search(query, 10, 1.5));
+    }
+
     private static final class InMemoryAtomStore implements AtomStore {
         private final List<KnowledgeAtom> atoms;
         InMemoryAtomStore(List<KnowledgeAtom> atoms) { this.atoms = atoms; }
