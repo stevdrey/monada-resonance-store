@@ -44,7 +44,7 @@ class ScanPhaseBreakdownRunnerTest {
             assertEquals(0, c.orphanVectors());
             assertEquals(c.cosineEvaluations(), c.candidates(), "threshold is -inf and ids are unique");
             assertTrue(c.resultsReturned() <= (long) r.topK() * r.queryCount());
-            assertTrue(c.boundedTopKComparisonProxy() <= c.fullSortComparisonProxy());
+            assertTrue(c.topKCostModel() <= c.sortCostModel());
         }
     }
 
@@ -69,7 +69,7 @@ class ScanPhaseBreakdownRunnerTest {
         var text = smallRunner(1).run(tempDir).render();
         for (var expected : List.of("Generator Seed: 42", "Vector Dimensions: 128", "Scale Points (N): [33, 60]",
                 "Top-K Sweep: [1, 5]", "Invocation: ./gradlew :monada-evaluation:runScanPhaseBreakdown -q",
-                "1. Structural Counts", "2. Phase Latency", "3. Phase Share", "4. Measurement Overhead",
+                "1. Structural Counts", "1b. Illustrative Cost Model (NOT measured comparisons)", "2. Phase Latency", "3. Phase Share", "4. Measurement Overhead",
                 "5. Decision")) {
             assertTrue(text.contains(expected), "missing: " + expected);
         }

@@ -54,8 +54,8 @@ public record ScanPhaseBreakdownReport(
             long cosineEvaluations,
             long candidates,
             long resultsReturned,
-            long fullSortComparisonProxy,
-            long boundedTopKComparisonProxy) {}
+            long sortCostModel,
+            long topKCostModel) {}
 
     public record PointResult(
             int corpusSize,
@@ -108,17 +108,28 @@ public record ScanPhaseBreakdownReport(
 
         sb.append("1. Structural Counts (machine-independent, summed over queries)\n");
         sb.append("---------------------------------------------------------------\n");
-        sb.append(String.format(Locale.ROOT, "%-10s | %-5s | %-8s | %-12s | %-10s | %-12s | %-11s | %-9s | %-14s | %-14s%n",
+        sb.append(String.format(Locale.ROOT, "%-10s | %-5s | %-8s | %-12s | %-10s | %-12s | %-11s | %-9s%n",
                 "Scale (N)", "Top-K", "Queries", "Vec Visited", "Orphans", "Cosine Evals",
-                "Candidates", "Returned", "Sort Cmp Proxy", "TopK Cmp Proxy"));
+                "Candidates", "Returned"));
         for (var r : results) {
             var c = r.counts();
-            sb.append(String.format(Locale.ROOT, "%-10d | %-5d | %-8d | %-12d | %-10d | %-12d | %-11d | %-9d | %-14d | %-14d%n",
+            sb.append(String.format(Locale.ROOT, "%-10d | %-5d | %-8d | %-12d | %-10d | %-12d | %-11d | %-9d%n",
                     r.corpusSize(), r.topK(), r.queryCount(), c.vectorsVisited(), c.orphanVectors(),
-                    c.cosineEvaluations(), c.candidates(), c.resultsReturned(),
-                    c.fullSortComparisonProxy(), c.boundedTopKComparisonProxy()));
+                    c.cosineEvaluations(), c.candidates(), c.resultsReturned()));
         }
-        sb.append("Sort Cmp Proxy = sum of M*ceil(log2 M); TopK Cmp Proxy = sum of M*ceil(log2(K+1)) (M = deduped candidates).\n\n");
+        sb.append('\n');
+
+        sb.append("1b. Illustrative Cost Model (NOT measured comparisons)\n");
+        sb.append("-------------------------------------------------------\n");
+        sb.append(String.format(Locale.ROOT, "%-10s | %-5s | %-24s | %-24s%n",
+                "Scale (N)", "Top-K", "Sort model M*ceil(log2 M)", "TopK model M*ceil(log2 K+1)"));
+        for (var r : results) {
+            sb.append(String.format(Locale.ROOT, "%-10d | %-5d | %-25d | %-27d%n",
+                    r.corpusSize(), r.topK(), r.counts().sortCostModel(), r.counts().topKCostModel()));
+        }
+        sb.append("These are upper-bound heuristics summed over queries (M = deduped candidates), not counted\n");
+        sb.append("comparisons: real sort and heap costs depend on input order. They are not evidence for or\n");
+        sb.append("against a bounded top-K prototype; the measured phase latencies below are.\n\n");
 
         sb.append("2. Phase Latency p50 / p95 (microseconds per query)\n");
         sb.append("---------------------------------------------------\n");
@@ -152,8 +163,10 @@ public record ScanPhaseBreakdownReport(
             sb.append(String.format(Locale.ROOT, "%-9d | %-5d | %-17s | %-17s | %-17s%n",
                     r.corpusSize(), r.topK(), fmt(r.production()), fmt(r.instrumentedTotal()), fmt(r.sumOfPhases())));
         }
+        sb.append("Production and instrumented scans alternate which runs first on each repetition to avoid a fixed\n");
+        sb.append("cache-warmth advantage.\n");
         sb.append("Overhead sources: System.nanoTime() reads between phases, a separate score array (scoring and\n");
-        sb.append("dedup are fused in production), and a diagnostic candidate copy. The instrumented total can\n");
+        sb.append("dedup are fused in production). The instrumented total can\n");
         sb.append("therefore exceed the production total; phase shares are estimates, not an exact decomposition.\n");
         sb.append("Atom load is cheap after the first call (FileAtomStore caches); vector load re-reads the vector\n");
         sb.append("map and file on every call. Setup (corpus generation, seeding, query encoding) is untimed.\n\n");

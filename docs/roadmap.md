@@ -57,7 +57,7 @@ The project follows a measurement-first path: improve retrieval quality only aft
   changing production scan algorithms or introducing approximate indexing.
 - Linear-scan phase breakdown (Issue #119): `ScanPhaseBreakdownRunner` and CLI `./gradlew :monada-evaluation:runScanPhaseBreakdown -q`
   time an evaluation-only instrumented equivalent of the linear scan (parity with `LinearScanResonanceIndex` verified per query).
-  At N=10,000 the vector load is ~98.7% of query time, cosine scoring ~0.6%, dedup ~0.1%, full sort ~0.4% for K=1 and K=5
+  At N=10,000 the vector load is ~98.8-98.9% of query time, cosine scoring ~0.5-0.7%, dedup ~0.1%, full sort ~0.3% for K=1 and K=5
   (single-machine, exploratory). The earlier `BOUNDED_EXACT_TOP_K_EXPERIMENT_JUSTIFIED` signal is therefore not supported by phase-level
   evidence: an exact bounded top-K prototype is not justified; the next performance step should target vector loading/materialization
   (for example avoiding a full vector re-read per search) behind an explicit option with its own storage-compatibility analysis.

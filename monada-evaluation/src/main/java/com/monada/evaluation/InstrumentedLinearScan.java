@@ -51,10 +51,6 @@ final class InstrumentedLinearScan {
             return atomLoadNanos + vectorLoadNanos + scoringNanos + dedupNanos + sortNanos + truncateNanos;
         }
 
-        /** Timer reads and phase splitting not attributable to any single phase. */
-        long unattributedNanos() {
-            return Math.max(0L, totalNanos - sumOfPhasesNanos());
-        }
     }
 
     static PhaseTrace search(
@@ -62,7 +58,8 @@ final class InstrumentedLinearScan {
             FrequencyStore frequencyStore,
             FrequencyVector queryVector,
             int topK,
-            double threshold) throws IOException {
+            double threshold,
+            boolean captureCandidates) throws IOException {
         if (topK <= 0) {
             throw new IllegalArgumentException("topK must be greater than zero");
         }
@@ -109,10 +106,6 @@ final class InstrumentedLinearScan {
         }
         var results = new ArrayList<>(resultsByAtomId.values());
         long t4 = System.nanoTime();
-        var candidates = List.copyOf(results);
-        // The defensive copy above is only for diagnostics/parity and is not timed as a phase;
-        // re-anchor the clock so it is not charged to the sort.
-        long t4b = System.nanoTime();
 
         // Phase 5: full O(M log M) sort, score desc then atom id asc.
         results.sort(
@@ -126,6 +119,10 @@ final class InstrumentedLinearScan {
                 : List.copyOf(results);
         long t6 = System.nanoTime();
 
+        // Diagnostic copy for parity only, taken after the last timer read so it never enters a
+        // phase. The sorted list is the full deduplicated candidate set in final order.
+        List<ResonanceResult> candidates = captureCandidates ? List.copyOf(results) : List.of();
+
         return new PhaseTrace(
                 finalResults,
                 candidates,
@@ -133,21 +130,23 @@ final class InstrumentedLinearScan {
                 t2 - t1,
                 t3 - t2,
                 t4 - t3,
-                t5 - t4b,
+                t5 - t4,
                 t6 - t5,
                 t6 - t0,
                 atoms.size(),
                 stored.size(),
                 stored.size() - scored,
                 scored,
-                candidates.size(),
+                resultsByAtomId.size(),
                 finalResults.size());
     }
 
     /**
-     * Proves the trace equals the production index for this query: the final top-K and the full
-     * deduplicated candidate set (obtained by asking the production index for every candidate)
-     * must match by atom id and bit-identical score, in the same order.
+     * Proves the trace equals the production index for this query with a single production scan:
+     * the full deduplicated candidate set (production asked for every candidate) must match the
+     * trace's candidates by atom id and bit-identical score in the same order, and the trace's final
+     * top-K must equal the first K entries of that production list. The trace must have been
+     * captured with {@code captureCandidates = true}.
      */
     static void verifyParity(
             ResonanceIndex production,
@@ -155,12 +154,12 @@ final class InstrumentedLinearScan {
             int topK,
             double threshold,
             PhaseTrace trace) throws IOException {
-        assertSame("top-K", production.search(queryVector, topK, threshold), trace.results());
-        var sortedCandidates = new ArrayList<>(trace.candidates());
-        sortedCandidates.sort(
-                Comparator.comparingDouble(ResonanceResult::score).reversed()
-                        .thenComparing(result -> result.atom().id()));
-        assertSame("candidate set", production.search(queryVector, Integer.MAX_VALUE, threshold), sortedCandidates);
+        if (trace.candidates().size() != trace.candidateCount()) {
+            throw new IllegalArgumentException("trace was not captured with captureCandidates = true");
+        }
+        var expected = production.search(queryVector, Integer.MAX_VALUE, threshold);
+        assertSame("candidate set", expected, trace.candidates());
+        assertSame("top-K", expected.subList(0, Math.min(topK, expected.size())), trace.results());
     }
 
     private static void assertSame(String what, List<ResonanceResult> expected, List<ResonanceResult> actual) {

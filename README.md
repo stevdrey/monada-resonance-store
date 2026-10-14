@@ -505,7 +505,7 @@ The benchmark:
 ./gradlew :monada-evaluation:runScanPhaseBreakdown -q
 ```
 
-Observed on one machine (AMD Ryzen 7 7730U, 16 threads, Linux, OpenJDK 27; exploratory, not a CI assertion): at N=10,000 the vector load (`FrequencyStore.findAll()`, which re-reads the vector map and file on every search) is ~98.7% of query time (~0.89 s p50), cosine scoring ~0.6%, dedup ~0.1%, full sort ~0.4% (~4 ms), for both K=1 and K=5. The shares are stable from N=100 to N=10,000. An exact bounded top-K prototype therefore cannot recover meaningful latency (Amdahl ceiling ~1.00x); the report ends with `BOUNDED_TOP_K_PROTOTYPE_NOT_JUSTIFIED`. The instrumented total is within ~0.4% of the production `search()` p50. Production code is unchanged.
+Observed on one machine (AMD Ryzen 7 7730U, 16 threads, Linux, OpenJDK 27; exploratory, not a CI assertion): at N=10,000 the vector load (`FrequencyStore.findAll()`, which re-reads the vector map and file on every search) is ~98.8-98.9% of query time (~0.89-0.91 s p50), cosine scoring ~0.5-0.7%, dedup ~0.1%, full sort ~0.3% (~3 ms), for both K=1 and K=5. The shares are stable from N=100 to N=10,000. An exact bounded top-K prototype therefore cannot recover meaningful latency (Amdahl ceiling ~1.00x); the report ends with `BOUNDED_TOP_K_PROTOTYPE_NOT_JUSTIFIED`. The instrumented total is within ~1% of the production `search()` p50; production and instrumented scans alternate which runs first per repetition, and the report's cost-model columns are illustrative heuristics, not measured comparisons. Production code is unchanged.
 
 ## Design Invariants
 

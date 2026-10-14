@@ -119,13 +119,13 @@ public final class ScanPhaseBreakdownRunner {
             var scaleDir = rootTempDir.resolve("phase-scale-" + corpusSize);
             Files.createDirectories(scaleDir);
 
-            // Setup (untimed): seed the store with the same bulk path as the #82 sweep.
-            var seeded = LatencyScaleSweepRunner.seedBenchmarkStore(
-                    dataset, scaleDir, memoryOptions, textNormalizer, encoder);
+            // Setup (untimed): write the same persisted files as the #82 sweep, then open one store
+            // pair shared by the production index and the instrumented scan so both see the same cache state.
+            LatencyScaleSweepRunner.seedStoreFiles(dataset, scaleDir, memoryOptions, textNormalizer, encoder);
             var atomStore = new FileAtomStore(scaleDir, ATOM_LOG);
             var vectorStore = FileFrequencyStore.openExisting(
                     scaleDir, VECTOR_FILE, VectorFormatProfile.currentFixedRaw(DEFAULT_DIMENSIONS));
-            var production = seeded.probeIndex();
+            var production = new LinearScanResonanceIndex(atomStore, vectorStore);
 
             // Setup (untimed): encode each non-blank query once, as the production path would.
             var queryVectors = new ArrayList<FrequencyVector>();
@@ -139,9 +139,9 @@ public final class ScanPhaseBreakdownRunner {
             for (int k : topKs) {
                 // Parity + structural counts (deterministic, one pass).
                 long atoms = 0, visited = 0, orphans = 0, cosine = 0, candidates = 0, returned = 0;
-                long sortProxy = 0, boundedProxy = 0;
+                long sortModel = 0, topKModel = 0;
                 for (var qv : queryVectors) {
-                    var trace = InstrumentedLinearScan.search(atomStore, vectorStore, qv, k, EVALUATION_THRESHOLD);
+                    var trace = InstrumentedLinearScan.search(atomStore, vectorStore, qv, k, EVALUATION_THRESHOLD, true);
                     InstrumentedLinearScan.verifyParity(production, qv, k, EVALUATION_THRESHOLD, trace);
                     atoms += trace.atomsLoaded();
                     visited += trace.vectorsVisited();
@@ -149,29 +149,40 @@ public final class ScanPhaseBreakdownRunner {
                     cosine += trace.cosineEvaluations();
                     candidates += trace.candidateCount();
                     returned += trace.resultsReturned();
-                    sortProxy += log2Ceil(trace.candidateCount()) * trace.candidateCount();
-                    boundedProxy += log2Ceil(k + 1L) * trace.candidateCount();
+                    sortModel += log2Ceil(trace.candidateCount()) * trace.candidateCount();
+                    topKModel += log2Ceil(k + 1L) * trace.candidateCount();
                 }
                 var counts = new StructuralCounts(atoms, visited, orphans, cosine, candidates, returned,
-                        sortProxy, boundedProxy);
+                        sortModel, topKModel);
 
-                // Warm-up (unmeasured).
+                // Warm-up (unmeasured); alternate which scan runs first.
                 for (int w = 0; w < warmupCount; w++) {
                     for (var qv : queryVectors) {
-                        production.search(qv, k, EVALUATION_THRESHOLD);
-                        InstrumentedLinearScan.search(atomStore, vectorStore, qv, k, EVALUATION_THRESHOLD);
+                        if (w % 2 == 0) {
+                            production.search(qv, k, EVALUATION_THRESHOLD);
+                            InstrumentedLinearScan.search(atomStore, vectorStore, qv, k, EVALUATION_THRESHOLD, false);
+                        } else {
+                            InstrumentedLinearScan.search(atomStore, vectorStore, qv, k, EVALUATION_THRESHOLD, false);
+                            production.search(qv, k, EVALUATION_THRESHOLD);
+                        }
                     }
                 }
 
-                // Measured repetitions.
+                // Measured repetitions; production runs first on even repetitions and second on odd ones
+                // so neither path systematically benefits from the other's cache warmth.
                 var prod = new ArrayList<Long>();
                 var traces = new ArrayList<InstrumentedLinearScan.PhaseTrace>();
                 for (int rep = 0; rep < repetitionCount; rep++) {
                     for (var qv : queryVectors) {
-                        long start = System.nanoTime();
-                        production.search(qv, k, EVALUATION_THRESHOLD);
-                        prod.add(System.nanoTime() - start);
-                        traces.add(InstrumentedLinearScan.search(atomStore, vectorStore, qv, k, EVALUATION_THRESHOLD));
+                        InstrumentedLinearScan.PhaseTrace trace;
+                        if (rep % 2 == 0) {
+                            prod.add(timeProduction(production, qv, k));
+                            trace = InstrumentedLinearScan.search(atomStore, vectorStore, qv, k, EVALUATION_THRESHOLD, false);
+                        } else {
+                            trace = InstrumentedLinearScan.search(atomStore, vectorStore, qv, k, EVALUATION_THRESHOLD, false);
+                            prod.add(timeProduction(production, qv, k));
+                        }
+                        traces.add(trace);
                     }
                 }
                 results.add(new PointResult(
@@ -192,6 +203,13 @@ public final class ScanPhaseBreakdownRunner {
         var decision = decide(results);
         return new ScanPhaseBreakdownReport(datasetName, seed, DEFAULT_DIMENSIONS, scalePoints, topKs,
                 warmupCount, repetitionCount, results, decision, rationale(decision, results));
+    }
+
+    private static long timeProduction(LinearScanResonanceIndex production, FrequencyVector qv, int k)
+            throws IOException {
+        long start = System.nanoTime();
+        production.search(qv, k, EVALUATION_THRESHOLD);
+        return System.nanoTime() - start;
     }
 
     private static PhaseLatency phase(
