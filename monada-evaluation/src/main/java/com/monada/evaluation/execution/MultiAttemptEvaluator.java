@@ -542,9 +542,9 @@ public final class MultiAttemptEvaluator {
             violations.add("cutoff export reports checkpoint " + checkpoint + " but was requested at "
                     + s.cutoffSequence);
         }
-        if (report.pages().size() < 2) {
-            violations.add("the cutoff export never traversed a continuation page");
-        }
+        violations.addAll(cutoffPaginationViolations(s.memories.get(fixture.cutoffScope()),
+                MultiAttemptFixtureRecorder.scope(fixture, fixture.cutoffScope()), report, s.cutoffSequence,
+                fixture.pageSize()));
         Map<String, MultiAttemptFixture.CutoffAttempt> judged = new TreeMap<>();
         fixture.cutoff().forEach(c -> judged.put(c.experienceId(), c));
         Set<String> exported = new java.util.TreeSet<>();
@@ -599,12 +599,71 @@ public final class MultiAttemptEvaluator {
         }
         List<String> evidence = List.of("cutoff " + fixture.cutoffScope() + " after " + fixture.cutoffEvent()
                 + " = sequence " + s.cutoffSequence + "; attempts at the cutoff: " + exported.size() + " (judged "
-                + judged.size() + "); cutoff export pages: " + report.pages().size(),
+                + judged.size() + "); cutoff export pages at size " + fixture.pageSize() + ": "
+                + report.pages().size() + " (paged export equals the unpaged export at the same cutoff; every page "
+                + "carries the same checkpoint and projection stamp)",
                 "latest hits against the cutoff export: " + joined + " joined with the judged cutoff values, " + beyond
                         + " beyond the cutoff and left unjoined");
         return ForgeGate.of(MultiAttemptEvaluationReport.CUTOFF,
                 "the cutoff export equals the judged state at the cutoff; later facts never join an earlier state",
                 violations, evidence);
+    }
+
+    /**
+     * The paged export at an explicit cutoff must equal one unpaged export at the same cutoff, sample for sample and
+     * in order (so a duplicated or dropped sample is a violation), traverse as many pages as the page size demands
+     * (at least two) and describe one frozen snapshot on every page: schema, scope, view, additional gates and ledger
+     * checkpoint equal those of the first page and of the unpaged export, the checkpoint is the requested cutoff, the
+     * projection stamp is that of the first page and covers the cutoff, and the continuation flags are consistent.
+     */
+    static List<String> cutoffPaginationViolations(ExecutionMemory memory, ScopeId scope,
+                                                   ExperienceExportReport report, long cutoffSequence, int pageSize) {
+        List<String> violations = new ArrayList<>();
+        com.monada.api.execution.ExperienceSamplePage reference = memory.exportSamples(ExportRequest.first(scope,
+                ExportCutoff.atSequence(cutoffSequence), 50,
+                ExportView.ADAPTER_READY, ExportEvidencePolicy.executionPolicyOnly()));
+        if (reference.hasMore()) {
+            violations.add(scope.value() + ": the unpaged cutoff export does not fit in one page");
+        }
+        List<ExperienceSample> paged = samples(report);
+        if (!reference.samples().equals(paged)) {
+            violations.add(scope.value() + ": the paged cutoff export differs from the unpaged cutoff export in "
+                    + "content or order");
+        }
+        int expectedPages = (reference.samples().size() + pageSize - 1) / pageSize;
+        List<com.monada.api.execution.ExperienceSamplePage> pages = report.pages();
+        if (pages.size() != expectedPages || pages.size() < 2) {
+            violations.add(scope.value() + ": cutoff export used " + pages.size() + " pages, expected "
+                    + expectedPages + " (at least 2) for " + reference.samples().size() + " executions at page size "
+                    + pageSize);
+        }
+        for (int i = 0; i < pages.size(); i++) {
+            var page = pages.get(i);
+            String label = scope.value() + " cutoff page " + (i + 1) + "/" + pages.size();
+            if (!com.monada.api.execution.ExperienceSamplePage.SCHEMA.equals(page.schema())
+                    || !page.schema().equals(reference.schema()) || !page.scope().equals(reference.scope())
+                    || page.view() != reference.view() || page.view() != ExportView.ADAPTER_READY
+                    || !page.additionalGates().equals(reference.additionalGates())
+                    || !page.additionalGates().isEmpty()) {
+                violations.add(label + ": schema/scope/view/gates " + page.schema() + "/" + page.scope().value() + "/"
+                        + page.view() + "/" + page.additionalGates() + " differ from the unpaged cutoff export");
+            }
+            if (!page.ledger().equals(reference.ledger()) || !page.ledger().equals(pages.get(0).ledger())
+                    || page.ledger().cutoffSequence() != cutoffSequence) {
+                violations.add(label + ": ledger checkpoint " + page.ledger() + " but the cutoff is " + cutoffSequence
+                        + " and the unpaged export has " + reference.ledger());
+            }
+            if (!page.projection().equals(pages.get(0).projection()) || !page.projection().coversCutoff()) {
+                violations.add(label + ": projection stamp " + page.projection() + " differs from the first page or "
+                        + "does not cover the cutoff");
+            }
+            boolean last = i == pages.size() - 1;
+            if (page.hasMore() == last || page.next().isPresent() != page.hasMore()) {
+                violations.add(label + ": hasMore=" + page.hasMore() + " next=" + page.next().isPresent()
+                        + (last ? " on the last page" : " on a page that is not the last"));
+            }
+        }
+        return violations;
     }
 
     private static List<String> cutoffViolations(String what, MultiAttemptFixture.CutoffAttempt c, String label,
@@ -754,6 +813,10 @@ public final class MultiAttemptEvaluator {
 
     // --- MA6: determinism -----------------------------------------------------------------------------
 
+    /**
+     * Two runs inside one JVM share its hash-seeded iteration orders, so this gate cannot see an order that differs
+     * between JVMs; {@code MultiAttemptCrossJvmDeterminismTest} compares the command's report across separate JVMs.
+     */
     private static ForgeGate determinismGate(Run first, Run second) {
         List<String> violations = new ArrayList<>();
         if (!first.fingerprint.equals(second.fingerprint)) {

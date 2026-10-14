@@ -38,7 +38,10 @@ final class AttemptJoin {
         NO_SAMPLE,
         /** The sample exists but holds no attempt with the hit's attempt id (or the hit has no attempt). */
         ATTEMPT_NOT_IN_SAMPLE,
-        /** The sample's attempt has no finish, or a finish other than the hit's exact reference. */
+        /**
+         * The sample's attempt has no finish, or a finish other than the hit's exact reference; the attempt result
+         * and accepted flags are then left unestablished, never taken from the other finish.
+         */
         FINISH_MISMATCH
     }
 
@@ -86,11 +89,15 @@ final class AttemptJoin {
                     acceptance, NONE, false, false);
         }
         ExperienceSample.SampleAttempt a = attempt.get();
+        if (a.finish().filter(ref::equals).isEmpty()) {
+            // the hit's fact is not the finish the sample exports: no attempt-level verdict is established
+            return new Row(id, ref.eventId().value(), ref.revision(), sequence, Status.FINISH_MISMATCH, label,
+                    acceptance, NONE, false, false);
+        }
         String result = a.result().map(Enum::name).orElse(MultiAttemptFixture.UNFINISHED);
         boolean validated = s.acceptance() == DerivedAcceptance.Status.VALIDATED_ACCEPTED && a.accepted()
                 && a.result().filter(r -> r == AttemptResult.COMPLETED).isPresent();
-        Status status = a.finish().filter(ref::equals).isPresent() ? Status.JOINED : Status.FINISH_MISMATCH;
-        return new Row(id, ref.eventId().value(), ref.revision(), sequence, status, label, acceptance, result,
+        return new Row(id, ref.eventId().value(), ref.revision(), sequence, Status.JOINED, label, acceptance, result,
                 a.accepted(), validated);
     }
 

@@ -197,9 +197,13 @@ public record MultiAttemptFixture(String version, String provenance, Map<String,
             if (!RESULTS.contains(a.result())) {
                 throw new IllegalStateException(a.experienceId() + ": unknown result " + a.result());
             }
-            if (a.finished() == (a.solution() == null || a.lesson() == null)) {
+            if (a.finished() && (a.solution() == null || a.lesson() == null)) {
                 throw new IllegalStateException(a.experienceId() + ": a finished attempt needs a solution and a "
-                        + "lesson, an unfinished one has neither");
+                        + "lesson");
+            }
+            if (!a.finished() && (a.solution() != null || a.lesson() != null)) {
+                throw new IllegalStateException(a.experienceId() + ": an unfinished attempt has neither a solution "
+                        + "nor a lesson");
             }
             if (a.revised() && (!a.finished() || a.revisedResult().equals(UNFINISHED)
                     || !RESULTS.contains(a.revisedResult()) || a.revisedSolution() == null

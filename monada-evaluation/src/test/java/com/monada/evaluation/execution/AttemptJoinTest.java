@@ -167,6 +167,22 @@ class AttemptJoinTest {
     }
 
     @Test
+    void aMismatchedFinishOfTheAcceptedAttemptIsNeverReportedAsValidated() {
+        // the sample's a2 is COMPLETED, marked accepted and VALIDATED_ACCEPTED, but its finish is not the hit's fact
+        ExperienceSample repair = ForgeTestSupport.sampleOf(samples, "m-repair");
+        ExperienceSample forged = ForgeTestSupport.withAttempt(repair, 1, a -> ForgeTestSupport.withFinish(a,
+                ForgeTestSupport.ref(a.finish().orElseThrow(), "m-repair.a2.stage", 1)));
+        AttemptJoin.Row r = AttemptJoin.join(hit("m-repair/a2"), replace(forged), Long.MAX_VALUE);
+        assertEquals(AttemptJoin.Status.FINISH_MISMATCH, r.status());
+        assertEquals(AttemptJoin.NONE, r.attemptResult());
+        assertFalse(r.markedAccepted());
+        assertFalse(r.validatedAcceptedAttempt());
+        assertEquals("SUCCESS", r.executionLabel()); // the execution was found; only the attempt fact was not
+        assertTrue(MultiAttemptEvaluator.rowViolations(FIXTURE, "T", r).stream()
+                .anyMatch(v -> v.contains("did not join its exported sample (FINISH_MISMATCH)")));
+    }
+
+    @Test
     void aFailedAttemptWronglyMarkedAcceptedIsStillNotReportedAsTheAcceptedAttempt() {
         ExperienceSample repair = ForgeTestSupport.sampleOf(samples, "m-repair");
         ExperienceSample forged = ForgeTestSupport.withAttempt(repair, 0, a -> ForgeTestSupport.copyAttempt(a, true,

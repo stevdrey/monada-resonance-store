@@ -92,6 +92,28 @@ class MultiAttemptFixtureTest {
     }
 
     @Test
+    void rejectsAPartiallyPopulatedUnfinishedAttempt() {
+        assertInvalid(withAttempt("m-unfinished/a2", a -> unfinished(a, "Started embedding the fonts", null)),
+                "neither a solution nor a lesson");
+        assertInvalid(withAttempt("m-unfinished/a2", a -> unfinished(a, null, "Fonts must be embedded")),
+                "neither a solution nor a lesson");
+    }
+
+    @Test
+    void rejectsAPartiallyPopulatedFinishedAttempt() {
+        assertInvalid(withAttempt("m-repair/a1", a -> new MultiAttemptFixture.Attempt(a.execution(), a.ordinal(),
+                a.reason(), a.result(), a.solution(), null, a.inputTokens(), a.outputTokens(), a.startSeconds(),
+                a.endSeconds(), a.evidence(), null, null, null, false)), "needs a solution and a lesson");
+    }
+
+    private static MultiAttemptFixture.Attempt unfinished(MultiAttemptFixture.Attempt a, String solution,
+                                                          String lesson) {
+        return new MultiAttemptFixture.Attempt(a.execution(), a.ordinal(), a.reason(), MultiAttemptFixture.UNFINISHED,
+                solution, lesson, a.inputTokens(), a.outputTokens(), a.startSeconds(), a.endSeconds(), a.evidence(),
+                null, null, null, false);
+    }
+
+    @Test
     void rejectsACutoffRowForAnUnknownAttempt() {
         List<MultiAttemptFixture.CutoffAttempt> cutoff = new ArrayList<>(fixture.cutoff());
         cutoff.add(new MultiAttemptFixture.CutoffAttempt("m-correct", 9, "FAILED", 1, false, "UNLABELED", "PENDING"));
