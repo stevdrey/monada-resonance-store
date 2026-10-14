@@ -220,7 +220,27 @@ public final class LatencyScaleSweepRunner {
      * Populates a fresh benchmark store in $O(N)$ bulk streaming time, bypassing
      * repeated $O(N^2)$ single-atom log reparsing during benchmark setup.
      */
-    private SeededStore seedBenchmarkStore(
+    private static SeededStore seedBenchmarkStore(
+            EvaluationDataset dataset,
+            Path storePath,
+            MonadaMemoryOptions options,
+            TextNormalizer textNormalizer,
+            FrequencyEncoder encoder) throws IOException {
+        var idToLabel = seedStoreFiles(dataset, storePath, options, textNormalizer, encoder);
+        int dimensions = DEFAULT_DIMENSIONS;
+        var populatedMemory = MonadaMemory.open(storePath, options);
+        var probeCounter = new CountingFrequencyStore(FileFrequencyStore.openExisting(
+                storePath, "vectors/segment-000001.f32", VectorFormatProfile.currentFixedRaw(dimensions)));
+        var probeIndex = new LinearScanResonanceIndex(new FileAtomStore(storePath, "atoms/segment-000001.log"), probeCounter);
+        return new SeededStore(populatedMemory, Collections.unmodifiableMap(idToLabel), probeIndex, probeCounter);
+    }
+
+    /**
+     * Writes only the persisted atom log, vector file and vector map for the dataset and returns the
+     * content-derived atom id to dataset label mapping. Reused by evaluation runners that build their
+     * own store handles.
+     */
+    static Map<String, String> seedStoreFiles(
             EvaluationDataset dataset,
             Path storePath,
             MonadaMemoryOptions options,
@@ -272,15 +292,10 @@ public final class LatencyScaleSweepRunner {
 
         Files.write(atomLog, atomLines, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
         Files.write(vectorMap, vectorMapLines, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
-
-        var populatedMemory = MonadaMemory.open(storePath, options);
-        var probeCounter = new CountingFrequencyStore(FileFrequencyStore.openExisting(
-                storePath, "vectors/segment-000001.f32", VectorFormatProfile.currentFixedRaw(dimensions)));
-        var probeIndex = new LinearScanResonanceIndex(new FileAtomStore(storePath, "atoms/segment-000001.log"), probeCounter);
-        return new SeededStore(populatedMemory, Collections.unmodifiableMap(idToLabel), probeIndex, probeCounter);
+        return idToLabel;
     }
 
-    private String formatAtomLine(KnowledgeAtom atom) {
+    private static String formatAtomLine(KnowledgeAtom atom) {
         String encodedContent = Base64.getEncoder().encodeToString(atom.content().getBytes(StandardCharsets.UTF_8));
         String encodedAliases = atom.aliases().stream()
                 .map(alias -> Base64.getEncoder().encodeToString(alias.getBytes(StandardCharsets.UTF_8)))

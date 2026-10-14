@@ -82,6 +82,7 @@ The project requires **JDK 27** (Gradle toolchain `27`) and builds with the vers
 ./gradlew :monada-evaluation:runNormalizedQueryKeyStress -q
 ./gradlew :monada-evaluation:runLatency -q
 ./gradlew :monada-evaluation:runLatencyScaleSweep -q
+./gradlew :monada-evaluation:runScanPhaseBreakdown -q
 ./gradlew :monada-evaluation:runProjectMemory -q
 ./gradlew :monada-evaluation:runSpeechModalityComparison -q
 ./gradlew :monada-evaluation:runSpeechHybridSweep -q
@@ -495,6 +496,16 @@ The benchmark:
 - Reports full-scan top-K invariance only when the measured results include at least two distinct K arms and every arm reports a $1.0$ scan fraction.
 - Tracks retrieval quality (Precision, Recall, Hit, MRR) and ranking stability per scale point.
 - Ends with an explicit evidence conclusion (`BOUNDED_EXACT_TOP_K_EXPERIMENT_JUSTIFIED`) without silently altering the production scan path.
+
+### Linear-Scan Phase Breakdown
+
+`ScanPhaseBreakdownRunner` (`runScanPhaseBreakdown`) isolates the cost centers that the scaled benchmark above reports only end-to-end. It runs an evaluation-only, phase-instrumented equivalent of `LinearScanResonanceIndex.search` over the same deterministic corpora (seed 42, 128 dimensions, N=100/1,000/5,000/10,000, K=1/5), verifies for every measured query that the final top-K and the full deduplicated candidate set equal the production index, and reports p50/p95 per phase (atom load, vector load, cosine scoring, threshold+dedup, full sort, truncate) next to machine-independent structural counts.
+
+```bash
+./gradlew :monada-evaluation:runScanPhaseBreakdown -q
+```
+
+Observed on one machine (AMD Ryzen 7 7730U, 16 threads, Linux, OpenJDK 27; exploratory, not a CI assertion): at N=10,000 the vector load (`FrequencyStore.findAll()`, which re-reads the vector map and file on every search) is ~98.8-98.9% of query time (~0.89-0.91 s p50), cosine scoring ~0.5-0.7%, dedup ~0.1%, full sort ~0.3% (~3 ms), for both K=1 and K=5. The shares are stable from N=100 to N=10,000. An exact bounded top-K prototype therefore cannot recover meaningful latency (Amdahl ceiling ~1.00x); the report ends with `BOUNDED_TOP_K_PROTOTYPE_NOT_JUSTIFIED`. The instrumented total is within ~1% of the production `search()` p50; production and instrumented scans alternate which runs first per repetition, and the report's cost-model columns are illustrative heuristics, not measured comparisons. Production code is unchanged.
 
 ## Design Invariants
 

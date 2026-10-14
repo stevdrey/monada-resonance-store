@@ -31,6 +31,10 @@ final class TextEvaluationCatalog {
             "expanded-technology", "1", EvaluationProfile.LEXICAL_ENRICHED.name(),
             TextEvaluationMode.EXPLORATORY);
 
+    static final TextEvaluationMetadata SCAN_PHASE_BREAKDOWN = new TextEvaluationMetadata(
+            "expanded-technology", "1", EvaluationProfile.LEXICAL_ENRICHED.name(),
+            TextEvaluationMode.EXPLORATORY);
+
     private TextEvaluationCatalog() {
     }
 }
