@@ -117,3 +117,10 @@ tasks.register<JavaExec>("runForgeExperienceEvaluation") {
     mainClass.set("com.monada.evaluation.execution.ForgeExperienceEvaluationMain")
     classpath = sourceSets["main"].runtimeClasspath
 }
+
+tasks.named<Test>("test") {
+    // The cross-JVM determinism test starts child JVMs that run the evaluation command on this runtime classpath.
+    doFirst {
+        systemProperty("forge.runtime.classpath", sourceSets["main"].runtimeClasspath.asPath)
+    }
+}

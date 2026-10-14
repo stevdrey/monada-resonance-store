@@ -18,7 +18,6 @@ import com.monada.core.execution.QualityDimension;
 import com.monada.core.execution.QualityObservation;
 import com.monada.core.execution.ScopeId;
 import java.util.ArrayList;
-import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,11 +28,31 @@ import java.util.TreeSet;
 import java.util.function.Predicate;
 
 /**
- * Pure checks of one exported {@link ExperienceSample} against expectations derived from the fixture, never from
- * the export itself: who may appear in an export, what a success needs, which group and ordinal it has and which
- * kind of ledger event each provenance reference must address. The expectations follow the sample contract of
- * {@code SampleBuilder} (contract v1, section 21); a legitimate change of that contract must change them here
- * explicitly.
+ * Pure checks of one exported {@link ExperienceSample} against expectations derived from the fixture and from the
+ * ledger, never from the export itself: who may appear in an export, what a success needs, which group and ordinal it
+ * has and which kind of ledger event each provenance reference must address.
+ *
+ * <p><b>Contract assumptions.</b> These checks deliberately mirror the following rules of the exporter
+ * ({@code SampleBuilder} / {@code SampleExporter}, contract v1 section 21). They are the only coupling to the
+ * exporter's internals, and {@code ForgeSampleContractTest} pins each of them to the real exporter by number, so a
+ * legitimate change of the exporter fails that test with a clear message instead of turning the gates red:
+ * <ol>
+ *   <li>the attempt named by an accepted outcome is marked {@code accepted}, an imported claim included; no attempt
+ *       of a rejected or outcome-less execution is;</li>
+ *   <li>a gate's state follows the state of its observation, and a gate without observation is MISSING;</li>
+ *   <li>the adapter view exports only observations recorded under the execution's own policy; the diagnostic view
+ *       exports all of them with a {@code policyMatches} flag and lists the ignored ones;</li>
+ *   <li>every stage exports exactly one usage entry per {@code UsageKind}; counters nobody recorded are
+ *       NOT_MEASURED with no value;</li>
+ *   <li>an ineligible sample explains itself with GATE_MISSING(dimension), GATE_FAIL(dimension) or
+ *       OUTCOME_IMPORTED_CLAIM, and eligibility is true exactly for SUCCESS and FAILURE;</li>
+ *   <li>every reference addresses the kind of event of its origin (start, finish, stage, evidence, outcome, gate
+ *       evidence of the accepted attempt, correction) and carries the coordinates of that event;</li>
+ *   <li>a corrected fact is exported at its latest revision and lists every earlier revision as superseded;</li>
+ *   <li>the group is (task, source revision, context, constraints, policy id, policy version) and the success
+ *       ordinal is the position among the successes of the group in recording order;</li>
+ *   <li>{@code firstSequence} and {@code lastSequence} are the first and last ledger sequence of the execution.</li>
+ * </ol>
  */
 final class ForgeSampleChecks {
     private ForgeSampleChecks() {
@@ -98,9 +117,23 @@ final class ForgeSampleChecks {
      * equal to the derived one) and, for a success, one passing gate for every mandatory dimension of the policy.
      */
     static List<String> successViolations(ForgeFixture fixture, ExperienceSample sample) {
+        return successViolations(fixture, sample, null);
+    }
+
+    /**
+     * As above, with the expected ordinals of the sample's project already computed ({@code null} computes them):
+     * the evaluator derives them once per project instead of once per sample.
+     */
+    static List<String> successViolations(ForgeFixture fixture, ExperienceSample sample,
+                                          Map<String, Integer> ordinalsOfScope) {
         List<String> violations = new ArrayList<>();
         String exec = sample.executionId().value();
-        ForgeFixture.Execution judged = fixture.execution(exec);
+        Optional<ForgeFixture.Execution> known = fixture.findExecution(exec);
+        if (known.isEmpty()) { // an export may name an execution the fixture does not know: report it, never throw
+            violations.add(exec + ": execution unknown to the fixture");
+            return violations;
+        }
+        ForgeFixture.Execution judged = known.get();
 
         // Eligibility is true exactly for the labels a consumer can learn from: SUCCESS and FAILURE (section 21).
         boolean learnable = sample.label() == ExperienceSample.Label.SUCCESS
@@ -116,7 +149,8 @@ final class ForgeSampleChecks {
         if (!sample.group().equals(expectedGroup(judged))) {
             violations.add(exec + ": group " + sample.group() + " but derived " + expectedGroup(judged));
         }
-        Integer ordinal = expectedOrdinals(fixture, judged.scopeKey()).get(exec);
+        Integer ordinal = (ordinalsOfScope != null ? ordinalsOfScope
+                : expectedOrdinals(fixture, judged.scopeKey())).get(exec);
         if (sample.label() == ExperienceSample.Label.SUCCESS) {
             if (ordinal == null) {
                 violations.add(exec + ": SUCCESS but judged " + judged.expectedLabel());
@@ -133,7 +167,7 @@ final class ForgeSampleChecks {
     private static List<String> gateViolations(String exec, Set<QualityDimension> mandatory,
                                                ExperienceSample sample) {
         List<String> violations = new ArrayList<>();
-        if (!EnumSet.copyOf(sample.requiredGates()).equals(EnumSet.copyOf(mandatory))
+        if (!Set.copyOf(sample.requiredGates()).equals(Set.copyOf(mandatory))
                 || sample.requiredGates().size() != mandatory.size()) {
             violations.add(exec + ": required gates " + sample.requiredGates() + " but the policy mandates "
                     + new TreeSet<>(mandatory));
@@ -405,14 +439,6 @@ final class ForgeSampleChecks {
                 .anyMatch(o -> o.dimension() == g.dimension() && g.observation().map(o::equals).orElse(true));
     }
 
-    static Predicate<ExecutionEvent> startedWithOrdinal(int ordinal) {
-        return e -> e instanceof AttemptStarted s && s.ordinal() == ordinal;
-    }
-
-    static Predicate<ExecutionEvent> finishedWith(Optional<com.monada.core.execution.AttemptResult> result) {
-        return e -> e instanceof AttemptFinished f && result.map(r -> r == f.result()).orElse(true);
-    }
-
     static Predicate<ExecutionEvent> finishedWithSolution(com.monada.core.execution.AttemptResult result,
                                                           String solution) {
         return e -> e instanceof AttemptFinished f && f.result() == result
@@ -447,15 +473,6 @@ final class ForgeSampleChecks {
             }
         }
         return violations;
-    }
-
-    static Predicate<ExecutionEvent> stageNamed(String name) {
-        return e -> e instanceof StageRecorded s && s.stage().equals(name);
-    }
-
-    static Predicate<ExecutionEvent> observing(QualityDimension dimension) {
-        return e -> e instanceof EvidenceRecorded ev && ev.observations().stream().map(QualityObservation::dimension)
-                .anyMatch(dimension::equals);
     }
 
     static EventKind kindOf(ExecutionEvent event) {

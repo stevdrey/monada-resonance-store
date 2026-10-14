@@ -65,9 +65,24 @@ public final class ForgeExperienceEvaluator {
      * sees the ledgers of an earlier call; the caller owns {@code workDir} and removes it.
      */
     public static ForgeEvaluationReport evaluate(ForgeFixture fixture, Path workDir) {
-        Run first = runOnce(fixture, freshRunDirectory(workDir));
+        return evaluate(fixture, workDir, ForgeExperienceEvaluator::allGates);
+    }
+
+    /** Everything the replay phase found, handed to the gates (the gates themselves never touch the stores). */
+    record ReplayFindings(int replayed, List<String> record, List<String> reconcile, List<String> replay,
+                          List<String> evidence) {
+    }
+
+    /** Computes the six gates that need the two snapshots; replaceable so that failure handling can be tested. */
+    @FunctionalInterface
+    interface GateRunner {
+        List<ForgeGate> run(ForgeFixture fixture, Snapshot first, Snapshot second, ReplayFindings replay);
+    }
+
+    static ForgeEvaluationReport evaluate(ForgeFixture fixture, Path workDir, GateRunner gateRunner) {
+        Run first = runOnce(fixture, freshRunDirectory(workDir), gateRunner);
         try {
-            Run second = runOnce(fixture, freshRunDirectory(workDir));
+            Run second = runOnce(fixture, freshRunDirectory(workDir), gateRunner);
             try {
                 List<ForgeGate> gates = new ArrayList<>(first.gates);
                 gates.add(determinismGate(first, second));
@@ -97,7 +112,7 @@ public final class ForgeExperienceEvaluator {
                        Map<String, Long> elapsed, String fingerprint) {
     }
 
-    private static Run runOnce(ForgeFixture fixture, Path root) {
+    private static Run runOnce(ForgeFixture fixture, Path root, GateRunner gateRunner) {
         try {
             Files.createDirectories(root);
         } catch (IOException e) {
@@ -135,49 +150,62 @@ public final class ForgeExperienceEvaluator {
         elapsed.put("reopen+reconcile", System.nanoTime() - t);
 
         Snapshot a = snapshot(fixture, root, elapsed);
-
-        // Replay: reopen for writing, record everything again, reconcile again, take a second snapshot.
-        t = System.nanoTime();
-        List<String> replayViolations = new ArrayList<>();
-        List<String> replayEvidence = new ArrayList<>();
-        int replayed = 0;
-        for (String scopeKey : fixture.scopeIds().keySet()) {
-            ScopeId scope = ForgeFixtureRecorder.scope(fixture, scopeKey);
-            try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
-                for (RecordResult r : ForgeFixtureRecorder.recordScope(memory, fixture, scopeKey)) {
-                    replayed++;
-                    if (r.status() != RecordResult.Status.IDEMPOTENT) {
-                        replayViolations.add(scopeKey + ": replayed event was " + r.status() + " " + r.reason());
+        Snapshot b = null;
+        try {
+            // Replay: reopen for writing, record everything again, reconcile again, take a second snapshot.
+            t = System.nanoTime();
+            List<String> replayViolations = new ArrayList<>();
+            List<String> replayEvidence = new ArrayList<>();
+            int replayed = 0;
+            for (String scopeKey : fixture.scopeIds().keySet()) {
+                ScopeId scope = ForgeFixtureRecorder.scope(fixture, scopeKey);
+                try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
+                    for (RecordResult r : ForgeFixtureRecorder.recordScope(memory, fixture, scopeKey)) {
+                        replayed++;
+                        if (r.status() != RecordResult.Status.IDEMPOTENT) {
+                            replayViolations.add(scopeKey + ": replayed event was " + r.status() + " " + r.reason());
+                        }
                     }
+                    ProjectionStatus rebuilt = memory.rebuildProjection(scope);
+                    replayEvidence.add(scopeKey + ": second rebuild " + rebuilt.state() + " covering "
+                            + rebuilt.coveredSequence() + "/" + rebuilt.ledgerSequence());
+                    replayViolations.addAll(projectionViolations(scopeKey + " second rebuild", rebuilt));
                 }
-                ProjectionStatus rebuilt = memory.rebuildProjection(scope);
-                replayEvidence.add(scopeKey + ": second rebuild " + rebuilt.state() + " covering "
-                        + rebuilt.coveredSequence() + "/" + rebuilt.ledgerSequence());
-                replayViolations.addAll(projectionViolations(scopeKey + " second rebuild", rebuilt));
+            }
+            elapsed.put("replay", System.nanoTime() - t);
+            b = snapshot(fixture, root, new LinkedHashMap<>());
+
+            List<String> evidence = new ArrayList<>(reconcileEvidence);
+            evidence.addAll(replayEvidence);
+            List<ForgeGate> gates = gateRunner.run(fixture, a, b, new ReplayFindings(replayed, recordViolations,
+                    reconcileViolations, replayViolations, evidence));
+            return new Run(a, new ArrayList<>(a.results.values()), gates, elapsed, a.fingerprint());
+        } catch (RuntimeException | Error e) {
+            a.close(); // the Run that would have owned it is never returned
+            throw e;
+        } finally {
+            if (b != null) {
+                b.close();
             }
         }
-        elapsed.put("replay", System.nanoTime() - t);
-        Snapshot b = snapshot(fixture, root, new LinkedHashMap<>());
+    }
 
+    static List<ForgeGate> allGates(ForgeFixture fixture, Snapshot a, Snapshot b, ReplayFindings replay) {
         List<ForgeGate> gates = new ArrayList<>();
         gates.add(isolationGate(fixture, a));
         gates.add(successGate(fixture, a));
         gates.add(referenceGate(fixture, a));
-        List<String> reconcileAndReplayEvidence = new ArrayList<>(reconcileEvidence);
-        reconcileAndReplayEvidence.addAll(replayEvidence);
-        gates.add(replayGate(fixture, a, b, replayed, recordViolations, reconcileViolations, replayViolations,
-                reconcileAndReplayEvidence));
+        gates.add(replayGate(fixture, a, b, replay.replayed(), replay.record(), replay.reconcile(), replay.replay(),
+                replay.evidence()));
         gates.add(accountingGate(fixture, a));
         gates.add(comparisonGate(fixture, a));
-
-        List<ForgeQueryResult> queries = new ArrayList<>(a.results.values());
-        return new Run(a, queries, gates, elapsed, a.fingerprint());
+        return gates;
     }
 
     // --- snapshot of a stable store -------------------------------------------------------------------
 
     /** Everything observed through public read APIs on one stable store. */
-    private static final class Snapshot {
+    static final class Snapshot {
         final Map<String, ExecutionMemory> memories = new LinkedHashMap<>();
         final Map<String, Map<String, ExecutionView>> views = new LinkedHashMap<>(); // scope key -> execution -> view
         final Map<String, ExperienceExportReport> exports = new LinkedHashMap<>();
@@ -198,8 +226,7 @@ public final class ForgeExperienceEvaluator {
             exports.forEach((scope, e) -> out.append(scope).append(' ').append(e.exportDigest()).append('\n'));
             results.forEach((id, r) -> {
                 out.append(id);
-                hits.get(id).forEach(h -> out.append(' ').append(ForgeFixtureRecorder.experienceId(
-                        h.ref().execution().value(), h.ref().attempt().orElseThrow())).append('@')
+                hits.get(id).forEach(h -> out.append(' ').append(experienceId(h.ref())).append('@')
                         .append(h.ref().revision()).append(':').append(h.similarity()));
                 out.append('\n');
             });
@@ -211,7 +238,7 @@ public final class ForgeExperienceEvaluator {
         }
     }
 
-    private static Snapshot snapshot(ForgeFixture fixture, Path root, Map<String, Long> elapsed) {
+    static Snapshot snapshot(ForgeFixture fixture, Path root, Map<String, Long> elapsed) {
         Snapshot s = new Snapshot(PriceBook.of(List.of(ForgeFixtureRecorder.priceSnapshot(fixture))));
         try {
             for (String scopeKey : fixture.scopeIds().keySet()) {
@@ -264,6 +291,17 @@ public final class ForgeExperienceEvaluator {
     }
 
     /**
+     * The experience id of a reference for reports and fingerprints: {@code <execution>/<attempt>}, or
+     * {@code <execution>/<no-attempt>} for an execution-level or outcome reference. It never throws: a malformed
+     * reference must reach the gate that rejects it.
+     */
+    static String experienceId(ExperienceRef ref) {
+        String execution = ref.execution().value();
+        return ref.attempt().map(a -> ForgeFixtureRecorder.experienceId(execution, a))
+                .orElse(execution + "/<no-attempt>");
+    }
+
+    /**
      * The ranked view of a query's hits for the report. A hit without an attempt (an execution-level or outcome
      * reference) gets the diagnostic id {@code <execution>/<no-attempt>} instead of aborting the run: building the
      * report must never throw, because the failed gate that diagnoses the malformed reference is what the report is
@@ -276,8 +314,7 @@ public final class ForgeExperienceEvaluator {
         for (ExperienceHit h : hits) {
             rank++;
             String execution = h.ref().execution().value();
-            String id = h.ref().attempt().map(a -> ForgeFixtureRecorder.experienceId(execution, a))
-                    .orElse(execution + "/<no-attempt>");
+            String id = experienceId(h.ref());
             ranked.add(new RankedHit(rank, id, h.similarity(), attemptResults.getOrDefault(id, "UNKNOWN"),
                     labels.getOrDefault(execution, "UNKNOWN"), h.ref().revision(), q.relevant().contains(id)));
         }
@@ -302,7 +339,7 @@ public final class ForgeExperienceEvaluator {
 
     // --- G1: scope isolation --------------------------------------------------------------------------
 
-    private static ForgeGate isolationGate(ForgeFixture fixture, Snapshot s) {
+    static ForgeGate isolationGate(ForgeFixture fixture, Snapshot s) {
         List<String> violations = new ArrayList<>();
         int hitCount = 0;
         for (ForgeFixture.Query q : fixture.queries()) {
@@ -327,8 +364,10 @@ public final class ForgeExperienceEvaluator {
             }
             for (ExperienceSample sample : s.exports.get(scopeKey).samples().stream().map(AnnotatedSample::sample)
                     .toList()) {
+                // an execution the fixture does not know is reported by the membership check below
                 if (!sample.execution().scope().equals(ForgeFixtureRecorder.scope(fixture, scopeKey))
-                        || !fixture.execution(sample.executionId().value()).scopeKey().equals(scopeKey)) {
+                        || fixture.findExecution(sample.executionId().value())
+                        .filter(e -> !e.scopeKey().equals(scopeKey)).isPresent()) {
                     violations.add(scopeKey + ": export holds a foreign execution " + sample.executionId().value());
                 }
             }
@@ -357,7 +396,10 @@ public final class ForgeExperienceEvaluator {
                 violations.add(q.id() + ": foreign-scope hit " + h.ref().scope().value());
             }
             String exec = h.ref().execution().value();
-            if (!fixture.execution(exec).scopeKey().equals(q.scopeKey())) {
+            Optional<ForgeFixture.Execution> known = fixture.findExecution(exec);
+            if (known.isEmpty()) {
+                violations.add(q.id() + ": hit on an execution unknown to the fixture: " + exec);
+            } else if (!known.get().scopeKey().equals(q.scopeKey())) {
                 violations.add(q.id() + ": hit on an execution of another project: " + exec);
             }
         }
@@ -375,16 +417,22 @@ public final class ForgeExperienceEvaluator {
 
     // --- G2: no invalid success labels ----------------------------------------------------------------
 
-    private static ForgeGate successGate(ForgeFixture fixture, Snapshot s) {
+    static ForgeGate successGate(ForgeFixture fixture, Snapshot s) {
         List<String> violations = new ArrayList<>();
         int successes = 0;
         int checked = 0;
         for (String scopeKey : fixture.scopeIds().keySet()) {
+            Map<String, Integer> ordinals = ForgeSampleChecks.expectedOrdinals(fixture, scopeKey);
             for (AnnotatedSample annotated : s.exports.get(scopeKey).samples()) {
                 ExperienceSample sample = annotated.sample();
                 String exec = sample.executionId().value();
-                ForgeFixture.Execution expected = fixture.execution(exec);
+                Optional<ForgeFixture.Execution> known = fixture.findExecution(exec);
                 checked++;
+                if (known.isEmpty()) {
+                    violations.add(exec + ": exported execution is unknown to the fixture");
+                    continue;
+                }
+                ForgeFixture.Execution expected = known.get();
                 if (!sample.label().name().equals(expected.expectedLabel())) {
                     violations.add(exec + ": label " + sample.label() + " but judged " + expected.expectedLabel());
                 }
@@ -392,7 +440,7 @@ public final class ForgeExperienceEvaluator {
                     violations.add(exec + ": acceptance " + sample.acceptance() + " but judged "
                             + expected.expectedAcceptance());
                 }
-                violations.addAll(ForgeSampleChecks.successViolations(fixture, sample));
+                violations.addAll(ForgeSampleChecks.successViolations(fixture, sample, ordinals));
                 if (sample.label() == ExperienceSample.Label.SUCCESS) {
                     successes++;
                     if (sample.acceptance() != DerivedAcceptance.Status.VALIDATED_ACCEPTED) {
@@ -417,7 +465,9 @@ public final class ForgeExperienceEvaluator {
         for (ForgeQueryResult q : s.results.values()) {
             for (RankedHit h : q.ranked()) {
                 String exec = h.experienceId().substring(0, h.experienceId().indexOf('/'));
-                if (h.label().equals("SUCCESS") && !fixture.execution(exec).expectedLabel().equals("SUCCESS")) {
+                boolean judgedSuccess = fixture.findExecution(exec).map(e -> e.expectedLabel().equals("SUCCESS"))
+                        .orElse(false);
+                if (h.label().equals("SUCCESS") && !judgedSuccess) {
                     violations.add(q.query().id() + ": hit " + h.experienceId() + " is shown as SUCCESS");
                 }
             }
@@ -478,7 +528,7 @@ public final class ForgeExperienceEvaluator {
         return violations;
     }
 
-    private static ForgeGate referenceGate(ForgeFixture fixture, Snapshot s) {
+    static ForgeGate referenceGate(ForgeFixture fixture, Snapshot s) {
         List<String> violations = new ArrayList<>();
         int hitsChecked = 0;
         int refsChecked = 0;
@@ -500,17 +550,19 @@ public final class ForgeExperienceEvaluator {
             pages.add(scopeKey + "=" + s.exports.get(scopeKey).pages().size());
             for (AnnotatedSample annotated : s.exports.get(scopeKey).samples()) {
                 ExperienceSample sample = annotated.sample();
-                for (LabelledRef labelled : exportedReferences(sample)) {
+                List<LabelledRef> references = exportedReferences(sample);
+                for (LabelledRef labelled : references) {
                     refsChecked++;
                     categories.merge(labelled.origin(), 1, Integer::sum);
                 }
-                violations.addAll(referenceViolations(memory, scope, sample));
-                violations.addAll(chronologyViolations(fixture, memory, scope, sample));
+                violations.addAll(referenceViolations(memory, scope, sample, references));
+                violations.addAll(chronologyViolations(fixture, memory, scope, sample, references));
                 violations.addAll(ForgeSampleChecks.sequenceBoundsViolations(memory, scope, sample));
                 violations.addAll(ForgeSampleChecks.evidenceStateViolations(fixture, sample));
                 String exec = sample.executionId().value();
                 violations.addAll(ForgeSampleChecks.revisionCountViolations(fixture, sample));
-                if (fixture.execution(exec).outcome() != ForgeFixture.OutcomeKind.NONE && sample.outcome().isEmpty()) {
+                if (fixture.findExecution(exec).map(e -> e.outcome() != ForgeFixture.OutcomeKind.NONE).orElse(false)
+                        && sample.outcome().isEmpty()) {
                     violations.add(exec + ": the recorded outcome is missing from the export");
                 }
                 for (ForgeFixture.Attempt fa : fixture.attemptsOf(exec)) {
@@ -620,9 +672,15 @@ public final class ForgeExperienceEvaluator {
      * superseded revision is older than the revision that replaced it.
      */
     static List<String> referenceViolations(ExecutionMemory memory, ScopeId scope, ExperienceSample sample) {
+        return referenceViolations(memory, scope, sample, exportedReferences(sample));
+    }
+
+    /** As above, with the sample's references already collected (the gate collects them once per sample). */
+    static List<String> referenceViolations(ExecutionMemory memory, ScopeId scope, ExperienceSample sample,
+                                            List<LabelledRef> references) {
         List<String> violations = new ArrayList<>();
         String exec = sample.executionId().value();
-        for (LabelledRef labelled : exportedReferences(sample)) {
+        for (LabelledRef labelled : references) {
             ExperienceRef ref = labelled.ref();
             Optional<HistoryEntry> exact = memory.loadEvent(scope, ref.eventId(), ref.revision());
             String what = exec + ": " + labelled.origin() + " ref " + ref.eventId().value() + " r" + ref.revision();
@@ -640,7 +698,7 @@ public final class ForgeExperienceEvaluator {
                 }
             }
         }
-        violations.addAll(revisionViolations(memory, scope, sample));
+        violations.addAll(revisionViolations(memory, scope, sample, references));
         return violations;
     }
 
@@ -651,10 +709,15 @@ public final class ForgeExperienceEvaluator {
      * an empty {@code superseded} list is not skipped.
      */
     static List<String> revisionViolations(ExecutionMemory memory, ScopeId scope, ExperienceSample sample) {
+        return revisionViolations(memory, scope, sample, exportedReferences(sample));
+    }
+
+    static List<String> revisionViolations(ExecutionMemory memory, ScopeId scope, ExperienceSample sample,
+                                           List<LabelledRef> references) {
         List<String> violations = new ArrayList<>();
         String exec = sample.executionId().value();
         Set<ExperienceRef> exportedFacts = new java.util.HashSet<>();
-        for (LabelledRef labelled : exportedReferences(sample)) {
+        for (LabelledRef labelled : references) {
             if (!labelled.origin().startsWith("revision.")) {
                 exportedFacts.add(labelled.ref());
             }
@@ -750,10 +813,15 @@ public final class ForgeExperienceEvaluator {
      */
     static List<String> chronologyViolations(ForgeFixture fixture, ExecutionMemory memory, ScopeId scope,
                                              ExperienceSample sample) {
+        return chronologyViolations(fixture, memory, scope, sample, exportedReferences(sample));
+    }
+
+    static List<String> chronologyViolations(ForgeFixture fixture, ExecutionMemory memory, ScopeId scope,
+                                             ExperienceSample sample, List<LabelledRef> references) {
         List<String> violations = new ArrayList<>();
         String exec = sample.executionId().value();
         long lastEnd = fixture.attemptsOf(exec).stream().mapToLong(ForgeFixture.Attempt::endSeconds).max().orElse(0);
-        for (LabelledRef labelled : exportedReferences(sample)) {
+        for (LabelledRef labelled : references) {
             ExperienceRef ref = labelled.ref();
             Instant expected = expectedInstant(fixture, exec, labelled, lastEnd);
             if (expected == null) {
@@ -829,8 +897,10 @@ public final class ForgeExperienceEvaluator {
         if (report.pages().size() < 2) {
             violations.add(scope.value() + ": the export never traversed a continuation page");
         }
-        violations.addAll(pageMetadataViolations(memory, scope, report));
-        List<ExperienceSample> unpaged = memory.exportSamples(ExportRequest.firstPage(scope, 50)).samples();
+        com.monada.api.execution.ExperienceSamplePage reference = memory.exportSamples(
+                ExportRequest.firstPage(scope, 50));
+        violations.addAll(pageMetadataViolations(memory, scope, report, reference));
+        List<ExperienceSample> unpaged = reference.samples();
         List<ExperienceSample> paged = report.samples().stream().map(AnnotatedSample::sample).toList();
         if (!unpaged.equals(paged)) {
             violations.add(scope.value() + ": the paged export differs from the unpaged export in content or order");
@@ -845,9 +915,13 @@ public final class ForgeExperienceEvaluator {
      * ({@code hasMore} on every page but the last, {@code next} present exactly when {@code hasMore}).
      */
     static List<String> pageMetadataViolations(ExecutionMemory memory, ScopeId scope, ExperienceExportReport report) {
+        return pageMetadataViolations(memory, scope, report, memory.exportSamples(ExportRequest.firstPage(scope, 50)));
+    }
+
+    /** As above, against an unpaged export that the caller already read (one export per project, not two). */
+    static List<String> pageMetadataViolations(ExecutionMemory memory, ScopeId scope, ExperienceExportReport report,
+                                               com.monada.api.execution.ExperienceSamplePage reference) {
         List<String> violations = new ArrayList<>();
-        com.monada.api.execution.ExperienceSamplePage reference = memory.exportSamples(
-                ExportRequest.firstPage(scope, 50));
         long highWatermark = memory.history(scope).highWatermark();
         List<com.monada.api.execution.ExperienceSamplePage> pages = report.pages();
         for (int i = 0; i < pages.size(); i++) {
@@ -962,42 +1036,32 @@ public final class ForgeExperienceEvaluator {
         return violations;
     }
 
-    private static boolean isOutcome(com.monada.core.execution.ExecutionEvent event) {
-        return event instanceof com.monada.core.execution.ExecutionEvent.OutcomeRecorded
-                || (event instanceof com.monada.core.execution.ExecutionEvent.Correction c
-                && c.replacement() instanceof com.monada.core.execution.ExecutionEvent.OutcomeRecorded);
-    }
-
     // --- G4: replay and idempotency -------------------------------------------------------------------
 
-    private static ForgeGate replayGate(ForgeFixture fixture, Snapshot a, Snapshot b, int replayed,
+    static ForgeGate replayGate(ForgeFixture fixture, Snapshot a, Snapshot b, int replayed,
                                         List<String> recordViolations, List<String> reconcileViolations,
                                         List<String> replayViolations, List<String> reconcileEvidence) {
         List<String> violations = new ArrayList<>(recordViolations);
         violations.addAll(reconcileViolations);
         violations.addAll(replayViolations);
-        try {
-            for (String scopeKey : fixture.scopeIds().keySet()) {
-                if (!a.views.get(scopeKey).equals(b.views.get(scopeKey))) {
-                    violations.add(scopeKey + ": execution views changed after replay");
-                }
-                violations.addAll(projectionViolations(scopeKey + " after replay", b.status.get(scopeKey)));
-                if (a.status.get(scopeKey).projectionVersion() > b.status.get(scopeKey).projectionVersion()) {
-                    violations.add(scopeKey + ": projection version went backwards");
-                }
-                if (a.status.get(scopeKey).ledgerSequence() != b.status.get(scopeKey).ledgerSequence()) {
-                    violations.add(scopeKey + ": ledger sequence moved from " + a.status.get(scopeKey).ledgerSequence()
-                            + " to " + b.status.get(scopeKey).ledgerSequence());
-                }
-                if (!a.exports.get(scopeKey).exportDigest().equals(b.exports.get(scopeKey).exportDigest())) {
-                    violations.add(scopeKey + ": export digest changed after replay and a second rebuild");
-                }
+        for (String scopeKey : fixture.scopeIds().keySet()) {
+            if (!a.views.get(scopeKey).equals(b.views.get(scopeKey))) {
+                violations.add(scopeKey + ": execution views changed after replay");
             }
-            if (!a.fingerprint().equals(b.fingerprint())) {
-                violations.add("recall rankings or similarities changed after replay and a second rebuild");
+            violations.addAll(projectionViolations(scopeKey + " after replay", b.status.get(scopeKey)));
+            if (a.status.get(scopeKey).projectionVersion() > b.status.get(scopeKey).projectionVersion()) {
+                violations.add(scopeKey + ": projection version went backwards");
             }
-        } finally {
-            b.close();
+            if (a.status.get(scopeKey).ledgerSequence() != b.status.get(scopeKey).ledgerSequence()) {
+                violations.add(scopeKey + ": ledger sequence moved from " + a.status.get(scopeKey).ledgerSequence()
+                        + " to " + b.status.get(scopeKey).ledgerSequence());
+            }
+            if (!a.exports.get(scopeKey).exportDigest().equals(b.exports.get(scopeKey).exportDigest())) {
+                violations.add(scopeKey + ": export digest changed after replay and a second rebuild");
+            }
+        }
+        if (!a.fingerprint().equals(b.fingerprint())) {
+            violations.add("recall rankings or similarities changed after replay and a second rebuild");
         }
         List<String> evidence = new ArrayList<>(reconcileEvidence);
         evidence.add("events replayed through record(): " + replayed + ", all must be IDEMPOTENT");
@@ -1028,7 +1092,7 @@ public final class ForgeExperienceEvaluator {
 
     // --- G5: resource accounting ----------------------------------------------------------------------
 
-    private static ForgeGate accountingGate(ForgeFixture fixture, Snapshot s) {
+    static ForgeGate accountingGate(ForgeFixture fixture, Snapshot s) {
         List<String> violations = new ArrayList<>();
         List<String> evidence = new ArrayList<>();
         int available = 0;
@@ -1073,7 +1137,11 @@ public final class ForgeExperienceEvaluator {
         for (ExperienceExportReport report : s.exports.values()) {
             for (AnnotatedSample annotated : report.samples()) {
                 String exec = annotated.sample().executionId().value();
-                CostToAcceptedOutcome viaSummary = s.summaries.get(exec).cost();
+                ExecutionSummary summaryOfExport = s.summaries.get(exec);
+                if (summaryOfExport == null) { // unknown execution: reported by the isolation and success gates
+                    continue;
+                }
+                CostToAcceptedOutcome viaSummary = summaryOfExport.cost();
                 if (!annotated.cost().equals(viaSummary)) {
                     violations.add(exec + ": export cost differs from the summary cost");
                 }
@@ -1081,7 +1149,7 @@ public final class ForgeExperienceEvaluator {
                 if (expected != null) {
                     exportChecked++;
                     violations.addAll(exportedUsageViolations(annotated.sample(), expected,
-                            s.summaries.get(exec).chainStages().size()));
+                            summaryOfExport.chainStages().size()));
                 }
             }
         }
@@ -1131,7 +1199,7 @@ public final class ForgeExperienceEvaluator {
 
     // --- G6: comparison -------------------------------------------------------------------------------
 
-    private static ForgeGate comparisonGate(ForgeFixture fixture, Snapshot s) {
+    static ForgeGate comparisonGate(ForgeFixture fixture, Snapshot s) {
         List<String> violations = new ArrayList<>();
         List<String> evidence = new ArrayList<>();
         ComparisonPolicy policy = policy(fixture);

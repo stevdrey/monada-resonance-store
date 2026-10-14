@@ -15,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.TreeMap;
@@ -108,8 +109,17 @@ public record ForgeFixture(String version, String provenance, Map<String, String
         return id;
     }
 
+    /** The execution with that id, for ids that come from the fixture itself (an unknown id is a fixture bug). */
     public Execution execution(String id) {
-        return executions.stream().filter(e -> e.id().equals(id)).findFirst().orElseThrow();
+        return findExecution(id).orElseThrow(() -> new IllegalArgumentException("unknown fixture execution: " + id));
+    }
+
+    /**
+     * The execution with that id, or empty. Use it for ids that come from an export or a recall: those may name an
+     * execution the fixture does not know, and a gate must report that, never throw.
+     */
+    public Optional<Execution> findExecution(String id) {
+        return executions.stream().filter(e -> e.id().equals(id)).findFirst();
     }
 
     public List<Attempt> attemptsOf(String execution) {
