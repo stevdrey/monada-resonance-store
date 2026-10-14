@@ -219,21 +219,35 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
     }
 
     /**
-     * Fixed-size scratch reused across the vectors of one read call. Values are read in bulk chunks
-     * instead of one {@code readFloat()} call per float (Issue #132, same approach as Issue #130 in
-     * {@code FileFrequencyStore}); the big-endian view copies raw bits, so values are bit-identical to
-     * {@link RandomAccessFile#readFloat()}, and a short read still surfaces as {@link EOFException}.
+     * Scratch reused across the vectors of one read call. It is sized to the largest chunk needed so far,
+     * at most 16 KiB, so a single small lookup does not allocate a full chunk and an empty store allocates
+     * nothing. Values are read in bulk chunks instead of one {@code readFloat()} call per float (Issue #132,
+     * same approach as Issue #130 in {@code FileFrequencyStore}); the big-endian view copies raw bits, so
+     * values are bit-identical to {@link RandomAccessFile#readFloat()}, and a short read still surfaces as
+     * {@link EOFException}.
      */
     private static final class FrameBuffer {
-        private final byte[] bytes = new byte[READ_CHUNK_FLOATS * Float.BYTES];
-        private final FloatBuffer floats = ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN).asFloatBuffer();
+        private byte[] bytes = new byte[0];
+        private FloatBuffer floats = view(bytes);
 
         void readFloats(RandomAccessFile file, float[] values) throws IOException {
+            ensureCapacity(Math.min(values.length, READ_CHUNK_FLOATS));
             for (int start = 0; start < values.length; start += READ_CHUNK_FLOATS) {
                 int count = Math.min(READ_CHUNK_FLOATS, values.length - start);
                 file.readFully(bytes, 0, count * Float.BYTES);
                 floats.get(0, values, start, count);
             }
+        }
+
+        private void ensureCapacity(int chunkFloats) {
+            if (bytes.length < chunkFloats * Float.BYTES) {
+                bytes = new byte[chunkFloats * Float.BYTES];
+                floats = view(bytes);
+            }
+        }
+
+        private static FloatBuffer view(byte[] bytes) {
+            return ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN).asFloatBuffer();
         }
     }
 }

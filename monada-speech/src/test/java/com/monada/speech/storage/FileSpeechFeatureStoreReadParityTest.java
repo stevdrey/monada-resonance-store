@@ -106,6 +106,44 @@ class FileSpeechFeatureStoreReadParityTest {
         assertSameFindBySampleId(store, ids(dims.length));
     }
 
+    @Test
+    void scratchGrowsFromSmallToLargeVectorsBitIdentically() throws IOException {
+        // The read scratch is sized to the vector and only grows; cover small-to-large and small-after-large.
+        var store = new FileSpeechFeatureStore(root);
+        int[] dims = {1, 3, DIMS, 5_000, 2, 4_096};
+        for (int i = 0; i < dims.length; i++) {
+            store.save("sample-" + i, new FrequencyVector(sequence(dims[i], i)));
+        }
+        var result = assertSameOutcome(oracleFindAll(), outcome(store::findAll));
+        assertEquals(5_000, result.get(3).vector().dimensions());
+        assertSameFindBySampleId(store, ids(dims.length));
+    }
+
+    @Test
+    void emptyStoreMatchesTheOracle() throws IOException {
+        var store = new FileSpeechFeatureStore(root);
+        var result = assertSameOutcome(oracleFindAll(), outcome(store::findAll));
+        assertTrue(result.isEmpty());
+        assertSameFindBySampleId(store, List.of("missing"));
+    }
+
+    @Test
+    void blankIndexLinesAreSkippedIdentically() throws IOException {
+        var store = seedThree();
+        Path index = root.resolve(INDEX);
+        var interleaved = new ArrayList<String>();
+        for (var line : Files.readAllLines(index)) {
+            interleaved.add("");
+            interleaved.add(line);
+            interleaved.add("   ");
+        }
+        Files.write(index, interleaved, StandardCharsets.UTF_8);
+
+        var result = assertSameOutcome(oracleFindAll(), outcome(store::findAll));
+        assertEquals(List.of("a", "b", "c"), result.stream().map(StoredSpeechFeatureVector::sampleId).toList());
+        assertSameFindBySampleId(store, List.of("a", "b", "c", "missing"));
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Corruption: same exception type and message as the previous path
     // ---------------------------------------------------------------------------------------------
