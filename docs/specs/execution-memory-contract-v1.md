@@ -1491,8 +1491,9 @@ Fixture `forge-experience` version `1` lives in `monada-evaluation/src/main/reso
 (`manifest.properties`, `executions.psv`, `attempts.psv`, `queries.psv`, `expectations.properties`). It is synthetic and
 manually authored and judged: relevance judgments and expected values are reviewed data, never produced by a model or a
 provider. It holds at least 24 experiences and 12 judged queries in at least 2 opaque projects (the bundled loader
-`ForgeFixture.load()` rejects smaller corpora; a `ForgeFixture` constructed directly is not validated), with fixed identifiers, times, context SHAs and a fixed price snapshot. One experience is one attempt
-and its id is `<execution>/a<ordinal>`. Query kinds include direct, paraphrase, multi-relevant, confusable,
+`ForgeFixture.load()` rejects smaller corpora; a `ForgeFixture` constructed directly is not validated), with fixed
+identifiers, times, context SHAs and a fixed price snapshot. One experience is one attempt and its id
+is `<execution>/a<ordinal>`. Query kinds include direct, paraphrase, multi-relevant, confusable,
 same-summary/different-attempt, stale revision, missing evidence, no-relevant and blank.
 
 ### 22.2 Flow
@@ -1534,22 +1535,23 @@ this contract; re-run the command for current output.
 
 Queries with an empty judged relevant set (`NO_RELEVANT`, `BLANK`) are reported but excluded from every metric
 denominator and average. A blank query must return no hits (checked by G1). A failed experience may be relevant to a
-query. Labels are per execution: a failed attempt inside an ultimately accepted execution is recalled and exported
+query; labels are per execution: a failed attempt inside an ultimately accepted execution is recalled and exported
 with that execution's `SUCCESS` label, so a host that needs "what failed" must join the attempt result (`FAILED`) to
-the hit; `FAILURE` is limited to a validated `REJECTED` or `FAILED` outcome. Pending or cancelled executions and
-imported claims are `UNLABELED` (section 21.4) and must not be read as negative examples. Success is never labelled without validated evidence
-(G2). See the roadmap gap "Labels are per execution".
+the hit. `FAILURE` is limited to a validated `REJECTED` or `FAILED` outcome. Pending or cancelled executions and
+imported claims are `UNLABELED` (section 21.4) and must not be read as negative examples. Success is never labelled
+without validated evidence (G2). See the roadmap gap "Labels are per execution".
 
 ### 22.6 Decision
 
 | Decision | Condition |
 | --- | --- |
 | `READY_FOR_HOST_ADAPTER_EXPERIMENT` | All seven gates pass; the command exits 0 |
-| `GAPS_REQUIRE_FOLLOW_UP` | At least one gate fails; the command exits 1 |
+| `GAPS_REQUIRE_FOLLOW_UP` | At least one gate fails; the report prints the decision and the command exits 1 |
 
-Observed outcome for the delivered fixture `forge-experience-v1` (25 experiences, 14 judged queries, 2 projects): all
-seven gates pass and the decision is `READY_FOR_HOST_ADAPTER_EXPERIMENT`. This is a correctness and isolation result
+Observed outcome for the delivered fixture `forge-experience-v1`: all seven gates pass and the decision is `READY_FOR_HOST_ADAPTER_EXPERIMENT`. This is a correctness and isolation result
 only; exploratory quality did not take part in it.
+
+An exception before the snapshots are built (section 22.3) is a distinct failure: no report and no decision are printed.
 
 The decision only authorizes a bounded host-adapter experiment outside this repository. Elapsed timing is printed
 separately after the report and is the only nondeterministic output.
@@ -1559,8 +1561,8 @@ separately after the report and is the only nondeterministic output.
 - No routing benefit is claimed, and nothing is trained, routed or adapted.
 - The corpus is tiny and synthetic: quality values carry no statistical meaning. Scale and scoped linear-scan latency
   are not part of the gates.
-- The default exact lexical encoding is unchanged and untuned; recall adds no relevance floor and labels are per
-  execution. Observed gaps and the next bounded experiment are recorded in [`docs/roadmap.md`](../roadmap.md)
+- The default exact lexical encoding is unchanged and untuned; recall adds no relevance floor.
+  Observed gaps and the next bounded experiment are recorded in [`docs/roadmap.md`](../roadmap.md)
   (Forge experience evaluation: observed gaps and next experiment), not duplicated here.
 - A reduced two-project scenario (record, reopen, reconcile, scoped recall, export) also runs against the published
   artifacts in the isolated consumers of `integration-tests/library-consumer`.
