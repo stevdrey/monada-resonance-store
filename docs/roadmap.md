@@ -61,6 +61,15 @@ The project follows a measurement-first path: improve retrieval quality only aft
   (single-machine, exploratory). The earlier `BOUNDED_EXACT_TOP_K_EXPERIMENT_JUSTIFIED` signal is therefore not supported by phase-level
   evidence: an exact bounded top-K prototype is not justified; the next performance step should target vector loading/materialization
   (for example avoiding a full vector re-read per search) behind an explicit option with its own storage-compatibility analysis.
+- Vector-load breakdown and bulk frame read (Issue #130): `VectorLoadBreakdownRunner` and CLI
+  `./gradlew :monada-evaluation:runVectorLoadBreakdown -q` split `FileFrequencyStore.findAll()` into index parse, seek, per-float read,
+  bulk read, float decode and materialization (parity with `findAll()` verified bit-for-bit). At N=10,000 the previous path made
+  1,280,000 Java-level `RandomAccessFile.readFloat` calls per load (API calls, not an exact syscall count), ~99% of the ~0.92 s p50 load (warm page cache, single machine, exploratory), so the
+  report concludes `PER_FLOAT_READ_DOMINANT_BULK_READ_JUSTIFIED`. `FileFrequencyStore` now reads each frame's values in bulk chunks
+  of up to 16 KiB (one `readFully` call per 128-dimension vector) with big-endian decode, with no format, metadata, result, ordering or error-message change (existing stores reused; bit-identical
+  parity tests cover fixed-raw, length-prefixed, undeclared-dimension and corrupt stores). Measured `findAll()` p50 at N=10,000 fell
+  from ~0.92 s to ~16 ms and linear-scan `search()` p50 from ~0.95 s to ~24 ms; vector load is now ~63-64% of query time, scoring ~18%,
+  full sort ~12% (still below the bounded top-K threshold). No cross-search vector cache was added; retaining vectors across searches needs its own invalidation and consistency analysis.
 
 ## Near-Term Direction
 

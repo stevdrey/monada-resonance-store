@@ -68,13 +68,36 @@ public final class ScanPhaseBreakdownRunner {
             long seed) {
         this.datasetName = Objects.requireNonNull(datasetName, "datasetName");
         this.seedDataset = Objects.requireNonNull(seedDataset, "seedDataset");
-        Objects.requireNonNull(scalePoints, "scalePoints");
+        validateScaleConfig(seedDataset, scalePoints, warmupCount, repetitionCount);
         Objects.requireNonNull(topKs, "topKs");
-        if (scalePoints.isEmpty()) {
-            throw new IllegalArgumentException("scalePoints must not be empty");
-        }
         if (topKs.isEmpty()) {
             throw new IllegalArgumentException("topKs must not be empty");
+        }
+        for (int k : topKs) {
+            if (k <= 0) {
+                throw new IllegalArgumentException("topK must be > 0, got: " + k);
+            }
+        }
+        if (new HashSet<>(topKs).size() != topKs.size()) {
+            throw new IllegalArgumentException("topKs must contain distinct values");
+        }
+        this.scalePoints = List.copyOf(scalePoints);
+        this.topKs = List.copyOf(topKs);
+        this.warmupCount = warmupCount;
+        this.repetitionCount = repetitionCount;
+        this.seed = seed;
+        this.generator = new DeterministicScaleCorpusGenerator(seed);
+    }
+
+    /**
+     * Shared scale-sweep configuration checks (also used by {@link VectorLoadBreakdownRunner}): non-empty,
+     * distinct scale points no smaller than the seed dataset, and non-negative warm-up/repetition counts.
+     */
+    static void validateScaleConfig(
+            EvaluationDataset seedDataset, List<Integer> scalePoints, int warmupCount, int repetitionCount) {
+        Objects.requireNonNull(scalePoints, "scalePoints");
+        if (scalePoints.isEmpty()) {
+            throw new IllegalArgumentException("scalePoints must not be empty");
         }
         if (new HashSet<>(scalePoints).size() != scalePoints.size()) {
             throw new IllegalArgumentException("scalePoints must contain distinct values");
@@ -85,26 +108,12 @@ public final class ScanPhaseBreakdownRunner {
                         "scale point " + sp + " must be >= seed dataset size " + seedDataset.atoms().size());
             }
         }
-        for (int k : topKs) {
-            if (k <= 0) {
-                throw new IllegalArgumentException("topK must be > 0, got: " + k);
-            }
-        }
-        if (new HashSet<>(topKs).size() != topKs.size()) {
-            throw new IllegalArgumentException("topKs must contain distinct values");
-        }
         if (warmupCount < 0) {
             throw new IllegalArgumentException("warmupCount must be >= 0, got: " + warmupCount);
         }
         if (repetitionCount < 0) {
             throw new IllegalArgumentException("repetitionCount must be >= 0, got: " + repetitionCount);
         }
-        this.scalePoints = List.copyOf(scalePoints);
-        this.topKs = List.copyOf(topKs);
-        this.warmupCount = warmupCount;
-        this.repetitionCount = repetitionCount;
-        this.seed = seed;
-        this.generator = new DeterministicScaleCorpusGenerator(seed);
     }
 
     public ScanPhaseBreakdownReport run(Path rootTempDir) throws IOException {
@@ -221,7 +230,8 @@ public final class ScanPhaseBreakdownRunner {
         return latency(samples);
     }
 
-    private static PhaseLatency latency(List<Long> samples) {
+    /** Median and p95 of wall-clock samples; shared with {@link VectorLoadBreakdownRunner}. */
+    static PhaseLatency latency(List<Long> samples) {
         var stats = ScaleTimingStatistics.from(samples, List.of(), 0, 0);
         return new PhaseLatency(stats.medianNanos(), stats.p95Nanos());
     }
