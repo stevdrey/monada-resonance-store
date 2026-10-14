@@ -1525,8 +1525,9 @@ cannot be loaded after reopen, or an I/O or storage error) propagates as an exce
 The gates are enforced by tests in `./gradlew test` (`ForgeExperienceEvaluationTest`, `ForgeGatesTest`,
 `ForgeReferenceChecksTest`, `ForgeSampleContractTest`, `ForgeCrossJvmDeterminismTest`), not by a versioned PROTECTED
 baseline snapshot. Precision, Recall, Hit and MRR are reported per query and in aggregate, are EXPLORATORY, are never
-enforced or frozen, and do not influence the decision. The existing baselines are unchanged (normalized stress
-`NORMALIZED_STRESS_RISK`, speech hybrid `HYBRID_CANDIDATE_RISKY`). Quality numbers are intentionally not recorded in
+enforced or frozen, and do not influence the decision. The CI-enforced protected baselines (text `default-databases-v1`,
+speech `PROTECTED`) are unchanged, and the unrelated exploratory decisions of other tracks (`NORMALIZED_STRESS_RISK`,
+`HYBRID_CANDIDATE_RISKY`) are neither baselines nor affected. Quality numbers are intentionally not recorded in
 this contract; re-run the command for current output.
 
 ### 22.5 Empty relevance and blank queries
@@ -1535,7 +1536,8 @@ Queries with an empty judged relevant set (`NO_RELEVANT`, `BLANK`) are reported 
 denominator and average. A blank query must return no hits (checked by G1). A failed experience may be relevant to a
 query. Labels are per execution: a failed attempt inside an ultimately accepted execution is recalled and exported
 with that execution's `SUCCESS` label, so a host that needs "what failed" must join the attempt result (`FAILED`) to
-the hit; an execution that was not accepted carries `FAILURE`. Success is never labelled without validated evidence
+the hit; `FAILURE` is limited to a validated `REJECTED` or `FAILED` outcome. Pending or cancelled executions and
+imported claims are `UNLABELED` (section 21.4) and must not be read as negative examples. Success is never labelled without validated evidence
 (G2). See the roadmap gap "Labels are per execution".
 
 ### 22.6 Decision
