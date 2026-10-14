@@ -19,7 +19,8 @@ import java.util.List;
  * per-atom max-score deduplication are identical to {@link LinearScanResonanceIndex};
  * only the final sort-and-truncate step differs. Deduplication completes before
  * selection, so a later higher-scoring vector for the same atom still replaces the
- * earlier one.
+ * earlier one. As in production, that deduplicated map holds up to M candidates; only
+ * the selection step is bounded to K, so total search memory is not O(K).
  *
  * <p><strong>Experimental — not used by any default path.</strong> It is only
  * constructed explicitly by tests and evaluation tooling; {@link LinearScanResonanceIndex}

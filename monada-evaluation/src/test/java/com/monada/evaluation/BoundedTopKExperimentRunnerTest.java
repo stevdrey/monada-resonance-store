@@ -93,7 +93,7 @@ class BoundedTopKExperimentRunnerTest {
         var text = smallRunner(1).run(tempDir).render();
         for (var expected : List.of("Generator Seed: 42", "Vector Dimensions: 128", "Scale Points (N): [33, 60]",
                 "Top-K Sweep: [1, 5]", "Invocation: ./gradlew :monada-evaluation:runBoundedTopKExperiment -q",
-                "1. Oracle Parity", "2. Retained Candidates and Allocation", "3. Selection Phase Latency",
+                "1. Oracle Parity", "2. Selection Working Set and Allocation", "total search memory is not O(K)", "3. Selection Phase Latency",
                 "4. End-to-End Search Latency", "5. Decision", "No automatic production rollout.")) {
             assertTrue(text.contains(expected), "missing: " + expected);
         }

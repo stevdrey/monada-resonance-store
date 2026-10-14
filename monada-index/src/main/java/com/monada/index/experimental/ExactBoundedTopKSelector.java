@@ -12,8 +12,9 @@ import java.util.PriorityQueue;
  * Experimental exact bounded top-K selector (Issue #120).
  *
  * <p>Selects the first {@code topK} results of {@link #RANKING_ORDER} from an already
- * deduplicated candidate collection while retaining at most {@code topK} candidates,
- * instead of sorting every candidate and truncating. The output must be identical to
+ * deduplicated candidate collection while its heap retains at most {@code topK} candidates,
+ * instead of sorting every candidate and truncating. Only the selection working set is
+ * bounded: the caller's candidate collection (up to M entries) is unchanged. The output must be identical to
  * the full-sort oracle used by {@link LinearScanResonanceIndex}: same atom IDs, same
  * score bits, same order.
  *

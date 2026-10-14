@@ -542,11 +542,13 @@ Within the same run, production `findAll()` is ~55x faster than the per-float re
 
 The runner checks parity before timing: atom IDs and bit-identical scores in order against the oracle, and experimental vs production `search()` at -Infinity and at exact-boundary thresholds. It then times the selection phase and end-to-end `search()` in separate loops, using the same N/K/seed/dimensions as the phase breakdown. Observed on the same machine (idle, warm page cache; exploratory, not a CI assertion), with 0 parity mismatches:
 
-| N | Selection p50 oracle → selector | `search()` p50 production → selector | Retained candidates per query |
+| N | Selection p50 / p95, oracle → selector | `search()` p50 / p95, production → selector | Selection working set (sort list → heap) |
 | --- | --- | --- | --- |
-| 1,000 | ~0.21-0.25 ms → ~0.016 ms | 0.89x | 1,000 → K |
-| 5,000 | ~1.56-1.62 ms → ~0.07-0.09 ms | 0.85x | 5,000 → K |
-| 10,000 | ~3.5-3.7 ms → ~0.15 ms | ~24.3-25.8 ms → ~20.2-20.4 ms (0.79-0.84x) | 10,000 → K |
+| 1,000 | 0.21-0.25 / 0.23-0.34 ms → 0.016-0.017 / 0.02-0.06 ms | 1.91-1.94 / 2.03-2.28 ms → 1.71-1.73 / 1.86-1.99 ms (0.89x) | 1,000 → K |
+| 5,000 | 1.56-1.62 / 1.64-1.86 ms → 0.07-0.09 / 0.08-0.18 ms | 11.1-11.2 / 12.4-12.9 ms → 9.5-9.6 / 10.3-11.3 ms (0.85x) | 5,000 → K |
+| 10,000 | 3.5-3.7 / 3.8-4.1 ms → 0.14-0.16 / 0.19-0.20 ms | 24.3-25.8 / 26.9-29.7 ms → 20.2-20.4 / 21.9-23.7 ms (0.79-0.84x) | 10,000 → K |
+
+Ranges span K=1/5 and two runs. The working-set column covers the selection phase only: both search paths still build the deduplicated map of up to M candidates, so total search memory is not O(K). The ~16-21% end-to-end gain at N=10,000 exceeds the full sort's ~12% share in the phase breakdown and is not attributed to sort removal alone; reduced allocation (~132 KB → ~0.2 KB per selection) is a plausible, unverified contributor.
 
 Decision: `RETAIN_EXPERIMENT`. The experiment is kept, and there is no automatic production rollout. Adoption needs its own Issue and explicit approval.
 

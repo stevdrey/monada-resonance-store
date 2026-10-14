@@ -86,10 +86,11 @@ The project follows a measurement-first path: improve retrieval quality only aft
   128 dimensions, 2 warmups, 5 repetitions), check parity before timing (selector vs oracle in hash and shuffled order; experimental vs
   production search at -Infinity and at exact-boundary thresholds at the top-K cut and the median), and time the selection phase and
   end-to-end `search()` in separate loops. Two idle-machine runs (AMD Ryzen 7 7730U, Linux 7.2.9, OpenJDK 27, load average <1.8 with no
-  other Gradle process, warm page cache; exploratory): 0 parity mismatches over 720 checks per run; retained candidates per query drop
-  from M (up to 10,000) to K; selection allocation at N=10,000 drops from ~132 KB to ~0.1-0.2 KB; isolated selection p50 at N=10,000
-  falls from ~3.5-3.7 ms to ~0.15 ms (0.04x); end-to-end `search()` p50 at N=10,000 falls from ~24.3-25.8 ms to ~20.2-20.4 ms
-  (0.79-0.84x), at N=5,000 0.85x, at N<=1,000 0.89-0.98x. The same-session `runScanPhaseBreakdown` puts the full sort at ~12% of
+  other Gradle process, warm page cache; exploratory): 0 parity mismatches over 720 checks per run; the selection working set drops
+  from an M-element sort list (up to 10,000) to a K-element heap (the deduplicated map of up to M candidates is still built by both
+  paths, so total search memory is not O(K)); selection allocation at N=10,000 drops from ~132 KB to ~0.1-0.2 KB; isolated selection
+  p50/p95 at N=10,000 falls from ~3.5-3.7/3.8-4.1 ms to ~0.14-0.16/0.19-0.20 ms (0.04x); end-to-end `search()` p50/p95 at N=10,000
+  falls from ~24.3-25.8/26.9-29.7 ms to ~20.2-20.4/21.9-23.7 ms (0.79-0.84x), at N=5,000 0.85x, at N<=1,000 0.89-0.98x. The same-session `runScanPhaseBreakdown` puts the full sort at ~12% of
   query time, so the ~16-21% end-to-end gain exceeds what removing the in-scan sort alone explains; measuring end-to-end in its own loop
   did not shrink it, and the oracle's ~132 KB per-search allocation (GC pressure) is a plausible, unverified contributor. Decision:
   `RETAIN_EXPERIMENT` (selection p50 <= 80% of the oracle and end-to-end p50 not slower within a 2% noise tolerance for every K at

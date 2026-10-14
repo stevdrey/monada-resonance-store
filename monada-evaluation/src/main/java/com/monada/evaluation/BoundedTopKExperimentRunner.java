@@ -405,7 +405,7 @@ public final class BoundedTopKExperimentRunner {
             double searchDelta = 1.0 - r.searchRatio();
             sb.append(String.format(Locale.ROOT,
                     "N=%d K=%d: selection p50 %.1f us -> %.1f us (%.2fx of oracle), end-to-end search p50"
-                            + " %.1f us -> %.1f us (%+.1f%%), retained %d -> %d candidates/query max. ",
+                            + " %.1f us -> %.1f us (%+.1f%%), selection working set %d (sort list) -> %d (heap) per query max. ",
                     r.corpusSize(), r.topK(), r.oracleSelection().p50Nanos() / 1000.0,
                     r.candidateSelection().p50Nanos() / 1000.0, r.selectionRatio(),
                     r.productionSearch().p50Nanos() / 1000.0, r.candidateSearch().p50Nanos() / 1000.0,

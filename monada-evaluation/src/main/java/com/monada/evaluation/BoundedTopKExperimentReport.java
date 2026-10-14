@@ -64,9 +64,10 @@ public record BoundedTopKExperimentReport(
     }
 
     /**
-     * Retained-candidate counts summed over queries, plus per-query maxima. The oracle retains every
-     * deduplicated candidate, so its retained count is {@link #candidates()}; the bounded selector holds at
-     * most K at once ({@link #candidatePeakRetained()}).
+     * Selection working-set counts summed over queries, plus per-query maxima. The oracle's sort list holds
+     * every deduplicated candidate, so its size is {@link #candidates()}; the bounded selector's heap holds at
+     * most K at once ({@link #candidatePeakRetained()}). Both search paths still build the deduplicated map of
+     * up to M candidates before selection; these counts do not describe total search memory.
      */
     public record RetentionCounts(
             long candidates,
@@ -147,10 +148,10 @@ public record BoundedTopKExperimentReport(
         sb.append("  threshold (-Infinity) and at two exact-boundary thresholds: the score at the top-K cut and the\n");
         sb.append("  median candidate score.\n\n");
 
-        sb.append("2. Retained Candidates and Allocation\n");
-        sb.append("-------------------------------------\n");
+        sb.append("2. Selection Working Set and Allocation\n");
+        sb.append("---------------------------------------\n");
         sb.append(String.format(Locale.ROOT, "%-10s | %-5s | %-11s | %-15s | %-18s | %-17s | %-17s | %-17s%n",
-                "Scale (N)", "Top-K", "Candidates", "Oracle retained", "Candidate retained",
+                "Scale (N)", "Top-K", "Candidates", "Oracle sort list", "Selector heap peak",
                 "Max M per query", "Oracle alloc B p50", "Cand. alloc B p50"));
         for (var r : results) {
             var c = r.retention();
@@ -159,8 +160,10 @@ public record BoundedTopKExperimentReport(
                     c.maxCandidatesPerQuery(), bytes(r.oracleAllocatedBytesP50()),
                     bytes(r.candidateAllocatedBytesP50())));
         }
-        sb.append("Retained counts are summed over queries: the oracle materializes and sorts every deduplicated\n");
-        sb.append("candidate (M per query); the candidate holds at most K at once. Allocation is per selection call\n");
+        sb.append("Counts are summed over queries and cover the selection phase only: the oracle copies and sorts\n");
+        sb.append("every deduplicated candidate (an M-element list per query); the selector's heap holds at most K.\n");
+        sb.append("Both search paths still build the deduplicated map of up to M candidates before selection, so\n");
+        sb.append("total search memory is not O(K). Allocation is per selection call\n");
         sb.append(allocationMeasured
                 ? "  (com.sun.management.ThreadMXBean thread-allocated bytes; includes the result list).\n\n"
                 : "  (n/a: per-thread allocation accounting is unavailable or disabled on this JVM).\n\n");
