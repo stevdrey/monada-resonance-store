@@ -83,6 +83,7 @@ The project requires **JDK 27** (Gradle toolchain `27`) and builds with the vers
 ./gradlew :monada-evaluation:runLatency -q
 ./gradlew :monada-evaluation:runLatencyScaleSweep -q
 ./gradlew :monada-evaluation:runScanPhaseBreakdown -q
+./gradlew :monada-evaluation:runVectorLoadBreakdown -q
 ./gradlew :monada-evaluation:runProjectMemory -q
 ./gradlew :monada-evaluation:runSpeechModalityComparison -q
 ./gradlew :monada-evaluation:runSpeechHybridSweep -q
@@ -506,6 +507,27 @@ The benchmark:
 ```
 
 Observed on one machine (AMD Ryzen 7 7730U, 16 threads, Linux, OpenJDK 27; exploratory, not a CI assertion): at N=10,000 the vector load (`FrequencyStore.findAll()`, which re-reads the vector map and file on every search) is ~98.8-98.9% of query time (~0.89-0.91 s p50), cosine scoring ~0.5-0.7%, dedup ~0.1%, full sort ~0.3% (~3 ms), for both K=1 and K=5. The shares are stable from N=100 to N=10,000. An exact bounded top-K prototype therefore cannot recover meaningful latency (Amdahl ceiling ~1.00x); the report ends with `BOUNDED_TOP_K_PROTOTYPE_NOT_JUSTIFIED`. The instrumented total is within ~1% of the production `search()` p50; production and instrumented scans alternate which runs first per repetition, and the report's cost-model columns are illustrative heuristics, not measured comparisons. Production code is unchanged.
+
+### Vector-Load Breakdown
+
+`VectorLoadBreakdownRunner` (`runVectorLoadBreakdown`) splits the dominant phase above, one `FileFrequencyStore.findAll()` call, into index parse, seek, per-float unbuffered read, bulk frame read, float decode and materialization over the same corpora (seed 42, 128 dimensions, `FIXED_RAW` frames, N=100/1,000/5,000/10,000). It is an evaluation-only reimplementation over the persisted files: every pass, a replica of the previous per-float read path and a bulk-read candidate are checked against `findAll()` (same ids, same order, bit-identical floats) before timing. The report prints p50/p95 per sub-phase, machine-independent counts (index lines, seeks, read calls, bytes, floats decoded, allocations) and a decision.
+
+```bash
+./gradlew :monada-evaluation:runVectorLoadBreakdown -q
+```
+
+Observed on one machine (AMD Ryzen 7 7730U, 16 threads, Linux 7.2.9, OpenJDK 27; warm OS page cache, exploratory, not a CI assertion): at N=10,000 the previous read path issued 1,280,000 `RandomAccessFile.readFloat` calls per load (one native read each) for 5,120,000 bytes, and those per-float reads were ~99% of the load (~0.92 s p50); index parse ~0.1%, seeks ~0.8%, float decode ~0.1%, materialization ~0.2%. Reading each frame with one `readFully` (10,000 reads for the same bytes) projected ~54x. The report ends with `PER_FLOAT_READ_DOMINANT_BULK_READ_JUSTIFIED`.
+
+`FileFrequencyStore` now reads each vector's values with one bulk read and decodes them big-endian (Issue #130). Persisted formats, manifest metadata, offset/framing validation, error messages, results and ordering are unchanged; existing stores are reused as-is and `findAll()`/`findByAtomId()` are proven bit-identical to the previous path for fixed-raw, length-prefixed and undeclared-dimension stores, including truncated segments, bad offsets and corrupt length prefixes. Measured after the change on the same machine:
+
+| N | `findAll()` p50 before | after | Linear-scan `search()` p50 before (K=1) | after |
+| --- | --- | --- | --- | --- |
+| 100 | 9.4 ms | 0.68 ms | 8.9 ms | 0.55 ms |
+| 1,000 | 91.1 ms | 2.3 ms | 88.4 ms | 2.0 ms |
+| 5,000 | 451.1 ms | 8.5 ms | 461.2 ms | 11.7 ms |
+| 10,000 | 922.1 ms | 18.1 ms | 954.6 ms | 25.1 ms |
+
+Vector load is still the largest phase (~63-64% at N=10,000), followed by cosine scoring (~16%) and the full sort (~13%), which stays below the 20% bounded top-K threshold (`BOUNDED_TOP_K_PROTOTYPE_NOT_JUSTIFIED`). Retaining vectors across searches remains out of scope and would need its own Issue with invalidation and compatibility analysis.
 
 ## Design Invariants
 

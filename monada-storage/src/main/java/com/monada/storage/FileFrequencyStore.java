@@ -6,6 +6,8 @@ import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -108,7 +110,7 @@ public class FileFrequencyStore implements FrequencyStore {
         validateOffset(offset, fileSize, atomId);
         try (RandomAccessFile file = new RandomAccessFile(vectorFile.toFile(), "r")) {
             file.seek(offset);
-            return Optional.of(readVector(file, atomId, offset));
+            return Optional.of(readVector(file, atomId, offset, new FrameBuffer()));
         }
     }
 
@@ -117,11 +119,13 @@ public class FileFrequencyStore implements FrequencyStore {
         List<IndexEntry> entries = readIndexEntries();
         List<StoredVector> vectors = new ArrayList<>(entries.size());
         long fileSize = Files.size(vectorFile);
+        FrameBuffer frameBuffer = new FrameBuffer();
         try (RandomAccessFile file = new RandomAccessFile(vectorFile.toFile(), "r")) {
             for (IndexEntry entry : entries) {
                 validateOffset(entry.offset(), fileSize, entry.atomId());
                 file.seek(entry.offset());
-                vectors.add(new StoredVector(entry.atomId(), readVector(file, entry.atomId(), entry.offset())));
+                vectors.add(new StoredVector(entry.atomId(),
+                        readVector(file, entry.atomId(), entry.offset(), frameBuffer)));
             }
         }
         return vectors;
@@ -248,7 +252,8 @@ public class FileFrequencyStore implements FrequencyStore {
         }
     }
 
-    private FrequencyVector readVector(RandomAccessFile file, String atomId, long offset) throws IOException {
+    private FrequencyVector readVector(RandomAccessFile file, String atomId, long offset, FrameBuffer frameBuffer)
+            throws IOException {
         try {
             Integer dimensions = declaredDimensions();
             if (usesLengthPrefix()) {
@@ -266,10 +271,13 @@ public class FileFrequencyStore implements FrequencyStore {
                                     + "dimensions (" + dimensions + ") for atomId=" + atomId + " at offset=" + offset);
                 }
             }
+            // One bulk read per vector instead of one native read per float (Issue #130). Big-endian
+            // decoding copies raw bits, so values are bit-identical to RandomAccessFile.readFloat().
             float[] values = new float[dimensions];
-            for (int i = 0; i < dimensions; i++) {
-                values[i] = file.readFloat();
-            }
+            int valueBytes = dimensions * Float.BYTES;
+            byte[] bytes = frameBuffer.capacity(valueBytes);
+            file.readFully(bytes, 0, valueBytes);
+            ByteBuffer.wrap(bytes, 0, valueBytes).order(ByteOrder.BIG_ENDIAN).asFloatBuffer().get(values);
             return new FrequencyVector(values);
         } catch (EOFException e) {
             throw new IOException(
@@ -314,5 +322,17 @@ public class FileFrequencyStore implements FrequencyStore {
     }
 
     private record IndexEntry(String atomId, long offset) {
+    }
+
+    /** Scratch bytes reused across the vectors of one read call; grows when dimensions vary. */
+    private static final class FrameBuffer {
+        private byte[] bytes = new byte[0];
+
+        byte[] capacity(int length) {
+            if (bytes.length < length) {
+                bytes = new byte[length];
+            }
+            return bytes;
+        }
     }
 }
