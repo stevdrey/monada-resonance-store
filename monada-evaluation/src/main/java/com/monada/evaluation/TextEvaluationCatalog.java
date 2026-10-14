@@ -35,6 +35,10 @@ final class TextEvaluationCatalog {
             "expanded-technology", "1", EvaluationProfile.LEXICAL_ENRICHED.name(),
             TextEvaluationMode.EXPLORATORY);
 
+    static final TextEvaluationMetadata VECTOR_LOAD_BREAKDOWN = new TextEvaluationMetadata(
+            "expanded-technology", "1", EvaluationProfile.LEXICAL_ENRICHED.name(),
+            TextEvaluationMode.EXPLORATORY);
+
     private TextEvaluationCatalog() {
     }
 }

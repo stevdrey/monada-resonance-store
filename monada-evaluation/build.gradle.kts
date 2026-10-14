@@ -78,6 +78,13 @@ tasks.register<JavaExec>("runScanPhaseBreakdown") {
     classpath = sourceSets["main"].runtimeClasspath
 }
 
+tasks.register<JavaExec>("runVectorLoadBreakdown") {
+    description = "Split linear-scan vector loading into index parse, seek, per-float read, bulk read, decode, and materialization costs (exploratory)"
+    group = "application"
+    mainClass.set("com.monada.evaluation.VectorLoadBreakdownMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
 tasks.register<JavaExec>("runProjectMemory") {
     description = "Run the project-memory evaluation dataset built from the repository's own documentation (exploratory)"
     group = "application"
