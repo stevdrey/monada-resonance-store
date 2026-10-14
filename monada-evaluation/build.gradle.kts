@@ -110,3 +110,17 @@ tasks.register<JavaExec>("runExecutionSampleExport") {
         .filter { it.startsWith("monada.execution.") }
         .associateWith { System.getProperty(it) }
 }
+
+tasks.register<JavaExec>("runForgeExperienceEvaluation") {
+    description = "Run the reproducible Forge experience-memory evaluation: hard correctness gates plus exploratory retrieval quality (no Forge, network or provider required)"
+    group = "application"
+    mainClass.set("com.monada.evaluation.execution.ForgeExperienceEvaluationMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
+tasks.named<Test>("test") {
+    // The cross-JVM determinism test starts child JVMs that run the evaluation command on this runtime classpath.
+    doFirst {
+        systemProperty("forge.runtime.classpath", sourceSets["main"].runtimeClasspath.asPath)
+    }
+}

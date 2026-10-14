@@ -114,7 +114,31 @@ Expected scope and implementation order:
 - #99 attempt-chain usage and hypothetical `CostToAcceptedOutcome` calculators (`monada-evaluation`) — depends on #95, #97 (implemented: pure `ExecutionSummaryCalculator` with provenance-split usage, decimal hypothetical cost, explicit completeness, effort vs wall-clock and per-dimension gate evidence; see contract section 19);
 - #100 evidence-gated pairwise comparison and Pareto diagnostics (`monada-evaluation`) — depends on #99 (implemented: pure `ExecutionComparator` with comparability reasons, caller-defined gate eligibility, explicit `INCONCLUSIVE` dimensions, conservative Pareto groups and no automatic winner on tradeoffs; observational evidence only, not a production default; see contract section 20);
 - #101 bounded provenance-preserving sample export — depends on #97, #98, #99, #100 (implemented: read-only `exportSamples` with explicit cutoff, stateless cursor, labels with eligibility reasons, exact refs and canonical JSON digest; cost and Pareto annotations and a read-only command in `monada-evaluation`; see contract section 21);
-- #102 reproducible end-to-end Forge experience evaluation and isolation gates — depends on #94, #96–#101.
+- #102 reproducible end-to-end Forge experience evaluation and isolation gates — depends on #94, #96–#101 (implemented: versioned synthetic fixture `forge-experience-v1`, `runForgeExperienceEvaluation` with seven hard correctness/isolation gates separated from EXPLORATORY retrieval quality, and a two-project scenario in the isolated library consumers; see the README section "Forge Experience Evaluation").
+
+#### Forge experience evaluation: observed gaps and next experiment (#102)
+
+Result on fixture `forge-experience-v1` (25 experiences, 2 projects, 14 judged queries): all seven hard gates
+pass and the decision is `READY_FOR_HOST_ADAPTER_EXPERIMENT`. This is a correctness and isolation result only;
+it is not evidence of any routing benefit, and the quality values below are EXPLORATORY (re-run the command for
+the current per-query output; they are not frozen as a baseline).
+
+Observed gaps, to be handled by separate bounded Issues if the host experiment needs them:
+
+- **Paraphrase recall is weak.** The paraphrase query (Q02) reaches Recall@3 of only 0.33 and ranks one relevant
+  experience at #11, while direct and multi-relevant queries reach Hit@1 = 1. The default exact lexical encoding
+  is unchanged and untuned by this track.
+- **Recall has no relevance floor.** `recall` fills up to the requested limit, including hits with similarity
+  `0.0000`, and the no-relevant query (Q12) still returns lexical neighbours (best similarity about 0.21). A host
+  must apply its own threshold; Store adds no default one here.
+- **Labels are per execution.** A failed attempt inside an accepted execution is exported and recalled with the
+  execution's `SUCCESS` label; a host that wants "what failed" must join the attempt result (`FAILED`) to the hit.
+- **Scale.** 25 experiences cannot support statistical claims; scoped linear-scan latency was not part of this gate.
+
+Next bounded consumer experiment (future, outside this repository): a host adapter in Forge that records real
+executions into `ExecutionMemory`, applies its own similarity threshold, joins recall hits to exported samples by
+execution, and is judged against its own manually reviewed queries with these same gates. No routing, learning or
+Neuron adaptation is enabled by this track.
 
 Numbering is roadmap order; independent items (for example #94 and #95) may proceed in parallel.
 
