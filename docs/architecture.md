@@ -176,7 +176,7 @@ deterministic reconciliation. Incompatible projections are reported, never rewri
 
 Packages: `com.monada.core.execution`, `com.monada.storage.execution` and `com.monada.api.execution`
 (implemented) and the evaluation-only `com.monada.evaluation.execution` (usage and hypothetical-cost
-calculators, #99; evidence-gated comparison and Pareto diagnostics, #100; export annotations and the read-only export command, #101). The extension is additive: atom, vector, feedback and manifest formats, `KnowledgeAtom` identity, ranking and query-key
+calculators, #99; evidence-gated comparison and Pareto diagnostics, #100; export annotations and the read-only export command, #101; the reproducible Forge experience evaluation with its seven hard correctness/isolation gates, #102). The extension is additive: atom, vector, feedback and manifest formats, `KnowledgeAtom` identity, ranking and query-key
 defaults, and existing public signatures stay unchanged.
 
 ### Execution Ledger Audit
@@ -201,7 +201,7 @@ monada-api
   -> monada-core
 ```
 
-`monada-evaluation` may depend on production modules for testing and reporting. `monada-speech` may depend on `monada-core` and selected storage patterns, but speech-specific concepts should not leak back into core APIs without explicit scope. Planned execution-memory
+`monada-evaluation` may depend on production modules for testing and reporting. `monada-speech` may depend on `monada-core` and selected storage patterns, but speech-specific concepts should not leak back into core APIs without explicit scope. Execution-memory
 packages follow the same direction; `monada-api` must never depend on `monada-evaluation`.
 
 ## Compatibility Boundary
@@ -213,7 +213,7 @@ Any change that affects persisted vectors must answer:
 - Does the manifest identify the format and semantic version?
 - Should the store be reused, rebuilt, or rejected?
 
-The planned execution ledger is additive: it has its own versioned manifest, never rewrites legacy
+The execution ledger (#96/#97) is additive: it has its own versioned manifest, never rewrites legacy
 files, and rejects unknown ledger versions instead of reinterpreting them.
 
 Silent semantic drift is treated as an architecture bug.

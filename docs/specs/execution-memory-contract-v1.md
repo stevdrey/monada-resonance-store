@@ -4,7 +4,8 @@ Status: accepted contract. The immutable domain records (section 15, issue #95) 
 replay and read-only audit (section 16, issue #96), the `ExecutionMemory` facade (section 17,
 issue #97), scoped projections with bounded recall (section 18, issue #98) and the usage and
 hypothetical-cost calculators (section 19, issue #99) and the evidence-gated comparison with Pareto
-diagnostics (section 20, issue #100) and the bounded sample export (section 21, issue #101) are implemented. Decision record: [ADR 0004](../adr/0004-embedded-execution-memory.md). Issue: #93 (Forge Integration 1/10).
+diagnostics (section 20, issue #100), the bounded sample export (section 21, issue #101) and the
+reproducible Forge experience evaluation (section 22, issue #102) are implemented. Decision record: [ADR 0004](../adr/0004-embedded-execution-memory.md). Issue: #93 (Forge Integration 1/10).
 
 This document is the normative v1 contract that issues #94–#102 implement. Later issues may refine
 exact Java signatures and the byte-level payload codec, but must not change the semantics defined here
@@ -66,7 +67,8 @@ Define, without implementing, the v1 semantics for:
 - `monada-api`: yes — `com.monada.api.execution` facade, derived acceptance and history (#97, implemented); projections and bounded recall (#98, implemented, section 18); sample export (#101, implemented, section 21).
 - `monada-evaluation`: yes — `com.monada.evaluation.execution` usage/cost calculators (#99, implemented,
   section 19), evidence-gated comparison (#100, implemented, section 20) and export annotations and
-  tool (#101, implemented, section 21); end-to-end gates (#102, later).
+  tool (#101, implemented, section 21); the reproducible Forge experience evaluation and its
+  hard gates (#102, implemented, section 22).
 - `monada-speech`: no.
 
 `monada-api` must never depend on `monada-evaluation`. The documented dependency direction is unchanged.
@@ -525,7 +527,7 @@ the exact shapes and the clarifications):
 | Feedback log (JSON lines) | `queryKey` defaults to `query` when missing | Unchanged; never written from outcomes |
 | `ExactQueryKeyStrategy`, feedback-aware ranking | Defaults | Unchanged defaults; projections use them |
 | `MonadaMemory` / `MonadaQuery` public API | Current signatures | Unchanged; execution API is a separate facade |
-| Protected baselines (text `default-databases-v1`, speech `PROTECTED`) | CI-enforced | Unchanged; execution evaluation adds no protected gate until #102 decides |
+| Protected baselines (text `default-databases-v1`, speech `PROTECTED`) | CI-enforced | Unchanged; #102 adds no protected baseline: its correctness/isolation gates are enforced by tests in `./gradlew test`, not by a versioned PROTECTED snapshot, and its retrieval quality stays EXPLORATORY (section 22) |
 | Speech layout `.monada-speech/` | Separate | Unchanged |
 
 Old vectors stay comparable because projections use the same encoder and options. Existing stores are
@@ -545,7 +547,7 @@ version must be rejected by v1 readers rather than reinterpreted.
 | #99 | Attempt-chain usage and hypothetical `CostToAcceptedOutcome` calculators (**implemented**, section 19) | `monada-evaluation` | #95, #97 |
 | #100 | Evidence-gated pairwise comparison and Pareto diagnostics (**implemented**, section 20) | `monada-evaluation` | #99 |
 | #101 | Bounded provenance-preserving sample export (+ evaluation annotations) (**implemented**, section 21) | `monada-api`, `monada-evaluation` | #97, #98, #99, #100 |
-| #102 | Reproducible end-to-end Forge experience evaluation and isolation gates | `monada-evaluation` | #94, #96–#101 |
+| #102 | Reproducible end-to-end Forge experience evaluation and isolation gates (**implemented**, section 22) | `monada-evaluation` | #94, #96–#101 |
 
 Consumer integration inside Monada Forge and Monada Neuron is future cross-repository work and is not
 part of this track.
@@ -1475,6 +1477,92 @@ boundary, usage provenance, cursor tampering, views, canonical JSON), `AdapterCo
 the cutoff, annotation independence, read-only command). Real executions are recorded through `ExecutionMemory` in
 temporary directories; fixtures contain no credentials, providers or private data.
 
+## 22. Forge Experience Evaluation (issue #102)
+
+Implements the end-to-end decision gate of the track in `com.monada.evaluation.execution` (`monada-evaluation`):
+`ForgeExperienceEvaluator`, `ForgeExperienceEvaluationMain`, `ForgeFixture`, `ForgeFixtureRecorder`, `ForgeGate`,
+`ForgeEvaluationReport`, `ForgeQueryResult` and `ForgeSampleChecks`. It uses only public APIs of the other modules and
+needs no Forge installation, network or provider. No persisted format, signature, default, encoder, ranking or query-key
+behaviour changes, and no protected baseline is added or altered.
+
+### 22.1 Fixture
+
+Fixture `forge-experience` version `1` lives in `monada-evaluation/src/main/resources/com/monada/evaluation/execution/forge-experience-v1/`
+(`manifest.properties`, `executions.psv`, `attempts.psv`, `queries.psv`, `expectations.properties`). It is synthetic and
+manually authored and judged: relevance judgments and expected values are reviewed data, never produced by a model or a
+provider. It holds at least 24 experiences and 12 judged queries in at least 2 opaque projects (`ForgeFixture` rejects
+smaller corpora), with fixed identifiers, times, context SHAs and a fixed price snapshot. One experience is one attempt
+and its id is `<execution>/a<ordinal>`. Query kinds include direct, paraphrase, multi-relevant, confusable,
+same-summary/different-attempt, stale revision, missing evidence, no-relevant and blank.
+
+### 22.2 Flow
+
+Per project: record through `ExecutionMemory`, close, reopen, reconcile the projection, load exact events, scoped
+recall, usage and hypothetical-cost summary, pairwise comparison, and paged export (page size 4, below the executions of
+each project, so every export traverses continuation pages). The whole flow runs twice in fresh `run-*` directories
+under the caller's work directory; the second run only feeds G7.
+
+### 22.3 Hard gates
+
+| Gate | Property |
+| --- | --- |
+| `G1-SCOPE-ISOLATION` | No foreign-scope leakage in recall, load or export; cross-scope probes are rejected |
+| `G2-NO-INVALID-SUCCESS` | No success label without validated evidence; labels equal the judged labels, including recalled hits |
+| `G3-EXACT-REFERENCES` | Every recalled and exported reference loads the exact ledger event at its latest revision; paged export equals the unpaged export |
+| `G4-REPLAY-IDEMPOTENCY` | Re-recording is idempotent; reopen, replay and rebuild leave views, exports and rankings unchanged |
+| `G5-RESOURCE-ACCOUNTING` | Attempt-chain usage and hypothetical `CostToAcceptedOutcome` equal the hand-verified values, also as exported |
+| `G6-COMPARISON` | Comparable and incomparable executions get the judged conclusion and mismatching fields |
+| `G7-DETERMINISM` | Two fixed-input runs produce identical content, gates, rankings and export digests |
+
+A gate passes exactly when it collected no violation. Gates report violations instead of throwing, so a regression
+always yields a report.
+
+### 22.4 Gates versus exploratory quality
+
+The gates are enforced by tests in `./gradlew test` (`ForgeExperienceEvaluationTest`, `ForgeGatesTest`,
+`ForgeReferenceChecksTest`, `ForgeSampleContractTest`, `ForgeCrossJvmDeterminismTest`), not by a versioned PROTECTED
+baseline snapshot. Precision, Recall, Hit and MRR are reported per query and in aggregate, are EXPLORATORY, are never
+enforced or frozen, and do not influence the decision. The existing baselines are unchanged (normalized stress
+`NORMALIZED_STRESS_RISK`, speech hybrid `HYBRID_CANDIDATE_RISKY`). Quality numbers are intentionally not recorded in
+this contract; re-run the command for current output.
+
+### 22.5 Empty relevance and blank queries
+
+Queries with an empty judged relevant set (`NO_RELEVANT`, `BLANK`) are reported but excluded from every metric
+denominator and average. A blank query must return no hits (checked by G1). A failed experience may be relevant to a
+query; it is then labelled as a failure and is never a success.
+
+### 22.6 Decision
+
+| Decision | Condition |
+| --- | --- |
+| `READY_FOR_HOST_ADAPTER_EXPERIMENT` | All seven gates pass; the command exits 0 |
+| `GAPS_REQUIRE_FOLLOW_UP` | At least one gate fails; the command exits 1 |
+
+The decision only authorizes a bounded host-adapter experiment outside this repository. Elapsed timing is printed
+separately after the report and is the only nondeterministic output.
+
+### 22.7 Limits
+
+- No routing benefit is claimed, and nothing is trained, routed or adapted.
+- The corpus is tiny and synthetic: quality values carry no statistical meaning. Scale and scoped linear-scan latency
+  are not part of the gates.
+- The default exact lexical encoding is unchanged and untuned; recall adds no relevance floor and labels are per
+  execution. Observed gaps and the next bounded experiment are recorded in [`docs/roadmap.md`](../roadmap.md)
+  (Forge experience evaluation: observed gaps and next experiment), not duplicated here.
+- A reduced two-project scenario (record, reopen, reconcile, scoped recall, export) also runs against the published
+  artifacts in the isolated consumers of `integration-tests/library-consumer`.
+- Wiring Forge or Neuron is future cross-repository work.
+
+### 22.8 Verification (issue #102)
+
+~~~bash
+./gradlew :monada-evaluation:runForgeExperienceEvaluation -q
+./gradlew :monada-evaluation:test
+./gradlew test
+./gradlew verifyLibraryConsumer
+~~~
+
 ## Acceptance Criteria
 
 - [x] ADR documents Store/Neuron/Forge ownership and concrete proposed public operations/types with examples.
@@ -1497,7 +1585,9 @@ git diff --stat origin/main -- . ':!docs'
 
 ## Evaluation Requirements
 
-None for #93. Retrieval evidence (per-query top-K, regressions) is required from #98 and #102.
+None for #93. Retrieval evidence (per-query top-K, regressions) is required from #98 and #102. For #102 the delivered
+evidence is the per-query report of `./gradlew :monada-evaluation:runForgeExperienceEvaluation -q` (section 22);
+its quality values are EXPLORATORY, not a protected baseline.
 
 ## Documentation Updates
 
