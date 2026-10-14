@@ -516,9 +516,9 @@ Observed on one machine (AMD Ryzen 7 7730U, 16 threads, Linux, OpenJDK 27; explo
 ./gradlew :monada-evaluation:runVectorLoadBreakdown -q
 ```
 
-Observed on one machine (AMD Ryzen 7 7730U, 16 threads, Linux 7.2.9, OpenJDK 27; warm OS page cache, exploratory, not a CI assertion): at N=10,000 the previous read path issued 1,280,000 `RandomAccessFile.readFloat` calls per load (one native read each) for 5,120,000 bytes, and those per-float reads were ~99% of the load (~0.92 s p50); index parse ~0.1%, seeks ~0.8%, float decode ~0.1%, materialization ~0.2%. Reading each frame with one `readFully` (10,000 reads for the same bytes) projected ~54x. The report ends with `PER_FLOAT_READ_DOMINANT_BULK_READ_JUSTIFIED`.
+Observed on one machine (AMD Ryzen 7 7730U, 16 threads, Linux 7.2.9, OpenJDK 27; warm OS page cache, exploratory, not a CI assertion): at N=10,000 the previous read path issued 1,280,000 Java-level `RandomAccessFile.readFloat` calls per load for 5,120,000 bytes (each issues at least one underlying read in JDK 27; the counts are API calls, not an exact syscall count), and those per-float reads were ~99% of the load (~0.92 s p50); index parse ~0.1%, seeks ~0.8%, float decode ~0.1%, materialization ~0.2%. Reading each frame with one `readFully` call (10,000 calls for the same bytes; one call may perform several underlying reads) projected ~54x. The report ends with `PER_FLOAT_READ_DOMINANT_BULK_READ_JUSTIFIED`.
 
-`FileFrequencyStore` now reads each vector's values in bulk chunks of up to 16 KiB (one read per 128-dimension vector) through a reused big-endian view (Issue #130). Persisted formats, manifest metadata, offset/framing validation, error messages, results and ordering are unchanged; existing stores are reused as-is and `findAll()`/`findByAtomId()` are proven bit-identical to the previous path for fixed-raw, length-prefixed and undeclared-dimension stores, including truncated segments (also inside a later chunk), bad offsets and corrupt length prefixes. Measured on the same machine before the change and with the final implementation (idle machine, load average ~2 on 16 threads):
+`FileFrequencyStore` now reads each vector's values in bulk chunks of up to 16 KiB (one `readFully` call per 128-dimension vector) through a reused big-endian view (Issue #130). Persisted formats, manifest metadata, offset/framing validation, error messages, results and ordering are unchanged; existing stores are reused as-is and `findAll()`/`findByAtomId()` are proven bit-identical to the previous path for fixed-raw, length-prefixed and undeclared-dimension stores, including truncated segments (also inside a later chunk), bad offsets and corrupt length prefixes. Measured on the same machine before the change and with the final implementation (idle machine, load average ~2 on 16 threads, warm page cache; single machine, exploratory, not a CI assertion):
 
 | N | `findAll()` p50 before | after | Linear-scan `search()` p50 before (K=1) | after |
 | --- | --- | --- | --- | --- |
@@ -527,7 +527,7 @@ Observed on one machine (AMD Ryzen 7 7730U, 16 threads, Linux 7.2.9, OpenJDK 27;
 | 5,000 | 451.1 ms | 8.4 ms | 461.2 ms | 11.4 ms |
 | 10,000 | 922.1 ms | 16.0 ms | 954.6 ms | 24.1 ms |
 
-Within the same run, production `findAll()` is ~55x faster than the per-float replica at N=10,000. Vector load is still the largest phase (~63-64% at N=10,000), followed by cosine scoring (~18%) and the full sort (~12%), which stays below the 20% bounded top-K threshold (`BOUNDED_TOP_K_PROTOTYPE_NOT_JUSTIFIED`). Retaining vectors across searches remains out of scope and would need its own Issue with invalidation and compatibility analysis.
+Within the same run, production `findAll()` is ~55x faster than the per-float replica at N=10,000. Vector load is still the largest phase (~63-64% at N=10,000), followed by cosine scoring (~18%) and the full sort (~12%), which stays below the 20% bounded top-K threshold (`BOUNDED_TOP_K_PROTOTYPE_NOT_JUSTIFIED`). Retaining vectors across searches remains out of scope and would need its own Issue with invalidation, consistency and compatibility analysis.
 
 ## Design Invariants
 

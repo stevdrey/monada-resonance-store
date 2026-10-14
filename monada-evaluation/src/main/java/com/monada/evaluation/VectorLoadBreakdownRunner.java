@@ -201,7 +201,7 @@ public final class VectorLoadBreakdownRunner {
         var r = largestScale(results);
         var c = r.counts();
         var sb = new StringBuilder(String.format(Locale.ROOT,
-                "N=%d: per-float read %.1f%% of the median replica load (%d read calls vs %d bulk reads for the"
+                "N=%d: per-float read %.1f%% of the median replica load (%d Java-level read calls vs %d readFully calls for the"
                         + " same %d bytes); index parse %.1f%%, seek %.1f%%, bulk read %.1f%%, float decode %.1f%%,"
                         + " materialize %.1f%%. Bulk candidate %.2fx faster than the replica at p50; production"
                         + " findAll %.2fx versus the replica. ",

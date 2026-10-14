@@ -108,7 +108,8 @@ public record VectorLoadBreakdownReport(
         sb.append("  the bulk candidate are checked against FileFrequencyStore.findAll() (same ids, same order,\n");
         sb.append("  bit-identical floats) at every scale point before anything is timed.\n");
         sb.append("Cache Assumption: Warm OS page cache. The segment is written during setup and re-read on every\n");
-        sb.append("  repetition; caches are never dropped, so disk latency is excluded and syscall/JVM cost dominates.\n\n");
+        sb.append("  repetition; caches are never dropped, so disk latency is excluded and per-call I/O and JVM\n");
+        sb.append("  overhead dominate. Single machine; results are exploratory.\n\n");
 
         sb.append("1. Structural Counts (machine-independent, per vector load)\n");
         sb.append("-----------------------------------------------------------\n");
@@ -121,9 +122,11 @@ public record VectorLoadBreakdownReport(
                     r.corpusSize(), c.indexLinesParsed(), c.seeks(), c.perFloatReadCalls(), c.bulkReadCalls(),
                     c.bulkBytesRead(), c.floatsDecoded(), c.arraysAllocated(), c.objectsAllocated()));
         }
-        sb.append("Per-float reads are RandomAccessFile.readInt/readFloat calls (one native read each in current JDKs);\n");
-        sb.append("bulk reads are one readFully per frame. Both strategies read the same bytes. Arrays/objects count\n");
-        sb.append("the per-vector float[] plus FrequencyVector's defensive copy, and FrequencyVector plus StoredVector.\n\n");
+        sb.append("Per-float reads count Java-level RandomAccessFile.readInt/readFloat calls and bulk reads count\n");
+        sb.append("readFully calls (one per frame); both read the same bytes. These are API calls, not an exact syscall\n");
+        sb.append("count: each readFloat issues at least one underlying read and readFully may issue several.\n");
+        sb.append("Arrays/objects count the per-vector float[] plus FrequencyVector's defensive copy, and\n");
+        sb.append("FrequencyVector plus StoredVector.\n\n");
 
         sb.append("2. Sub-Phase Latency p50 / p95 (microseconds per vector load)\n");
         sb.append("-------------------------------------------------------------\n");

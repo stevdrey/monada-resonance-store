@@ -324,7 +324,7 @@ public class FileFrequencyStore implements FrequencyStore {
 
     /**
      * Fixed-size scratch reused across the vectors of one read call. Values are read in bulk chunks
-     * instead of one native read per float (Issue #130); the big-endian view copies raw bits, so values
+     * instead of one {@code readFloat()} call per float (Issue #130); the big-endian view copies raw bits, so values
      * are bit-identical to {@link RandomAccessFile#readFloat()}, and a short read still surfaces as
      * {@link EOFException}.
      */
