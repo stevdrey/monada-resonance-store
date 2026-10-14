@@ -68,8 +68,8 @@ The project follows a measurement-first path: improve retrieval quality only aft
   report concludes `PER_FLOAT_READ_DOMINANT_BULK_READ_JUSTIFIED`. `FileFrequencyStore` now reads each frame's values in bulk chunks
   of up to 16 KiB (one read per 128-dimension vector) with big-endian decode, with no format, metadata, result, ordering or error-message change (existing stores reused; bit-identical
   parity tests cover fixed-raw, length-prefixed, undeclared-dimension and corrupt stores). Measured `findAll()` p50 at N=10,000 fell
-  from ~0.92 s to ~18 ms and linear-scan `search()` p50 from ~0.95 s to ~25 ms; vector load is now ~64% of query time, scoring ~16%,
-  full sort ~13% (still below the bounded top-K threshold). No cross-search vector cache was added.
+  from ~0.92 s to ~16 ms and linear-scan `search()` p50 from ~0.95 s to ~24 ms; vector load is now ~63-64% of query time, scoring ~18%,
+  full sort ~12% (still below the bounded top-K threshold). No cross-search vector cache was added.
 
 ## Near-Term Direction
 
