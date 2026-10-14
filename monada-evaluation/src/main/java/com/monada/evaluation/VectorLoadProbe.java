@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Stream;
@@ -34,7 +35,6 @@ final class VectorLoadProbe {
 
     private final Path vectorFile;
     private final Path vectorMap;
-    private final VectorFormatProfile profile;
     private final int dimensions;
     private final boolean lengthPrefixed;
     private final int frameBytes;
@@ -42,7 +42,7 @@ final class VectorLoadProbe {
     VectorLoadProbe(Path root, String vectorSegment, VectorFormatProfile profile) {
         Objects.requireNonNull(root, "root");
         Objects.requireNonNull(vectorSegment, "vectorSegment");
-        this.profile = Objects.requireNonNull(profile, "profile");
+        Objects.requireNonNull(profile, "profile");
         this.vectorFile = root.resolve(vectorSegment);
         this.vectorMap = FileFrequencyStore.resolveVectorMapPath(root);
         this.dimensions = profile.dimensions();
@@ -69,10 +69,6 @@ final class VectorLoadProbe {
             return new StructuralCounts(indexLinesParsed, seeks, perFloatReadCalls, perFloatBytesRead,
                     bulkReadCalls, bulkBytesRead, floatsDecoded, arraysAllocated, objectsAllocated);
         }
-    }
-
-    VectorFormatProfile profile() {
-        return profile;
     }
 
     int dimensions() {
@@ -135,20 +131,59 @@ final class VectorLoadProbe {
         return checksum;
     }
 
-    /** Bulk raw byte read: seek, then one {@code readFully} of the whole frame into a reused buffer. */
-    long bulkRead(List<IndexEntry> entries, Counters counters) throws IOException {
+    /**
+     * Bulk raw byte read: seek, then one {@code readFully} of the whole frame into a reused buffer.
+     * When {@code capture} is non-null (parity pass only, never timed), frame {@code e} is also copied
+     * to {@code capture[e * frameBytes]} so it can be checked with {@link #verifyBulkFrames}.
+     */
+    long bulkRead(List<IndexEntry> entries, Counters counters, byte[] capture) throws IOException {
         var frame = new byte[frameBytes];
         long checksum = 0;
         try (var file = new RandomAccessFile(vectorFile.toFile(), "r")) {
-            for (var entry : entries) {
-                file.seek(entry.offset());
+            for (int e = 0; e < entries.size(); e++) {
+                file.seek(entries.get(e).offset());
                 file.readFully(frame);
                 counters.bulkReadCalls++;
                 counters.bulkBytesRead += frameBytes;
                 checksum += frame[frameBytes - 1];
+                if (capture != null) {
+                    System.arraycopy(frame, 0, capture, e * frameBytes, frameBytes);
+                }
             }
         }
         return checksum;
+    }
+
+    /** Bytes needed to capture every frame of {@code entries} with {@link #bulkRead}. */
+    int captureSize(List<IndexEntry> entries) {
+        return Math.multiplyExact(entries.size(), frameBytes);
+    }
+
+    /**
+     * Throws unless each captured frame equals the segment bytes at its indexed offset, proving the bulk
+     * read pass read the right bytes for the right entries.
+     */
+    void verifyBulkFrames(List<IndexEntry> entries, byte[] segmentBytes, byte[] captured) {
+        for (int e = 0; e < entries.size(); e++) {
+            int offset = Math.toIntExact(entries.get(e).offset());
+            if (!Arrays.equals(captured, e * frameBytes, (e + 1) * frameBytes,
+                    segmentBytes, offset, offset + frameBytes)) {
+                throw new IllegalStateException("bulk read diverged from segment bytes for atomId="
+                        + entries.get(e).atomId() + " at offset=" + offset);
+            }
+        }
+    }
+
+    /** Throws unless the seek pass visited every indexed offset (sum of file pointers). */
+    static void verifySeeks(List<IndexEntry> entries, long seekChecksum) {
+        long expected = 0;
+        for (var entry : entries) {
+            expected += entry.offset();
+        }
+        if (expected != seekChecksum) {
+            throw new IllegalStateException("seek pass visited offsets summing to " + seekChecksum
+                    + ", expected " + expected);
+        }
     }
 
     /**

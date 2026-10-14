@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.FloatBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -23,6 +24,8 @@ public class FileFrequencyStore implements FrequencyStore {
     private static final String DEFAULT_SEGMENT = "vectors/segment-000001.f32";
     /** Hard safety cap when we cannot cross-check the on-disk dimension header against a manifest. */
     private static final int MAX_LEGACY_DIMENSIONS = 1 << 20;
+    /** Floats decoded per bulk read; bounds the scratch buffer to 16 KiB regardless of dimensions. */
+    private static final int READ_CHUNK_FLOATS = 4_096;
 
     private final Path vectorFile;
     private final Path vectorMap;
@@ -271,13 +274,8 @@ public class FileFrequencyStore implements FrequencyStore {
                                     + "dimensions (" + dimensions + ") for atomId=" + atomId + " at offset=" + offset);
                 }
             }
-            // One bulk read per vector instead of one native read per float (Issue #130). Big-endian
-            // decoding copies raw bits, so values are bit-identical to RandomAccessFile.readFloat().
             float[] values = new float[dimensions];
-            int valueBytes = dimensions * Float.BYTES;
-            byte[] bytes = frameBuffer.capacity(valueBytes);
-            file.readFully(bytes, 0, valueBytes);
-            ByteBuffer.wrap(bytes, 0, valueBytes).order(ByteOrder.BIG_ENDIAN).asFloatBuffer().get(values);
+            frameBuffer.readFloats(file, values);
             return new FrequencyVector(values);
         } catch (EOFException e) {
             throw new IOException(
@@ -324,15 +322,22 @@ public class FileFrequencyStore implements FrequencyStore {
     private record IndexEntry(String atomId, long offset) {
     }
 
-    /** Scratch bytes reused across the vectors of one read call; grows when dimensions vary. */
+    /**
+     * Fixed-size scratch reused across the vectors of one read call. Values are read in bulk chunks
+     * instead of one native read per float (Issue #130); the big-endian view copies raw bits, so values
+     * are bit-identical to {@link RandomAccessFile#readFloat()}, and a short read still surfaces as
+     * {@link EOFException}.
+     */
     private static final class FrameBuffer {
-        private byte[] bytes = new byte[0];
+        private final byte[] bytes = new byte[READ_CHUNK_FLOATS * Float.BYTES];
+        private final FloatBuffer floats = ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN).asFloatBuffer();
 
-        byte[] capacity(int length) {
-            if (bytes.length < length) {
-                bytes = new byte[length];
+        void readFloats(RandomAccessFile file, float[] values) throws IOException {
+            for (int start = 0; start < values.length; start += READ_CHUNK_FLOATS) {
+                int count = Math.min(READ_CHUNK_FLOATS, values.length - start);
+                file.readFully(bytes, 0, count * Float.BYTES);
+                floats.get(0, values, start, count);
             }
-            return bytes;
         }
     }
 }

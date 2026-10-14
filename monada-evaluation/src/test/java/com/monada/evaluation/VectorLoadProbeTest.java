@@ -87,7 +87,7 @@ class VectorLoadProbeTest {
         var entries = probe.parseIndex(c);
         probe.seekOnly(entries, c);
         probe.perFloatRead(entries, c);
-        probe.bulkRead(entries, c);
+        probe.bulkRead(entries, c, null);
         var decoded = new float[entries.size() * 3];
         probe.decode(entries, Files.readAllBytes(root.resolve(SEGMENT)), decoded, c);
         probe.materialize(entries, decoded, c);
@@ -103,6 +103,30 @@ class VectorLoadProbeTest {
         assertEquals(n * 3L, counts.floatsDecoded());
         assertEquals(2L * n, counts.arraysAllocated());
         assertEquals(2L * n, counts.objectsAllocated());
+    }
+
+    @Test
+    void seekAndBulkReadPassesAreVerifiedAgainstTheIndexAndSegmentBytes(@TempDir Path root) throws IOException {
+        var profile = VectorFormatProfile.legacyLengthPrefixed(3);
+        seed(root, profile);
+        var index = FileFrequencyStore.resolveVectorMapPath(root);
+        Files.write(index, Files.readAllLines(index).reversed(), StandardCharsets.UTF_8);
+        var probe = new VectorLoadProbe(root, SEGMENT, profile);
+        var entries = probe.parseIndex(new VectorLoadProbe.Counters());
+        var segmentBytes = Files.readAllBytes(root.resolve(SEGMENT));
+
+        long seekChecksum = probe.seekOnly(entries, new VectorLoadProbe.Counters());
+        VectorLoadProbe.verifySeeks(entries, seekChecksum);
+        assertThrows(IllegalStateException.class, () -> VectorLoadProbe.verifySeeks(entries, seekChecksum + 1));
+
+        var captured = new byte[probe.captureSize(entries)];
+        probe.bulkRead(entries, new VectorLoadProbe.Counters(), captured);
+        probe.verifyBulkFrames(entries, segmentBytes, captured);
+
+        captured[captured.length - 1] ^= 1;
+        var ex = assertThrows(IllegalStateException.class,
+                () -> probe.verifyBulkFrames(entries, segmentBytes, captured));
+        assertTrue(ex.getMessage().contains("atomId=atom-0"), "index is reversed, so the last frame is atom-0");
     }
 
     @Test

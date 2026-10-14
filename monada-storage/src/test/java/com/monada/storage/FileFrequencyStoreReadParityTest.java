@@ -135,6 +135,31 @@ class FileFrequencyStoreReadParityTest {
         assertSameFindByAtomId(Mode.LEGACY_UNDECLARED, store, ids(dims.length));
     }
 
+    @Test
+    void vectorsSpanningSeveralReadChunksAreBitIdentical() throws IOException {
+        // FileFrequencyStore reads values in 4,096-float chunks; cover below, at, just above and well above.
+        var store = new FileFrequencyStore(root);
+        int[] dims = {4_095, 4_096, 4_097, 10_000, 1};
+        for (int i = 0; i < dims.length; i++) {
+            store.save("atom-" + i, new FrequencyVector(sequence(dims[i], i)));
+        }
+        var result = assertSameOutcome(oracleFindAll(Mode.LEGACY_UNDECLARED), outcome(store::findAll));
+        assertEquals(10_000, result.get(3).vector().dimensions());
+        assertSameFindByAtomId(Mode.LEGACY_UNDECLARED, store, ids(dims.length));
+    }
+
+    @Test
+    void truncationInsideALaterReadChunkFailsIdentically() throws IOException {
+        var store = new FileFrequencyStore(root);
+        store.save("a", new FrequencyVector(sequence(3, 0)));
+        store.save("b", new FrequencyVector(sequence(10_000, 1)));
+        // Keep the prefix and the first two 4,096-float chunks of "b", cut inside the third one.
+        truncateTo(offsetOf(root, "b") + Integer.BYTES + (8_192 + 100) * Float.BYTES);
+        var message = assertSameError(oracleFindAll(Mode.LEGACY_UNDECLARED), outcome(store::findAll));
+        assertTrue(message.contains("Vector segment truncated while reading atomId=b"), message);
+        assertSameFindByAtomId(Mode.LEGACY_UNDECLARED, store, List.of("a", "b"));
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Corruption: same exception type and message as the previous path
     // ---------------------------------------------------------------------------------------------
@@ -429,6 +454,14 @@ class FileFrequencyStoreReadParityTest {
                 .mapToLong(entry -> Long.parseLong(entry[1]))
                 .findFirst()
                 .orElseThrow();
+    }
+
+    private static float[] sequence(int dimensions, int seed) {
+        float[] values = new float[dimensions];
+        for (int d = 0; d < dimensions; d++) {
+            values[d] = seed * 100_000f + d + 0.25f;
+        }
+        return values;
     }
 
     private static List<String> ids(int count) {

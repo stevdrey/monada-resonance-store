@@ -3,7 +3,6 @@ package com.monada.evaluation;
 import com.monada.api.MonadaMemoryOptions;
 import com.monada.encoder.LexicalEnrichmentPipeline;
 import com.monada.encoder.SimpleFrequencyEncoder;
-import com.monada.evaluation.ScanPhaseBreakdownReport.PhaseLatency;
 import com.monada.evaluation.VectorLoadBreakdownReport.Decision;
 import com.monada.evaluation.VectorLoadBreakdownReport.PointResult;
 import com.monada.evaluation.datasets.ExpandedTechnologyDataset;
@@ -14,10 +13,11 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+
+import static com.monada.evaluation.ScanPhaseBreakdownRunner.latency;
 
 /**
  * Evaluation-only harness that splits the vector-load phase of linear-scan recall
@@ -59,25 +59,7 @@ public final class VectorLoadBreakdownRunner {
             long seed) {
         this.datasetName = Objects.requireNonNull(datasetName, "datasetName");
         this.seedDataset = Objects.requireNonNull(seedDataset, "seedDataset");
-        Objects.requireNonNull(scalePoints, "scalePoints");
-        if (scalePoints.isEmpty()) {
-            throw new IllegalArgumentException("scalePoints must not be empty");
-        }
-        if (new HashSet<>(scalePoints).size() != scalePoints.size()) {
-            throw new IllegalArgumentException("scalePoints must contain distinct values");
-        }
-        for (int sp : scalePoints) {
-            if (sp < seedDataset.atoms().size()) {
-                throw new IllegalArgumentException(
-                        "scale point " + sp + " must be >= seed dataset size " + seedDataset.atoms().size());
-            }
-        }
-        if (warmupCount < 0) {
-            throw new IllegalArgumentException("warmupCount must be >= 0, got: " + warmupCount);
-        }
-        if (repetitionCount < 0) {
-            throw new IllegalArgumentException("repetitionCount must be >= 0, got: " + repetitionCount);
-        }
+        ScanPhaseBreakdownRunner.validateScaleConfig(seedDataset, scalePoints, warmupCount, repetitionCount);
         this.scalePoints = List.copyOf(scalePoints);
         this.warmupCount = warmupCount;
         this.repetitionCount = repetitionCount;
@@ -107,9 +89,11 @@ public final class VectorLoadBreakdownRunner {
             // Parity + structural counts (deterministic, one untimed pass of every operation).
             var counters = new VectorLoadProbe.Counters();
             var entries = probe.parseIndex(counters);
-            probe.seekOnly(entries, counters);
+            VectorLoadProbe.verifySeeks(entries, probe.seekOnly(entries, counters));
             long perFloatChecksum = probe.perFloatRead(entries, counters);
-            probe.bulkRead(entries, counters);
+            var captured = new byte[probe.captureSize(entries)];
+            probe.bulkRead(entries, counters, captured);
+            probe.verifyBulkFrames(entries, fixture.segmentBytes(), captured);
             long decodeChecksum = probe.decode(entries, fixture.segmentBytes(), fixture.decodeTarget(), counters);
             if (perFloatChecksum != decodeChecksum) {
                 throw new IllegalStateException("per-float read and float decode disagree at N=" + corpusSize);
@@ -120,7 +104,10 @@ public final class VectorLoadBreakdownRunner {
             VectorLoadProbe.verifyParity("per-float replica", expected, probe.replicaFindAll());
             VectorLoadProbe.verifyParity("bulk candidate", expected, probe.bulkCandidateFindAll());
 
-            var samples = new long[PASS_COUNT][repetitionCount];
+            var samples = new ArrayList<List<Long>>(PASS_COUNT);
+            for (int pass = 0; pass < PASS_COUNT; pass++) {
+                samples.add(new ArrayList<>(repetitionCount));
+            }
             for (int w = 0; w < warmupCount; w++) {
                 for (int pass = 0; pass < PASS_COUNT; pass++) {
                     runPass((pass + w) % PASS_COUNT, probe, store, fixture);
@@ -129,15 +116,15 @@ public final class VectorLoadBreakdownRunner {
             for (int rep = 0; rep < repetitionCount; rep++) {
                 for (int i = 0; i < PASS_COUNT; i++) {
                     int pass = (i + rep) % PASS_COUNT;
-                    samples[pass][rep] = runPass(pass, probe, store, fixture);
+                    samples.get(pass).add(runPass(pass, probe, store, fixture));
                 }
             }
 
             results.add(new PointResult(
                     corpusSize, repetitionCount,
-                    latency(samples[0]), latency(samples[1]), latency(samples[2]), latency(samples[3]),
-                    latency(samples[4]), latency(samples[5]), latency(samples[6]), latency(samples[7]),
-                    latency(samples[8]),
+                    latency(samples.get(0)), latency(samples.get(1)), latency(samples.get(2)),
+                    latency(samples.get(3)), latency(samples.get(4)), latency(samples.get(5)),
+                    latency(samples.get(6)), latency(samples.get(7)), latency(samples.get(8)),
                     counters.toCounts()));
         }
 
@@ -167,7 +154,7 @@ public final class VectorLoadBreakdownRunner {
             case 0 -> probe.parseIndex(counters).size();
             case 1 -> probe.seekOnly(fixture.entries(), counters);
             case 2 -> probe.perFloatRead(fixture.entries(), counters);
-            case 3 -> probe.bulkRead(fixture.entries(), counters);
+            case 3 -> probe.bulkRead(fixture.entries(), counters, null);
             case 4 -> probe.decode(fixture.entries(), fixture.segmentBytes(), fixture.decodeTarget(), counters);
             case 5 -> probe.materialize(fixture.entries(), fixture.decodeTarget(), counters).size();
             case 6 -> probe.replicaFindAll().size();
@@ -180,15 +167,6 @@ public final class VectorLoadBreakdownRunner {
             throw new IllegalStateException("unreachable sink value");
         }
         return elapsed;
-    }
-
-    private static PhaseLatency latency(long[] samples) {
-        var list = new ArrayList<Long>(samples.length);
-        for (long sample : samples) {
-            list.add(sample);
-        }
-        var stats = ScaleTimingStatistics.from(list, List.of(), 0, 0);
-        return new PhaseLatency(stats.medianNanos(), stats.p95Nanos());
     }
 
     private static PointResult largestScale(List<PointResult> results) {
