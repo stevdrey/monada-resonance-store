@@ -529,6 +529,8 @@ Observed on one machine (AMD Ryzen 7 7730U, 16 threads, Linux 7.2.9, OpenJDK 27;
 
 Within the same run, production `findAll()` is ~55x faster than the per-float replica at N=10,000. Vector load is still the largest phase (~63-64% at N=10,000), followed by cosine scoring (~18%) and the full sort (~12%), which stays below the 20% bounded top-K threshold (`BOUNDED_TOP_K_PROTOTYPE_NOT_JUSTIFIED`). Retaining vectors across searches remains out of scope and would need its own Issue with invalidation, consistency and compatibility analysis.
 
+`FileSpeechFeatureStore` uses the same chunked read for speech feature vectors (Issue #132), with the same guarantees: unchanged format, validation, error messages, results and ordering, and parity tests against the previous per-float path. On the same machine, `findAll()` p50 at N=10,000 x 64 dimensions (the speech default) fell from ~462 ms to ~22 ms (warm page cache, exploratory, not a CI assertion); generated speech evaluation output is byte-identical.
+
 ## Design Invariants
 
 - Measure before optimizing.
