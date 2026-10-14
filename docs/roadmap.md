@@ -76,14 +76,17 @@ The project follows a measurement-first path: improve retrieval quality only aft
   is unchanged and pinned by a golden regression test. Seeded property and edge tests (ties at the cut, repeated IDs, negative and
   signed-zero scores, K>N, inclusive boundary thresholds, no matches, insertion-order permutations) match the full-sort oracle on IDs
   and score bits. `BoundedTopKExperimentRunner` and CLI `./gradlew :monada-evaluation:runBoundedTopKExperiment -q` reuse the #119
-  configuration (N=100/1,000/5,000/10,000, K=1/5, seed 42, 128 dimensions, 2 warmups, 5 repetitions): 0 parity mismatches over
-  576 selector and 576 search checks; retained candidates per query drop from M (up to 10,000) to K; selection allocation at N=10,000
-  drops from ~132 KB to ~0.1-0.2 KB; isolated selection p50 at N=10,000 falls from ~5.4-6.4 ms to ~0.2-0.3 ms (0.03-0.04x) and
-  end-to-end `search()` p50 from ~32-38 ms to ~25-29 ms (0.76-0.81x) across two runs (AMD Ryzen 7 7730U, Linux 7.2.9, OpenJDK 27,
-  machine under concurrent load, load average ~4-6; exploratory). The end-to-end gain exceeds the ~1.13x Amdahl ceiling implied by
-  the same-session `runScanPhaseBreakdown` sort share (~11-12%; a first loaded run measured 20-23%), so its magnitude is
-  load-sensitive and should be re-measured on an idle machine before any adoption. Decision: `RETAIN_EXPERIMENT` (keep the
-  experimental candidate; no automatic production rollout; adoption needs its own Issue and explicit approval).
+  configuration (N=100/1,000/5,000/10,000, K=1/5, seed 42, 128 dimensions, 2 warmups, 5 repetitions): 0 parity mismatches in every run
+  (288 selector and 288 search checks per run); retained candidates per query drop from M (up to 10,000) to K; selection allocation at N=10,000
+  drops from ~132 KB to ~0.1-0.2 KB. Idle-machine measurements (two runs; AMD Ryzen 7 7730U, Linux 7.2.9, OpenJDK 27, load average
+  ~1, warm page cache; exploratory): at N=10,000 isolated selection p50 falls from ~3.8-4.2 ms to ~0.15 ms (0.04x) and end-to-end
+  `search()` p50 from ~25.6-26.6 ms to ~21.4 ms (0.81-0.83x); at N=5,000 0.84-0.86x; at N<=1,000 0.88-0.96x. The same-session
+  `runScanPhaseBreakdown` reproduces the #130 baseline (production `search()` p50 ~23.4 ms at N=10,000) with the full sort at
+  ~11.5% of query time (~1.13x Amdahl ceiling, `BOUNDED_TOP_K_PROTOTYPE_NOT_JUSTIFIED`); the measured 17-19% end-to-end gain
+  exceeds that share, so part of it is not explained by sort time; reduced allocation/GC interference in the interleaved harness is a plausible,
+  unverified contributor. Earlier runs under concurrent load (load average ~4-6) showed the same direction with noisier magnitudes
+  (0.76-0.81x end-to-end; sort share 11-23%). Decision: `RETAIN_EXPERIMENT` (keep the experimental candidate; no automatic
+  production rollout; adoption needs its own Issue and explicit approval).
 
 ## Near-Term Direction
 
@@ -126,8 +129,8 @@ Non-goals:
 
 Improve scan efficiency only after a measurable baseline shows a real bottleneck.
 
-Status: exact bounded selector evaluated in Issue #120 (`RETAIN_EXPERIMENT`, parity proven, not enabled). Production adoption
-requires a separate Issue, an idle-machine re-measurement, and explicit approval.
+Status: exact bounded selector evaluated in Issue #120 (`RETAIN_EXPERIMENT`, parity proven, idle-machine end-to-end p50
+0.81-0.83x at N=10,000, not enabled). Production adoption requires a separate Issue and explicit approval.
 
 ### Track — Forge Integration: embedded execution memory (#93–#102)
 
