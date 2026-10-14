@@ -29,6 +29,12 @@ public record BoundedTopKExperimentReport(
     /** Candidate selection p50 must be at most this fraction of the oracle sort+truncate p50. */
     public static final double SELECTION_SPEEDUP_RATIO = 0.80;
 
+    /**
+     * Noise tolerance for the end-to-end criterion: the candidate's search p50 may exceed production's by
+     * at most this fraction and still count as "not slower", so sub-microsecond jitter cannot flip the decision.
+     */
+    public static final double END_TO_END_TOLERANCE = 0.02;
+
     /** Smallest largest-scale point at which a retain decision is considered informative. */
     public static final int MIN_DECISION_SCALE = ScanPhaseBreakdownReport.MIN_DECISION_SCALE;
 
@@ -58,12 +64,12 @@ public record BoundedTopKExperimentReport(
     }
 
     /**
-     * Retained-candidate counts summed over queries (oracle holds every deduplicated candidate; the
-     * bounded selector holds at most K), plus per-query maxima.
+     * Retained-candidate counts summed over queries, plus per-query maxima. The oracle retains every
+     * deduplicated candidate, so its retained count is {@link #candidates()}; the bounded selector holds at
+     * most K at once ({@link #candidatePeakRetained()}).
      */
     public record RetentionCounts(
             long candidates,
-            long oracleRetained,
             long candidatePeakRetained,
             int maxCandidatesPerQuery,
             int maxCandidatePeakRetainedPerQuery,
@@ -138,7 +144,8 @@ public record BoundedTopKExperimentReport(
         }
         sb.append("Selector checks: candidates in production hash order and a seeded shuffle vs the full-sort oracle.\n");
         sb.append("Search checks: ExperimentalBoundedTopKLinearScanIndex vs LinearScanResonanceIndex at the evaluation\n");
-        sb.append("  threshold (-Infinity) and at an exact-boundary threshold (the median candidate score).\n\n");
+        sb.append("  threshold (-Infinity) and at two exact-boundary thresholds: the score at the top-K cut and the\n");
+        sb.append("  median candidate score.\n\n");
 
         sb.append("2. Retained Candidates and Allocation\n");
         sb.append("-------------------------------------\n");
@@ -148,7 +155,7 @@ public record BoundedTopKExperimentReport(
         for (var r : results) {
             var c = r.retention();
             sb.append(String.format(Locale.ROOT, "%-10d | %-5d | %-11d | %-15d | %-18d | %-17d | %-18s | %-17s%n",
-                    r.corpusSize(), r.topK(), c.candidates(), c.oracleRetained(), c.candidatePeakRetained(),
+                    r.corpusSize(), r.topK(), c.candidates(), c.candidates(), c.candidatePeakRetained(),
                     c.maxCandidatesPerQuery(), bytes(r.oracleAllocatedBytesP50()),
                     bytes(r.candidateAllocatedBytesP50())));
         }
@@ -178,7 +185,9 @@ public record BoundedTopKExperimentReport(
                     r.corpusSize(), r.topK(), fmt(r.productionSearch()), fmt(r.candidateSearch()),
                     ratio(r.searchRatio())));
         }
-        sb.append("Oracle/candidate (and production/candidate) alternate which runs first on each repetition.\n");
+        sb.append("Each pair alternates which arm runs first on each repetition. Selection and end-to-end search are\n");
+        sb.append("measured in separate loops (each with its own warm-up), so selection garbage never lands between\n");
+        sb.append("timed searches.\n");
         sb.append("End-to-end search includes atom load, vector load and scoring, which the selector does not change;\n");
         sb.append("a smaller K is not a guarantee of lower end-to-end latency.\n\n");
 

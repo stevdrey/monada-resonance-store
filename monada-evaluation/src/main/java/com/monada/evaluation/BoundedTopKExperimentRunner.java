@@ -10,10 +10,10 @@ import com.monada.evaluation.BoundedTopKExperimentReport.ParityCounts;
 import com.monada.evaluation.BoundedTopKExperimentReport.PointResult;
 import com.monada.evaluation.BoundedTopKExperimentReport.RetentionCounts;
 import com.monada.evaluation.datasets.ExpandedTechnologyDataset;
-import com.monada.index.ExactBoundedTopKSelector;
-import com.monada.index.ExperimentalBoundedTopKLinearScanIndex;
 import com.monada.index.LinearScanResonanceIndex;
 import com.monada.index.ResonanceIndex;
+import com.monada.index.experimental.ExactBoundedTopKSelector;
+import com.monada.index.experimental.ExperimentalBoundedTopKLinearScanIndex;
 import com.monada.storage.FileAtomStore;
 import com.monada.storage.FileFrequencyStore;
 import com.monada.storage.VectorFormatProfile;
@@ -65,6 +65,10 @@ public final class BoundedTopKExperimentRunner {
     private final long seed;
     private final DeterministicScaleCorpusGenerator generator;
     private final AllocationMeter allocationMeter = AllocationMeter.create();
+    /**
+     * Accumulates a cheap digest of every measured result so the JIT cannot treat the timed work as dead
+     * code; exposed through {@link #sink()} so the accumulation is observable.
+     */
     private long sink;
 
     public BoundedTopKExperimentRunner() {
@@ -165,10 +169,15 @@ public final class BoundedTopKExperimentRunner {
                         searchMismatches++;
                     }
                     if (!sortedCandidates.isEmpty()) {
-                        var boundary = sortedCandidates.get(sortedCandidates.size() / 2).score();
-                        searchChecks++;
-                        if (!sameSearch(production, experimental, qv, k, boundary)) {
-                            searchMismatches++;
+                        // Exact-boundary thresholds: the score at the top-K cut exercises inclusive filtering
+                        // right where selection truncates; the median exercises filtering mid-distribution.
+                        for (var boundaryIndex : new int[]{
+                                Math.min(k, sortedCandidates.size()) - 1, sortedCandidates.size() / 2}) {
+                            var boundary = sortedCandidates.get(boundaryIndex).score();
+                            searchChecks++;
+                            if (!sameSearch(production, experimental, qv, k, boundary)) {
+                                searchMismatches++;
+                            }
                         }
                     }
 
@@ -180,48 +189,59 @@ public final class BoundedTopKExperimentRunner {
                 }
                 var parity = new ParityCounts(queryVectors.size(), selectorChecks, selectorMismatches,
                         searchChecks, searchMismatches);
-                var retention = new RetentionCounts(candidates, candidates, candidatePeak, maxCandidates, maxPeak,
-                        returned);
+                var retention = new RetentionCounts(candidates, candidatePeak, maxCandidates, maxPeak, returned);
 
-                // Warm-up (unmeasured); alternate which arm runs first.
+                // Selection phase, measured on its own: oracle sort+truncate vs bounded selector on identical
+                // candidate lists. The oracle arm runs first on even repetitions and second on odd ones so
+                // neither arm systematically benefits from the other's cache warmth.
                 for (int w = 0; w < warmupCount; w++) {
-                    for (int q = 0; q < queryVectors.size(); q++) {
-                        var qv = queryVectors.get(q);
-                        var list = candidateLists.get(q);
+                    for (var list : candidateLists) {
                         if (w % 2 == 0) {
                             consume(oracleSelect(list, k));
                             consume(ExactBoundedTopKSelector.select(list, k).results());
-                            consume(production.search(qv, k, EVALUATION_THRESHOLD));
-                            consume(experimental.search(qv, k, EVALUATION_THRESHOLD));
                         } else {
                             consume(ExactBoundedTopKSelector.select(list, k).results());
                             consume(oracleSelect(list, k));
+                        }
+                    }
+                }
+                var oracleSel = new ArrayList<Long>();
+                var candidateSel = new ArrayList<Long>();
+                var oracleAlloc = new ArrayList<Long>();
+                var candidateAlloc = new ArrayList<Long>();
+                for (int rep = 0; rep < repetitionCount; rep++) {
+                    for (var list : candidateLists) {
+                        if (rep % 2 == 0) {
+                            timeOracleSelection(list, k, oracleSel, oracleAlloc);
+                            timeCandidateSelection(list, k, candidateSel, candidateAlloc);
+                        } else {
+                            timeCandidateSelection(list, k, candidateSel, candidateAlloc);
+                            timeOracleSelection(list, k, oracleSel, oracleAlloc);
+                        }
+                    }
+                }
+
+                // End-to-end search, measured in a separate loop with its own warm-up so the selection
+                // micro-benchmark's garbage and cache traffic never land between timed searches.
+                for (int w = 0; w < warmupCount; w++) {
+                    for (var qv : queryVectors) {
+                        if (w % 2 == 0) {
+                            consume(production.search(qv, k, EVALUATION_THRESHOLD));
+                            consume(experimental.search(qv, k, EVALUATION_THRESHOLD));
+                        } else {
                             consume(experimental.search(qv, k, EVALUATION_THRESHOLD));
                             consume(production.search(qv, k, EVALUATION_THRESHOLD));
                         }
                     }
                 }
-
-                // Measured repetitions; the oracle/production arm runs first on even repetitions and
-                // second on odd ones so neither arm systematically benefits from the other's cache warmth.
-                var oracleSel = new ArrayList<Long>();
-                var candidateSel = new ArrayList<Long>();
-                var oracleAlloc = new ArrayList<Long>();
-                var candidateAlloc = new ArrayList<Long>();
                 var productionSearch = new ArrayList<Long>();
                 var candidateSearch = new ArrayList<Long>();
                 for (int rep = 0; rep < repetitionCount; rep++) {
-                    for (int q = 0; q < queryVectors.size(); q++) {
-                        var qv = queryVectors.get(q);
-                        var list = candidateLists.get(q);
+                    for (var qv : queryVectors) {
                         if (rep % 2 == 0) {
-                            timeOracleSelection(list, k, oracleSel, oracleAlloc);
-                            timeCandidateSelection(list, k, candidateSel, candidateAlloc);
                             productionSearch.add(timeSearch(production, qv, k));
                             candidateSearch.add(timeSearch(experimental, qv, k));
                         } else {
-                            timeCandidateSelection(list, k, candidateSel, candidateAlloc);
-                            timeOracleSelection(list, k, oracleSel, oracleAlloc);
                             candidateSearch.add(timeSearch(experimental, qv, k));
                             productionSearch.add(timeSearch(production, qv, k));
                         }
@@ -314,6 +334,11 @@ public final class BoundedTopKExperimentRunner {
         return elapsed;
     }
 
+    /** Digest of every consumed result; non-zero once any non-empty result was measured. */
+    long sink() {
+        return sink;
+    }
+
     /** Keeps results observable so the JIT cannot drop the measured work. */
     private void consume(List<ResonanceResult> selected) {
         sink += selected.size();
@@ -354,8 +379,14 @@ public final class BoundedTopKExperimentRunner {
         }
         boolean beneficial = largest.stream().allMatch(r ->
                 r.selectionRatio() <= BoundedTopKExperimentReport.SELECTION_SPEEDUP_RATIO
-                        && r.candidateSearch().p50Nanos() <= r.productionSearch().p50Nanos());
+                        && withinEndToEndTolerance(r));
         return beneficial ? Decision.RETAIN_EXPERIMENT : Decision.NO_BENEFIT;
+    }
+
+    /** Candidate end-to-end p50 is not slower than production beyond the noise tolerance. */
+    private static boolean withinEndToEndTolerance(PointResult r) {
+        return r.candidateSearch().p50Nanos()
+                <= r.productionSearch().p50Nanos() * (1.0 + BoundedTopKExperimentReport.END_TO_END_TOLERANCE);
     }
 
     static String rationale(Decision decision, List<PointResult> results) {
@@ -383,14 +414,20 @@ public final class BoundedTopKExperimentRunner {
         }
         sb.append(decision == Decision.RETAIN_EXPERIMENT
                 ? "The bounded selector is at most " + (int) (BoundedTopKExperimentReport.SELECTION_SPEEDUP_RATIO * 100)
-                + "% of the oracle selection cost and end-to-end search is not slower for every K at the largest"
-                + " scale, so the experiment is retained for a separate, explicitly approved adoption decision."
+                + "% of the oracle selection cost and end-to-end search is not slower (within "
+                + tolerancePercent() + " noise tolerance) for every K at the largest scale, so the experiment is"
+                + " retained for a separate, explicitly approved adoption decision."
                 : "The bounded selector does not meet both criteria (selection p50 <= "
                 + (int) (BoundedTopKExperimentReport.SELECTION_SPEEDUP_RATIO * 100)
-                + "% of the oracle and end-to-end search p50 not slower) for every K at the largest scale.");
+                + "% of the oracle and end-to-end search p50 not slower beyond " + tolerancePercent()
+                + " noise tolerance) for every K at the largest scale.");
         sb.append(" The selector only replaces sort+truncate; vector load and scoring still bound end-to-end"
                 + " latency, so a smaller K does not guarantee lower end-to-end latency. Timings are exploratory.");
         return sb.toString();
+    }
+
+    private static String tolerancePercent() {
+        return String.format(Locale.ROOT, "%.0f%%", BoundedTopKExperimentReport.END_TO_END_TOLERANCE * 100);
     }
 
     /**

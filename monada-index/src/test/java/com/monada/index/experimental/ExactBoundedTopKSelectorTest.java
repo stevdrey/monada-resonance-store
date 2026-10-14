@@ -1,4 +1,4 @@
-package com.monada.index;
+package com.monada.index.experimental;
 
 import com.monada.core.AtomType;
 import com.monada.core.KnowledgeAtom;

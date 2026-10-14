@@ -1,6 +1,7 @@
-package com.monada.index;
+package com.monada.index.experimental;
 
 import com.monada.core.ResonanceResult;
+import com.monada.index.LinearScanResonanceIndex;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;

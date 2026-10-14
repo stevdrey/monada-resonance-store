@@ -1,8 +1,10 @@
-package com.monada.index;
+package com.monada.index.experimental;
 
 import com.monada.core.FrequencyVector;
 import com.monada.core.KnowledgeAtom;
 import com.monada.core.ResonanceResult;
+import com.monada.index.LinearScanResonanceIndex;
+import com.monada.index.ResonanceIndex;
 import com.monada.storage.AtomStore;
 import com.monada.storage.FrequencyStore;
 import java.io.IOException;

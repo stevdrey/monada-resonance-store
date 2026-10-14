@@ -9,7 +9,7 @@ import com.monada.evaluation.BoundedTopKExperimentReport.PointResult;
 import com.monada.evaluation.BoundedTopKExperimentReport.RetentionCounts;
 import com.monada.evaluation.ScanPhaseBreakdownReport.PhaseLatency;
 import com.monada.evaluation.datasets.ExpandedTechnologyDataset;
-import com.monada.index.ExactBoundedTopKSelector;
+import com.monada.index.experimental.ExactBoundedTopKSelector;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -38,7 +38,7 @@ class BoundedTopKExperimentRunnerTest {
     private static PointResult synthetic(int n, int k, long mismatches, long oracleSel, long candidateSel,
                                          long productionSearch, long candidateSearch) {
         var parity = new ParityCounts(1, 2, mismatches, 2, 0);
-        var retention = new RetentionCounts(n, n, k, n, k, k);
+        var retention = new RetentionCounts(n, k, n, k, k);
         return new PointResult(n, k, 1, 1, parity, retention, lat(oracleSel), lat(candidateSel),
                 lat(productionSearch), lat(candidateSearch), 0, 0);
     }
@@ -50,16 +50,18 @@ class BoundedTopKExperimentRunnerTest {
 
     @Test
     void parityHoldsAndRetainedCandidatesAreBoundedByK(@TempDir Path tempDir) throws IOException {
-        var report = smallRunner(1).run(tempDir);
+        var runner = smallRunner(1);
+        var report = runner.run(tempDir);
         assertEquals(4, report.results().size());
+        assertTrue(runner.sink() != 0, "measured results must feed the dead-code-elimination sink");
         for (var r : report.results()) {
             var p = r.parity();
             assertEquals(0, p.mismatches(), "N=" + r.corpusSize() + " K=" + r.topK());
             assertEquals(2L * r.queryCount(), p.selectorChecks());
-            assertTrue(p.searchChecks() >= r.queryCount());
+            // -Infinity threshold plus the top-K-cut and median exact-boundary thresholds per query.
+            assertEquals(3L * r.queryCount(), p.searchChecks());
             var c = r.retention();
             assertEquals((long) r.corpusSize() * r.queryCount(), c.candidates(), "threshold is -inf, ids unique");
-            assertEquals(c.candidates(), c.oracleRetained());
             assertTrue(c.maxCandidatePeakRetainedPerQuery() <= r.topK());
             assertTrue(c.candidatePeakRetained() <= (long) r.topK() * r.queryCount());
             assertEquals(c.candidatePeakRetained(), c.resultsReturned());
@@ -113,9 +115,12 @@ class BoundedTopKExperimentRunnerTest {
         // Selection not fast enough for one K.
         assertEquals(Decision.NO_BENEFIT, BoundedTopKExperimentRunner.decide(
                 List.of(synthetic(10_000, 1, 0, 100, 10, 1_000, 900), synthetic(10_000, 5, 0, 100, 81, 1_000, 900))));
-        // End-to-end slower despite faster selection.
+        // End-to-end within the 2% noise tolerance still counts as not slower.
+        assertEquals(Decision.RETAIN_EXPERIMENT, BoundedTopKExperimentRunner.decide(
+                List.of(synthetic(10_000, 1, 0, 100, 10, 1_000, 1_020))));
+        // End-to-end slower beyond the tolerance despite faster selection.
         assertEquals(Decision.NO_BENEFIT, BoundedTopKExperimentRunner.decide(
-                List.of(synthetic(10_000, 1, 0, 100, 10, 1_000, 1_001))));
+                List.of(synthetic(10_000, 1, 0, 100, 10, 1_000, 1_021))));
         assertTrue(BoundedTopKExperimentRunner.rationale(Decision.RETAIN_EXPERIMENT,
                 List.of(synthetic(10_000, 1, 0, 100, 10, 1_000, 900))).contains("N=10000 K=1"));
     }
