@@ -33,6 +33,12 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
      */
     static final int BULK_WINDOW_BYTES = 1 << 20;
 
+    /**
+     * Bytes read when {@link #findAll()} jumps forward past its window (a gap, or the first read), unless the frame
+     * needs more. Keeps sparse indexes from reading a full window per entry; a contiguous refill reads to capacity.
+     */
+    static final int GAP_READ_BYTES = 8 << 10;
+
     private final Path vectorFile;
     private final Path vectorMap;
 
@@ -85,13 +91,16 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
     /**
      * Returns every active vector (last index entry per sample ID, in first-seen order).
      *
-     * <p>When the index offsets are non-decreasing (the append order {@link #save} produces), the segment is read
-     * sequentially through one reused window of at most {@value #BULK_WINDOW_BYTES} bytes (never more than the
-     * segment) with positional reads, and each frame is decoded at its indexed offset; a frame that is not fully
-     * inside the window triggers a refill starting at that frame (Issue #136). Out-of-order indexes and frames larger than the window use the
-     * per-vector seek-and-read path. Either way entries are validated and read in index order, so results, offset
-     * and header checks, truncation messages and the precedence of errors are unchanged. Read buffers are bounded
-     * by the window plus the 16 KiB chunk scratch of {@link ChunkedFloatReader}, independent of segment size.
+     * <p>The segment is read through one reused window of at most {@value #BULK_WINDOW_BYTES} bytes (never more than
+     * the segment) with positional reads, and each frame is decoded at its indexed offset (Issue #136). The window
+     * only moves forward: a frame that continues the window keeps its unread tail and refills it to capacity, a
+     * forward jump past the window reads at most {@value #GAP_READ_BYTES} bytes or the frame, and no byte is read
+     * twice by contiguous refills. Entries whose offset is before the window (out-of-order indexes) and frames
+     * larger than the window use the per-vector seek-and-read path, so an append-ordered index needs a handful of
+     * reads, any other order still works, and no order rereads a whole window per entry. Entries are validated and
+     * read in index order, so results, offset and header checks, truncation messages and the precedence of errors
+     * are unchanged. Read buffers are bounded by the window plus the 16 KiB chunk scratch of
+     * {@link ChunkedFloatReader}, independent of segment size.
      */
     @Override
     public List<StoredSpeechFeatureVector> findAll() throws IOException {
@@ -100,14 +109,12 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
         var fileSize = Files.size(vectorFile);
         var floatReader = new ChunkedFloatReader();
         try (var file = new RandomAccessFile(vectorFile.toFile(), "r")) {
-            var window = offsetsNonDecreasing(entries)
-                    ? new SegmentWindow(file.getChannel(), windowCapacity(fileSize))
-                    : null;
+            var window = new SegmentWindow(file.getChannel(), windowCapacity(fileSize));
             for (var entry : entries) {
                 validateOffset(entry.offset(), fileSize, entry.sampleId());
-                var vector = window == null
-                        ? readVectorAt(file, entry.sampleId(), entry.offset(), floatReader)
-                        : readVector(window, file, entry.sampleId(), entry.offset(), floatReader);
+                var vector = entry.offset() < window.start()
+                        ? readPerVector(file, entry.sampleId(), entry.offset(), floatReader)
+                        : readFromWindow(window, file, entry.sampleId(), entry.offset(), floatReader);
                 byId.put(entry.sampleId(), new StoredSpeechFeatureVector(entry.sampleId(), vector));
             }
         }
@@ -186,7 +193,8 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
         }
     }
 
-    private FrequencyVector readVectorAt(
+    /** Seeks to {@code offset} and reads the frame there with the per-vector {@link RandomAccessFile} path. */
+    private FrequencyVector readPerVector(
             RandomAccessFile file, String sampleId, long offset, ChunkedFloatReader floatReader) throws IOException {
         file.seek(offset);
         return readVector(file, sampleId, offset, floatReader);
@@ -197,7 +205,7 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
      * path: a header or values past the end of the segment are a truncation, and the dimension range is checked
      * before anything is allocated. Frames larger than the window are read from {@code file} by the per-vector path.
      */
-    private FrequencyVector readVector(
+    private FrequencyVector readFromWindow(
             SegmentWindow window, RandomAccessFile file, String sampleId, long offset, ChunkedFloatReader floatReader)
             throws IOException {
         if (!window.cover(offset, Integer.BYTES)) {
@@ -209,7 +217,7 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
         }
         long frameBytes = Integer.BYTES + (long) dimensions * Float.BYTES;
         if (frameBytes > window.capacity()) {
-            return readVectorAt(file, sampleId, offset, floatReader);
+            return readPerVector(file, sampleId, offset, floatReader);
         }
         if (!window.cover(offset, (int) frameBytes)) {
             throw truncated(sampleId, offset, new EOFException());
@@ -217,6 +225,7 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
         return FrequencyVector.read(floatReader, window.at(offset + Integer.BYTES), dimensions);
     }
 
+    /** Reads the frame at the current file pointer, which the caller has positioned at {@code offset}. */
     private FrequencyVector readVector(
             RandomAccessFile file, String sampleId, long offset, ChunkedFloatReader floatReader)
             throws IOException {
@@ -255,15 +264,6 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
         return (int) Math.min(BULK_WINDOW_BYTES, Math.max(fileSize, Integer.BYTES));
     }
 
-    private static boolean offsetsNonDecreasing(List<IndexEntry> entries) {
-        for (int i = 1; i < entries.size(); i++) {
-            if (entries.get(i).offset() < entries.get(i - 1).offset()) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     private void validateOffset(long offset, long fileSize, String sampleId) throws IOException {
         if (offset < 0) {
             throw new IOException(
@@ -290,9 +290,10 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
     }
 
     /**
-     * One reused view of at most {@value #BULK_WINDOW_BYTES} bytes of {@code [start, start + limit)} of the segment, refilled
-     * with positional channel reads (which leave the file pointer alone), and a {@link java.io.DataInput} over it
-     * positioned per frame so {@link FrequencyVector#read} decodes straight from the window. Not thread-safe.
+     * One reused view of at most {@value #BULK_WINDOW_BYTES} bytes of {@code [start, start + limit)} of the segment,
+     * refilled with positional channel reads (which leave the file pointer alone), and a {@link java.io.DataInput}
+     * over it positioned per frame so {@link FrequencyVector#read} decodes straight from the window. It only moves
+     * forward. Not thread-safe.
      */
     private static final class SegmentWindow extends InputStream {
         private final FileChannel channel;
@@ -313,20 +314,44 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
             return bytes.length;
         }
 
+        /** Segment offset of the first byte in the window; offsets before it are never read through the window. */
+        long start() {
+            return start;
+        }
+
         /**
-         * Makes {@code [offset, offset + length)} available, refilling from {@code offset} when it is not already
-         * in the window; false when the segment ends first. {@code length} must not exceed the window.
+         * Makes {@code [offset, offset + length)} available for {@code offset >= start()}, refilling from
+         * {@code offset} when it is not already in the window; false when the segment ends first. Bytes of the
+         * window at or after {@code offset} are kept, not reread. The refill reads {@code length} bytes when the
+         * window already starts at {@code offset} (a frame longer than what is buffered), up to capacity when
+         * {@code offset} continues the window, and {@link #GAP_READ_BYTES} or {@code length} after a forward gap.
+         * {@code length} must not exceed the window capacity.
          */
         boolean cover(long offset, int length) throws IOException {
-            if (offset >= start && offset + length <= start + limit) {
+            long end = start + limit;
+            if (offset >= start && offset + length <= end) {
                 return true;
             }
-            buffer.clear();
-            start = offset;
-            while (buffer.hasRemaining() && channel.read(buffer, offset + buffer.position()) >= 0) {
-                // positional reads until the window is full or the segment ends
+            boolean overlaps = limit > 0 && offset <= end;
+            int keep = overlaps ? (int) (end - offset) : 0;
+            int target;
+            if (overlaps && offset == start) {
+                target = length;
+            } else if (overlaps) {
+                target = bytes.length;
+            } else {
+                target = Math.min(bytes.length, Math.max(length, GAP_READ_BYTES));
             }
+            if (keep > 0) {
+                System.arraycopy(bytes, (int) (offset - start), bytes, 0, keep);
+            }
+            buffer.clear().limit(target).position(keep);
+            while (buffer.hasRemaining() && channel.read(buffer, offset + buffer.position()) >= 0) {
+                // positional reads until the target is buffered or the segment ends
+            }
+            start = offset;
             limit = buffer.position();
+            buffer.limit(bytes.length);
             return length <= limit;
         }
 

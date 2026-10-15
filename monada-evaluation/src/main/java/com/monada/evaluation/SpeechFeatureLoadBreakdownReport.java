@@ -127,7 +127,8 @@ public record SpeechFeatureLoadBreakdownReport(
         sb.append("Passes: header read and value read each include their own seek; per-vector I/O is seek + readInt +\n");
         sb.append("  readFully without decode; materialize decodes from segment bytes already in memory. The passes are\n");
         sb.append("  not an exact decomposition of a combined load. Shares are relative to the replica (the pre-#136\n");
-        sb.append("  per-vector path), so they stay comparable after production changes.\n");
+        sb.append("  per-vector path), so they stay comparable after production changes. The windowed candidate is a\n");
+        sb.append("  frozen snapshot of the stage-1 proposal; the production column measures the shipped read path.\n");
         sb.append("Cache Assumption: Warm OS page cache; single machine; results are exploratory.\n\n");
 
         sb.append("1. Pass Latency p50 / p95 (microseconds per call)\n");

@@ -213,6 +213,11 @@ final class SpeechFeatureLoadProbe {
      * that is not fully inside the window triggers a refill starting at its offset. Out-of-order indexes and
      * frames larger than the window use the per-vector path, so memory stays bounded and no index order rereads
      * a whole window per entry.
+     *
+     * <p>This is a frozen snapshot of the stage-1 proposal that the #136 decision was taken on, kept so the
+     * report stays reproducible. It is deliberately not kept in sync with {@code FileSpeechFeatureStore}: the
+     * shipped read path (per-entry fallback for offsets before the window, tail carry-over and bounded gap reads)
+     * is what the production column measures.
      */
     List<StoredSpeechFeatureVector> windowedCandidateFindAll(Counters counters) throws IOException {
         var entries = parseIndex(new Counters());

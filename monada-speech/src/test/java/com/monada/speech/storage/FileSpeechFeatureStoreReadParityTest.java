@@ -276,7 +276,9 @@ class FileSpeechFeatureStoreReadParityTest {
     }
 
     @Test
-    void truncationInsideTheFrameThatCrossesOneWindowFailsIdentically() throws IOException {
+    void truncationInsideTheFrameThatEndsTheFirstMebibyteFailsIdentically() throws IOException {
+        // The cut leaves the segment shorter than one window, so the window shrinks to the segment and this is a
+        // single-fill case; corruptFramesFoundAfterARefillFailIdentically covers frames reached by a refill.
         for (int cut : new int[]{2, Integer.BYTES + 10}) { // inside the header, inside the values
             var dir = root.resolve("cut" + cut);
             var store = new FileSpeechFeatureStore(dir);
@@ -285,7 +287,7 @@ class FileSpeechFeatureStoreReadParityTest {
                 store.save("sample-" + i, new FrequencyVector(sequence(997, i)));
                 i++;
             }
-            var crossing = readIndexEntries(dir).getLast(); // starts before one window of bytes, ends after it
+            var crossing = readIndexEntries(dir).getLast(); // starts before 1 MiB of segment, ends after it
             assertTrue(crossing.offset() < FileSpeechFeatureStore.BULK_WINDOW_BYTES);
             try (var channel = Files.newByteChannel(dir.resolve(SEGMENT), StandardOpenOption.WRITE)) {
                 channel.truncate(crossing.offset() + cut);
@@ -293,6 +295,66 @@ class FileSpeechFeatureStoreReadParityTest {
             var message = assertSameError(oracleFindAll(dir), outcome(store::findAll));
             assertTrue(message.contains("truncated while reading sampleId=" + crossing.sampleId()), message);
         }
+    }
+
+    @Test
+    void corruptFramesFoundAfterARefillFailIdentically() throws IOException {
+        // The segment stays larger than one window, so these frames are reached through a mid-segment refill.
+        int window = FileSpeechFeatureStore.BULK_WINDOW_BYTES;
+        for (var corruption : List.of("header-truncated", "values-past-eof", "invalid-header")) {
+            var dir = root.resolve(corruption);
+            var store = new FileSpeechFeatureStore(dir);
+            int i = 0;
+            while (Files.size(dir.resolve(SEGMENT)) < window + 20_000L) {
+                store.save("sample-" + i, new FrequencyVector(sequence(997, i)));
+                i++;
+            }
+            var entries = readIndexEntries(dir);
+            var crossing = entries.stream()
+                    .filter(e -> e.offset() < window && e.offset() + Integer.BYTES + 997 * Float.BYTES > window)
+                    .findFirst().orElseThrow();
+            var afterWindow = entries.stream().filter(e -> e.offset() >= window).findFirst().orElseThrow();
+            IndexEntry target;
+            try (var file = new RandomAccessFile(dir.resolve(SEGMENT).toFile(), "rw")) {
+                switch (corruption) {
+                    case "header-truncated" -> {
+                        target = afterWindow;
+                        file.setLength(afterWindow.offset() + 2);
+                    }
+                    case "values-past-eof" -> {
+                        target = crossing;
+                        file.seek(crossing.offset());
+                        file.writeInt(65_536); // fits the window but runs past the end of the segment
+                    }
+                    default -> {
+                        target = crossing;
+                        file.seek(crossing.offset());
+                        file.writeInt(-1);
+                    }
+                }
+            }
+            assertTrue(Files.size(dir.resolve(SEGMENT)) > window, "segment must stay larger than one window");
+            var message = assertSameError(oracleFindAll(dir), outcome(store::findAll));
+            assertTrue(message.contains("sampleId=" + target.sampleId()), message);
+        }
+    }
+
+    @Test
+    void framesAtTheWindowFallbackBoundaryAreBitIdenticalAndTruncateIdentically() throws IOException {
+        // Frame sizes capacity - 4, capacity + 4 and exactly capacity bytes (4-byte header + 4 bytes per value).
+        int exact = (FileSpeechFeatureStore.BULK_WINDOW_BYTES - Integer.BYTES) / Float.BYTES;
+        var store = new FileSpeechFeatureStore(root);
+        store.save("small", new FrequencyVector(sequence(DIMS, 0)));
+        store.save("below", new FrequencyVector(sequence(exact - 1, 1)));
+        store.save("above", new FrequencyVector(sequence(exact + 1, 2)));
+        store.save("exact", new FrequencyVector(sequence(exact, 3)));
+        var result = assertSameOutcome(oracleFindAll(), outcome(store::findAll));
+        assertEquals(List.of(DIMS, exact - 1, exact + 1, exact),
+                result.stream().map(v -> v.vector().dimensions()).toList());
+
+        truncateTo(Files.size(root.resolve(SEGMENT)) - 10); // inside the exactly-window-sized frame
+        var message = assertSameError(oracleFindAll(), outcome(store::findAll));
+        assertTrue(message.contains("truncated while reading sampleId=exact"), message);
     }
 
     @Test
