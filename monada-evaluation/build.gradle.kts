@@ -146,6 +146,13 @@ tasks.register<JavaExec>("runMultiAttemptExecutionEvaluation") {
     classpath = sourceSets["main"].runtimeClasspath
 }
 
+tasks.register<JavaExec>("runForgeRecallStress") {
+    description = "Run the judged Forge recall stress set (paraphrase, synonym, negation, relation, terminology, no-relevant, duplicate-summary, empty-query) over fixture forge-experience-v1 (exploratory metrics plus hard checks; no Forge, network or provider required)"
+    group = "application"
+    mainClass.set("com.monada.evaluation.execution.RecallStressEvaluationMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
 tasks.named<Test>("test") {
     // The cross-JVM determinism test starts child JVMs that run the evaluation command on this runtime classpath.
     doFirst {

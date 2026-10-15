@@ -204,6 +204,48 @@ its seven gates (the `runForgeExperienceEvaluation` report is byte-identical apa
 new report are lexical neighbours used as join evidence; no retrieval-quality or routing claim is made. A host still
 performs this join itself; promoting an attempt-level field into the export would need a separate contract change.
 
+#### Judged recall stress set for paraphrases and confusable tasks (#122)
+
+Characterizes, with evidence and without any semantic change, how the current exact lexical recall misses
+paraphrases and surfaces similar-but-irrelevant tasks. Fixture `forge-recall-stress-v1` adds 26 hand-judged queries
+over the UNCHANGED `forge-experience-v1` corpus: paraphrase, synonym, negation, relation/preposition, terminology,
+no-relevant, duplicate-summary and empty-query categories (3-4 each). Each query lists its relevant experiences and,
+separately, the experiences judged *confusable* (shared vocabulary or task, not an answer, for example the approach a
+negated query excludes); empty relevant sets are explicit. Judgments were written from the corpus texts before any
+recall ran and were reviewed by the repository owner in PR #140 (S06 kept; S10, S16 and S22 revised; S13 aligned with
+S07); changing one now requires a new fixture version. The 14 #102 queries are read
+from their own fixture and reported as the `BASELINE` group.
+
+`./gradlew :monada-evaluation:runForgeRecallStress -q` reports per query every rank and similarity, relevant positions,
+misses outside the top 5, a reason (`RESOLVED`, `PARTIAL_RECALL`, `OUTRANKED`, `NOT_IN_TOP_K`, `ZERO_SIMILARITY_ONLY`,
+`NOT_RETRIEVED`, `EMPTY_AS_EXPECTED` for blank queries, `NO_HITS` for non-blank queries without a hit,
+`FALSE_NEIGHBOURS_RETURNED`; a zero-similarity fill hit never makes a query `RESOLVED`) and a category per hit (`RELEVANT`,
+`JUDGED_CONFUSABLE`, `SAME_EXECUTION`, `SAME_TASK`, `LEXICAL_NEIGHBOUR`, `ZERO_SIMILARITY`), plus Hit@K, Recall@K and
+MRR per category with zero-relevant queries listed and excluded from every denominator. Four hard checks decide the
+exit code (`RS1` scoped CURRENT recall, `RS2` blank queries return nothing, `RS3` two fresh stores rank identically,
+`RS4` the #102 evaluation passes and its rankings equal this runner's; both run the same code, so a regression against
+`main` shows only in a before/after report diff); metrics are EXPLORATORY, have no threshold and are not a protected
+baseline.
+
+Observed on 2026-10-15 after the owner's relevance review in PR #140 (all hard checks pass; ALL_STRESS: 19 scored,
+7 excluded; Hit@1 0.58, Recall@5 0.80, MRR 0.71 against BASELINE Hit@1 1.00, Recall@5 0.97, MRR 1.00):
+
+- **Synonyms and terminology are the weakest groups.** Synonyms (Hit@1 0.33, MRR 0.44): S06 ("resend undelivered callbacks") retrieves no webhook
+  attempt within 50 hits; S04 reaches its relevant attempts only as zero-similarity fill (`ZERO_SIMILARITY_ONLY`).
+- **Terminology** (Hit@1 0.00, MRR 0.29): abbreviations and jargon ("NPE", "idempotent consumer") rank lexical
+  neighbours first, and S16 ("randomized spread to retry delays" for jitter) retrieves no relevant attempt at all.
+- **Negation is invisible to lexical recall**: in S07 and S09 the excluded approach ranks #1 (`JUDGED_CONFUSABLE`); the
+  same offset attempt also leads the cursor-paging query S13.
+- **No relevance floor**: every no-relevant query returns confusable neighbours, up to similarity 0.40 (S18, key
+  rotation vs key placement) — above the similarity of several relevant hits elsewhere (S01 tops out at 0.18), so a
+  single host threshold cannot separate them on this corpus.
+- Duplicate summaries and relation/preposition variants resolve at Hit@1 1.00; punctuation-only and stopword-only
+  queries return no hit (`NO_HITS`: observed, not promised by any contract).
+
+These are 26 queries over 25 experiences: they localize failure modes for Next Steps 5/10 and 6/10, not statistical
+claims. Not changed: encoders, `summary-text-v1`, query keys, thresholds, `forge-experience-v1` and its seven gates
+(the `runForgeExperienceEvaluation` report is byte-identical apart from timing).
+
 Numbering is roadmap order; independent items (for example #94 and #95) may proceed in parallel.
 
 Non-goals:
