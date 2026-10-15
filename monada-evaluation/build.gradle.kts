@@ -160,6 +160,13 @@ tasks.register<JavaExec>("runForgeRecallThresholdSweep") {
     classpath = sourceSets["main"].runtimeClasspath
 }
 
+tasks.register<JavaExec>("runForgeQueryExpansionComparison") {
+    description = "Compare exact queries with a bounded, documented query-side lexical expansion over the judged Forge recall stress set on the same persisted projection (offline A/B with vetoes; evaluation-only, nothing adopted; no Forge, network or provider required)"
+    group = "application"
+    mainClass.set("com.monada.evaluation.execution.QueryExpansionMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
 tasks.named<Test>("test") {
     // The cross-JVM determinism test starts child JVMs that run the evaluation command on this runtime classpath.
     doFirst {
