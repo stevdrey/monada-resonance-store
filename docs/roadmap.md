@@ -111,6 +111,14 @@ The project follows a measurement-first path: improve retrieval quality only aft
   multi-error precedence. The windowed candidate in the report stays a frozen snapshot of the stage-1 proposal. Production `findAll()` p50 at N=10,000 fell from ~22.3 ms to ~3.0 ms (64 dims) and
   from ~22.8 ms to ~3.7 ms (128 dims) (warm page cache, single machine, exploratory). Format, index, API and defaults are unchanged,
   and generated speech evaluation output is byte-identical. Not done here: cross-query caching and dedup of superseded entries.
+- Structural I/O checks for the windowed speech read (follow-up to Issue #136): a package-private `findAll(ReadStats)` counts
+  window refills, channel reads, bytes read into the window and per-vector fallbacks (public `findAll()` passes a no-op
+  instance, so API, results, ordering and errors are unchanged). `FileSpeechFeatureStoreReadStructureTest` asserts, without
+  timing: an append-ordered segment is read exactly once (window bytes == segment size), multi-window refills stay bounded, a
+  shuffled index never reads a window byte twice, a sparse index reads at most one 8 KiB gap read per entry, an exactly
+  window-sized frame is decoded from the window while one 4 bytes larger uses one fallback, and a reversed index of N entries
+  uses N-1 fallbacks. Two efficiency-only mutants that the parity test cannot see (dropping the tail carry-over; sending an
+  exactly window-sized frame to the fallback) now fail. Speech evaluation output is byte-identical.
 - Exact bounded top-K experiment (Issue #120): experimental `ExactBoundedTopKSelector` (bounded min-heap over the deduplicated
   candidates, production comparator score desc / atom id asc) and `ExperimentalBoundedTopKLinearScanIndex` (same scan, threshold and
   keep-max dedup, selector instead of sort+truncate) live in the unstable `com.monada.index.experimental` package and are never
