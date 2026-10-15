@@ -100,6 +100,23 @@ class MultiAttemptFixtureTest {
     }
 
     @Test
+    void rejectsPartiallyPopulatedCorrectionFields() {
+        assertInvalid(withAttempt("m-repair/a1", a -> revised(a, null, "Split on commas after unquoting", null)),
+                "revised result, solution and lesson together");
+        assertInvalid(withAttempt("m-repair/a1", a -> revised(a, null, null, "Quoted fields need a real parser")),
+                "revised result, solution and lesson together");
+        assertInvalid(withAttempt("m-correct/a1", a -> revised(a, a.revisedResult(), a.revisedSolution(), null)),
+                "revised result, solution and lesson together");
+    }
+
+    private static MultiAttemptFixture.Attempt revised(MultiAttemptFixture.Attempt a, String result, String solution,
+                                                       String lesson) {
+        return new MultiAttemptFixture.Attempt(a.execution(), a.ordinal(), a.reason(), a.result(), a.solution(),
+                a.lesson(), a.inputTokens(), a.outputTokens(), a.startSeconds(), a.endSeconds(), a.evidence(), result,
+                solution, lesson, a.judgedAccepted());
+    }
+
+    @Test
     void rejectsAPartiallyPopulatedFinishedAttempt() {
         assertInvalid(withAttempt("m-repair/a1", a -> new MultiAttemptFixture.Attempt(a.execution(), a.ordinal(),
                 a.reason(), a.result(), a.solution(), null, a.inputTokens(), a.outputTokens(), a.startSeconds(),

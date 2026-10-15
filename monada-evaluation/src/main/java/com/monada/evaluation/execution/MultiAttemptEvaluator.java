@@ -549,11 +549,18 @@ public final class MultiAttemptEvaluator {
         Map<String, MultiAttemptFixture.CutoffAttempt> judged = new TreeMap<>();
         fixture.cutoff().forEach(c -> judged.put(c.experienceId(), c));
         Set<String> exported = new java.util.TreeSet<>();
+        ExecutionMemory cutoffMemory = s.memories.get(fixture.cutoffScope());
+        ScopeId cutoffScope = MultiAttemptFixtureRecorder.scope(fixture, fixture.cutoffScope());
+        int references = 0;
         for (ExperienceSample sample : samples(report)) {
             if (sample.lastSequence() > s.cutoffSequence) {
                 violations.add(sample.executionId().value() + ": uses sequence " + sample.lastSequence()
                         + " beyond the cutoff " + s.cutoffSequence);
             }
+            // the historical facts must be the exact ledger events, as MA3 requires of the latest export
+            violations.addAll(ForgeExperienceEvaluator.referenceViolations(cutoffMemory, cutoffScope, sample));
+            violations.addAll(cutoffReferenceBoundViolations(cutoffMemory, cutoffScope, sample, s.cutoffSequence));
+            references += ForgeExperienceEvaluator.exportedReferences(sample).size();
             for (ExperienceSample.SampleAttempt a : sample.attempts()) {
                 String id = ForgeFixtureRecorder.experienceId(sample.executionId().value(), a.id());
                 exported.add(id);
@@ -607,7 +614,8 @@ public final class MultiAttemptEvaluator {
                 + " (judged "
                 + judged.size() + "); cutoff export pages at size " + fixture.pageSize() + ": "
                 + report.pages().size() + " (paged export equals the unpaged export at the same cutoff; every page "
-                + "carries the same checkpoint and projection stamp)",
+                + "carries the same checkpoint and projection stamp); cutoff references resolved exactly and within "
+                + "the cutoff: " + references,
                 "latest hits against the cutoff export: " + joined + " joined with the judged cutoff values, " + beyond
                         + " beyond the cutoff and left unjoined");
         return ForgeGate.of(MultiAttemptEvaluationReport.CUTOFF,
@@ -620,7 +628,8 @@ public final class MultiAttemptEvaluator {
      * in order (so a duplicated or dropped sample is a violation), traverse as many pages as the page size demands
      * (at least two) and describe one frozen snapshot on every page: schema, scope, view, additional gates and ledger
      * checkpoint equal those of the first page and of the unpaged export, the checkpoint is the requested cutoff, the
-     * projection stamp is that of the first page and covers the cutoff, and the continuation flags are consistent.
+     * projection stamp equals the unpaged export's and the first page's and covers the cutoff, and the continuation
+     * flags are consistent.
      */
     static List<String> cutoffPaginationViolations(ExecutionMemory memory, ScopeId scope,
                                                    ExperienceExportReport report, long cutoffSequence, int pageSize) {
@@ -659,15 +668,39 @@ public final class MultiAttemptEvaluator {
                 violations.add(label + ": ledger checkpoint " + page.ledger() + " but the cutoff is " + cutoffSequence
                         + " and the unpaged export has " + reference.ledger());
             }
-            if (!page.projection().equals(pages.get(0).projection()) || !page.projection().coversCutoff()) {
-                violations.add(label + ": projection stamp " + page.projection() + " differs from the first page or "
-                        + "does not cover the cutoff");
+            if (!page.projection().equals(reference.projection()) || !page.projection().equals(pages.get(0).projection())
+                    || !page.projection().coversCutoff()) {
+                violations.add(label + ": projection stamp " + page.projection() + " differs from the unpaged cutoff "
+                        + "export " + reference.projection() + " or the first page, or does not cover the cutoff");
             }
             boolean last = i == pages.size() - 1;
             if (page.hasMore() == last || page.next().isPresent() != page.hasMore()) {
                 violations.add(label + ": hasMore=" + page.hasMore() + " next=" + page.next().isPresent()
                         + (last ? " on the last page" : " on a page that is not the last"));
             }
+        }
+        return violations;
+    }
+
+    /**
+     * A sample exported as of a cutoff may only reference facts recorded up to that cutoff: every provenance reference
+     * must resolve to a ledger event at a sequence no later than the cutoff (a later correction, such as
+     * {@code m-correct.a1.fin.r2}, is never part of the historical sample). Unresolvable references are reported by
+     * {@link ForgeExperienceEvaluator#referenceViolations}.
+     */
+    static List<String> cutoffReferenceBoundViolations(ExecutionMemory memory, ScopeId scope, ExperienceSample sample,
+                                                       long cutoffSequence) {
+        List<String> violations = new ArrayList<>();
+        String exec = sample.executionId().value();
+        for (ForgeExperienceEvaluator.LabelledRef labelled : ForgeExperienceEvaluator.exportedReferences(sample)) {
+            ExperienceRef ref = labelled.ref();
+            memory.loadEvent(scope, ref.eventId(), ref.revision()).ifPresent(entry -> {
+                if (entry.sequence() > cutoffSequence) {
+                    violations.add(exec + ": " + labelled.origin() + " ref " + ref.eventId().value() + " r"
+                            + ref.revision() + " lies at sequence " + entry.sequence() + " beyond the cutoff "
+                            + cutoffSequence);
+                }
+            });
         }
         return violations;
     }

@@ -209,6 +209,12 @@ public record MultiAttemptFixture(String version, String provenance, Map<String,
                 throw new IllegalStateException(a.experienceId() + ": an unfinished attempt has neither a solution "
                         + "nor a lesson");
             }
+            long revisedFields = java.util.stream.Stream.of(a.revisedResult(), a.revisedSolution(), a.revisedLesson())
+                    .filter(java.util.Objects::nonNull).count();
+            if (revisedFields != 0 && revisedFields != 3) {
+                throw new IllegalStateException(a.experienceId() + ": a correction needs a revised result, solution "
+                        + "and lesson together");
+            }
             if (a.revised() && (!a.finished() || a.revisedResult().equals(UNFINISHED)
                     || !RESULTS.contains(a.revisedResult()) || a.revisedSolution() == null
                     || a.revisedLesson() == null)) {

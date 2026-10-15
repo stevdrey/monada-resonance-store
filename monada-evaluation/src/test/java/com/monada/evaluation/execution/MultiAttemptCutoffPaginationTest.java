@@ -166,6 +166,59 @@ class MultiAttemptCutoffPaginationTest {
     }
 
     @Test
+    void aProjectionStampWrongOnEveryPageIsCaughtAgainstTheUnpagedExport() {
+        // consistent across pages, so only the comparison with the unpaged export can catch it
+        List<ExperienceSamplePage> pages = report.pages().stream().map(p -> new ExperienceSamplePage(p.schema(),
+                p.scope(), p.view(), p.additionalGates(), p.ledger(), new ExperienceSamplePage.ProjectionStamp(
+                p.projection().formatVersion() + 1, p.projection().textScheme(), p.projection().state(),
+                p.projection().coversCutoff()), p.samples(), p.hasMore(), p.next())).toList();
+        List<String> v = violations(new ExperienceExportReport(scope, pages, report.samples(), report.comparison(),
+                report.exportDigest()));
+        assertTrue(v.stream().anyMatch(x -> x.contains("cutoff page 1/2") && x.contains("differs from the unpaged "
+                + "cutoff export")), v.toString());
+        assertTrue(v.stream().anyMatch(x -> x.contains("cutoff page 2/2")), v.toString());
+    }
+
+    @Test
+    void cutoffSamplesMustReferenceTheExactHistoricalEvents() {
+        MultiAttemptEvaluator.Snapshot s = MultiAttemptEvaluator.snapshot(FIXTURE, root, new LinkedHashMap<>());
+        try {
+            ExperienceExportReport real = s.cutoffExport;
+            assertTrue(MultiAttemptEvaluator.cutoffGate(FIXTURE, s).passed());
+
+            // a1's finish pointing at its own stage event: COMPLETED r1 still matches the judgment, the reference not
+            s.cutoffExport = withFinishOfCorrectA1(real, "m-correct.a1.stage", 1);
+            ForgeGate stage = MultiAttemptEvaluator.cutoffGate(FIXTURE, s);
+            assertFalse(stage.passed());
+            assertTrue(stage.details().stream().anyMatch(d -> d.contains("attempt.finish ref m-correct.a1.stage r1")
+                    && d.contains("STAGE_RECORDED")), stage.details().toString());
+
+            // a1's finish pointing at the later correction: a fact the historical sample cannot reference
+            s.cutoffExport = withFinishOfCorrectA1(real, "m-correct.a1.fin.r2", 2);
+            ForgeGate later = MultiAttemptEvaluator.cutoffGate(FIXTURE, s);
+            assertFalse(later.passed());
+            assertTrue(later.details().stream().anyMatch(d -> d.contains("attempt.finish ref m-correct.a1.fin.r2 r2 "
+                    + "lies at sequence") && d.contains("beyond the cutoff " + cutoff)), later.details().toString());
+        } finally {
+            s.close();
+        }
+    }
+
+    /** The cutoff export with the finish reference of m-correct a1 replaced. */
+    private static ExperienceExportReport withFinishOfCorrectA1(ExperienceExportReport real, String eventId,
+                                                                int revision) {
+        List<AnnotatedSample> forged = new ArrayList<>();
+        for (AnnotatedSample a : real.samples()) {
+            forged.add(!a.sample().executionId().value().equals("m-correct") ? a
+                    : new AnnotatedSample(ForgeTestSupport.withAttempt(a.sample(), 0, at -> ForgeTestSupport
+                    .withFinish(at, ForgeTestSupport.ref(at.finish().orElseThrow(), eventId, revision))), a.cost(),
+                    a.comparison()));
+        }
+        return new ExperienceExportReport(real.scope(), real.pages(), forged, real.comparison(),
+                real.exportDigest());
+    }
+
+    @Test
     void aSinglePageNeverExercisesTheCursor() {
         ExperienceExportReport single = ExperienceExportReport.build(memory, ExportRequest.first(scope,
                 ExportCutoff.atSequence(cutoff), 50, ExportView.ADAPTER_READY,
