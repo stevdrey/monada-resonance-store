@@ -178,6 +178,7 @@ class FileSpeechFeatureStoreReadStructureTest {
             assertEquals(activeBytes, stats.windowBytesRead(), "only the last round is read, versions=" + versions);
             assertEquals(0, stats.windowBytesReread());
             assertEquals(0, stats.perVectorReads());
+            assertEquals(100L * (versions - 1), stats.supersededEntriesSkipped(), "versions=" + versions);
         }
     }
 
@@ -196,7 +197,8 @@ class FileSpeechFeatureStoreReadStructureTest {
             file.seek(40);
             none.perVectorRead(file, 0);
         }
-        assertEquals(List.of(0L, 0L, 0L, 0L, 0L, 0L), counts(none));
+        none.supersededEntrySkipped();
+        assertEquals(List.of(0L, 0L, 0L, 0L, 0L, 0L, 0L), counts(none));
 
         // Fresh counters give identical counts on every run, and the public findAll() leaves them untouched.
         var first = findAll(frames.size());
@@ -239,7 +241,8 @@ class FileSpeechFeatureStoreReadStructureTest {
 
     private static List<Long> counts(ReadStats stats) {
         return List.of(stats.windowFills(), stats.channelReads(), stats.windowBytesRead(),
-                stats.windowBytesReread(), stats.perVectorReads(), stats.perVectorBytesRead());
+                stats.windowBytesReread(), stats.perVectorReads(), stats.perVectorBytesRead(),
+                stats.supersededEntriesSkipped());
     }
 
     /** Writes frames of the given dimensions back to back with an append-ordered index; returns them in order. */

@@ -16,6 +16,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
@@ -118,45 +119,37 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
     /** {@link #findAll()} that also counts its reads into {@code stats}; tests use it to pin the I/O structure. */
     List<StoredSpeechFeatureVector> findAll(ReadStats stats) throws IOException {
         var entries = readIndexEntries();
-        var activeIndexById = new LinkedHashMap<String, Integer>(); // first-seen order, index of the last entry
-        for (int i = 0; i < entries.size(); i++) {
-            activeIndexById.put(entries.get(i).sampleId(), i);
-        }
-        var active = new boolean[entries.size()];
-        for (int i : activeIndexById.values()) {
-            active[i] = true;
-        }
-        var vectors = new StoredSpeechFeatureVector[entries.size()];
+        var active = activeEntries(entries);
+        var result = new StoredSpeechFeatureVector[active.count()];
         var fileSize = Files.size(vectorFile);
         var floatReader = new ChunkedFloatReader();
         try (var file = new RandomAccessFile(vectorFile.toFile(), "r")) {
             var window = new SegmentWindow(file.getChannel(), windowCapacity(fileSize), stats);
             for (int i = 0; i < entries.size(); i++) {
-                if (!active[i]) {
-                    continue; // superseded by a later entry for the same sample ID (Issue #137)
+                int slot = active.slots()[i];
+                if (slot < 0) {
+                    stats.supersededEntrySkipped(); // superseded by a later entry for the same sample ID (Issue #137)
+                    continue;
                 }
                 var entry = entries.get(i);
                 validateOffset(entry.offset(), fileSize, entry.sampleId());
                 var vector = entry.offset() < window.start()
                         ? readPerVector(file, entry.sampleId(), entry.offset(), floatReader, stats)
                         : readFromWindow(window, file, entry.sampleId(), entry.offset(), floatReader, stats);
-                vectors[i] = new StoredSpeechFeatureVector(entry.sampleId(), vector);
+                result[slot] = new StoredSpeechFeatureVector(entry.sampleId(), vector);
             }
         }
-        var result = new ArrayList<StoredSpeechFeatureVector>(activeIndexById.size());
-        for (int i : activeIndexById.values()) {
-            result.add(vectors[i]);
-        }
-        return List.copyOf(result);
+        return List.of(result);
     }
 
     /**
      * Validates the dimensions of every active stored vector without materializing float values.
      *
      * <p>The feature index remains append-only, so repeated sample IDs use the last index entry,
-     * matching {@link #findAll()}; superseded entries are not validated. The returned count is the number of active vectors inspected.
-     * This method validates offsets and vector-dimension headers only; callers that need vector
-     * values must still use {@link #findAll()} or {@link #findBySampleId(String)}.
+     * matching {@link #findAll()}; superseded entries are not validated. The returned count is the
+     * number of active vectors inspected. This method validates offsets and vector-dimension headers
+     * only; callers that need vector values must still use {@link #findAll()} or
+     * {@link #findBySampleId(String)}.
      *
      * @param expectedDimensions dimensions required by the caller
      * @return number of active vectors validated, or zero when the feature index is empty
@@ -168,14 +161,18 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
             throw new IllegalArgumentException("expected dimensions must be positive: " + expectedDimensions);
         }
 
-        var activeEntries = new LinkedHashMap<String, IndexEntry>();
-        for (IndexEntry entry : readIndexEntries()) {
-            activeEntries.put(entry.sampleId(), entry);
+        var entries = readIndexEntries();
+        var active = activeEntries(entries);
+        var activeEntries = new IndexEntry[active.count()]; // first-seen order
+        for (int i = 0; i < entries.size(); i++) {
+            if (active.slots()[i] >= 0) {
+                activeEntries[active.slots()[i]] = entries.get(i);
+            }
         }
 
         var fileSize = Files.size(vectorFile);
         try (var file = new RandomAccessFile(vectorFile.toFile(), "r")) {
-            for (IndexEntry entry : activeEntries.values()) {
+            for (IndexEntry entry : activeEntries) {
                 validateOffset(entry.offset(), fileSize, entry.sampleId());
                 file.seek(entry.offset());
                 int actualDimensions = readVectorDimensions(file, entry.sampleId(), entry.offset());
@@ -185,7 +182,7 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
                 }
             }
         }
-        return activeEntries.size();
+        return activeEntries.length;
     }
 
     private Long findOffset(String sampleId) throws IOException {
@@ -208,6 +205,25 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
                     .forEach(entry -> entries.add(entry));
         }
         return entries;
+    }
+
+    /**
+     * The active entry of each sample ID is its last index entry (last-wins). Returns, per index entry, its slot in the
+     * first-seen order of sample IDs when it is active, or -1 when a later entry supersedes it. {@link #findAll()} and
+     * {@link #validateStoredVectorDimensions(int)} both use this, so they always agree on which entries are active.
+     */
+    private static ActiveEntries activeEntries(List<IndexEntry> entries) {
+        var lastIndexById = new LinkedHashMap<String, Integer>(); // first-seen order, index of the last entry
+        for (int i = 0; i < entries.size(); i++) {
+            lastIndexById.put(entries.get(i).sampleId(), i);
+        }
+        var slots = new int[entries.size()];
+        Arrays.fill(slots, -1);
+        int slot = 0;
+        for (int i : lastIndexById.values()) {
+            slots[i] = slot++;
+        }
+        return new ActiveEntries(slots, slot);
     }
 
     private static IndexEntry parseEntry(String line) {
@@ -324,10 +340,15 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
     private record IndexEntry(String sampleId, long offset) {
     }
 
+    /** Per index entry, its result slot in first-seen order, or -1 when superseded; {@code count} active entries. */
+    private record ActiveEntries(int[] slots, int count) {
+    }
+
     /**
      * Read counters of one {@link #findAll(ReadStats)} call: window refills, positional channel reads (including the
      * one that reports end of segment), bytes read into the window, window bytes read at or below a segment offset
-     * the window had already read (rereads), and frames and bytes (file-pointer advance) read by the per-vector path.
+     * the window had already read (rereads), frames and bytes (file-pointer advance) read by the per-vector path, and
+     * superseded index entries skipped without being validated or read (Issue #137).
      * They describe the structure of the reads only (no timing), so tests can bound rereads and fallbacks
      * deterministically. Per-vector bytes catch overreads but not how many calls a fallback makes. {@link #NONE}
      * discards everything (no extra I/O) and is what {@link #findAll()} uses. Not thread-safe.
@@ -345,6 +366,10 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
             @Override
             void perVectorRead(RandomAccessFile file, long offset) {
             }
+
+            @Override
+            void supersededEntrySkipped() {
+            }
         };
 
         private long windowFills;
@@ -354,6 +379,7 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
         private long windowHighWater;
         private long perVectorReads;
         private long perVectorBytesRead;
+        private long supersededEntriesSkipped;
 
         void windowFill() {
             windowFills++;
@@ -397,6 +423,15 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
 
         long perVectorBytesRead() {
             return perVectorBytesRead;
+        }
+
+        /** Records an index entry skipped because a later entry for the same sample ID supersedes it (Issue #137). */
+        void supersededEntrySkipped() {
+            supersededEntriesSkipped++;
+        }
+
+        long supersededEntriesSkipped() {
+            return supersededEntriesSkipped;
         }
     }
 

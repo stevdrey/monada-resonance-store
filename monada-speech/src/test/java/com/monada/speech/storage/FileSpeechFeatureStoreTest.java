@@ -121,7 +121,7 @@ class FileSpeechFeatureStoreTest {
         var store = new FileSpeechFeatureStore(tempDir);
         store.save("sample1", new FrequencyVector(new float[]{0.1f, 0.2f}));
         store.save("sample1", new FrequencyVector(new float[]{0.3f, 0.4f}));
-        try (var file = new RandomAccessFile(tempDir.resolve("features/speech-features-000001.f32").toFile(), "rw")) {
+        try (var file = new RandomAccessFile(tempDir.resolve(SpeechFeatureSegmentFixture.SEGMENT).toFile(), "rw")) {
             file.writeInt(-1); // the superseded first frame
         }
 

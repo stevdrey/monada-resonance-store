@@ -478,6 +478,8 @@ class FileSpeechFeatureStoreReadParityTest {
 
             var oracle = oracleFindAll(dir);
             assertTrue(oracle.error() != null, corruption + ": the strict oracle fails on the superseded entry");
+            var supersededEntry = corruption.contains("offset") ? "sampleId=b" : "sampleId=a at offset=0";
+            assertTrue(oracle.error().getMessage().contains(supersededEntry), oracle.error().getMessage());
             var result = assertSameOutcome(oracleFindAllActive(dir), outcome(store::findAll));
             // First-seen order counts superseded entries too, so the prepended "b" line moves "b" first.
             var expectedOrder = corruption.contains("offset")
@@ -509,7 +511,12 @@ class FileSpeechFeatureStoreReadParityTest {
 
             var message = assertSameError(oracleFindAllActive(dir), outcome(store::findAll));
             assertTrue(message.contains("Invalid vector dimensions (-1) for sampleId=" + target), message);
-            if (!corruption.equals("active-and-superseded")) {
+            if (corruption.equals("active-and-superseded")) {
+                // Precedence change: the strict path stopped at the superseded "a" frame, first in index order.
+                var strict = oracleFindAll(dir).error();
+                assertTrue(strict != null && strict.getMessage().contains("sampleId=a at offset=0"),
+                        String.valueOf(strict));
+            } else {
                 assertSameError(oracleFindAll(dir), outcome(store::findAll));
             }
             assertSameFindBySampleId(store, dir, List.of("a", "b", "c"));

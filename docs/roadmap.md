@@ -134,8 +134,10 @@ The project follows a measurement-first path: improve retrieval quality only aft
   Storage compatibility: no new metadata; existing stores are read unchanged and are more lenient only toward corrupt superseded
   entries; vectors stay comparable (bit-identical); path: reuse. Proof: `FileSpeechFeatureStoreReadParityTest` keeps its verbatim
   oracle and adds a documented exception, where superseded-corruption cases are compared with the oracle on a de-duplicated index.
-  `FileSpeechFeatureStoreReadStructureTest` asserts that superseded frames are never read. Generated speech evaluation output is
-  byte-identical. Not done here: index compaction and surfacing superseded-entry corruption through diagnostics.
+  `FileSpeechFeatureStoreReadStructureTest` asserts that superseded frames are never read, using a new `ReadStats` counter of
+  superseded entries skipped (no-op on the public path). `findAll()` and `validateStoredVectorDimensions()` share one active-entry
+  helper. Generated speech evaluation output is byte-identical. Not done here: index compaction and a user-facing diagnostic for
+  superseded-entry corruption.
 - Exact bounded top-K experiment (Issue #120): experimental `ExactBoundedTopKSelector` (bounded min-heap over the deduplicated
   candidates, production comparator score desc / atom id asc) and `ExperimentalBoundedTopKLinearScanIndex` (same scan, threshold and
   keep-max dedup, selector instead of sort+truncate) live in the unstable `com.monada.index.experimental` package and are never
