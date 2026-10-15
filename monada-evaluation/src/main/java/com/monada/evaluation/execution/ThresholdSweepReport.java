@@ -46,9 +46,10 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
 
     /**
      * How a query enters the metrics: {@code SCORED} (has relevant experiences), {@code NO_RELEVANT} (a content query
-     * judged to have no answer, whose returns are false matches) or {@code EMPTY} (a blank query or an
-     * {@link Category#EMPTY_QUERY} probe without content, such as punctuation or stopwords only). EMPTY queries enter
-     * no denominator: they return nothing at every threshold, so counting them would inflate no-relevant abstention.
+     * judged to have no answer, whose returns are false matches) or {@code EMPTY} (a blank query, an
+     * {@link Category#EMPTY_QUERY} probe, or any other query without relevant experiences whose recall returns no hit,
+     * such as punctuation or stopwords only, whatever its category). EMPTY queries enter no denominator: they return
+     * nothing at every threshold, so counting them would inflate no-relevant abstention.
      */
     public enum Kind {
         SCORED, NO_RELEVANT, EMPTY;
@@ -57,7 +58,8 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
             if (q.scored()) {
                 return SCORED;
             }
-            boolean empty = q.query().text().isBlank() || q.query().category() == Category.EMPTY_QUERY;
+            boolean empty = q.query().text().isBlank() || q.query().category() == Category.EMPTY_QUERY
+                    || q.hits().isEmpty();
             return empty ? EMPTY : NO_RELEVANT;
         }
     }
@@ -211,7 +213,7 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
      * success.
      */
     public Optional<Integer> firstFullNoRelevantAbstention() {
-        List<QuerySweep> none = rows.stream().filter(r -> r.kind() == Kind.NO_RELEVANT).toList();
+        List<QuerySweep> none = noRelevantRows();
         if (none.isEmpty()) {
             return Optional.empty();
         }
@@ -224,11 +226,22 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
         return Optional.empty();
     }
 
+    private List<QuerySweep> noRelevantRows() {
+        return rows.stream().filter(r -> r.kind() == Kind.NO_RELEVANT).toList();
+    }
+
     /**
      * Highest declared threshold that loses no relevant hit with a positive similarity. Zero-similarity relevant
      * hits are limit fill (a tie-order artefact, not a match), so losing them is reported but not counted here.
+     * Empty when the 0.00 baseline keeps no positive-similarity relevant hit: there is nothing to lose, which is not
+     * evaluable, never a vacuous success.
      */
-    public int lastWithoutPositiveRelevantLoss() {
+    public Optional<Integer> lastWithoutPositiveRelevantLoss() {
+        boolean anyPositiveRelevant = rows.stream().flatMap(r -> r.kept().get(0).stream())
+                .anyMatch(h -> h.neighbour() == Neighbour.RELEVANT && h.similarity() > 0.0);
+        if (!anyPositiveRelevant) {
+            return Optional.empty();
+        }
         int last = 0;
         for (int i = 1; i < grid.size(); i++) {
             int point = i;
@@ -239,7 +252,7 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
             }
             last = i;
         }
-        return last;
+        return Optional.of(last);
     }
 
     /** Deterministic report text; contains no timing. */
@@ -263,7 +276,8 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
                 + "kept / kept, recall = relevant kept / judged positives, cover = queries with a relevant hit kept, "
                 + "abst = queries keeping nothing. No-relevant content queries are reported separately (ret = "
                 + "queries still returning a hit, false = hits kept) and never enter a scored denominator. Empty "
-                + "queries (blank, or EMPTY_QUERY probes without content) enter no denominator and are listed only "
+                + "queries (blank, EMPTY_QUERY probes, or any query without relevant experiences whose recall returns "
+                + "no hit, such as punctuation or stopwords only) enter no denominator and are listed only "
                 + "in the per-query table. n/a = empty denominator.\n");
 
         out.append("\n== Sweep per group ==\n");
@@ -356,15 +370,20 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
 
     private void appendOperatingPoints(StringBuilder out) {
         out.append("\n== Operating points (EXPLORATORY, host-owned; illustrations, not recommendations) ==\n");
-        int lossless = lastWithoutPositiveRelevantLoss();
-        PointSummary keep = summary("ALL", lossless);
-        out.append(fmt("  Highest threshold losing no positive-similarity relevant hit: %s — recall %s, prec %s, "
-                + "no-relevant still returning %d/%d (%d false hits)\n", thr(grid.get(lossless)),
-                metric(keep.recall()), metric(keep.precision()), keep.falseReturnQueries(), keep.noRelevant(),
-                keep.falseHits()));
+        Optional<Integer> lossless = lastWithoutPositiveRelevantLoss();
+        if (lossless.isEmpty()) {
+            out.append("  Highest threshold losing no positive-similarity relevant hit: n/a — not evaluable: no "
+                    + "relevant hit with positive similarity at 0.00.\n");
+        } else {
+            PointSummary keep = summary("ALL", lossless.get());
+            out.append(fmt("  Highest threshold losing no positive-similarity relevant hit: %s — recall %s, prec %s, "
+                    + "no-relevant still returning %d/%d (%d false hits)\n", thr(grid.get(lossless.get())),
+                    metric(keep.recall()), metric(keep.precision()), keep.falseReturnQueries(), keep.noRelevant(),
+                    keep.falseHits()));
+        }
         Optional<Integer> silent = firstFullNoRelevantAbstention();
-        boolean evaluable = keep.noRelevant() > 0;
-        if (!evaluable) {
+        boolean negatives = !noRelevantRows().isEmpty();
+        if (!negatives) {
             out.append("  Full no-relevant abstention: n/a — not evaluable: no content-bearing no-relevant queries in "
                     + "this set (empty probes do not count).\n");
         } else if (silent.isEmpty()) {
@@ -380,11 +399,14 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
                     + "abstention %s\n", thr(grid.get(point)), metric(s.recall()), metric(s.precision()),
                     metric(s.coverage()), lost, uncovered, metric(s.abstention())));
         }
-        boolean separable = silent.isPresent() && silent.get() <= lossless;
-        if (!evaluable) {
+        if (!negatives) {
             out.append("  Tradeoff: n/a on this set — without no-relevant content queries, silencing wrong matches "
                     + "cannot be weighed against lost relevant hits.");
+        } else if (lossless.isEmpty()) {
+            out.append("  Tradeoff: n/a on this set — without positive-similarity relevant hits, lost relevant "
+                    + "matches cannot be weighed against silenced wrong matches.");
         } else {
+            boolean separable = silent.isPresent() && silent.get() <= lossless.get();
             out.append(separable
                     ? "  Tradeoff: on this set one declared threshold silences every no-relevant query without losing "
                     + "a positive-similarity relevant hit."

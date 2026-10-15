@@ -103,7 +103,7 @@ class ThresholdSweepTest {
         ThresholdSweepReport report = ThresholdSweep.sweep(stress(), GRID);
         assertEquals(Optional.of(report.point(0.25)), report.firstFullNoRelevantAbstention());
         // The 0.0 fill relevant hit of S92 is lost at 0.1 but does not count as a positive-similarity loss.
-        assertEquals(report.point(0.1), report.lastWithoutPositiveRelevantLoss());
+        assertEquals(Optional.of(report.point(0.1)), report.lastWithoutPositiveRelevantLoss());
         String text = report.render();
         assertTrue(text.contains("Lowest threshold at which every no-relevant content query abstains: 0.25"), text);
         assertFalse(text.contains(NOT_EVALUABLE), text);
@@ -123,6 +123,31 @@ class ThresholdSweepTest {
         ThresholdSweepReport report = ThresholdSweep.sweep(stress(s94(), s95(), stopwords), GRID);
         assertEquals(Kind.EMPTY, report.row("S96").kind(), "a stopwords-only probe is EMPTY, not NO_RELEVANT");
         assertNotEvaluable(report);
+    }
+
+    @Test
+    void contentFreeQueriesOutsideTheEmptyCategoryAreEmptyToo() {
+        QueryOutcome stopwords = outcome("S96", Category.NO_RELEVANT, "the and of", Set.of(), List.of());
+        QueryOutcome punctuation = outcome("S97", Category.NO_RELEVANT, "?!", Set.of(), List.of());
+        ThresholdSweepReport report = ThresholdSweep.sweep(stress(s91(), stopwords, punctuation), GRID);
+        assertEquals(Kind.EMPTY, report.row("S96").kind(), "no ranking at all: content-free, whatever the category");
+        assertEquals(Kind.EMPTY, report.row("S97").kind());
+        assertNotEvaluable(report);
+    }
+
+    @Test
+    void withoutPositiveSimilarityRelevantHitsTheLosslessPointIsNotEvaluable() {
+        for (QueryOutcome[] set : List.of(new QueryOutcome[] {s90(), s94()}, new QueryOutcome[] {s90(), s92()})) {
+            ThresholdSweepReport report = ThresholdSweep.sweep(stress(set), GRID);
+            assertEquals(Optional.empty(), report.lastWithoutPositiveRelevantLoss(), "nothing to lose is no evidence");
+            assertEquals(Optional.of(report.point(0.25)), report.firstFullNoRelevantAbstention());
+            String text = report.render();
+            assertTrue(text.contains("Highest threshold losing no positive-similarity relevant hit: n/a — not "
+                    + "evaluable: no relevant hit with positive similarity at 0.00."), text);
+            assertTrue(text.contains("Tradeoff: n/a on this set — without positive-similarity relevant hits"), text);
+            assertFalse(text.contains("without losing a positive-similarity relevant hit"), text);
+            assertFalse(text.contains(NOT_EVALUABLE), text);
+        }
     }
 
     @Test
