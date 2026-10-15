@@ -618,19 +618,7 @@ class FileSpeechFeatureStoreReadParityTest {
 
     /** Writes segment and index bytes directly so arbitrary raw float bits (e.g. NaN payloads) persist. */
     private void writeRawStore(List<int[]> vectors) throws IOException {
-        new FileSpeechFeatureStore(root);
-        int bytes = vectors.stream().mapToInt(bits -> Integer.BYTES + bits.length * Float.BYTES).sum();
-        var segment = ByteBuffer.allocate(bytes);
-        var index = new StringBuilder();
-        for (int v = 0; v < vectors.size(); v++) {
-            index.append("sample-").append(v).append('\t').append(segment.position()).append('\n');
-            segment.putInt(vectors.get(v).length);
-            for (int bits : vectors.get(v)) {
-                segment.putInt(bits);
-            }
-        }
-        Files.write(root.resolve(SEGMENT), segment.array());
-        Files.writeString(root.resolve(INDEX), index, StandardCharsets.UTF_8);
+        SpeechFeatureSegmentFixture.write(root, vectors);
     }
 
     private void truncateTo(long size) throws IOException {

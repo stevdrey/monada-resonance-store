@@ -1,12 +1,12 @@
 package com.monada.speech.storage;
 
 import com.monada.speech.storage.FileSpeechFeatureStore.ReadStats;
+import com.monada.speech.storage.SpeechFeatureSegmentFixture.Frame;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
+import java.io.RandomAccessFile;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -19,14 +19,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Pins the I/O structure of the windowed {@link FileSpeechFeatureStore#findAll()} (Issue #136) with deterministic
- * counters instead of timing: bytes read into the window, window refills and per-vector fallbacks. The parity test
- * pins results and errors; these catch efficiency-only regressions (rereads, needless fallbacks, full-window reads
- * per sparse entry) that leave results unchanged.
+ * counters instead of timing: bytes read and reread through the window, window refills, and per-vector fallbacks
+ * with the bytes they read. The parity test pins results and errors; these catch efficiency-only regressions
+ * (rereads, needless fallbacks, full-window reads per sparse entry) that leave results unchanged.
  */
 class FileSpeechFeatureStoreReadStructureTest {
 
-    private static final String SEGMENT = "features/speech-features-000001.f32";
-    private static final String INDEX = "indexes/speech-feature-map.idx";
     private static final int CAPACITY = FileSpeechFeatureStore.BULK_WINDOW_BYTES;
     private static final int GAP = FileSpeechFeatureStore.GAP_READ_BYTES;
 
@@ -35,13 +33,14 @@ class FileSpeechFeatureStoreReadStructureTest {
 
     @Test
     void appendOrderedSegmentSmallerThanTheWindowIsReadExactlyOnce() throws IOException {
-        var frames = writeStore(Collections.nCopies(100, 64)); // 26,000 bytes: one gap read, then one refill
+        var frames = writeStore(Collections.nCopies(100, 64)); // 26,000 bytes: the window is the segment
         long size = segmentSize();
-        assertTrue(size > GAP && size < CAPACITY);
+        assertTrue(size < CAPACITY);
 
         var stats = findAll(frames.size());
-        assertEquals(size, stats.windowBytesRead(), "no window byte may be read twice");
-        assertEquals(2, stats.windowFills());
+        assertEquals(size, stats.windowBytesRead(), "the whole segment is read through the window");
+        assertEquals(0, stats.windowBytesReread());
+        assertFillsWithin(stats, size, size, frames.getFirst().bytes());
         assertEquals(0, stats.perVectorReads());
     }
 
@@ -58,16 +57,13 @@ class FileSpeechFeatureStoreReadStructureTest {
         }
         var frames = writeStore(frameDims);
         long size = segmentSize();
-        long maxFrame = frameBytes(4_097);
 
         var stats = findAll(frames.size());
         assertEquals(size, stats.windowBytesRead(), "contiguous refills must keep the unread tail");
-        assertEquals(0, stats.perVectorReads());
-        // A GAP-sized first read, then refills to capacity that each keep less than one frame of tail.
-        long refillBound = 1 + ceilDiv(size - GAP, CAPACITY - maxFrame);
-        assertTrue(stats.windowFills() >= ceilDiv(size, CAPACITY), "fills=" + stats.windowFills());
-        assertTrue(stats.windowFills() <= refillBound, "fills=" + stats.windowFills() + " bound=" + refillBound);
+        assertEquals(0, stats.windowBytesReread());
+        assertFillsWithin(stats, size, CAPACITY, frameBytes(4_097));
         assertTrue(stats.channelReads() >= stats.windowFills());
+        assertEquals(0, stats.perVectorReads());
     }
 
     @Test
@@ -77,18 +73,29 @@ class FileSpeechFeatureStoreReadStructureTest {
             frameDims.add(1 + (i * 37) % 900);
         }
         var frames = writeStore(frameDims);
-        var order = new ArrayList<>(frames);
-        Collections.shuffle(order, new Random(136));
-        writeIndex(order);
         long size = segmentSize();
         assertTrue(size > CAPACITY, "segment must span several windows");
+        // Blocks of 8 keep the index nearly sorted, so frames often continue the window (tail carry-over); one block
+        // of every frame is a full shuffle, where most entries jump forward or fall behind the window.
+        for (int block : new int[]{8, frames.size()}) {
+            var random = new Random(136);
+            var order = new ArrayList<Frame>(frames.size());
+            for (int from = 0; from < frames.size(); from += block) {
+                var chunk = new ArrayList<>(frames.subList(from, Math.min(from + block, frames.size())));
+                Collections.shuffle(chunk, random);
+                order.addAll(chunk);
+            }
+            SpeechFeatureSegmentFixture.writeIndex(root, order);
 
-        var stats = findAll(frames.size());
-        // The window only moves forward and keeps its tail, so even a shuffled index stays within one segment read;
-        // entries behind the window take the per-vector path instead of rereading a window.
-        assertTrue(stats.windowBytesRead() <= size, "window bytes=" + stats.windowBytesRead() + " size=" + size);
-        assertTrue(stats.windowBytesRead() <= size + (long) frames.size() * GAP);
-        assertTrue(stats.perVectorReads() < frames.size());
+            var stats = findAll(frames.size());
+            // The window only moves forward and keeps its tail; entries behind it take the per-vector path, which
+            // reads exactly their frames.
+            assertEquals(0, stats.windowBytesReread(), "block=" + block);
+            assertTrue(stats.windowBytesRead() <= size, "block=" + block + " window bytes=" + stats.windowBytesRead());
+            assertTrue(stats.windowFills() > 1, "a shuffled index must still use the window");
+            assertTrue(stats.perVectorReads() > 0 && stats.perVectorReads() < frames.size(), "block=" + block);
+            assertTrue(stats.perVectorBytesRead() <= size, "block=" + block);
+        }
     }
 
     @Test
@@ -98,11 +105,12 @@ class FileSpeechFeatureStoreReadStructureTest {
         for (int i = 0; i < frames.size(); i += 64) {
             sparse.add(frames.get(i));
         }
-        writeIndex(sparse);
+        SpeechFeatureSegmentFixture.writeIndex(root, sparse);
 
         var stats = findAll(sparse.size());
         assertTrue(stats.windowBytesRead() <= (long) sparse.size() * GAP,
                 "window bytes=" + stats.windowBytesRead() + " for " + sparse.size() + " sparse entries");
+        assertEquals(0, stats.windowBytesReread());
         assertEquals(sparse.size(), stats.windowFills());
         assertEquals(0, stats.perVectorReads());
     }
@@ -116,37 +124,58 @@ class FileSpeechFeatureStoreReadStructureTest {
         var stats = findAll(frames.size());
         assertEquals(0, stats.perVectorReads());
         assertEquals(segmentSize(), stats.windowBytesRead());
+        assertEquals(0, stats.windowBytesReread());
     }
 
     @Test
-    void frameOneValueLargerThanTheWindowUsesOnePerVectorRead() throws IOException {
+    void frameOneValueLargerThanTheWindowUsesOnePerVectorReadOfExactlyItsFrame() throws IOException {
         int above = (CAPACITY - Integer.BYTES) / Float.BYTES + 1;
         var frames = writeStore(List.of(64, above, 3));
         assertEquals(CAPACITY + Float.BYTES, frames.get(1).bytes());
 
         var stats = findAll(frames.size());
         assertEquals(1, stats.perVectorReads());
+        assertEquals(frames.get(1).bytes(), stats.perVectorBytesRead());
+        assertEquals(0, stats.windowBytesReread());
     }
 
     @Test
     void reversedIndexReadsTheLastFrameThroughTheWindowAndTheRestPerVector() throws IOException {
         int count = 50;
         var frames = writeStore(Collections.nCopies(count, 64));
-        writeIndex(frames.reversed());
+        SpeechFeatureSegmentFixture.writeIndex(root, frames.reversed());
 
         var stats = findAll(count);
         assertEquals(count - 1, stats.perVectorReads());
+        assertEquals(segmentSize() - frames.getLast().bytes(), stats.perVectorBytesRead(),
+                "each fallback reads exactly its own frame");
         assertEquals(1, stats.windowFills());
         assertEquals(frames.getLast().bytes(), stats.windowBytesRead());
     }
 
     @Test
-    void publicFindAllCountsNothing() throws IOException {
-        writeStore(List.of(64, 3, 777));
-        assertEquals(3, new FileSpeechFeatureStore(root).findAll().size());
+    void countersAreDeterministicAndThePublicPathRecordsNothing() throws IOException {
+        var frames = writeStore(List.of(64, 3, 777, 4_097, 1));
+        var order = new ArrayList<>(frames);
+        Collections.shuffle(order, new Random(7));
+        SpeechFeatureSegmentFixture.writeIndex(root, order);
+
+        // NONE discards every record, even when called directly.
         var none = ReadStats.NONE;
-        assertEquals(List.of(0L, 0L, 0L, 0L),
-                List.of(none.windowFills(), none.channelReads(), none.windowBytesRead(), none.perVectorReads()));
+        none.windowFill();
+        none.channelRead(0, 100);
+        try (var file = new RandomAccessFile(root.resolve(SpeechFeatureSegmentFixture.SEGMENT).toFile(), "r")) {
+            file.seek(40);
+            none.perVectorRead(file, 0);
+        }
+        assertEquals(List.of(0L, 0L, 0L, 0L, 0L, 0L), counts(none));
+
+        // Fresh counters give identical counts on every run, and the public findAll() leaves them untouched.
+        var first = findAll(frames.size());
+        var firstCounts = counts(first);
+        new FileSpeechFeatureStore(root).findAll();
+        assertEquals(firstCounts, counts(first));
+        assertEquals(firstCounts, counts(findAll(frames.size())));
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -168,45 +197,41 @@ class FileSpeechFeatureStoreReadStructureTest {
         return stats;
     }
 
-    private record Frame(String sampleId, long offset, int bytes) {
+    /**
+     * An append-ordered read of {@code size} bytes needs at least {@code ceil(size / capacity)} fills and at most
+     * one gap read of {@link FileSpeechFeatureStore#GAP_READ_BYTES} followed by refills to capacity that each keep
+     * less than one frame of tail.
+     */
+    private static void assertFillsWithin(ReadStats stats, long size, long capacity, long maxFrame) {
+        long min = Math.ceilDiv(size, capacity);
+        long max = 1 + Math.ceilDiv(Math.max(0, size - GAP), capacity - maxFrame);
+        assertTrue(stats.windowFills() >= min && stats.windowFills() <= max,
+                "fills=" + stats.windowFills() + " expected within [" + min + ", " + max + "]");
+    }
+
+    private static List<Long> counts(ReadStats stats) {
+        return List.of(stats.windowFills(), stats.channelReads(), stats.windowBytesRead(),
+                stats.windowBytesReread(), stats.perVectorReads(), stats.perVectorBytesRead());
     }
 
     /** Writes frames of the given dimensions back to back with an append-ordered index; returns them in order. */
     private List<Frame> writeStore(List<Integer> dimensions) throws IOException {
-        new FileSpeechFeatureStore(root);
-        long total = dimensions.stream().mapToLong(FileSpeechFeatureStoreReadStructureTest::frameBytes).sum();
-        var segment = ByteBuffer.allocate(Math.toIntExact(total));
-        var frames = new ArrayList<Frame>(dimensions.size());
+        var rawBits = new ArrayList<int[]>(dimensions.size());
         for (int i = 0; i < dimensions.size(); i++) {
-            int d = dimensions.get(i);
-            frames.add(new Frame("sample-" + i, segment.position(), Math.toIntExact(frameBytes(d))));
-            segment.putInt(d);
-            for (int v = 0; v < d; v++) {
-                segment.putFloat(i * 10_000f + v + 0.5f);
+            int[] bits = new int[dimensions.get(i)];
+            for (int v = 0; v < bits.length; v++) {
+                bits[v] = Float.floatToRawIntBits(i * 10_000f + v + 0.5f);
             }
+            rawBits.add(bits);
         }
-        Files.write(root.resolve(SEGMENT), segment.array());
-        writeIndex(frames);
-        return frames;
-    }
-
-    private void writeIndex(List<Frame> frames) throws IOException {
-        var index = new StringBuilder();
-        for (var frame : frames) {
-            index.append(frame.sampleId()).append('\t').append(frame.offset()).append('\n');
-        }
-        Files.writeString(root.resolve(INDEX), index, StandardCharsets.UTF_8);
+        return SpeechFeatureSegmentFixture.write(root, rawBits);
     }
 
     private long segmentSize() throws IOException {
-        return Files.size(root.resolve(SEGMENT));
+        return Files.size(root.resolve(SpeechFeatureSegmentFixture.SEGMENT));
     }
 
     private static long frameBytes(int dimensions) {
         return Integer.BYTES + (long) dimensions * Float.BYTES;
-    }
-
-    private static long ceilDiv(long a, long b) {
-        return Math.ceilDiv(a, b);
     }
 }

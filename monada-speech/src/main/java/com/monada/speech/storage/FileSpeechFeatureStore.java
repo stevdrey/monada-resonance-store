@@ -203,9 +203,10 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
     private FrequencyVector readPerVector(
             RandomAccessFile file, String sampleId, long offset, ChunkedFloatReader floatReader, ReadStats stats)
             throws IOException {
-        stats.perVectorRead();
         file.seek(offset);
-        return readVector(file, sampleId, offset, floatReader);
+        var vector = readVector(file, sampleId, offset, floatReader);
+        stats.perVectorRead(file, offset);
+        return vector;
     }
 
     /**
@@ -302,9 +303,11 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
 
     /**
      * Read counters of one {@link #findAll(ReadStats)} call: window refills, positional channel reads (including the
-     * one that reports end of segment), bytes read into the window, and frames read by the per-vector path. They
-     * describe the structure of the reads only (no timing), so tests can bound rereads and fallbacks
-     * deterministically. {@link #NONE} discards everything and is what {@link #findAll()} uses. Not thread-safe.
+     * one that reports end of segment), bytes read into the window, window bytes read at or below a segment offset
+     * the window had already read (rereads), and frames and bytes (file-pointer advance) read by the per-vector path.
+     * They describe the structure of the reads only (no timing), so tests can bound rereads and fallbacks
+     * deterministically. Per-vector bytes catch overreads but not how many calls a fallback makes. {@link #NONE}
+     * discards everything (no extra I/O) and is what {@link #findAll()} uses. Not thread-safe.
      */
     static class ReadStats {
         static final ReadStats NONE = new ReadStats() {
@@ -313,32 +316,40 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
             }
 
             @Override
-            void channelRead(int bytes) {
+            void channelRead(long position, int bytes) {
             }
 
             @Override
-            void perVectorRead() {
+            void perVectorRead(RandomAccessFile file, long offset) {
             }
         };
 
         private long windowFills;
         private long channelReads;
         private long windowBytesRead;
+        private long windowBytesReread;
+        private long windowHighWater;
         private long perVectorReads;
+        private long perVectorBytesRead;
 
         void windowFill() {
             windowFills++;
         }
 
-        void channelRead(int bytes) {
+        /** Records a positional read of {@code bytes} (negative at end of segment) at segment {@code position}. */
+        void channelRead(long position, int bytes) {
             channelReads++;
             if (bytes > 0) {
                 windowBytesRead += bytes;
+                windowBytesReread += Math.max(0, Math.min(position + bytes, windowHighWater) - position);
+                windowHighWater = Math.max(windowHighWater, position + bytes);
             }
         }
 
-        void perVectorRead() {
+        /** Records a per-vector read that started at {@code offset} and left the file pointer after its frame. */
+        void perVectorRead(RandomAccessFile file, long offset) throws IOException {
             perVectorReads++;
+            perVectorBytesRead += file.getFilePointer() - offset;
         }
 
         long windowFills() {
@@ -353,8 +364,16 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
             return windowBytesRead;
         }
 
+        long windowBytesReread() {
+            return windowBytesReread;
+        }
+
         long perVectorReads() {
             return perVectorReads;
+        }
+
+        long perVectorBytesRead() {
+            return perVectorBytesRead;
         }
     }
 
@@ -419,8 +438,9 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
             buffer.clear().limit(target).position(keep);
             stats.windowFill();
             while (buffer.hasRemaining()) { // positional reads until the target is buffered or the segment ends
-                int read = channel.read(buffer, offset + buffer.position());
-                stats.channelRead(read);
+                long position = offset + buffer.position();
+                int read = channel.read(buffer, position);
+                stats.channelRead(position, read);
                 if (read < 0) {
                     break;
                 }

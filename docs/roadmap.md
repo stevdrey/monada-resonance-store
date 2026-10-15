@@ -112,13 +112,16 @@ The project follows a measurement-first path: improve retrieval quality only aft
   from ~22.8 ms to ~3.7 ms (128 dims) (warm page cache, single machine, exploratory). Format, index, API and defaults are unchanged,
   and generated speech evaluation output is byte-identical. Not done here: cross-query caching and dedup of superseded entries.
 - Structural I/O checks for the windowed speech read (follow-up to Issue #136): a package-private `findAll(ReadStats)` counts
-  window refills, channel reads, bytes read into the window and per-vector fallbacks (public `findAll()` passes a no-op
-  instance, so API, results, ordering and errors are unchanged). `FileSpeechFeatureStoreReadStructureTest` asserts, without
-  timing: an append-ordered segment is read exactly once (window bytes == segment size), multi-window refills stay bounded, a
-  shuffled index never reads a window byte twice, a sparse index reads at most one 8 KiB gap read per entry, an exactly
-  window-sized frame is decoded from the window while one 4 bytes larger uses one fallback, and a reversed index of N entries
-  uses N-1 fallbacks. Two efficiency-only mutants that the parity test cannot see (dropping the tail carry-over; sending an
-  exactly window-sized frame to the fallback) now fail. Speech evaluation output is byte-identical.
+  window refills, channel reads, bytes read and reread through the window (reread = at or below the furthest offset already
+  read), and per-vector fallbacks with the bytes they read (file-pointer advance; it catches overreads, not call counts). Public
+  `findAll()` passes a no-op instance, so API, results, ordering and errors are unchanged and production makes no extra calls.
+  `FileSpeechFeatureStoreReadStructureTest` asserts, without timing: an append-ordered segment is read exactly once with refills
+  bounded by the window and gap sizes; nearly sorted and fully shuffled indexes reread no window byte; a sparse index reads at
+  most one 8 KiB gap read per entry; an exactly window-sized frame is decoded from the window, while one 4 bytes larger uses one
+  fallback that reads exactly its frame; a reversed index of N entries uses N-1 fallbacks; and counters are deterministic
+  across runs and untouched by the public path. Two efficiency-only mutants that the parity test cannot see (dropping the tail
+  carry-over; sending an exactly window-sized frame to the fallback) now fail. Test segments are written by a shared
+  `SpeechFeatureSegmentFixture`. Speech evaluation output is byte-identical.
 - Exact bounded top-K experiment (Issue #120): experimental `ExactBoundedTopKSelector` (bounded min-heap over the deduplicated
   candidates, production comparator score desc / atom id asc) and `ExperimentalBoundedTopKLinearScanIndex` (same scan, threshold and
   keep-max dedup, selector instead of sort+truncate) live in the unstable `com.monada.index.experimental` package and are never
