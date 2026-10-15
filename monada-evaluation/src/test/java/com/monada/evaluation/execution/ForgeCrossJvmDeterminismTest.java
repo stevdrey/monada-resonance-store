@@ -8,12 +8,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -32,6 +36,9 @@ class ForgeCrossJvmDeterminismTest {
     private static final int JVMS = 6;
     private static final String TIMING = "== Elapsed timing";
 
+    /** Commands in this package that print no evaluation report, so there is nothing to compare across JVMs. */
+    private static final Set<Class<?>> NOT_REPORT_COMMANDS = Set.of(ExperienceExportMain.class);
+
     private record Result(int exit, String out, String err) {
     }
 
@@ -39,7 +46,26 @@ class ForgeCrossJvmDeterminismTest {
     static Stream<Arguments> commands() {
         return Stream.of(Arguments.of(ForgeExperienceEvaluationMain.class, "READY_FOR_HOST_ADAPTER_EXPERIMENT"),
                 Arguments.of(MultiAttemptEvaluationMain.class, "ATTEMPT_JOINS_VERIFIED"),
-                Arguments.of(RecallStressEvaluationMain.class, "STRESS_SET_CHARACTERIZED"));
+                Arguments.of(RecallStressEvaluationMain.class, "STRESS_SET_CHARACTERIZED"),
+                Arguments.of(ThresholdSweepMain.class, "SWEEP_CHARACTERIZED"));
+    }
+
+    /** A new evaluation command fails here until it is added to {@link #commands()} or, if it prints no report, excluded. */
+    @Test
+    void everyEvaluationCommandIsCovered() throws Exception {
+        Path classes = Path.of(ThresholdSweepMain.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+        Path dir = classes.resolve(ThresholdSweepMain.class.getPackageName().replace('.', '/'));
+        Set<String> found;
+        try (Stream<Path> files = Files.list(dir)) {
+            found = files.map(f -> f.getFileName().toString())
+                    .filter(n -> n.endsWith("Main.class") && !n.contains("$"))
+                    .map(n -> ThresholdSweepMain.class.getPackageName() + "." + n.substring(0, n.length() - 6))
+                    .collect(Collectors.toCollection(java.util.TreeSet::new));
+        }
+        Set<String> covered = Stream.concat(commands().map(a -> (Class<?>) a.get()[0]), NOT_REPORT_COMMANDS.stream())
+                .map(Class::getName)
+                .collect(Collectors.toCollection(java.util.TreeSet::new));
+        assertEquals(found, covered, "every *Main in " + dir + " must be in commands() or NOT_REPORT_COMMANDS");
     }
 
     @ParameterizedTest(name = "{0}")
