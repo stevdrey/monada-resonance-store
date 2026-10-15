@@ -141,17 +141,19 @@ public final class RecallStressEvaluator {
     /** Classifies the ranking of one query against its judgments and computes its exploratory metrics. */
     static QueryOutcome outcome(ForgeFixture corpus, StressQuery q, String projectionState, List<Observed> observed,
                                 List<Integer> ks, int deepestK) {
+        Judgments judgments = Judgments.of(corpus, q);
         List<Hit> hits = new ArrayList<>();
         for (int i = 0; i < observed.size(); i++) {
             Observed o = observed.get(i);
             boolean tie = i > 0 && observed.get(i - 1).similarity() == o.similarity();
-            hits.add(new Hit(i + 1, o.experienceId(), o.similarity(), tie, neighbour(corpus, q, o)));
+            hits.add(new Hit(i + 1, o.experienceId(), o.similarity(), tie, neighbour(corpus, judgments, o)));
         }
         List<String> ids = hits.stream().map(Hit::experienceId).toList();
         Optional<Neighbour> lead = hits.isEmpty() || !hits.get(0).neighbour().falseNeighbour() ? Optional.empty()
                 : Optional.of(hits.get(0).neighbour());
         if (q.relevant().isEmpty()) {
-            Reason reason = hits.isEmpty() ? Reason.EMPTY_AS_EXPECTED : Reason.FALSE_NEIGHBOURS_RETURNED;
+            Reason reason = !hits.isEmpty() ? Reason.FALSE_NEIGHBOURS_RETURNED
+                    : q.text().isBlank() ? Reason.EMPTY_AS_EXPECTED : Reason.NO_HITS;
             return new QueryOutcome(q, projectionState, hits, List.of(), Map.of(), Map.of(), 0.0, reason, lead);
         }
         List<RelevantPosition> positions = new ArrayList<>();
@@ -188,27 +190,36 @@ public final class RecallStressEvaluator {
         if (first > 1) {
             return Reason.OUTRANKED;
         }
-        boolean allWithinK = positions.stream().allMatch(p -> p.retrieved() && p.rank() <= deepestK);
-        return allWithinK ? Reason.RESOLVED : Reason.PARTIAL_RECALL;
+        // A zero-similarity fill hit is a tie-order artefact, not a match: it never makes a query RESOLVED.
+        boolean allMatchedWithinK = positions.stream()
+                .allMatch(p -> p.retrieved() && p.rank() <= deepestK && p.similarity() > 0.0);
+        return allMatchedWithinK ? Reason.RESOLVED : Reason.PARTIAL_RECALL;
+    }
+
+    /** A query's judgments with the executions and tasks of its relevant experiences, derived once per query. */
+    record Judgments(Set<String> relevant, Set<String> confusable, Set<String> relevantExecutions,
+                     Set<String> relevantTasks) {
+        static Judgments of(ForgeFixture corpus, StressQuery q) {
+            Set<String> executions = q.relevant().stream().map(RecallStressFixture::executionOf)
+                    .collect(Collectors.toSet());
+            Set<String> tasks = executions.stream().map(e -> corpus.execution(e).task()).collect(Collectors.toSet());
+            return new Judgments(q.relevant(), q.confusable(), executions, tasks);
+        }
     }
 
     /** The category of one hit, in the precedence order documented on {@link Neighbour}. */
-    static Neighbour neighbour(ForgeFixture corpus, StressQuery q, Observed hit) {
-        if (q.relevant().contains(hit.experienceId())) {
+    static Neighbour neighbour(ForgeFixture corpus, Judgments j, Observed hit) {
+        if (j.relevant().contains(hit.experienceId())) {
             return Neighbour.RELEVANT;
         }
-        if (q.confusable().contains(hit.experienceId())) {
+        if (j.confusable().contains(hit.experienceId())) {
             return Neighbour.JUDGED_CONFUSABLE;
         }
-        Set<String> relevantExecutions = q.relevant().stream().map(RecallStressFixture::executionOf)
-                .collect(Collectors.toSet());
-        if (relevantExecutions.contains(hit.execution())) {
+        if (j.relevantExecutions().contains(hit.execution())) {
             return Neighbour.SAME_EXECUTION;
         }
-        Set<String> relevantTasks = relevantExecutions.stream().map(e -> corpus.execution(e).task())
-                .collect(Collectors.toSet());
         Optional<String> task = corpus.findExecution(hit.execution()).map(ForgeFixture.Execution::task);
-        if (task.isPresent() && relevantTasks.contains(task.get())) {
+        if (task.isPresent() && j.relevantTasks().contains(task.get())) {
             return Neighbour.SAME_TASK;
         }
         return hit.similarity() > 0.0 ? Neighbour.LEXICAL_NEIGHBOUR : Neighbour.ZERO_SIMILARITY;
@@ -304,8 +315,9 @@ public final class RecallStressEvaluator {
         }
         long passed = baseline.gates().stream().filter(ForgeGate::passed).count();
         return ForgeGate.of(RecallStressReport.BASELINE_PARITY,
-                "the #102 evaluation still passes and its rankings are reproduced unchanged", violations,
+                "the #102 evaluation passes and its rankings equal this runner's (same code: a regression "
+                        + "against main needs the before/after report diff)", violations,
                 List.of("#102 decision: " + baseline.decision() + " (" + passed + "/" + baseline.gates().size()
-                        + " gates); baseline rankings compared: " + baselineQueries.size()));
+                        + " gates); baseline rankings compared with the #102 pipeline: " + baselineQueries.size()));
     }
 }

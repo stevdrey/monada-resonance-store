@@ -217,12 +217,14 @@ from their own fixture and reported as the `BASELINE` group.
 
 `./gradlew :monada-evaluation:runForgeRecallStress -q` reports per query every rank and similarity, relevant positions,
 misses outside the top 5, a reason (`RESOLVED`, `PARTIAL_RECALL`, `OUTRANKED`, `NOT_IN_TOP_K`, `ZERO_SIMILARITY_ONLY`,
-`NOT_RETRIEVED`, `EMPTY_AS_EXPECTED`, `FALSE_NEIGHBOURS_RETURNED`) and a category per hit (`RELEVANT`,
+`NOT_RETRIEVED`, `EMPTY_AS_EXPECTED` for blank queries, `NO_HITS` for non-blank queries without a hit,
+`FALSE_NEIGHBOURS_RETURNED`; a zero-similarity fill hit never makes a query `RESOLVED`) and a category per hit (`RELEVANT`,
 `JUDGED_CONFUSABLE`, `SAME_EXECUTION`, `SAME_TASK`, `LEXICAL_NEIGHBOUR`, `ZERO_SIMILARITY`), plus Hit@K, Recall@K and
 MRR per category with zero-relevant queries listed and excluded from every denominator. Four hard checks decide the
 exit code (`RS1` scoped CURRENT recall, `RS2` blank queries return nothing, `RS3` two fresh stores rank identically,
-`RS4` the #102 evaluation still passes and its rankings are reproduced); metrics are EXPLORATORY, have no threshold
-and are not a protected baseline.
+`RS4` the #102 evaluation passes and its rankings equal this runner's; both run the same code, so a regression against
+`main` shows only in a before/after report diff); metrics are EXPLORATORY, have no threshold and are not a protected
+baseline.
 
 Observed on 2026-10-14 (all hard checks pass; ALL_STRESS: 18 scored, 8 excluded; Hit@1 0.61, Recall@5 0.84, MRR 0.75
 against BASELINE Hit@1 1.00, Recall@5 0.97, MRR 1.00):
@@ -230,12 +232,13 @@ against BASELINE Hit@1 1.00, Recall@5 0.97, MRR 1.00):
 - **Synonyms are the weakest group** (Hit@1 0.33, MRR 0.44): S06 ("resend undelivered callbacks") retrieves no webhook
   attempt within 50 hits; S04 reaches its relevant attempts only as zero-similarity fill (`ZERO_SIMILARITY_ONLY`).
 - **Terminology** (Hit@1 0.25): abbreviations and jargon ("NPE", "idempotent consumer") rank lexical neighbours first.
-- **Negation is invisible to lexical recall**: in S07 and S09 the excluded approach ranks #1 (`JUDGED_CONFUSABLE`).
+- **Negation is invisible to lexical recall**: in S07 and S09 the excluded approach ranks #1 (`JUDGED_CONFUSABLE`); the
+  same offset attempt also leads the cursor-paging query S13.
 - **No relevance floor**: every no-relevant query returns confusable neighbours, up to similarity 0.51 (S10, reverse
   migration) — above the similarity of several relevant hits elsewhere, so a single host threshold cannot separate
   them on this corpus.
 - Duplicate summaries and relation/preposition variants resolve at Hit@1 1.00; punctuation-only and stopword-only
-  queries return no hit, like blank queries.
+  queries return no hit (`NO_HITS`: observed, not promised by any contract).
 
 These are 26 queries over 25 experiences: they localize failure modes for Next Steps 5/10 and 6/10, not statistical
 claims. Not changed: encoders, `summary-text-v1`, query keys, thresholds, `forge-experience-v1` and its seven gates

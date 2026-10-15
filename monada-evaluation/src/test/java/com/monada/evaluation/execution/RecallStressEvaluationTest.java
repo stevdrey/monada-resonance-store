@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.monada.evaluation.execution.RecallStressEvaluator.Judgments;
 import com.monada.evaluation.execution.RecallStressEvaluator.Observation;
 import com.monada.evaluation.execution.RecallStressEvaluator.Observed;
 import com.monada.evaluation.execution.RecallStressFixture.Category;
@@ -96,18 +97,24 @@ class RecallStressEvaluationTest {
             assertTrue(report.outcome(id).hits().isEmpty(), id);
             assertEquals(Reason.EMPTY_AS_EXPECTED, report.outcome(id).reason());
         }
+        for (String id : List.of("S25", "S26")) { // not blank: zero hits observed, but no contract promises them
+            assertTrue(report.outcome(id).hits().isEmpty(), id);
+            assertEquals(Reason.NO_HITS, report.outcome(id).reason());
+        }
         QueryOutcome s19 = report.outcome("S19");
         assertEquals(Reason.FALSE_NEIGHBOURS_RETURNED, s19.reason());
         assertTrue(s19.hits().stream().allMatch(h -> h.neighbour().falseNeighbour()));
     }
 
     @Test
-    void baselineRankingsEqualThe102Evaluation() {
-        ForgeEvaluationReport baseline = ForgeExperienceEvaluator.evaluate(fixture.corpus(), work.resolve("b102"));
-        assertTrue(baseline.allGatesPassed(), baseline.render());
-        for (ForgeQueryResult r : baseline.queries()) {
-            assertEquals(r.rankedIds(), report.outcome(r.query().id()).rankedIds(), r.query().id());
-        }
+    void baselineParityCheckCoversEvery102Query() {
+        ForgeGate rs4 = report.gates().stream().filter(g -> g.id().equals(RecallStressReport.BASELINE_PARITY))
+                .findFirst().orElseThrow();
+        assertTrue(rs4.passed(), rs4.details().toString());
+        assertTrue(rs4.details().get(0).contains("READY_FOR_HOST_ADAPTER_EXPERIMENT (7/7 gates)"), rs4.details().get(0));
+        assertTrue(rs4.details().get(0).endsWith(": " + fixture.queriesOf(Category.BASELINE).size()),
+                rs4.details().get(0));
+        assertFalse(report.render().contains("rankings are reproduced"), "RS4 must not claim more than parity");
     }
 
     @Test
@@ -116,8 +123,8 @@ class RecallStressEvaluationTest {
         int exit = RecallStressEvaluationMain.run(new PrintStream(bytes, true, StandardCharsets.UTF_8));
         String out = bytes.toString(StandardCharsets.UTF_8);
         assertEquals(0, exit, out);
+        assertTrue(out.startsWith("Forge Recall Stress Set (issue #122)\n"), out);
         assertTrue(out.indexOf("STRESS_SET_CHARACTERIZED") < out.indexOf("== Elapsed timing"));
-        assertEquals(report.render(), out.substring(0, out.indexOf("\n== Elapsed timing")));
     }
 
     // ---------------------------------------------------------------- classifiers on synthetic input
@@ -125,7 +132,9 @@ class RecallStressEvaluationTest {
     @Test
     void hitCategoriesFollowTheirPrecedence() {
         ForgeFixture corpus = fixture.corpus();
-        StressQuery q = query(Set.of("a-inv1/a2"), Set.of("a-inv3/a1"));
+        Judgments q = Judgments.of(corpus, query(Set.of("a-inv1/a2"), Set.of("a-inv3/a1")));
+        assertEquals(Set.of("a-inv1"), q.relevantExecutions());
+        assertEquals(Set.of("task-invoice-null"), q.relevantTasks());
         assertEquals(Neighbour.RELEVANT, RecallStressEvaluator.neighbour(corpus, q, hit("a-inv1/a2", 0.0)));
         assertEquals(Neighbour.JUDGED_CONFUSABLE, RecallStressEvaluator.neighbour(corpus, q, hit("a-inv3/a1", 0.0)));
         assertEquals(Neighbour.SAME_EXECUTION, RecallStressEvaluator.neighbour(corpus, q, hit("a-inv1/a1", 0.5)));
@@ -137,12 +146,27 @@ class RecallStressEvaluationTest {
     @Test
     void queryReasonsFollowTheTaxonomy() {
         assertEquals(Reason.RESOLVED, reason(pos(1, 0.5), pos(5, 0.1)));
+        assertEquals(Reason.PARTIAL_RECALL, reason(pos(1, 0.5), pos(5, 0.0))); // fill within K is not a match
         assertEquals(Reason.PARTIAL_RECALL, reason(pos(1, 0.5), pos(6, 0.1)));
         assertEquals(Reason.PARTIAL_RECALL, reason(pos(1, 0.5), pos(0, 0.0)));
         assertEquals(Reason.OUTRANKED, reason(pos(2, 0.5)));
         assertEquals(Reason.NOT_IN_TOP_K, reason(pos(6, 0.5)));
         assertEquals(Reason.ZERO_SIMILARITY_ONLY, reason(pos(1, 0.0), pos(3, 0.0)));
         assertEquals(Reason.NOT_RETRIEVED, reason(pos(0, 0.0)));
+    }
+
+    @Test
+    void zeroHitsAreExpectedOnlyForBlankQueries() {
+        StressQuery blank = new StressQuery("T02", Category.EMPTY_QUERY, "EMPTY_QUERY", "alpha", " ", Set.of(),
+                Set.of(), "synthetic");
+        StressQuery words = new StressQuery("T03", Category.EMPTY_QUERY, "EMPTY_QUERY", "alpha", "the of", Set.of(),
+                Set.of(), "synthetic");
+        assertEquals(Reason.EMPTY_AS_EXPECTED,
+                RecallStressEvaluator.outcome(fixture.corpus(), blank, "CURRENT", List.of(), List.of(1, 3, 5), 5).reason());
+        assertEquals(Reason.NO_HITS,
+                RecallStressEvaluator.outcome(fixture.corpus(), words, "CURRENT", List.of(), List.of(1, 3, 5), 5).reason());
+        assertEquals(Reason.FALSE_NEIGHBOURS_RETURNED, RecallStressEvaluator.outcome(fixture.corpus(), words,
+                "CURRENT", List.of(hit("a-page/a1", 0.1)), List.of(1, 3, 5), 5).reason());
     }
 
     @Test

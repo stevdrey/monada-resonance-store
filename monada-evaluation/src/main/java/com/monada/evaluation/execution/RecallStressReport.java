@@ -30,7 +30,7 @@ public record RecallStressReport(String fixtureVersion, String provenance, Strin
     public static final String SCOPED_RECALL = "RS1-SCOPED-RECALL";
     public static final String BLANK_QUERY = "RS2-BLANK-QUERY-NO-HITS";
     public static final String DETERMINISM = "RS3-DETERMINISM";
-    public static final String BASELINE_PARITY = "RS4-BASELINE-102-PARITY";
+    public static final String BASELINE_PARITY = "RS4-BASELINE-102-PIPELINE-PARITY";
 
     public enum Decision { STRESS_SET_CHARACTERIZED, CHECKS_FAILED }
 
@@ -50,16 +50,18 @@ public record RecallStressReport(String fixtureVersion, String provenance, Strin
 
     /**
      * Per-query failure taxonomy, derived only from observed ranks and the hand judgments. With relevant
-     * experiences: {@code RESOLVED} (a relevant hit at #1 and every relevant one within the deepest K),
-     * {@code PARTIAL_RECALL} (relevant at #1, some relevant deeper or missing), {@code OUTRANKED} (first relevant
-     * within the deepest K but below #1), {@code NOT_IN_TOP_K} (first relevant deeper than K),
-     * {@code ZERO_SIMILARITY_ONLY} (relevant experiences appear only as zero-similarity limit fill, so their ranks
-     * are tie-order artefacts, not lexical matches) and {@code NOT_RETRIEVED}. Without: {@code EMPTY_AS_EXPECTED} or
+     * experiences: {@code RESOLVED} (a relevant hit at #1 and every relevant one within the deepest K with a
+     * similarity above 0), {@code PARTIAL_RECALL} (relevant at #1, some relevant deeper, missing or reached only as
+     * zero-similarity fill), {@code OUTRANKED} (first relevant within the deepest K but below #1),
+     * {@code NOT_IN_TOP_K} (first relevant deeper than K), {@code ZERO_SIMILARITY_ONLY} (relevant experiences appear
+     * only as zero-similarity limit fill, so their ranks are tie-order artefacts, not lexical matches) and
+     * {@code NOT_RETRIEVED}. Without: {@code EMPTY_AS_EXPECTED} (a blank query, whose zero hits the contract
+     * guarantees), {@code NO_HITS} (a non-blank query with no hit, which no contract promises) or
      * {@code FALSE_NEIGHBOURS_RETURNED}. Rank-based metrics still count fill hits, exactly as the #102 report does.
      */
     public enum Reason {
         RESOLVED, PARTIAL_RECALL, OUTRANKED, NOT_IN_TOP_K, ZERO_SIMILARITY_ONLY, NOT_RETRIEVED, EMPTY_AS_EXPECTED,
-        FALSE_NEIGHBOURS_RETURNED
+        NO_HITS, FALSE_NEIGHBOURS_RETURNED
     }
 
     /** One ranked hit; {@code tie} marks a similarity equal to the previous hit's (order then follows atom id). */
@@ -234,8 +236,10 @@ public record RecallStressReport(String fixtureVersion, String provenance, Strin
         out.append("  ").append(d).append('\n');
         out.append(d == Decision.STRESS_SET_CHARACTERIZED
                 ? "  Every hard check passed: recall stayed in scope, blank queries returned nothing, two fresh stores "
-                + "ranked identically and the #102 baseline rankings are reproduced. The metrics above characterize "
-                + "the current exact lexical recall; they are exploratory evidence, not a quality claim or a gate.\n"
+                + "ranked identically and the #102 evaluation passes with the same rankings as this runner (same "
+                + "code: a regression against main shows only in a before/after report diff). The metrics above "
+                + "characterize the current exact lexical recall; they are exploratory evidence, not a quality claim "
+                + "or a gate.\n"
                 : "  At least one hard check failed: the characterization is not trustworthy until it is fixed.\n");
         return out.toString();
     }

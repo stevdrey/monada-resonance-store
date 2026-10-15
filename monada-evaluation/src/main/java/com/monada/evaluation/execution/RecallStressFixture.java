@@ -111,6 +111,12 @@ public record RecallStressFixture(String version, String provenance, String judg
 
     /** Structural checks of the judgments; a violation is a fixture bug and aborts loading. */
     void validate() {
+        // Checked first: deepest K is the last value, so the order matters even when the corpus agrees.
+        for (int i = 1; i < ks.size(); i++) {
+            if (ks.get(i) <= ks.get(i - 1)) {
+                throw new IllegalStateException("metric K values must be strictly ascending: " + ks);
+            }
+        }
         if (recallLimit != corpus.recallLimit() || !ks.equals(corpus.ks())) {
             throw new IllegalStateException("recall limit and metric K values must equal those of the #102 corpus");
         }

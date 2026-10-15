@@ -107,6 +107,22 @@ class RecallStressFixtureTest {
     }
 
     @Test
+    void rejectsMetricKValuesThatAreNotStrictlyAscending() {
+        for (List<Integer> ks : List.of(List.of(5, 3, 1), List.of(1, 3, 3))) {
+            RecallStressFixture copy = new RecallStressFixture(FIXTURE.version(), FIXTURE.provenance(),
+                    FIXTURE.judgmentProtocol(), FIXTURE.reviewer(), FIXTURE.corpus(), FIXTURE.recallLimit(), ks,
+                    FIXTURE.queries());
+            IllegalStateException e = assertThrows(IllegalStateException.class, copy::validate);
+            assertTrue(e.getMessage().contains("strictly ascending"), e.getMessage());
+        }
+    }
+
+    @Test
+    void cursorAndNegatedQueriesJudgeTheOffsetAttemptAlike() {
+        assertEquals(FIXTURE.query("S07").orElseThrow().confusable(), FIXTURE.query("S13").orElseThrow().confusable());
+    }
+
+    @Test
     void rejectsADuplicateQueryId() {
         List<StressQuery> queries = new ArrayList<>(FIXTURE.queries());
         queries.add(queries.get(queries.size() - 1));
