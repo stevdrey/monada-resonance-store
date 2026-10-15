@@ -43,6 +43,10 @@ final class TextEvaluationCatalog {
             "expanded-technology", "1", EvaluationProfile.LEXICAL_ENRICHED.name(),
             TextEvaluationMode.EXPLORATORY);
 
+    static final TextEvaluationMetadata SPEECH_FEATURE_LOAD_BREAKDOWN = new TextEvaluationMetadata(
+            "generated-speech-gaussian", "1", "SPEECH_FEATURE_STORE",
+            TextEvaluationMode.EXPLORATORY);
+
     static final TextEvaluationMetadata BOUNDED_TOP_K_EXPERIMENT = new TextEvaluationMetadata(
             "expanded-technology", "1", EvaluationProfile.LEXICAL_ENRICHED.name(),
             TextEvaluationMode.EXPLORATORY);

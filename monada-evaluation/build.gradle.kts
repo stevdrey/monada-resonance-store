@@ -92,6 +92,13 @@ tasks.register<JavaExec>("runVectorCopyShare") {
     classpath = sourceSets["main"].runtimeClasspath
 }
 
+tasks.register<JavaExec>("runSpeechFeatureLoadBreakdown") {
+    description = "Split FileSpeechFeatureStore.findAll() into index parse, seek, header read, value read and materialization (exploratory)"
+    group = "application"
+    mainClass.set("com.monada.evaluation.SpeechFeatureLoadBreakdownMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
 tasks.register<JavaExec>("runBoundedTopKExperiment") {
     description = "Compare the experimental exact bounded top-K selector against the linear-scan full-sort oracle (exploratory)"
     group = "application"
