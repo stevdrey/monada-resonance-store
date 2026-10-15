@@ -14,10 +14,11 @@ import java.util.function.Predicate;
  * in {@code monada-evaluation}: nothing in the store, the projection, the encoder or the query keys reads it, and
  * {@code ExecutionMemory.recall} never applies it. The evaluator passes the expanded text to recall explicitly.
  *
- * <p>Expansion is pure and deterministic: a rule fires when its source token occurs in the query as a whole token
- * (lowercase, split on non-alphanumeric characters exactly like the default lexical encoder); fired rules append their
- * terms in table order after the unchanged source text; a term already in the query or already added is skipped; at
- * most {@link #maxAddedTermsPerQuery()} terms are added. A query where no rule fires is returned unchanged.
+ * <p>Expansion is pure and deterministic: a rule fires when its source token occurs in the SOURCE query as a whole
+ * token (lowercase, split on non-alphanumeric characters exactly like the default lexical encoder), never on a term
+ * another rule added; fired rules append their terms in table order after the unchanged source text; a term already in
+ * the query or already added is skipped; at most {@link #maxAddedTermsPerQuery()} terms are added. A query where no
+ * rule fires is returned unchanged.
  */
 public record QueryExpansion(String version, String provenance, String leakage, int maxRules, int maxTermsPerRule,
                              int maxAddedTermsPerQuery, List<Rule> rules) {
@@ -36,10 +37,11 @@ public record QueryExpansion(String version, String provenance, String leakage, 
 
     /**
      * The result of expanding one query. {@code expanded} equals {@code source} when nothing was added;
-     * {@code fired} lists the rules whose source token occurs in the query (in table order), even when all of their
-     * terms were skipped as already present.
+     * {@code fired} lists the rules whose source token occurs in the SOURCE query (in table order), even when all of
+     * their terms were skipped as already present; {@code truncated} is true when the per-query cap dropped a new term.
      */
-    public record Expansion(String source, String expanded, List<String> fired, List<String> added) {
+    public record Expansion(String source, String expanded, List<String> fired, List<String> added,
+                            boolean truncated) {
         public Expansion {
             fired = List.copyOf(fired);
             added = List.copyOf(added);
@@ -110,7 +112,7 @@ public record QueryExpansion(String version, String provenance, String leakage, 
     }
 
     private static boolean isToken(String s) {
-        return s.matches("[\\p{Lower}\\p{Digit}]+") && s.equals(s.toLowerCase(Locale.ROOT));
+        return s.matches("[a-z0-9]+");
     }
 
     /** The lowercase whole tokens of {@code text}, split like the default lexical encoder; blanks dropped. */
@@ -126,22 +128,31 @@ public record QueryExpansion(String version, String provenance, String leakage, 
 
     /** Expands {@code query} with the rules {@code enabled} accepts; pure and deterministic. */
     public Expansion expand(String query, Predicate<Rule> enabled) {
-        Set<String> present = new LinkedHashSet<>(tokens(query));
+        // Rules match the source tokens only, so an added term never fires a later rule (no chaining).
+        Set<String> source = Set.copyOf(tokens(query));
+        Set<String> seen = new LinkedHashSet<>(source);
         List<String> fired = new ArrayList<>();
         List<String> added = new ArrayList<>();
+        boolean truncated = false;
         for (Rule r : rules) {
-            if (!enabled.test(r) || !present.contains(r.source())) {
+            if (!enabled.test(r) || !source.contains(r.source())) {
                 continue;
             }
             fired.add(r.id());
             for (String term : r.added()) {
-                if (added.size() < maxAddedTermsPerQuery && present.add(term)) {
-                    added.add(term);
+                if (seen.contains(term)) {
+                    continue;
                 }
+                if (added.size() >= maxAddedTermsPerQuery) {
+                    truncated = true;
+                    continue;
+                }
+                seen.add(term);
+                added.add(term);
             }
         }
         String expanded = added.isEmpty() ? query : query + " " + String.join(" ", added);
-        return new Expansion(query, expanded, fired, added);
+        return new Expansion(query, expanded, fired, added, truncated);
     }
 
     public Rule rule(String id) {

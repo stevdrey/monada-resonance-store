@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /**
@@ -90,7 +91,7 @@ public final class RecallStressEvaluator {
                 fixture.recallLimit(), fixture.ks(), outcomes, gates, elapsed);
     }
 
-    private static Path fresh(Path workDir, String prefix) {
+    static Path fresh(Path workDir, String prefix) {
         try {
             Files.createDirectories(workDir);
             return Files.createTempDirectory(workDir, prefix);
@@ -127,16 +128,29 @@ public final class RecallStressEvaluator {
      * text {@code text} gives for it (the query's own text for the stress evaluation).
      */
     static Observation recallAll(RecallStressFixture fixture, Path root, Function<StressQuery, String> text) {
+        return recallAll(fixture, root, text, q -> true);
+    }
+
+    /**
+     * Like {@link #recallAll(RecallStressFixture, Path, Function)} but recalls only the queries {@code include}
+     * accepts; the observation has no entry for the others and opens only the projects it needs.
+     */
+    static Observation recallAll(RecallStressFixture fixture, Path root, Function<StressQuery, String> text,
+                                 Predicate<StressQuery> include) {
         ForgeFixture corpus = fixture.corpus();
+        List<StressQuery> queries = fixture.queries().stream().filter(include).toList();
         Map<String, String> state = new LinkedHashMap<>();
         Map<String, List<Observed>> hits = new LinkedHashMap<>();
         Map<String, ExecutionMemory> memories = new LinkedHashMap<>();
         try {
             for (String scopeKey : corpus.scopeIds().keySet()) {
-                memories.put(scopeKey, ExecutionMemory.openReadOnly(root, ForgeFixtureRecorder.scope(corpus, scopeKey)));
+                if (queries.stream().anyMatch(q -> q.scopeKey().equals(scopeKey))) {
+                    memories.put(scopeKey, ExecutionMemory.openReadOnly(root,
+                            ForgeFixtureRecorder.scope(corpus, scopeKey)));
+                }
             }
             // Fixture order, not scope order: the report and the fingerprint follow the query list.
-            for (StressQuery q : fixture.queries()) {
+            for (StressQuery q : queries) {
                 ScopeId scope = ForgeFixtureRecorder.scope(corpus, q.scopeKey());
                 ExperienceRecall recall = memories.get(q.scopeKey()).recall(scope, text.apply(q),
                         fixture.recallLimit());

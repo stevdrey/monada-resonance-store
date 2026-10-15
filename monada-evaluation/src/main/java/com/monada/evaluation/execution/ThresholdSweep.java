@@ -87,10 +87,8 @@ public final class ThresholdSweep {
     }
 
     static ForgeGate stressChecksGate(RecallStressReport stress) {
-        List<String> violations = stress.failedGates().stream().map(id -> "stress check " + id + " failed").toList();
-        return ForgeGate.of(ThresholdSweepReport.STRESS_CHECKS,
-                "the #122 rankings under the sweep pass RS1-RS4 (scoped, blank, deterministic, #102 parity)",
-                violations, List.of("stress decision: " + stress.decision()));
+        return stress.checksGate(ThresholdSweepReport.STRESS_CHECKS,
+                "the #122 rankings under the sweep pass RS1-RS4 (scoped, blank, deterministic, #102 parity)");
     }
 
     /**

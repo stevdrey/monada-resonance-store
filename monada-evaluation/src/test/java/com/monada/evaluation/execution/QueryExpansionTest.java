@@ -89,6 +89,21 @@ class QueryExpansionTest {
         assertEquals(List.of("x1", "x2"), e.added());
         assertEquals(List.of("R01", "R02"), e.fired());
         assertEquals("aa bb x1 x2", e.expanded());
+        assertTrue(e.truncated(), "the cap dropped x3 and y1");
+        assertFalse(TABLE.expand("NPE in billing aggregation").truncated());
+    }
+
+    @Test
+    void anAddedTermNeverFiresALaterRule() {
+        QueryExpansion chain = new QueryExpansion("t", "p", "l", 5, 3, 8, List.of(
+                new Rule("R01", "aa", List.of("bb"), Risk.LOW, "why"),
+                new Rule("R02", "bb", List.of("cc"), Risk.LOW, "why")));
+        chain.validate();
+        Expansion e = chain.expand("aa");
+        assertEquals("aa bb", e.expanded());
+        assertEquals(List.of("R01"), e.fired());
+        assertEquals(List.of("R01", "R02"), chain.expand("aa bb").fired());
+        assertEquals("aa bb cc", chain.expand("aa bb").expanded());
     }
 
     @Test
@@ -142,7 +157,7 @@ class QueryExpansionTest {
         QueryComparison r = compare("S07", ranking("a-page/a2:0.5", "a-page/a1:0.4", "a-page/a3:0.3"),
                 ranking("a-page/a1:0.6", "a-page/a2:0.5", "a-page/a3:0.3"));
         assertEquals(Effect.REGRESSED, r.effect());
-        assertEquals(List.of("a-page/a1 #2 -> #1"), r.confusableRises());
+        assertEquals(List.of("a-page/a1 #2 -> #1 sim 0.4000 -> 0.6000"), r.confusableRises());
         List<Veto> vetoes = QueryExpansionEvaluator.vetoes(List.of(r), 5);
         assertEquals(List.of("V1", "V3"), vetoes.stream().map(Veto::code).toList());
         assertEquals(Verdict.REJECTED, QueryExpansionEvaluator.verdict(List.of(r), vetoes));
@@ -167,11 +182,33 @@ class QueryExpansionTest {
     }
 
     @Test
+    void aConfusableScoringHigherWithoutRisingIsVetoedOnAScoredQuery() {
+        // S13 as observed under LOW_RISK: the excluded offset attempt drops to #2 but gains similarity.
+        QueryComparison r = compare("S13", ranking("a-page/a1:0.4901", "a-page/a2:0.4463", "a-page/a3:0.3873"),
+                ranking("a-page/a2:0.5726", "a-page/a1:0.5717", "a-page/a3:0.4743"));
+        assertEquals(Effect.IMPROVED, r.effect());
+        assertEquals(List.of("a-page/a1 #1 -> #2 sim 0.4901 -> 0.5717"), r.confusableRises());
+        List<Veto> vetoes = QueryExpansionEvaluator.vetoes(List.of(r), 5);
+        assertEquals(List.of("V3"), vetoes.stream().map(Veto::code).toList());
+        assertEquals(Verdict.REJECTED, QueryExpansionEvaluator.verdict(List.of(r), vetoes));
+        QueryComparison weaker = compare("S13", ranking("a-page/a1:0.4901", "a-page/a2:0.4463"),
+                ranking("a-page/a2:0.5726", "a-page/a1:0.4500"));
+        assertEquals(List.of(), weaker.confusableRises(), "a confusable that falls and weakens is no veto");
+    }
+
+    @Test
+    void deltasOfAQueryWithoutRelevantExperiencesAreNotApplicable() {
+        QueryComparison r = compare("S18", ranking("b-backup/a1:0.39"), ranking("b-backup/a1:0.30"));
+        assertEquals("n/a (no relevant experience)", r.deltas());
+    }
+
+    @Test
     void aStrengthenedConfusableOnANoRelevantQueryIsVetoedEvenWithoutANewNeighbour() {
         QueryComparison r = compare("S18", ranking("b-backup/a1:0.39", "b-tokens/a1:0.13"),
                 ranking("b-backup/a1:0.33", "b-tokens/a1:0.27"));
         assertEquals(List.of(), r.falseSharing());
-        assertEquals(List.of("V4"), QueryExpansionEvaluator.vetoes(List.of(r), 5).stream().map(Veto::code)
+        // b-tokens/a1 is a judged confusable of S18 that scores higher: V3 and V4 both see it.
+        assertEquals(List.of("V3", "V4"), QueryExpansionEvaluator.vetoes(List.of(r), 5).stream().map(Veto::code)
                 .toList());
     }
 

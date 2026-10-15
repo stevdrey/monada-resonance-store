@@ -79,8 +79,11 @@ public record QueryExpansionReport(QueryExpansion table, RecallStressReport stre
             return exact.query().id();
         }
 
-        /** Hit@1, RR and Recall@K deltas as text; only meaningful for scored queries. */
+        /** Hit@1, RR and Recall@K deltas as text; {@code n/a} for a query with no relevant experience. */
         public String deltas() {
+            if (!exact.scored()) {
+                return "n/a (no relevant experience)";
+            }
             int first = exact.hitAt().keySet().iterator().next();
             int deepest = exact.recallAt().keySet().stream().reduce((a, b) -> b).orElseThrow();
             return fmt("dHit@%d=%+.2f dRR=%+.4f dR@%d=%+.2f", first,
@@ -187,7 +190,7 @@ public record QueryExpansionReport(QueryExpansion table, RecallStressReport stre
                 + "Judgments are those of the source query.\n");
         out.append(fmt("Reading guide: metrics and verdicts are EXPLORATORY; only the hard checks decide. Vetoes: V1 "
                 + "a scored BASELINE/NEGATION/RELATION/DUPLICATE_SUMMARY query loses Hit@1, RR or R@%1$d; V2 any other "
-                + "scored query loses RR or R@%1$d; V3 a judged confusable rises within the top %1$d; V4 a non-blank "
+                + "scored query loses RR or R@%1$d; V3 a judged confusable in the top %1$d ranks better or scores higher than under exact recall; V4 a non-blank "
                 + "query with nothing relevant gets a new top-%1$d neighbour or a top-%1$d wrong match gains "
                 + "similarity. False "
                 + "sharing = a non-relevant positive-similarity hit that enters the candidate top %1$d. The best "
@@ -305,7 +308,8 @@ public record QueryExpansionReport(QueryExpansion table, RecallStressReport stre
     private static String conclusion(CandidateResult c) {
         return switch (c.verdict()) {
             case REJECTED -> "REJECTED by " + String.join(", ", c.vetoCodes()) + " (" + c.vetoes().size()
-                    + " vetoes); the aggregate gain does not justify it";
+                    + " vetoes)" + (c.idsWith(Effect.IMPROVED).isEmpty() ? ""
+                    : "; improving " + String.join(", ", c.idsWith(Effect.IMPROVED)) + " does not outweigh them");
             case NOT_JUSTIFIED -> "NOT_JUSTIFIED: no veto, but no scored query improved";
             case JUSTIFIED_FOR_FOLLOW_UP -> "JUSTIFIED_FOR_FOLLOW_UP on this in-sample set only (no veto; improved "
                     + String.join(", ", c.idsWith(Effect.IMPROVED)) + "); not adopted";
@@ -332,8 +336,10 @@ public record QueryExpansionReport(QueryExpansion table, RecallStressReport stre
                                 + " added nothing new"));
                 continue;
             }
-            out.append(fmt("  %s: \"%s\" (fired %s; added %s)\n", c.candidate().name(), e.expanded(),
-                    String.join(",", e.fired()), String.join(" ", e.added())));
+            out.append(fmt("  %s: \"%s\" (fired %s; added %s%s)\n", c.candidate().name(), e.expanded(),
+                    String.join(",", e.fired()), String.join(" ", e.added()),
+                    e.truncated() ? "; cap of " + table.maxAddedTermsPerQuery() + " terms reached, later terms dropped"
+                            : ""));
             out.append("  ").append(c.candidate().name()).append(summary(r.candidate()));
             out.append(fmt("; effect %s%s\n", r.effect(), r.exact().scored() ? " (" + r.deltas() + ")" : ""));
             appendHits(out, r.candidate());

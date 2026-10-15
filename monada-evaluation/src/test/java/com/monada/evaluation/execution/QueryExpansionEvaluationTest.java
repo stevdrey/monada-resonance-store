@@ -97,11 +97,14 @@ class QueryExpansionEvaluationTest {
     }
 
     @Test
-    void theLowRiskCandidateIsAtMostJustifiedForAFollowUpAndNothingIsAdopted() {
+    void theLowRiskCandidateIsVetoedByTheCursorPagingConfusableAndNothingIsAdopted() {
         CandidateResult low = report.candidate("LOW_RISK");
         assertTrue(low.candidate().ruleIds().stream()
                 .allMatch(id -> report.table().rule(id).risk() == QueryExpansion.Risk.LOW));
-        assertEquals(Verdict.JUSTIFIED_FOR_FOLLOW_UP, low.verdict(), low.vetoes().toString());
+        assertEquals(Verdict.REJECTED, low.verdict(), low.vetoes().toString());
+        assertTrue(low.vetoes().stream().anyMatch(v -> v.code().equals("V3") && v.queryId().equals("S13")),
+                low.vetoes().toString());
+        assertFalse(low.idsWith(QueryExpansionReport.Effect.IMPROVED).isEmpty());
         String text = report.render();
         assertTrue(text.contains("No candidate is adopted"), text);
         assertTrue(text.contains("in-sample"), text);
@@ -109,13 +112,30 @@ class QueryExpansionEvaluationTest {
     }
 
     @Test
-    void negationQueriesNeverGainAJudgedConfusableInTheTopK() {
-        for (CandidateResult c : report.candidates()) {
+    void isolatedRulesReuseTheExactRankingsOfTheQueriesTheyDoNotChange() {
+        for (CandidateResult c : report.rules()) {
             for (QueryComparison r : c.rows()) {
-                if (r.exact().query().category() == RecallStressFixture.Category.NEGATION) {
-                    assertEquals(List.of(), r.confusableRises(), c.candidate().name() + " " + r.id());
+                if (!r.expansion().changed()) {
+                    assertEquals(r.exact().hits(), r.candidate().hits(), c.candidate().name() + " " + r.id());
+                }
+                for (String id : r.expansion().fired()) {
+                    assertTrue(QueryExpansion.tokens(r.exact().query().text())
+                            .contains(report.table().rule(id).source()), "no chaining: " + r.id());
                 }
             }
+        }
+    }
+
+    @Test
+    void theNegationStressCaseVetoesTheRuleThatStrengthensTheExcludedApproach() {
+        // S07 excludes offset paging; paginate -> pagination makes the offset attempt score higher at #1.
+        CandidateResult r10 = report.rule("R10");
+        assertEquals(Verdict.REJECTED, r10.verdict());
+        assertTrue(r10.vetoes().stream().anyMatch(v -> v.code().equals("V3") && v.queryId().equals("S07")),
+                r10.vetoes().toString());
+        for (String name : List.of("FULL", "LOW_RISK")) {
+            assertTrue(report.candidate(name).row("S07").confusableRises().stream()
+                    .anyMatch(x -> x.startsWith("a-page/a1 ")), name);
         }
     }
 

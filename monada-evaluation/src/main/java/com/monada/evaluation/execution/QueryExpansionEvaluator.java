@@ -82,7 +82,7 @@ public final class QueryExpansionEvaluator {
         elapsed.put("stress evaluation (#122)", System.nanoTime() - t);
 
         t = System.nanoTime();
-        Path store = fresh(workDir, "expansion-store-");
+        Path store = RecallStressEvaluator.fresh(workDir, "expansion-store-");
         RecallStressEvaluator.record(fixture, store);
         String before = fingerprint(store);
         Observation exact = RecallStressEvaluator.recallAll(fixture, store, StressQuery::text);
@@ -90,16 +90,24 @@ public final class QueryExpansionEvaluator {
         List<Candidate> isolated = ruleCandidates(table);
         Map<Candidate, Map<String, Expansion>> expansions = new LinkedHashMap<>();
         Map<Candidate, Observation> observed = new LinkedHashMap<>();
-        for (Candidate c : Stream.concat(declared.stream(), isolated.stream()).toList()) {
+        // Declared candidates recall every query, so QX3 proves unexpanded queries rank identically; isolated rules
+        // then recall only the queries they change and reuse the exact rankings for the rest.
+        for (Candidate c : declared) {
             Map<String, Expansion> e = expand(fixture, table, c);
             expansions.put(c, e);
             observed.put(c, RecallStressEvaluator.recallAll(fixture, store, q -> e.get(q.id()).expanded()));
+        }
+        for (Candidate c : isolated) {
+            Map<String, Expansion> e = expand(fixture, table, c);
+            expansions.put(c, e);
+            observed.put(c, withExact(fixture, exact, RecallStressEvaluator.recallAll(fixture, store,
+                    q -> e.get(q.id()).expanded(), q -> e.get(q.id()).changed())));
         }
         String after = fingerprint(store);
         elapsed.put("exact + candidate recall", System.nanoTime() - t);
 
         t = System.nanoTime();
-        Path second = fresh(workDir, "expansion-store-");
+        Path second = RecallStressEvaluator.fresh(workDir, "expansion-store-");
         RecallStressEvaluator.record(fixture, second);
         Map<Candidate, Observation> repeated = new LinkedHashMap<>();
         for (Candidate c : declared) {
@@ -122,13 +130,16 @@ public final class QueryExpansionEvaluator {
         return new QueryExpansionReport(table, stress, declaredResults, ruleResults, gates, elapsed);
     }
 
-    private static Path fresh(Path workDir, String prefix) {
-        try {
-            Files.createDirectories(workDir);
-            return Files.createTempDirectory(workDir, prefix);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+    /** {@code partial}'s rankings where it has them, the exact ones elsewhere, in fixture order. */
+    private static Observation withExact(RecallStressFixture fixture, Observation exact, Observation partial) {
+        Map<String, String> state = new LinkedHashMap<>();
+        Map<String, List<Observed>> hits = new LinkedHashMap<>();
+        for (StressQuery q : fixture.queries()) {
+            Observation from = partial.hits().containsKey(q.id()) ? partial : exact;
+            state.put(q.id(), from.projectionState().get(q.id()));
+            hits.put(q.id(), from.hits().get(q.id()));
         }
+        return new Observation(state, hits);
     }
 
     static Map<String, Expansion> expand(RecallStressFixture fixture, QueryExpansion table, Candidate c) {
@@ -160,8 +171,8 @@ public final class QueryExpansionEvaluator {
 
     /**
      * Compares one query's exact and candidate rankings: metric deltas, the effect, the false sharing (non-relevant
-     * positive-similarity hits that enter the candidate top {@code k}) and the judged confusables that rise to a
-     * better rank within the candidate top {@code k}.
+     * positive-similarity hits that enter the candidate top {@code k}) and the judged confusables in the candidate top
+     * {@code k} that rank better or score higher than under exact recall.
      */
     static QueryComparison compare(Expansion expansion, QueryOutcome exact, QueryOutcome candidate, int firstK,
                                    int k) {
@@ -169,12 +180,19 @@ public final class QueryExpansionEvaluator {
         List<Hit> sharing = candidate.hits().stream().limit(k)
                 .filter(h -> h.neighbour() != Neighbour.RELEVANT && h.similarity() > 0.0)
                 .filter(h -> !exactTop.contains(h.experienceId())).toList();
+        Map<String, Double> was = similarities(exact);
         List<String> rises = new ArrayList<>();
         for (String id : exact.query().confusable()) {
             int before = rank(exact, id);
             int after = rank(candidate, id);
-            if (after <= k && after < before) {
-                rises.add(id + " " + (before == Integer.MAX_VALUE ? "not retrieved" : "#" + before) + " -> #" + after);
+            if (after > k) {
+                continue;
+            }
+            double from = was.getOrDefault(id, 0.0);
+            double to = candidate.hits().get(after - 1).similarity();
+            if (after < before || to > from) {
+                rises.add(ForgeEvaluationReport.fmt("%s %s -> #%d sim %.4f -> %.4f", id,
+                        before == Integer.MAX_VALUE ? "not retrieved" : "#" + before, after, from, to));
             }
         }
         Effect effect = Effect.NOT_SCORED;
@@ -193,6 +211,13 @@ public final class QueryExpansionEvaluator {
         return new QueryComparison(expansion, exact, candidate, effect, sharing, rises);
     }
 
+    /** Similarity of every hit an outcome returned, by experience id. */
+    private static Map<String, Double> similarities(QueryOutcome o) {
+        Map<String, Double> out = new LinkedHashMap<>();
+        o.hits().forEach(h -> out.put(h.experienceId(), h.similarity()));
+        return out;
+    }
+
     private static int rank(QueryOutcome o, String experienceId) {
         int index = o.rankedIds().indexOf(experienceId);
         return index < 0 ? Integer.MAX_VALUE : index + 1;
@@ -200,7 +225,8 @@ public final class QueryExpansionEvaluator {
 
     /**
      * The vetoes of one candidate. V1: a scored query of a protected category loses Hit@1, RR or Recall@K. V2: any
-     * other scored query loses RR or Recall@K. V3: a judged confusable rises within the top K. V4: a non-blank query
+     * other scored query loses RR or Recall@K. V3: a judged confusable in the top K ranks better or scores higher than
+     * under exact recall (negation and relationship stress). V4: a non-blank query
      * with nothing relevant gets a new top-K neighbour, or a top-K wrong match with a higher similarity than under
      * exact recall (false sharing or a strengthened collision).
      */
@@ -230,8 +256,7 @@ public final class QueryExpansionEvaluator {
     /** Candidate top-K hits whose similarity is higher than under exact recall (0 when exact did not return them). */
     private static List<String> strengthened(QueryComparison r, int k) {
         List<String> out = new ArrayList<>();
-        Map<String, Double> before = new LinkedHashMap<>();
-        r.exact().hits().forEach(h -> before.put(h.experienceId(), h.similarity()));
+        Map<String, Double> before = similarities(r.exact());
         for (Hit h : r.candidate().hits().subList(0, Math.min(r.candidate().hits().size(), k))) {
             double was = before.getOrDefault(h.experienceId(), 0.0);
             if (h.similarity() > was) {
@@ -275,10 +300,8 @@ public final class QueryExpansionEvaluator {
     }
 
     static ForgeGate stressChecksGate(RecallStressReport stress) {
-        List<String> violations = stress.failedGates().stream().map(id -> "stress check " + id + " failed").toList();
-        return ForgeGate.of(QueryExpansionReport.STRESS_CHECKS,
-                "the #122 exact rankings pass RS1-RS4 (scoped, blank, deterministic, #102 parity)", violations,
-                List.of("stress decision: " + stress.decision()));
+        return stress.checksGate(QueryExpansionReport.STRESS_CHECKS,
+                "the #122 exact rankings pass RS1-RS4 (scoped, blank, deterministic, #102 parity)");
     }
 
     static ForgeGate exactParityGate(RecallStressFixture fixture, RecallStressReport stress, Observation exact) {
@@ -338,9 +361,13 @@ public final class QueryExpansionEvaluator {
                 Expansion e = entry.getValue().get(q.id());
                 String where = c.name() + " " + q.id();
                 Set<String> allowed = new LinkedHashSet<>();
+                List<String> sourceTokens = QueryExpansion.tokens(q.text());
                 for (String id : e.fired()) {
                     if (!c.ruleIds().contains(id)) {
                         violations.add(where + ": rule " + id + " is not part of the candidate");
+                    }
+                    if (!sourceTokens.contains(table.rule(id).source())) {
+                        violations.add(where + ": rule " + id + " fired without its source in the query (chaining)");
                     }
                     allowed.addAll(table.rule(id).added());
                 }
@@ -352,7 +379,6 @@ public final class QueryExpansionEvaluator {
                     violations.add(where + ": " + e.added().size() + " terms added, cap "
                             + table.maxAddedTermsPerQuery());
                 }
-                List<String> sourceTokens = QueryExpansion.tokens(q.text());
                 for (String term : e.added()) {
                     if (!allowed.contains(term) || sourceTokens.contains(term)) {
                         violations.add(where + ": added term " + term + " is not a new term of a fired rule");
