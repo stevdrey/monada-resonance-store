@@ -256,25 +256,27 @@ grid is `0.00` (current behaviour, zero-similarity fill included) and nine candi
 #122 observations (relevant paraphrase hits about 0.06–0.18, no-relevant neighbours up to 0.21/0.25/0.33/0.40) and
 never derived from the sweep's output. Per threshold and per category it reports precision among kept hits, recall
 among judged positives, top-K coverage, Hit@1 and abstention for queries with relevant experiences; separately, for
-the six non-blank no-relevant queries, false returns, false hits and abstention (never in a positive denominator);
-blank queries only in the per-query table. Costs per candidate list every lost relevant hit (fill marked) and the
+the four no-relevant content queries (Q12, S17–S19), false returns, false hits and abstention (never in a positive
+denominator). Empty queries (blank, plus the punctuation-only and stopword-only probes S25 and S26) return nothing at
+every threshold and enter no denominator, so they cannot inflate no-relevant abstention. Costs per candidate list every lost relevant hit (fill marked) and the
 wrong matches kept by neighbour category. Three hard checks decide the exit code (`TS1` the #122 checks pass, `TS2`
-`0.00` equals the unfiltered top 5, `TS3` each higher threshold keeps a prefix of the lower one); every metric is
+`0.00` equals the unfiltered top 5 and every threshold keeps exactly min(5, hits at or above it) in rank order, `TS3`
+each higher threshold keeps a prefix of the lower one); every metric is
 EXPLORATORY.
 
-Observed on 2026-10-15 (all checks pass; 31 scored queries, 66 judged positives, 6 non-blank no-relevant):
+Observed on 2026-10-15 (all checks pass; 31 scored queries, 66 judged positives, 4 no-relevant content queries):
 
 | threshold | precision | recall | coverage | scored abstain | no-relevant returning | false hits |
 | --- | --- | --- | --- | --- | --- | --- |
-| 0.00 | 0.36 | 0.85 | 0.94 | 0.00 | 4/6 | 20 |
-| 0.05 | 0.42 | 0.80 | 0.90 | 0.00 | 4/6 | 17 |
-| 0.10 | 0.60 | 0.76 | 0.87 | 0.10 | 4/6 | 9 |
-| 0.20 | 0.80 | 0.68 | 0.77 | 0.23 | 4/6 | 7 |
-| 0.25 | 0.86 | 0.65 | 0.71 | 0.29 | 2/6 | 2 |
-| 0.40 | 0.90 | 0.56 | 0.68 | 0.32 | 0/6 | 0 |
+| 0.00 | 0.36 | 0.85 | 0.94 | 0.00 | 4/4 | 20 |
+| 0.05 | 0.42 | 0.80 | 0.90 | 0.00 | 4/4 | 17 |
+| 0.10 | 0.60 | 0.76 | 0.87 | 0.10 | 4/4 | 9 |
+| 0.20 | 0.80 | 0.68 | 0.77 | 0.23 | 4/4 | 7 |
+| 0.25 | 0.86 | 0.65 | 0.71 | 0.29 | 2/4 | 2 |
+| 0.40 | 0.90 | 0.56 | 0.68 | 0.32 | 0/4 | 0 |
 
 - `0.05` is the highest declared threshold that loses no positive-similarity relevant hit (it drops only zero-similarity
-  fill, including the fill-only relevant hits of S04), yet four no-relevant queries still return 17 false hits.
+  fill, including the fill-only relevant hits of S04), yet all four no-relevant content queries still return 17 false hits.
 - `0.40` is the lowest at which every no-relevant query abstains (S18 at 0.3953 is the last), but it loses 19 relevant
   hits and 8 scored queries lose every relevant hit; paraphrase and synonym groups abstain entirely, and the four
   judged confusables ranked #1 by negation queries S07–S09 and the cursor-paging query S13 (0.49–0.74) still pass.

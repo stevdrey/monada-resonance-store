@@ -25,7 +25,8 @@ import java.util.stream.Collectors;
  */
 public record RecallStressReport(String fixtureVersion, String provenance, String judgmentProtocol, String reviewer,
                                  int experienceCount, int projectCount, int recallLimit, List<Integer> ks,
-                                 List<QueryOutcome> queries, List<ForgeGate> gates, Map<String, Long> elapsedNanos) {
+                                 List<QueryOutcome> queries, List<ForgeGate> gates, Map<String, Long> elapsedNanos)
+        implements RecallStressEvaluationMain.Report {
 
     public static final String SCOPED_RECALL = "RS1-SCOPED-RECALL";
     public static final String BLANK_QUERY = "RS2-BLANK-QUERY-NO-HITS";
@@ -114,6 +115,7 @@ public record RecallStressReport(String fixtureVersion, String provenance, Strin
         return gates.stream().allMatch(ForgeGate::passed) ? Decision.STRESS_SET_CHARACTERIZED : Decision.CHECKS_FAILED;
     }
 
+    @Override
     public boolean allGatesPassed() {
         return decision() == Decision.STRESS_SET_CHARACTERIZED;
     }
@@ -170,6 +172,7 @@ public record RecallStressReport(String fixtureVersion, String provenance, Strin
     }
 
     /** Deterministic report text; contains no timing. */
+    @Override
     public String render() {
         StringBuilder out = new StringBuilder();
         out.append("Forge Recall Stress Set (issue #122)\n");
@@ -287,11 +290,12 @@ public record RecallStressReport(String fixtureVersion, String provenance, Strin
         return text.replace("\t", "\\t");
     }
 
-    private static String metric(double value) {
+    static String metric(double value) {
         return Double.isNaN(value) ? "n/a" : fmt("%.2f", value);
     }
 
-    private static <E extends Enum<E>> String counts(Map<E, Integer> counts) {
+    /** Enum counts as {@code NAME=n} pairs, or {@code -} when there are none. */
+    static <E extends Enum<E>> String counts(Map<E, Integer> counts) {
         if (counts.isEmpty()) {
             return "-";
         }
@@ -300,7 +304,13 @@ public record RecallStressReport(String fixtureVersion, String provenance, Strin
     }
 
     /** Elapsed wall-clock timing. Nondeterministic by nature and never part of {@link #render()}. */
+    @Override
     public String renderTiming() {
+        return renderTiming(elapsedNanos);
+    }
+
+    /** The timing section shared by the stress and threshold-sweep reports. */
+    static String renderTiming(Map<String, Long> elapsedNanos) {
         StringBuilder out = new StringBuilder("== Elapsed timing (nondeterministic; excluded from every check) ==\n");
         elapsedNanos.forEach((phase, nanos) -> out.append(String.format(Locale.ROOT, "  %-24s %.1f ms\n", phase,
                 nanos / 1_000_000.0)));

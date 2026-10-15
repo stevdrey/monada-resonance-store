@@ -43,14 +43,6 @@ class ThresholdSweepEvaluationTest {
     }
 
     @Test
-    void twoFreshEvaluationsRenderTheSameReport() {
-        ThresholdSweepReport second = ThresholdSweep.evaluate(RecallStressFixture.load(), work.resolve("second"));
-        assertEquals(report.render(), second.render());
-        assertFalse(report.render().contains("Elapsed timing"));
-        assertFalse(report.render().contains(" ms\n"));
-    }
-
-    @Test
     void theDeclaredGridHasTheBaselineAndAtLeastFiveCandidates() {
         assertEquals(ThresholdSweep.GRID, report.grid());
         assertEquals(0.0, report.grid().get(0));
@@ -94,11 +86,12 @@ class ThresholdSweepEvaluationTest {
         assertEquals(scored.size(), all.scored());
         assertEquals(scored.stream().mapToInt(r -> r.outcome().query().relevant().size()).sum(),
                 all.judgedPositives());
-        assertEquals(List.of("Q12", "S17", "S18", "S19", "S25", "S26"), report.rows().stream()
+        assertEquals(List.of("Q12", "S17", "S18", "S19"), report.rows().stream()
                 .filter(r -> r.kind() == Kind.NO_RELEVANT).map(QuerySweep::id).toList());
-        assertEquals(List.of("Q14", "S23", "S24"), report.rows().stream()
-                .filter(r -> r.kind() == Kind.BLANK).map(QuerySweep::id).toList());
-        assertEquals(report.rows().size(), all.scored() + all.noRelevant() + 3);
+        assertEquals(List.of("Q14", "S23", "S24", "S25", "S26"), report.rows().stream()
+                .filter(r -> r.kind() == Kind.EMPTY).map(QuerySweep::id).toList());
+        assertEquals(report.rows().size(), all.scored() + all.noRelevant() + 5);
+        assertEquals(0.0, all.noRelevantAbstention(), "every no-relevant content query returns hits at 0.00");
     }
 
     @Test
@@ -111,12 +104,16 @@ class ThresholdSweepEvaluationTest {
         assertFalse(text.toLowerCase(java.util.Locale.ROOT).contains("recommended threshold"), text);
     }
 
+    /** The command runs a second, fresh evaluation, so it also checks that two runs render the same report. */
     @Test
-    void theCommandExitsZeroAndPrintsTimingLast() {
+    void theCommandExitsZeroAndAFreshRunRendersTheSameReport() {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         int exit = ThresholdSweepMain.run(new PrintStream(bytes, true, StandardCharsets.UTF_8));
         String out = bytes.toString(StandardCharsets.UTF_8);
         assertEquals(0, exit, out);
-        assertTrue(out.indexOf("== Decision ==") < out.indexOf("== Elapsed timing"));
+        String rendered = report.render();
+        assertTrue(out.startsWith(rendered + "\n== Elapsed timing"), out);
+        assertFalse(rendered.contains("Elapsed timing"));
+        assertFalse(rendered.contains(" ms\n"));
     }
 }

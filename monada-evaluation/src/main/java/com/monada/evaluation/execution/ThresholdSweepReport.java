@@ -1,6 +1,8 @@
 package com.monada.evaluation.execution;
 
 import static com.monada.evaluation.execution.ForgeEvaluationReport.fmt;
+import static com.monada.evaluation.execution.RecallStressReport.counts;
+import static com.monada.evaluation.execution.RecallStressReport.metric;
 
 import com.monada.evaluation.execution.RecallStressFixture.Category;
 import com.monada.evaluation.execution.RecallStressReport.Hit;
@@ -11,7 +13,6 @@ import java.util.Collections;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -22,7 +23,7 @@ import java.util.stream.Collectors;
 /**
  * The result of the host-owned relevance threshold sweep (issue #123): per threshold and per group, precision among
  * returned hits, recall among judged positives, top-K coverage and abstention of queries with relevant experiences;
- * separately, false returns and abstention of non-blank queries judged to have no relevant experience; the relevant
+ * separately, false returns and abstention of content-bearing queries judged to have no relevant experience; the relevant
  * hits each threshold loses and the wrong matches it keeps; a few hard checks and, separately, elapsed timing.
  *
  * <p>Every metric is EXPLORATORY and host-owned: no threshold is recommended, none becomes a default and none is a
@@ -30,10 +31,11 @@ import java.util.stream.Collectors;
  * {@link #renderTiming()} is not.
  */
 public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid, List<QuerySweep> rows,
-                                   List<ForgeGate> gates, Map<String, Long> elapsedNanos) {
+                                   List<ForgeGate> gates, Map<String, Long> elapsedNanos)
+        implements RecallStressEvaluationMain.Report {
 
     public static final String STRESS_CHECKS = "TS1-STRESS-CHECKS";
-    public static final String BASELINE_IDENTITY = "TS2-BASELINE-IDENTITY";
+    public static final String FILTER_SEMANTICS = "TS2-FILTER-SEMANTICS";
     public static final String MONOTONIC = "TS3-MONOTONIC-PREFIX";
 
     public enum Decision { SWEEP_CHARACTERIZED, CHECKS_FAILED }
@@ -42,12 +44,21 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
     public static final String THRESHOLD_CONCLUSION = "UNDECIDED (host-owned; no production threshold without "
             + "cross-dataset evidence)";
 
-    /** How a query enters the metrics: scored (has relevant experiences), no-relevant (non-blank) or blank. */
+    /**
+     * How a query enters the metrics: {@code SCORED} (has relevant experiences), {@code NO_RELEVANT} (a content query
+     * judged to have no answer, whose returns are false matches) or {@code EMPTY} (a blank query or an
+     * {@link Category#EMPTY_QUERY} probe without content, such as punctuation or stopwords only). EMPTY queries enter
+     * no denominator: they return nothing at every threshold, so counting them would inflate no-relevant abstention.
+     */
     public enum Kind {
-        SCORED, NO_RELEVANT, BLANK;
+        SCORED, NO_RELEVANT, EMPTY;
 
         static Kind of(QueryOutcome q) {
-            return q.scored() ? SCORED : q.query().text().isBlank() ? BLANK : NO_RELEVANT;
+            if (q.scored()) {
+                return SCORED;
+            }
+            boolean empty = q.query().text().isBlank() || q.query().category() == Category.EMPTY_QUERY;
+            return empty ? EMPTY : NO_RELEVANT;
         }
     }
 
@@ -92,12 +103,22 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
                                int judgedPositives, double precision, double recall, double coverage, double hitAt1,
                                double abstention, int noRelevant, int falseReturnQueries, int falseHits,
                                double noRelevantAbstention, Map<Neighbour, Integer> wrongKept) {
+        public PointSummary {
+            wrongKept = Collections.unmodifiableMap(wrongKept.isEmpty() ? new EnumMap<>(Neighbour.class)
+                    : new EnumMap<>(wrongKept));
+        }
     }
 
     public ThresholdSweepReport {
         Objects.requireNonNull(stress, "stress");
         grid = List.copyOf(grid);
         rows = List.copyOf(rows);
+        for (QuerySweep row : rows) {
+            if (row.kept().size() != grid.size()) {
+                throw new IllegalArgumentException(row.id() + ": " + row.kept().size() + " kept lists for a grid of "
+                        + grid.size() + " thresholds");
+            }
+        }
         gates = List.copyOf(gates);
         elapsedNanos = Collections.unmodifiableMap(new LinkedHashMap<>(elapsedNanos));
     }
@@ -110,6 +131,7 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
         return gates.stream().allMatch(ForgeGate::passed) ? Decision.SWEEP_CHARACTERIZED : Decision.CHECKS_FAILED;
     }
 
+    @Override
     public boolean allGatesPassed() {
         return decision() == Decision.SWEEP_CHARACTERIZED;
     }
@@ -119,7 +141,7 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
     }
 
     public static Set<String> expectedGateIds() {
-        return Set.of(STRESS_CHECKS, BASELINE_IDENTITY, MONOTONIC);
+        return Set.of(STRESS_CHECKS, FILTER_SEMANTICS, MONOTONIC);
     }
 
     public QuerySweep row(String queryId) {
@@ -183,7 +205,7 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
         return ratio((int) rows.stream().filter(p).count(), rows.size());
     }
 
-    /** Lowest declared threshold at which every non-blank no-relevant query abstains, if any. */
+    /** Lowest declared threshold at which every no-relevant content query abstains, if any. */
     public Optional<Integer> firstFullNoRelevantAbstention() {
         for (int i = 0; i < grid.size(); i++) {
             int point = i;
@@ -213,6 +235,7 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
     }
 
     /** Deterministic report text; contains no timing. */
+    @Override
     public String render() {
         StringBuilder out = new StringBuilder();
         int k = stress.deepestK();
@@ -230,10 +253,10 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
         out.append("Reading guide: every metric is EXPLORATORY and host-owned; similarity is not confidence or "
                 + "validated quality. Scored columns use only queries with relevant experiences: prec = relevant "
                 + "kept / kept, recall = relevant kept / judged positives, cover = queries with a relevant hit kept, "
-                + "abst = queries keeping nothing. Non-blank no-relevant queries are reported separately (ret = "
-                + "queries still returning a hit, false = hits kept) and never enter a scored denominator. Blank "
-                + "queries return nothing by contract and are listed only in the per-query table. n/a = empty "
-                + "denominator.\n");
+                + "abst = queries keeping nothing. No-relevant content queries are reported separately (ret = "
+                + "queries still returning a hit, false = hits kept) and never enter a scored denominator. Empty "
+                + "queries (blank, or EMPTY_QUERY probes without content) enter no denominator and are listed only "
+                + "in the per-query table. n/a = empty denominator.\n");
 
         out.append("\n== Sweep per group ==\n");
         for (String group : groupNames()) {
@@ -333,14 +356,14 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
                 keep.falseHits()));
         Optional<Integer> silent = firstFullNoRelevantAbstention();
         if (silent.isEmpty()) {
-            out.append("  No declared threshold makes every non-blank no-relevant query abstain.\n");
+            out.append("  No declared threshold makes every no-relevant content query abstain.\n");
         } else {
             int point = silent.get();
             PointSummary s = summary("ALL", point);
             long lost = rows.stream().mapToLong(r -> r.lostRelevant(point).size()).sum();
             long uncovered = rows.stream().filter(r -> r.kind() == Kind.SCORED)
                     .filter(r -> r.relevantKept(0) > 0 && r.relevantKept(point) == 0).count();
-            out.append(fmt("  Lowest threshold at which every non-blank no-relevant query abstains: %s — recall %s, "
+            out.append(fmt("  Lowest threshold at which every no-relevant content query abstains: %s — recall %s, "
                     + "prec %s, cover %s, %d relevant hits lost, %d scored queries lose every relevant hit, scored "
                     + "abstention %s\n", thr(grid.get(point)), metric(s.recall()), metric(s.precision()),
                     metric(s.coverage()), lost, uncovered, metric(s.abstention())));
@@ -360,7 +383,7 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
         return switch (kind) {
             case SCORED -> "scored";
             case NO_RELEVANT -> "no-rel";
-            case BLANK -> "blank";
+            case EMPTY -> "empty";
         };
     }
 
@@ -368,27 +391,13 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
         return fmt("%.2f", threshold);
     }
 
-    private static String metric(double value) {
-        return Double.isNaN(value) ? "n/a" : fmt("%.2f", value);
-    }
-
     private static String list(List<String> values) {
         return values.isEmpty() ? "none" : String.join(", ", values);
     }
 
-    private static <E extends Enum<E>> String counts(Map<E, Integer> counts) {
-        if (counts.isEmpty()) {
-            return "none";
-        }
-        return counts.entrySet().stream().map(e -> e.getKey() + "=" + e.getValue())
-                .collect(Collectors.joining(" "));
-    }
-
     /** Elapsed wall-clock timing. Nondeterministic by nature and never part of {@link #render()}. */
+    @Override
     public String renderTiming() {
-        StringBuilder out = new StringBuilder("== Elapsed timing (nondeterministic; excluded from every check) ==\n");
-        elapsedNanos.forEach((phase, nanos) -> out.append(String.format(Locale.ROOT, "  %-26s %.1f ms\n", phase,
-                nanos / 1_000_000.0)));
-        return out.toString();
+        return RecallStressReport.renderTiming(elapsedNanos);
     }
 }

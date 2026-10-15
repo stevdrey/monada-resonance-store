@@ -59,7 +59,7 @@ public final class ThresholdSweep {
             }
             rows.add(new QuerySweep(q, kept));
         }
-        List<ForgeGate> gates = List.of(stressChecksGate(stress), baselineIdentityGate(rows, k),
+        List<ForgeGate> gates = List.of(stressChecksGate(stress), filterSemanticsGate(rows, grid, k),
                 monotonicGate(rows, grid));
         return new ThresholdSweepReport(stress, grid, rows, gates, Map.of());
     }
@@ -93,17 +93,45 @@ public final class ThresholdSweep {
                 violations, List.of("stress decision: " + stress.decision()));
     }
 
-    static ForgeGate baselineIdentityGate(List<QuerySweep> rows, int k) {
+    /**
+     * Checks what was kept against the ranking, independently of {@link #retained}: at 0.0 the unfiltered top K; at
+     * every threshold, kept hits all reach it, keep their rank order, skip no eligible hit ranked above them and number
+     * exactly {@code min(K, hits at or above it)}. An exclusive boundary, a dropped or reordered hit or a cut at the
+     * wrong K fails here.
+     */
+    static ForgeGate filterSemanticsGate(List<QuerySweep> rows, List<Double> grid, int k) {
         List<String> violations = new ArrayList<>();
         for (QuerySweep row : rows) {
-            List<Hit> unfiltered = row.outcome().hits().stream().limit(k).toList();
-            if (!row.kept().get(0).equals(unfiltered)) {
-                violations.add(row.id() + ": threshold 0.0 changes the top " + k);
+            List<Hit> ranked = row.outcome().hits();
+            if (!row.kept().get(0).equals(ranked.subList(0, Math.min(k, ranked.size())))) {
+                violations.add(row.id() + ": threshold 0.0 is not the unfiltered top " + k);
+            }
+            for (int i = 0; i < grid.size(); i++) {
+                double threshold = grid.get(i);
+                List<Hit> kept = row.kept().get(i);
+                long eligible = ranked.stream().filter(h -> h.similarity() >= threshold).count();
+                if (kept.size() != Math.min(k, eligible)) {
+                    violations.add(row.id() + " @" + threshold + ": kept " + kept.size() + " of " + eligible
+                            + " hits at or above the threshold (K " + k + ")");
+                }
+                int lastRank = kept.isEmpty() ? 0 : kept.get(kept.size() - 1).rank();
+                ranked.stream().filter(h -> h.similarity() >= threshold && h.rank() < lastRank)
+                        .filter(h -> !kept.contains(h))
+                        .forEach(h -> violations.add(row.id() + " @" + threshold + ": skipped " + h.experienceId()));
+                for (int j = 0; j < kept.size(); j++) {
+                    Hit h = kept.get(j);
+                    if (h.similarity() < threshold) {
+                        violations.add(row.id() + " @" + threshold + ": kept " + h.experienceId() + " below it");
+                    }
+                    if (j > 0 && h.rank() <= kept.get(j - 1).rank()) {
+                        violations.add(row.id() + " @" + threshold + ": rank order changed at " + h.experienceId());
+                    }
+                }
             }
         }
-        return ForgeGate.of(ThresholdSweepReport.BASELINE_IDENTITY,
-                "threshold 0.0 keeps exactly the unfiltered top " + k + " of every query (current behaviour)",
-                violations, List.of("queries compared: " + rows.size()));
+        return ForgeGate.of(ThresholdSweepReport.FILTER_SEMANTICS,
+                "0.0 keeps the unfiltered top " + k + "; each threshold keeps min(K, hits >= threshold) in rank order",
+                violations, List.of("queries: " + rows.size() + "; thresholds: " + grid.size()));
     }
 
     static ForgeGate monotonicGate(List<QuerySweep> rows, List<Double> grid) {

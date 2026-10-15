@@ -1,11 +1,6 @@
 package com.monada.evaluation.execution;
 
-import java.io.IOException;
 import java.io.PrintStream;
-import java.io.UncheckedIOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Comparator;
 
 /**
  * Sweeps host-owned relevance thresholds (issue #123) over the rankings of the judged recall stress set (issue #122)
@@ -29,29 +24,7 @@ public final class ThresholdSweepMain {
     }
 
     static int run(PrintStream out) {
-        Path work = null;
-        try {
-            work = Files.createTempDirectory("forge-recall-threshold-sweep");
-            ThresholdSweepReport report = ThresholdSweep.evaluate(RecallStressFixture.load(), work);
-            out.print(report.render());
-            out.print("\n");
-            out.print(report.renderTiming());
-            return report.allGatesPassed() ? 0 : 1;
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        } finally {
-            deleteQuietly(work);
-        }
-    }
-
-    private static void deleteQuietly(Path dir) {
-        if (dir == null) {
-            return;
-        }
-        try (var walk = Files.walk(dir)) {
-            walk.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
-        } catch (IOException ignored) {
-            // best-effort cleanup of a temporary directory
-        }
+        return RecallStressEvaluationMain.runReport(out, "forge-recall-threshold-sweep",
+                work -> ThresholdSweep.evaluate(RecallStressFixture.load(), work));
     }
 }
