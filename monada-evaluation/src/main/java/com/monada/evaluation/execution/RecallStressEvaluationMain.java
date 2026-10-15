@@ -6,6 +6,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
+import java.util.function.Function;
 
 /**
  * Runs the judged Forge recall stress set (issue #122) over the unchanged {@code forge-experience-v1} corpus and
@@ -28,11 +29,29 @@ public final class RecallStressEvaluationMain {
         System.exit(run(System.out));
     }
 
+    /** What a report command prints: deterministic text, then nondeterministic timing, and the exit decision. */
+    interface Report {
+        String render();
+
+        String renderTiming();
+
+        boolean allGatesPassed();
+    }
+
     static int run(PrintStream out) {
+        return runReport(out, "forge-recall-stress", work -> RecallStressEvaluator.evaluate(RecallStressFixture.load(),
+                work));
+    }
+
+    /**
+     * Evaluates in a fresh temporary directory named after {@code tempPrefix}, prints the report then its timing and
+     * returns 0 when every hard check passed, 1 otherwise. The directory is removed afterwards.
+     */
+    static int runReport(PrintStream out, String tempPrefix, Function<Path, ? extends Report> evaluate) {
         Path work = null;
         try {
-            work = Files.createTempDirectory("forge-recall-stress");
-            RecallStressReport report = RecallStressEvaluator.evaluate(RecallStressFixture.load(), work);
+            work = Files.createTempDirectory(tempPrefix);
+            Report report = evaluate.apply(work);
             out.print(report.render());
             out.print("\n");
             out.print(report.renderTiming());
