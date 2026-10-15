@@ -91,6 +91,13 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
     /**
      * Returns every active vector (last index entry per sample ID, in first-seen order).
      *
+     * <p>The feature index is append-only and last-wins: a later {@link #save} of a sample ID supersedes its earlier
+     * entries. Superseded entries are neither validated nor read (Issue #137), the same as
+     * {@link #findBySampleId(String)} and {@link #validateStoredVectorDimensions(int)}, so a store re-encoded k times
+     * reads only its active frames, and a corrupt superseded entry (bad offset, invalid header, truncated frame) does
+     * not fail the call. A corrupt active entry still fails with the same exception and message as before. Malformed
+     * index lines still fail, because the whole index is parsed before any frame is read.
+     *
      * <p>The segment is read through one reused window of at most {@value #BULK_WINDOW_BYTES} bytes (the segment size
      * when smaller, with a 4-byte floor for one header) with positional reads, and each frame is decoded at its
      * indexed offset (Issue #136). The window only moves forward: a frame that continues the window keeps its
@@ -100,7 +107,7 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
      * append-ordered index needs a handful of reads, any other order still works, and no order rereads a whole
      * window per entry. Entries are validated and
      * read in index order, so results, offset and header checks, truncation messages and the precedence of errors
-     * are unchanged. Read buffers are bounded by the window plus the 16 KiB chunk scratch of
+     * among active entries are unchanged. Read buffers are bounded by the window plus the 16 KiB chunk scratch of
      * {@link ChunkedFloatReader}, independent of segment size.
      */
     @Override
@@ -110,28 +117,44 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
 
     /** {@link #findAll()} that also counts its reads into {@code stats}; tests use it to pin the I/O structure. */
     List<StoredSpeechFeatureVector> findAll(ReadStats stats) throws IOException {
-        var byId = new LinkedHashMap<String, StoredSpeechFeatureVector>();
         var entries = readIndexEntries();
+        var activeIndexById = new LinkedHashMap<String, Integer>(); // first-seen order, index of the last entry
+        for (int i = 0; i < entries.size(); i++) {
+            activeIndexById.put(entries.get(i).sampleId(), i);
+        }
+        var active = new boolean[entries.size()];
+        for (int i : activeIndexById.values()) {
+            active[i] = true;
+        }
+        var vectors = new StoredSpeechFeatureVector[entries.size()];
         var fileSize = Files.size(vectorFile);
         var floatReader = new ChunkedFloatReader();
         try (var file = new RandomAccessFile(vectorFile.toFile(), "r")) {
             var window = new SegmentWindow(file.getChannel(), windowCapacity(fileSize), stats);
-            for (var entry : entries) {
+            for (int i = 0; i < entries.size(); i++) {
+                if (!active[i]) {
+                    continue; // superseded by a later entry for the same sample ID (Issue #137)
+                }
+                var entry = entries.get(i);
                 validateOffset(entry.offset(), fileSize, entry.sampleId());
                 var vector = entry.offset() < window.start()
                         ? readPerVector(file, entry.sampleId(), entry.offset(), floatReader, stats)
                         : readFromWindow(window, file, entry.sampleId(), entry.offset(), floatReader, stats);
-                byId.put(entry.sampleId(), new StoredSpeechFeatureVector(entry.sampleId(), vector));
+                vectors[i] = new StoredSpeechFeatureVector(entry.sampleId(), vector);
             }
         }
-        return List.copyOf(byId.values());
+        var result = new ArrayList<StoredSpeechFeatureVector>(activeIndexById.size());
+        for (int i : activeIndexById.values()) {
+            result.add(vectors[i]);
+        }
+        return List.copyOf(result);
     }
 
     /**
      * Validates the dimensions of every active stored vector without materializing float values.
      *
      * <p>The feature index remains append-only, so repeated sample IDs use the last index entry,
-     * matching {@link #findAll()}. The returned count is the number of active vectors inspected.
+     * matching {@link #findAll()}; superseded entries are not validated. The returned count is the number of active vectors inspected.
      * This method validates offsets and vector-dimension headers only; callers that need vector
      * values must still use {@link #findAll()} or {@link #findBySampleId(String)}.
      *

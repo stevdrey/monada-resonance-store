@@ -11,6 +11,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -27,7 +28,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Proves that {@link FileSpeechFeatureStore#findAll()} and {@link FileSpeechFeatureStore#findBySampleId} return
  * exactly what the pre-Issue #132 per-float read path returned (same ids, same order, bit-identical floats)
  * and fail with the same exception type and message on corrupt segments and indexes. The oracle below is a
- * verbatim copy of that previous read path.
+ * verbatim copy of that previous read path. One documented exception (Issue #137): {@code findAll()} skips entries
+ * superseded by a later entry for the same sample ID, so a corrupt superseded entry no longer fails it; those cases
+ * are compared with the oracle run on a de-duplicated index (see {@code oracleFindAllActive}).
  */
 class FileSpeechFeatureStoreReadParityTest {
 
@@ -406,6 +409,132 @@ class FileSpeechFeatureStoreReadParityTest {
             var message = assertSameError(oracleFindAll(dir), outcome(store::findAll));
             assertTrue(message.contains("sampleId=" + (reversed ? "e" : "b")), message);
         }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Superseded entries (Issue #137): the one documented exception to oracle parity. findAll() no longer
+    // validates or reads entries superseded by a later entry for the same sample ID, like findBySampleId(). For
+    // valid stores it still matches the oracle exactly; when only a superseded entry is corrupt, the oracle fails
+    // and findAll() returns what the oracle returns for the same store with a de-duplicated index.
+    // ---------------------------------------------------------------------------------------------
+
+    @Test
+    void validStoresWithSupersededEntriesMatchTheOracle() throws IOException {
+        for (int versions : new int[]{2, 4}) {
+            for (var layout : List.of("rounds", "interleaved", "shuffled")) {
+                var dir = root.resolve(layout + versions);
+                var store = new FileSpeechFeatureStore(dir);
+                if (layout.equals("interleaved")) {
+                    for (int i = 0; i < 30; i++) {
+                        for (int v = 0; v < versions; v++) {
+                            store.save("sample-" + i, new FrequencyVector(sequence(1 + (i + v) % 7, i * 10 + v)));
+                        }
+                    }
+                } else {
+                    for (int v = 0; v < versions; v++) {
+                        for (int i = 0; i < 30; i++) {
+                            store.save("sample-" + i, new FrequencyVector(sequence(1 + (i + v) % 7, i * 10 + v)));
+                        }
+                    }
+                }
+                if (layout.equals("shuffled")) {
+                    Path index = dir.resolve(INDEX);
+                    var lines = new ArrayList<>(Files.readAllLines(index));
+                    Collections.shuffle(lines, new Random(137));
+                    Files.write(index, lines, StandardCharsets.UTF_8);
+                }
+
+                var result = assertSameOutcome(oracleFindAll(dir), outcome(store::findAll));
+                assertEquals(30, result.size(), layout + versions);
+                assertSameOutcome(oracleFindAllActive(dir), outcome(store::findAll));
+                assertSameFindBySampleId(store, dir, ids(30));
+            }
+        }
+    }
+
+    @Test
+    void corruptSupersededEntriesNoLongerFailFindAll() throws IOException {
+        for (var corruption : List.of("negative-offset", "offset-past-eof", "invalid-header", "values-past-eof")) {
+            var dir = root.resolve(corruption);
+            var store = new FileSpeechFeatureStore(dir);
+            store.save("a", new FrequencyVector(new float[]{1f, 2f, 3f}));
+            store.save("b", new FrequencyVector(new float[]{4f, 5f}));
+            store.save("c", new FrequencyVector(new float[]{6f}));
+            store.save("a", new FrequencyVector(new float[]{7f, 8f, 9f, 10f}));
+            Path index = dir.resolve(INDEX);
+            switch (corruption) {
+                case "negative-offset", "offset-past-eof" -> {
+                    var lines = new ArrayList<>(Files.readAllLines(index));
+                    lines.addFirst("b\t" + (corruption.equals("negative-offset") ? "-4" : "999999"));
+                    Files.write(index, lines, StandardCharsets.UTF_8);
+                }
+                default -> {
+                    try (var file = new RandomAccessFile(dir.resolve(SEGMENT).toFile(), "rw")) {
+                        file.seek(0); // the superseded first frame of "a"
+                        file.writeInt(corruption.equals("invalid-header") ? -1 : 65_536);
+                    }
+                }
+            }
+
+            var oracle = oracleFindAll(dir);
+            assertTrue(oracle.error() != null, corruption + ": the strict oracle fails on the superseded entry");
+            var result = assertSameOutcome(oracleFindAllActive(dir), outcome(store::findAll));
+            // First-seen order counts superseded entries too, so the prepended "b" line moves "b" first.
+            var expectedOrder = corruption.contains("offset")
+                    ? List.of("b", "a", "c") : List.of("a", "b", "c");
+            assertEquals(expectedOrder, result.stream().map(StoredSpeechFeatureVector::sampleId).toList());
+            assertEquals(4, result.get(expectedOrder.indexOf("a")).vector().dimensions(), corruption);
+            assertSameFindBySampleId(store, dir, List.of("a", "b", "c"));
+        }
+    }
+
+    @Test
+    void corruptActiveEntriesStillFailWithTheSameMessage() throws IOException {
+        for (var corruption : List.of("active-only", "active-and-superseded", "active-duplicate")) {
+            var dir = root.resolve(corruption);
+            var store = new FileSpeechFeatureStore(dir);
+            store.save("a", new FrequencyVector(new float[]{1f, 2f, 3f}));
+            store.save("b", new FrequencyVector(new float[]{4f, 5f}));
+            store.save("a", new FrequencyVector(new float[]{7f, 8f, 9f, 10f}));
+            store.save("c", new FrequencyVector(new float[]{6f}));
+            var target = corruption.equals("active-duplicate") ? "a" : "b";
+            try (var file = new RandomAccessFile(dir.resolve(SEGMENT).toFile(), "rw")) {
+                file.seek(offsetOf(dir, target));
+                file.writeInt(-1);
+                if (corruption.equals("active-and-superseded")) {
+                    file.seek(0); // the superseded first frame of "a", before "b" in index order
+                    file.writeInt(-1);
+                }
+            }
+
+            var message = assertSameError(oracleFindAllActive(dir), outcome(store::findAll));
+            assertTrue(message.contains("Invalid vector dimensions (-1) for sampleId=" + target), message);
+            if (!corruption.equals("active-and-superseded")) {
+                assertSameError(oracleFindAll(dir), outcome(store::findAll));
+            }
+            assertSameFindBySampleId(store, dir, List.of("a", "b", "c"));
+        }
+    }
+
+    /**
+     * The verbatim oracle run on a copy of {@code dir} whose index keeps only the last entry per sample ID, in
+     * first-seen order: the expected {@code findAll()} outcome once superseded entries are skipped (Issue #137).
+     */
+    private static Outcome<List<StoredSpeechFeatureVector>> oracleFindAllActive(Path dir) throws IOException {
+        var active = new LinkedHashMap<String, IndexEntry>();
+        for (var entry : readIndexEntries(dir)) {
+            active.put(entry.sampleId(), entry);
+        }
+        var copy = dir.resolveSibling(dir.getFileName() + "-active");
+        Files.createDirectories(copy.resolve(SEGMENT).getParent());
+        Files.createDirectories(copy.resolve(INDEX).getParent());
+        Files.copy(dir.resolve(SEGMENT), copy.resolve(SEGMENT), StandardCopyOption.REPLACE_EXISTING);
+        var index = new StringBuilder();
+        for (var entry : active.values()) {
+            index.append(entry.sampleId()).append('\t').append(entry.offset()).append('\n');
+        }
+        Files.writeString(copy.resolve(INDEX), index, StandardCharsets.UTF_8);
+        return oracleFindAll(copy);
     }
 
     // ---------------------------------------------------------------------------------------------

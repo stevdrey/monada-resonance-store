@@ -110,7 +110,7 @@ The project follows a measurement-first path: improve retrieval quality only aft
   than the window, frames at the window/fallback size boundary, corrupt frames reached by a mid-segment refill, and
   multi-error precedence. The windowed candidate in the report stays a frozen snapshot of the stage-1 proposal. Production `findAll()` p50 at N=10,000 fell from ~22.3 ms to ~3.0 ms (64 dims) and
   from ~22.8 ms to ~3.7 ms (128 dims) (warm page cache, single machine, exploratory). Format, index, API and defaults are unchanged,
-  and generated speech evaluation output is byte-identical. Not done here: cross-query caching and dedup of superseded entries.
+  and generated speech evaluation output is byte-identical. Not done here: cross-query caching. Dedup of superseded entries: Issue #137.
 - Structural I/O checks for the windowed speech read (follow-up to Issue #136): a package-private `findAll(ReadStats)` counts
   window refills, channel reads, bytes read and reread through the window (reread = at or below the furthest offset already
   read), and per-vector fallbacks with the bytes they read (file-pointer advance; it catches overreads, not call counts). Public
@@ -122,6 +122,20 @@ The project follows a measurement-first path: improve retrieval quality only aft
   across runs and untouched by the public path. Two efficiency-only mutants that the parity test cannot see (dropping the tail
   carry-over; sending an exactly window-sized frame to the fallback) now fail. Test segments are written by a shared
   `SpeechFeatureSegmentFixture`. Speech evaluation output is byte-identical.
+- Superseded speech feature entries (Issue #137): decision **(b)**, `FileSpeechFeatureStore.findAll()` skips index entries
+  superseded by a later entry for the same sample ID, like `findBySampleId()` and `validateStoredVectorDimensions()` already did.
+  Results stay in the first-seen order of each sample ID with the vector from its last entry, and active entries are still validated
+  and read in index order. Valid stores therefore return identical, bit-identical results, and a corrupt active entry fails with the
+  same exception and message. Error-behavior change: a corrupt *superseded* entry (bad offset, invalid header, truncated frame) no
+  longer fails `findAll()`. Malformed index lines still fail. Measured with a scratch probe (not committed) at N=10,000 x 64 dims,
+  k full re-encode rounds in append order: window bytes read went from 2.6/5.2/10.4 MB to 2.6 MB for k=1/2/4. Timing, with
+  baseline and candidate JVMs alternated over 3 rounds (warm page cache, single machine, exploratory): k=1 within noise
+  (~6-12 ms both), k=4 p50 ~11-21 ms -> ~9-13 ms. Index parsing still grows with k and now dominates the remaining cost.
+  Storage compatibility: no new metadata; existing stores are read unchanged and are more lenient only toward corrupt superseded
+  entries; vectors stay comparable (bit-identical); path: reuse. Proof: `FileSpeechFeatureStoreReadParityTest` keeps its verbatim
+  oracle and adds a documented exception, where superseded-corruption cases are compared with the oracle on a de-duplicated index.
+  `FileSpeechFeatureStoreReadStructureTest` asserts that superseded frames are never read. Generated speech evaluation output is
+  byte-identical. Not done here: index compaction and surfacing superseded-entry corruption through diagnostics.
 - Exact bounded top-K experiment (Issue #120): experimental `ExactBoundedTopKSelector` (bounded min-heap over the deduplicated
   candidates, production comparator score desc / atom id asc) and `ExperimentalBoundedTopKLinearScanIndex` (same scan, threshold and
   keep-max dedup, selector instead of sort+truncate) live in the unstable `com.monada.index.experimental` package and are never
