@@ -85,6 +85,13 @@ tasks.register<JavaExec>("runVectorLoadBreakdown") {
     classpath = sourceSets["main"].runtimeClasspath
 }
 
+tasks.register<JavaExec>("runVectorCopyShare") {
+    description = "Measure the share of FrequencyVector's defensive copy in FileFrequencyStore and FileSpeechFeatureStore findAll() (exploratory)"
+    group = "application"
+    mainClass.set("com.monada.evaluation.VectorCopyShareMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
 tasks.register<JavaExec>("runBoundedTopKExperiment") {
     description = "Compare the experimental exact bounded top-K selector against the linear-scan full-sort oracle (exploratory)"
     group = "application"

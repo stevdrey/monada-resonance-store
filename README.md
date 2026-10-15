@@ -84,6 +84,7 @@ The project requires **JDK 27** (Gradle toolchain `27`) and builds with the vers
 ./gradlew :monada-evaluation:runLatencyScaleSweep -q
 ./gradlew :monada-evaluation:runScanPhaseBreakdown -q
 ./gradlew :monada-evaluation:runVectorLoadBreakdown -q
+./gradlew :monada-evaluation:runVectorCopyShare -q
 ./gradlew :monada-evaluation:runBoundedTopKExperiment -q
 ./gradlew :monada-evaluation:runProjectMemory -q
 ./gradlew :monada-evaluation:runSpeechModalityComparison -q
@@ -531,6 +532,12 @@ Observed on one machine (AMD Ryzen 7 7730U, 16 threads, Linux 7.2.9, OpenJDK 27;
 Within the same run, production `findAll()` is ~55x faster than the per-float replica at N=10,000. Vector load is still the largest phase (~63-64% at N=10,000), followed by cosine scoring (~18%) and the full sort (~12%), which stays below the 20% bounded top-K threshold (`BOUNDED_TOP_K_PROTOTYPE_NOT_JUSTIFIED`). Retaining vectors across searches remains out of scope and would need its own Issue with invalidation, consistency and compatibility analysis.
 
 `FileSpeechFeatureStore` uses the same chunked read for speech feature vectors (Issue #132), with the same guarantees: unchanged format, validation, error messages, results and ordering, and parity tests against the previous per-float path. On the same machine, `findAll()` p50 at N=10,000 x 64 dimensions (the speech default) fell from ~462 ms to ~22 ms (warm page cache, exploratory, not a CI assertion); generated speech evaluation output is byte-identical.
+
+`VectorCopyShareRunner` (`runVectorCopyShare`, Issue #135) measures the second `float[]` that each loaded vector used to cost: the store decoded into one array and `FrequencyVector`'s constructor copied it. It times both stores' `findAll()` against two parity-checked replicas that differ only in that copy, and reports per-call allocated bytes. Shares are relative to the copying replica (the pre-#135 path), so a rerun after the change reports the same figures. At N=10,000 the copy was 37.4% of the copying `FileFrequencyStore.findAll()` allocation and 29.7% for `FileSpeechFeatureStore`, but only ~1-6% of p50, so the report concludes `COPY_SHARE_MEANINGFUL_REMOVE_COPY` on allocation. `FrequencyVector` is now a final class with an unchanged public API and a store-only no-copy `FrequencyVector.read(...)` ([ADR 0005](docs/adr/0005-frequency-vector-final-class.md)). Production `findAll()` allocation dropped by exactly N x one `float[dims]`: from 14.10 MB to 8.82 MB at 128 dimensions and from 9.21 MB to 6.49 MB at 64 dimensions. Results are bit-identical, and the latency change is within noise (single machine, exploratory).
+
+```bash
+./gradlew :monada-evaluation:runVectorCopyShare -q
+```
 
 ### Exact Bounded Top-K Experiment
 

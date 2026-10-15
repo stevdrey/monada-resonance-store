@@ -19,7 +19,6 @@ import com.monada.storage.FileFrequencyStore;
 import com.monada.storage.VectorFormatProfile;
 
 import java.io.IOException;
-import java.lang.management.ManagementFactory;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -428,28 +427,5 @@ public final class BoundedTopKExperimentRunner {
 
     private static String tolerancePercent() {
         return String.format(Locale.ROOT, "%.0f%%", BoundedTopKExperimentReport.END_TO_END_TOLERANCE * 100);
-    }
-
-    /**
-     * Optional per-thread allocation accounting ({@code com.sun.management.ThreadMXBean}). Read-only: when
-     * accounting is unsupported or disabled the figures are reported as not measured, never force-enabled.
-     */
-    record AllocationMeter(com.sun.management.ThreadMXBean bean) {
-
-        static AllocationMeter create() {
-            if (ManagementFactory.getThreadMXBean() instanceof com.sun.management.ThreadMXBean bean
-                    && bean.isThreadAllocatedMemorySupported() && bean.isThreadAllocatedMemoryEnabled()) {
-                return new AllocationMeter(bean);
-            }
-            return new AllocationMeter(null);
-        }
-
-        boolean supported() {
-            return bean != null;
-        }
-
-        long currentThreadAllocatedBytes() {
-            return bean == null ? 0L : bean.getCurrentThreadAllocatedBytes();
-        }
     }
 }

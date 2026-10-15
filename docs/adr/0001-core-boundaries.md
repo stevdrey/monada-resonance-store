@@ -40,6 +40,14 @@ Limits:
 - `com.monada.core.io` is exported by the automatic module but is not a supported consumer API (see [library-consumption](../specs/library-consumption.md));
 - adding any other I/O code to core requires a new amendment to this ADR.
 
+## Amendment: No-Copy Vector Read in Core (Issue #135)
+
+`FrequencyVector.read(ChunkedFloatReader, DataInput, int dimensions)` is the second and last I/O-facing entry point
+in core. It decodes `dimensions` floats through the shared reader straight into a new vector's backing array, so the
+stores skip a defensive copy (see [ADR 0005](0005-frequency-vector-final-class.md)). The limits above still apply.
+The method takes a positioned `DataInput` and a dimension count only. Framing, headers, offsets, validation and error
+messages stay in the owning store.
+
 ## Review Checklist
 
 A PR respects this ADR when:
@@ -48,4 +56,4 @@ A PR respects this ADR when:
 - dependency direction stays clear;
 - public API changes are intentional;
 - evaluation-only behavior does not leak into production code;
-- no I/O code is added to `monada-core` beyond the amendment above without updating this ADR.
+- no I/O code is added to `monada-core` beyond the amendments above without updating this ADR.
