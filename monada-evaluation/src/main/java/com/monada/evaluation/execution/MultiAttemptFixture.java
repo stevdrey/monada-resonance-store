@@ -1,16 +1,18 @@
 package com.monada.evaluation.execution;
 
+import static com.monada.evaluation.execution.ForgeFixture.dash;
+import static com.monada.evaluation.execution.ForgeFixture.dimensions;
+import static com.monada.evaluation.execution.ForgeFixture.evidence;
+import static com.monada.evaluation.execution.ForgeFixture.properties;
+import static com.monada.evaluation.execution.ForgeFixture.require;
+import static com.monada.evaluation.execution.ForgeFixture.rows;
+import static com.monada.evaluation.execution.ForgeFixture.unique;
+
 import com.monada.core.execution.QualityDimension;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.UncheckedIOException;
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
-import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -84,6 +86,10 @@ public record MultiAttemptFixture(String version, String provenance, Map<String,
             return revised() ? revisedSolution : solution;
         }
 
+        public String latestLesson() {
+            return revised() ? revisedLesson : lesson;
+        }
+
         /** Revision of the effective finish: 2 when corrected, 1 otherwise, 0 for an unfinished attempt. */
         public int latestRevision() {
             return !finished() ? 0 : revised() ? 2 : 1;
@@ -147,7 +153,7 @@ public record MultiAttemptFixture(String version, String provenance, Map<String,
 
     /** Loads and validates the version-1 corpus from the module resources. */
     public static MultiAttemptFixture load() {
-        Properties manifest = properties("manifest.properties");
+        Properties manifest = properties(RESOURCE_ROOT, "manifest.properties");
         Map<String, String> scopes = new LinkedHashMap<>();
         scopes.put("alpha", require(manifest, "scope.alpha"));
         scopes.put("beta", require(manifest, "scope.beta"));
@@ -158,24 +164,24 @@ public record MultiAttemptFixture(String version, String provenance, Map<String,
                 new BigDecimal(require(manifest, "price.output")), Long.parseLong(require(manifest, "price.unitSize")));
 
         List<Execution> executions = new ArrayList<>();
-        for (String[] f : rows("executions.psv", 12)) {
+        for (String[] f : rows(RESOURCE_ROOT, "executions.psv", 12)) {
             String[] outcome = f[8].split(":");
             executions.add(new Execution(f[0], f[1], f[2], f[3], f[4], f[5], f[6], dimensions(f[7]),
                     OutcomeKind.valueOf(outcome[0]), outcome.length > 1 ? Integer.parseInt(outcome[1]) : 0,
                     f[9], f[10], csv(f[11])));
         }
         List<Attempt> attempts = new ArrayList<>();
-        for (String[] f : rows("attempts.psv", 15)) {
+        for (String[] f : rows(RESOURCE_ROOT, "attempts.psv", 15)) {
             attempts.add(new Attempt(f[0], Integer.parseInt(f[1]), f[2], f[3], dash(f[4]), dash(f[5]),
                     Long.parseLong(f[6]), Long.parseLong(f[7]), Long.parseLong(f[8]), Long.parseLong(f[9]),
                     evidence(f[10]), dash(f[11]), dash(f[12]), dash(f[13]), yesNo(f[14])));
         }
         List<Query> queries = new ArrayList<>();
-        for (String[] f : rows("queries.psv", 5)) {
+        for (String[] f : rows(RESOURCE_ROOT, "queries.psv", 5)) {
             queries.add(new Query(f[0], f[1], f[2], new LinkedHashSet<>(csv(f[3])), f[4]));
         }
         List<CutoffAttempt> cutoff = new ArrayList<>();
-        for (String[] f : rows("cutoff.psv", 8)) {
+        for (String[] f : rows(RESOURCE_ROOT, "cutoff.psv", 8)) {
             cutoff.add(new CutoffAttempt(f[0], Integer.parseInt(f[1]), f[2], f[3].equals("-") ? 0
                     : Integer.parseInt(f[3]), yesNo(f[4]), yesNo(f[5]), f[6], f[7]));
         }
@@ -281,11 +287,15 @@ public record MultiAttemptFixture(String version, String provenance, Map<String,
 
     private void validateCutoff() {
         scopeId(cutoffScope);
-        String[] parts = cutoffEvent.split("\\.");
-        if (parts.length != 3 || !parts[2].equals("fin")) {
+        // parsed from the right: an execution id may itself contain dots
+        String suffix = ".fin";
+        int attemptDot = cutoffEvent.endsWith(suffix)
+                ? cutoffEvent.lastIndexOf('.', cutoffEvent.length() - suffix.length() - 1) : -1;
+        if (attemptDot <= 0) {
             throw new IllegalStateException("cutoff event must be an attempt finish <execution>.a<n>.fin: " + cutoffEvent);
         }
-        Attempt at = findAttempt(parts[0] + "/" + parts[1])
+        String attemptPart = cutoffEvent.substring(attemptDot + 1, cutoffEvent.length() - suffix.length());
+        Attempt at = findAttempt(cutoffEvent.substring(0, attemptDot) + "/" + attemptPart)
                 .orElseThrow(() -> new IllegalStateException("cutoff event names an unknown attempt: " + cutoffEvent));
         if (!at.finished() || !execution(at.execution()).scopeKey().equals(cutoffScope)) {
             throw new IllegalStateException("cutoff event must be a finish recorded in the cutoff scope: " + cutoffEvent);
@@ -324,9 +334,10 @@ public record MultiAttemptFixture(String version, String provenance, Map<String,
             throw new IllegalStateException("fixture needs at least " + MIN_MULTI_ATTEMPT_SUCCESSES + " SUCCESS "
                     + "executions with a failed or cancelled earlier attempt, has " + multiAttemptSuccesses);
         }
-        require(attempts.stream().anyMatch(a -> a.result().equals("CANCELLED")), "an abandoned (cancelled) attempt");
-        require(attempts.stream().anyMatch(a -> !a.finished()), "an unfinished attempt");
-        require(attempts.stream().anyMatch(a -> a.revised() && !a.revisedResult().equals(a.result())),
+        requireScenario(attempts.stream().anyMatch(a -> a.result().equals("CANCELLED")),
+                "an abandoned (cancelled) attempt");
+        requireScenario(attempts.stream().anyMatch(a -> !a.finished()), "an unfinished attempt");
+        requireScenario(attempts.stream().anyMatch(a -> a.revised() && !a.revisedResult().equals(a.result())),
                 "a correction that changes the attempt result");
         Set<String> sameScope = new LinkedHashSet<>();
         Set<String> crossScope = new LinkedHashSet<>();
@@ -339,37 +350,14 @@ public record MultiAttemptFixture(String version, String provenance, Map<String,
                 }
             }
         }
-        require(!sameScope.isEmpty(), "two independent executions of one project with identical summaries");
-        require(!crossScope.isEmpty(), "identical summaries in two projects");
+        requireScenario(!sameScope.isEmpty(), "two independent executions of one project with identical summaries");
+        requireScenario(!crossScope.isEmpty(), "identical summaries in two projects");
     }
 
-    private static void require(boolean present, String scenario) {
+    private static void requireScenario(boolean present, String scenario) {
         if (!present) {
             throw new IllegalStateException("fixture needs " + scenario);
         }
-    }
-
-    private static void unique(Collection<String> values, String what) {
-        if (new LinkedHashSet<>(values).size() != values.size()) {
-            throw new IllegalStateException("duplicate " + what + " id");
-        }
-    }
-
-    private static Set<QualityDimension> dimensions(String csv) {
-        Set<QualityDimension> out = EnumSet.noneOf(QualityDimension.class);
-        Arrays.stream(csv.split(",")).map(String::trim).map(QualityDimension::valueOf).forEach(out::add);
-        return out;
-    }
-
-    private static Map<QualityDimension, String> evidence(String field) {
-        Map<QualityDimension, String> out = new LinkedHashMap<>();
-        if (!field.equals("-")) {
-            for (String part : field.split(";")) {
-                String[] kv = part.split("=");
-                out.put(QualityDimension.valueOf(kv[0].trim()), kv[1].trim());
-            }
-        }
-        return out;
     }
 
     private static List<String> csv(String field) {
@@ -382,58 +370,5 @@ public record MultiAttemptFixture(String version, String provenance, Map<String,
             case "n" -> false;
             default -> throw new IllegalStateException("expected y or n but found: " + field);
         };
-    }
-
-    private static String dash(String field) {
-        return field.equals("-") ? null : field;
-    }
-
-    private static String require(Properties p, String key) {
-        String value = p.getProperty(key);
-        if (value == null || value.isBlank()) {
-            throw new IllegalStateException("missing fixture property: " + key);
-        }
-        return value.trim();
-    }
-
-    private static Properties properties(String name) {
-        Properties p = new Properties();
-        try (InputStream in = open(name)) {
-            p.load(new java.io.InputStreamReader(in, StandardCharsets.UTF_8));
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-        return p;
-    }
-
-    private static InputStream open(String name) {
-        InputStream in = MultiAttemptFixture.class.getResourceAsStream(RESOURCE_ROOT + name);
-        if (in == null) {
-            throw new IllegalStateException("missing fixture resource: " + RESOURCE_ROOT + name);
-        }
-        return in;
-    }
-
-    private static List<String[]> rows(String name, int columns) {
-        List<String[]> out = new ArrayList<>();
-        try (InputStream in = open(name)) {
-            for (String line : new String(in.readAllBytes(), StandardCharsets.UTF_8).split("\n", -1)) {
-                if (line.isBlank() || line.startsWith("#")) {
-                    continue;
-                }
-                String[] fields = line.split("\\|", -1);
-                if (fields.length != columns) {
-                    throw new IllegalStateException(name + ": expected " + columns + " columns but found "
-                            + fields.length + " in: " + line);
-                }
-                for (int i = 0; i < fields.length; i++) {
-                    fields[i] = fields[i].trim();
-                }
-                out.add(fields);
-            }
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-        return out;
     }
 }

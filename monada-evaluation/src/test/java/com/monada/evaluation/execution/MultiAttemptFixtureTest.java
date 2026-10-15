@@ -139,6 +139,39 @@ class MultiAttemptFixtureTest {
     }
 
     @Test
+    void parsesTheCutoffEventFromTheRightSoExecutionIdsMayContainDots() {
+        // rename m-correct to m.correct everywhere it is referenced, including the cutoff event
+        UnaryOperator<String> rename = id -> id.equals("m-correct") ? "m.correct" : id;
+        List<MultiAttemptFixture.Execution> executions = fixture.executions().stream().map(e -> new MultiAttemptFixture
+                .Execution(rename.apply(e.id()), e.scopeKey(), e.task(), e.summary(), e.sourceRevision(),
+                e.contextFingerprint(), e.constraintsFingerprint(), e.mandatory(), e.outcome(), e.outcomeAttempt(),
+                e.expectedLabel(), e.expectedAcceptance(), e.expectedReasons())).toList();
+        List<MultiAttemptFixture.Attempt> attempts = fixture.attempts().stream().map(a -> new MultiAttemptFixture
+                .Attempt(rename.apply(a.execution()), a.ordinal(), a.reason(), a.result(), a.solution(), a.lesson(),
+                a.inputTokens(), a.outputTokens(), a.startSeconds(), a.endSeconds(), a.evidence(), a.revisedResult(),
+                a.revisedSolution(), a.revisedLesson(), a.judgedAccepted())).toList();
+        List<MultiAttemptFixture.Query> queries = fixture.queries().stream().map(q -> new MultiAttemptFixture.Query(
+                q.id(), q.scopeKey(), q.text(), new java.util.LinkedHashSet<>(q.relevant().stream()
+                .map(r -> r.replace("m-correct/", "m.correct/")).toList()), q.judgment())).toList();
+        List<MultiAttemptFixture.CutoffAttempt> cutoff = fixture.cutoff().stream().map(c -> new MultiAttemptFixture
+                .CutoffAttempt(rename.apply(c.execution()), c.ordinal(), c.result(), c.revision(), c.markedAccepted(),
+                c.accepted(), c.label(), c.acceptance())).toList();
+        MultiAttemptFixture dotted = new MultiAttemptFixture(fixture.version(), fixture.provenance(),
+                fixture.scopeIds(), fixture.price(), fixture.recallLimit(), fixture.pageSize(), fixture.cutoffScope(),
+                "m.correct.a1.fin", executions, attempts, queries, cutoff);
+        dotted.validate(); // accepted: the attempt is parsed from the right
+        assertInvalid(withCutoffEvent("m-correct.fin"), "must be an attempt finish");
+        assertInvalid(withCutoffEvent("m-correct.a1.stage"), "must be an attempt finish");
+        assertInvalid(withCutoffEvent("m-correct.a9.fin"), "unknown attempt");
+    }
+
+    private MultiAttemptFixture withCutoffEvent(String event) {
+        return new MultiAttemptFixture(fixture.version(), fixture.provenance(), fixture.scopeIds(), fixture.price(),
+                fixture.recallLimit(), fixture.pageSize(), fixture.cutoffScope(), event, fixture.executions(),
+                fixture.attempts(), fixture.queries(), fixture.cutoff());
+    }
+
+    @Test
     void judgesTheRawOutcomeMarkerAtTheCutoffSeparately() {
         MultiAttemptFixture.CutoffAttempt accepted = cutoffRow("m-repair/a2");
         assertTrue(accepted.markedAccepted());

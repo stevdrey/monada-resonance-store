@@ -13,13 +13,17 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import org.junit.jupiter.api.Test;
+import java.util.stream.Stream;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
- * G7 compares two runs inside one JVM, where hash-seeded iteration orders (Map.copyOf, Set.of) are identical, so
- * it cannot see an ordering that differs between JVMs: that kind of nondeterminism was found once only by diffing
- * the report across separate processes by hand. This test does that diff: it starts several JVMs at the same time
- * on the module's runtime classpath, runs the evaluation command in each, and requires the same deterministic report.
+ * G7 (and MA6 of the multi-attempt evaluation) compares two runs inside one JVM, where hash-seeded iteration orders
+ * (Map.copyOf, Set.of) are identical, so it cannot see an ordering that differs between JVMs: that kind of
+ * nondeterminism was found once only by diffing the report across separate processes by hand. This test does that
+ * diff for every evaluation command: it starts several JVMs at the same time on the module's runtime classpath, runs
+ * the command in each, and requires the same deterministic report.
  *
  * <p>The check is probabilistic by nature: a random per-JVM order that has two possible outcomes is caught with
  * probability {@code 1 - 2 / 2^JVMS} (97% with six JVMs), never falsely reported.
@@ -31,8 +35,15 @@ class ForgeCrossJvmDeterminismTest {
     private record Result(int exit, String out, String err) {
     }
 
-    @Test
-    void separateJvmsProduceTheSameDeterministicReport() throws Exception {
+    /** Each evaluation command with the decision its report prints when every gate passes. */
+    static Stream<Arguments> commands() {
+        return Stream.of(Arguments.of(ForgeExperienceEvaluationMain.class, "READY_FOR_HOST_ADAPTER_EXPERIMENT"),
+                Arguments.of(MultiAttemptEvaluationMain.class, "ATTEMPT_JOINS_VERIFIED"));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("commands")
+    void separateJvmsProduceTheSameDeterministicReport(Class<?> command, String decision) throws Exception {
         String classpath = System.getProperty("forge.runtime.classpath");
         assertNotNull(classpath, "the Gradle test task must pass forge.runtime.classpath");
         String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
@@ -41,7 +52,7 @@ class ForgeCrossJvmDeterminismTest {
         List<CompletableFuture<String>> outs = new ArrayList<>();
         List<CompletableFuture<String>> errs = new ArrayList<>();
         for (int i = 0; i < JVMS; i++) {
-            Process p = new ProcessBuilder(java, "-cp", classpath, ForgeExperienceEvaluationMain.class.getName())
+            Process p = new ProcessBuilder(java, "-cp", classpath, command.getName())
                     .start();
             processes.add(p);
             outs.add(CompletableFuture.supplyAsync(() -> read(p.getInputStream())));
@@ -64,7 +75,7 @@ class ForgeCrossJvmDeterminismTest {
             assertFalse(r.out().contains("\r"), "JVM " + i + " printed a carriage return");
         }
         String first = deterministicPart(results.get(0).out());
-        assertTrue(first.contains("READY_FOR_HOST_ADAPTER_EXPERIMENT"), first);
+        assertTrue(first.contains(decision), first);
         for (int i = 1; i < JVMS; i++) {
             assertEquals(first, deterministicPart(results.get(i).out()),
                     "JVM " + i + " printed a different deterministic report than JVM 0");

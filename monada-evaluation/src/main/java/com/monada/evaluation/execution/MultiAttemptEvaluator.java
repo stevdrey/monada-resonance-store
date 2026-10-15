@@ -177,14 +177,16 @@ public final class MultiAttemptEvaluator {
 
             t = System.nanoTime();
             List<ExperienceSample> cutoffSamples = samples(s.cutoffExport);
+            Map<String, List<ExperienceSample>> latestSamples = new LinkedHashMap<>();
+            s.exports.forEach((scopeKey, report) -> latestSamples.put(scopeKey, samples(report)));
             for (MultiAttemptFixture.Query q : fixture.queries()) {
                 ScopeId scope = MultiAttemptFixtureRecorder.scope(fixture, q.scopeKey());
                 ExperienceRecall recall = s.memories.get(q.scopeKey()).recall(scope, q.text(), fixture.recallLimit());
                 s.hits.put(q.id(), recall.hits());
-                ExperienceExportReport latest = s.exports.get(q.scopeKey());
-                long latestCutoff = latest.pages().get(0).ledger().cutoffSequence();
+                List<ExperienceSample> latest = latestSamples.get(q.scopeKey());
+                long latestCutoff = s.exports.get(q.scopeKey()).pages().get(0).ledger().cutoffSequence();
                 s.latestRows.put(q.id(), recall.hits().stream()
-                        .map(h -> AttemptJoin.join(h, samples(latest), latestCutoff)).toList());
+                        .map(h -> AttemptJoin.join(h, latest, latestCutoff)).toList());
                 if (q.scopeKey().equals(fixture.cutoffScope())) {
                     s.cutoffRows.put(q.id(), recall.hits().stream()
                             .map(h -> AttemptJoin.join(h, cutoffSamples, s.cutoffSequence)).toList());
@@ -557,10 +559,12 @@ public final class MultiAttemptEvaluator {
                 violations.add(sample.executionId().value() + ": uses sequence " + sample.lastSequence()
                         + " beyond the cutoff " + s.cutoffSequence);
             }
-            // the historical facts must be the exact ledger events, as MA3 requires of the latest export
-            violations.addAll(ForgeExperienceEvaluator.referenceViolations(cutoffMemory, cutoffScope, sample));
-            violations.addAll(cutoffReferenceBoundViolations(cutoffMemory, cutoffScope, sample, s.cutoffSequence));
-            references += ForgeExperienceEvaluator.exportedReferences(sample).size();
+            // the historical facts must be the exact ledger events (as MA3 requires of the latest export), each one
+            // recorded no later than the cutoff; the references are collected once and every event loaded once
+            List<ForgeExperienceEvaluator.LabelledRef> refs = ForgeExperienceEvaluator.exportedReferences(sample);
+            violations.addAll(ForgeExperienceEvaluator.referenceViolations(cutoffMemory, cutoffScope, sample, refs,
+                    s.cutoffSequence));
+            references += refs.size();
             for (ExperienceSample.SampleAttempt a : sample.attempts()) {
                 String id = ForgeFixtureRecorder.experienceId(sample.executionId().value(), a.id());
                 exported.add(id);
@@ -624,84 +628,23 @@ public final class MultiAttemptEvaluator {
     }
 
     /**
-     * The paged export at an explicit cutoff must equal one unpaged export at the same cutoff, sample for sample and
-     * in order (so a duplicated or dropped sample is a violation), traverse as many pages as the page size demands
-     * (at least two) and describe one frozen snapshot on every page: schema, scope, view, additional gates and ledger
-     * checkpoint equal those of the first page and of the unpaged export, the checkpoint is the requested cutoff, the
-     * projection stamp equals the unpaged export's and the first page's and covers the cutoff, and the continuation
-     * flags are consistent.
+     * The paged export at an explicit cutoff is held to the same pagination rules as the latest export
+     * ({@link ForgeExperienceEvaluator#pagedExportViolations}): it equals one unpaged export at the same cutoff, sample
+     * for sample and in order, traverses as many pages as the page size demands (at least two), and every page carries
+     * the unpaged export's schema, scope, view, gates, checkpoint (the requested cutoff) and projection stamp, with
+     * consistent continuation flags.
      */
     static List<String> cutoffPaginationViolations(ExecutionMemory memory, ScopeId scope,
                                                    ExperienceExportReport report, long cutoffSequence, int pageSize) {
         List<String> violations = new ArrayList<>();
         com.monada.api.execution.ExperienceSamplePage reference = memory.exportSamples(ExportRequest.first(scope,
-                ExportCutoff.atSequence(cutoffSequence), 50,
-                ExportView.ADAPTER_READY, ExportEvidencePolicy.executionPolicyOnly()));
+                ExportCutoff.atSequence(cutoffSequence), 50, ExportView.ADAPTER_READY,
+                ExportEvidencePolicy.executionPolicyOnly()));
         if (reference.hasMore()) {
             violations.add(scope.value() + ": the unpaged cutoff export does not fit in one page");
         }
-        List<ExperienceSample> paged = samples(report);
-        if (!reference.samples().equals(paged)) {
-            violations.add(scope.value() + ": the paged cutoff export differs from the unpaged cutoff export in "
-                    + "content or order");
-        }
-        int expectedPages = (reference.samples().size() + pageSize - 1) / pageSize;
-        List<com.monada.api.execution.ExperienceSamplePage> pages = report.pages();
-        if (pages.size() != expectedPages || pages.size() < 2) {
-            violations.add(scope.value() + ": cutoff export used " + pages.size() + " pages, expected "
-                    + expectedPages + " (at least 2) for " + reference.samples().size() + " executions at page size "
-                    + pageSize);
-        }
-        for (int i = 0; i < pages.size(); i++) {
-            var page = pages.get(i);
-            String label = scope.value() + " cutoff page " + (i + 1) + "/" + pages.size();
-            if (!com.monada.api.execution.ExperienceSamplePage.SCHEMA.equals(page.schema())
-                    || !page.schema().equals(reference.schema()) || !page.scope().equals(reference.scope())
-                    || page.view() != reference.view() || page.view() != ExportView.ADAPTER_READY
-                    || !page.additionalGates().equals(reference.additionalGates())
-                    || !page.additionalGates().isEmpty()) {
-                violations.add(label + ": schema/scope/view/gates " + page.schema() + "/" + page.scope().value() + "/"
-                        + page.view() + "/" + page.additionalGates() + " differ from the unpaged cutoff export");
-            }
-            if (!page.ledger().equals(reference.ledger()) || !page.ledger().equals(pages.get(0).ledger())
-                    || page.ledger().cutoffSequence() != cutoffSequence) {
-                violations.add(label + ": ledger checkpoint " + page.ledger() + " but the cutoff is " + cutoffSequence
-                        + " and the unpaged export has " + reference.ledger());
-            }
-            if (!page.projection().equals(reference.projection()) || !page.projection().equals(pages.get(0).projection())
-                    || !page.projection().coversCutoff()) {
-                violations.add(label + ": projection stamp " + page.projection() + " differs from the unpaged cutoff "
-                        + "export " + reference.projection() + " or the first page, or does not cover the cutoff");
-            }
-            boolean last = i == pages.size() - 1;
-            if (page.hasMore() == last || page.next().isPresent() != page.hasMore()) {
-                violations.add(label + ": hasMore=" + page.hasMore() + " next=" + page.next().isPresent()
-                        + (last ? " on the last page" : " on a page that is not the last"));
-            }
-        }
-        return violations;
-    }
-
-    /**
-     * A sample exported as of a cutoff may only reference facts recorded up to that cutoff: every provenance reference
-     * must resolve to a ledger event at a sequence no later than the cutoff (a later correction, such as
-     * {@code m-correct.a1.fin.r2}, is never part of the historical sample). Unresolvable references are reported by
-     * {@link ForgeExperienceEvaluator#referenceViolations}.
-     */
-    static List<String> cutoffReferenceBoundViolations(ExecutionMemory memory, ScopeId scope, ExperienceSample sample,
-                                                       long cutoffSequence) {
-        List<String> violations = new ArrayList<>();
-        String exec = sample.executionId().value();
-        for (ForgeExperienceEvaluator.LabelledRef labelled : ForgeExperienceEvaluator.exportedReferences(sample)) {
-            ExperienceRef ref = labelled.ref();
-            memory.loadEvent(scope, ref.eventId(), ref.revision()).ifPresent(entry -> {
-                if (entry.sequence() > cutoffSequence) {
-                    violations.add(exec + ": " + labelled.origin() + " ref " + ref.eventId().value() + " r"
-                            + ref.revision() + " lies at sequence " + entry.sequence() + " beyond the cutoff "
-                            + cutoffSequence);
-                }
-            });
-        }
+        violations.addAll(ForgeExperienceEvaluator.pagedExportViolations(scope, "cutoff ", report, reference, pageSize,
+                reference.samples().size(), cutoffSequence));
         return violations;
     }
 
@@ -785,8 +728,10 @@ public final class MultiAttemptEvaluator {
                 if (known.isEmpty() || !known.get().scopeKey().equals(q.scopeKey())) {
                     violations.add(q.id() + ": hit on an execution outside the queried project: " + exec);
                 }
-                if (!rows.get(i).experienceId().startsWith(exec + "/")) {
-                    violations.add(q.id() + ": hit on " + exec + " joined as " + rows.get(i).experienceId());
+                // the sample the join matched must be the hit's own execution, never another one with the same text
+                String matched = rows.get(i).sampleExecution();
+                if (!matched.equals(AttemptJoin.NONE) && !matched.equals(exec)) {
+                    violations.add(q.id() + ": hit on " + exec + " joined the sample of " + matched);
                 }
             }
         }
@@ -820,62 +765,71 @@ public final class MultiAttemptEvaluator {
                 MultiAttemptFixture.Execution a = fixture.executions().get(i);
                 MultiAttemptFixture.Execution b = fixture.executions().get(j);
                 if (a.summary().equals(b.summary()) && a.scopeKey().equals(b.scopeKey())) {
-                    violations.addAll(twinViolations(fixture, s, a, b));
-                    twins.add(a.id() + "/" + b.id() + " (shared projected atoms: " + sharedAtoms(fixture, s, a, b)
-                            + ")");
+                    violations.addAll(twinViolations(fixture, s, a, b, twins));
                 }
             }
         }
         List<String> evidence = List.of("hits checked: " + hits + "; foreign-scope hits or samples: none allowed; "
-                + "cross-scope probes rejected: " + probes, "same-project identical-summary executions with distinct "
-                + "references and samples: " + twins + "; identical summaries across projects never cross");
+                + "cross-scope probes rejected: " + probes, "same-project identical-summary executions, each hit "
+                + "joined to its own execution's sample: " + twins + "; identical summaries across projects never cross");
         return ForgeGate.of(MultiAttemptEvaluationReport.SCOPE_ISOLATION,
                 "no foreign-scope leakage; identical summaries never merge or cross executions", violations, evidence);
     }
 
-    /** Two executions with identical summaries in one project: distinct refs, each joined to its own sample. */
-    private static List<String> twinViolations(MultiAttemptFixture fixture, Snapshot s,
-                                               MultiAttemptFixture.Execution a, MultiAttemptFixture.Execution b) {
+    /**
+     * Two independent executions with identical summaries in one project. Every hit on either must join the sample of
+     * its own execution, with that execution's judged label (identical texts must never borrow the twin's verdict),
+     * both must be recalled, and when they hold an attempt with identical texts both must be recalled through one
+     * shared projected atom (the projector's atom identity), so the scenario is really exercised. Appends one evidence
+     * entry to {@code evidence}.
+     */
+    private static List<String> twinViolations(MultiAttemptFixture fixture, Snapshot s, MultiAttemptFixture.Execution a,
+                                               MultiAttemptFixture.Execution b, List<String> evidence) {
         List<String> violations = new ArrayList<>();
-        Map<String, Set<String>> refs = new TreeMap<>();
+        String pair = a.id() + "/" + b.id();
+        Map<String, Set<String>> atoms = new TreeMap<>();
+        int joined = 0;
         for (MultiAttemptFixture.Query q : fixture.queries()) {
             if (!q.scopeKey().equals(a.scopeKey())) {
                 continue;
             }
-            for (ExperienceHit h : s.hits.get(q.id())) {
-                String exec = h.ref().execution().value();
-                if (exec.equals(a.id()) || exec.equals(b.id())) {
-                    refs.computeIfAbsent(exec, k -> new java.util.TreeSet<>()).add(h.ref().eventId().value());
+            List<ExperienceHit> hits = s.hits.get(q.id());
+            for (int i = 0; i < hits.size(); i++) {
+                String exec = hits.get(i).ref().execution().value();
+                MultiAttemptFixture.Execution own = exec.equals(a.id()) ? a : exec.equals(b.id()) ? b : null;
+                if (own == null) {
+                    continue;
+                }
+                atoms.computeIfAbsent(exec, k -> new java.util.TreeSet<>()).add(hits.get(i).atomId());
+                AttemptJoin.Row row = s.latestRows.get(q.id()).get(i);
+                if (!row.joined() || !row.sampleExecution().equals(exec)
+                        || !row.executionLabel().equals(own.expectedLabel())) {
+                    violations.add(q.id() + ": " + row.experienceId() + " of " + pair + " joined " + row.status()
+                            + " the sample of " + row.sampleExecution() + " labelled " + row.executionLabel()
+                            + ", expected its own sample labelled " + own.expectedLabel());
+                } else {
+                    joined++;
                 }
             }
         }
-        Set<String> left = refs.getOrDefault(a.id(), Set.of());
-        Set<String> right = refs.getOrDefault(b.id(), Set.of());
+        Set<String> left = atoms.getOrDefault(a.id(), Set.of());
+        Set<String> right = atoms.getOrDefault(b.id(), Set.of());
         if (left.isEmpty() || right.isEmpty()) {
-            violations.add(a.id() + "/" + b.id() + ": both identical-summary executions must be recalled");
+            violations.add(pair + ": both identical-summary executions must be recalled");
         }
         Set<String> shared = new java.util.TreeSet<>(left);
         shared.retainAll(right);
-        if (!shared.isEmpty()) {
-            violations.add(a.id() + "/" + b.id() + ": identical-summary executions share references " + shared);
+        boolean identicalTexts = fixture.attemptsOf(a.id()).stream().filter(MultiAttemptFixture.Attempt::finished)
+                .anyMatch(x -> fixture.attemptsOf(b.id()).stream().filter(MultiAttemptFixture.Attempt::finished)
+                        .anyMatch(y -> x.latestSolution().equals(y.latestSolution())
+                                && x.latestLesson().equals(y.latestLesson())));
+        if (identicalTexts && shared.isEmpty()) {
+            violations.add(pair + ": attempts with identical texts were not recalled through a shared atom, so the "
+                    + "identical-text scenario was not exercised");
         }
+        evidence.add(pair + " (" + joined + " hits joined to their own sample; shared projected atoms: "
+                + shared.size() + ")");
         return violations;
-    }
-
-    /**
-     * How many projected atoms both executions are recalled through: identical attempt texts share one atom while
-     * keeping distinct references (the projector's atom identity), which is why the join is by execution id only.
-     */
-    private static int sharedAtoms(MultiAttemptFixture fixture, Snapshot s, MultiAttemptFixture.Execution a,
-                                   MultiAttemptFixture.Execution b) {
-        Map<String, Set<String>> atoms = new TreeMap<>();
-        fixture.queries().stream().filter(q -> q.scopeKey().equals(a.scopeKey()))
-                .flatMap(q -> s.hits.get(q.id()).stream())
-                .forEach(h -> atoms.computeIfAbsent(h.ref().execution().value(), k -> new java.util.TreeSet<>())
-                        .add(h.atomId()));
-        Set<String> shared = new java.util.TreeSet<>(atoms.getOrDefault(a.id(), Set.of()));
-        shared.retainAll(atoms.getOrDefault(b.id(), Set.of()));
-        return shared.size();
     }
 
     private static List<String> mustReject(String what, Runnable call) {
@@ -891,7 +845,7 @@ public final class MultiAttemptEvaluator {
 
     /**
      * Two runs inside one JVM share its hash-seeded iteration orders, so this gate cannot see an order that differs
-     * between JVMs; {@code MultiAttemptCrossJvmDeterminismTest} compares the command's report across separate JVMs.
+     * between JVMs; {@code ForgeCrossJvmDeterminismTest} compares the command's report across separate JVMs.
      */
     private static ForgeGate determinismGate(Run first, Run second) {
         List<String> violations = new ArrayList<>();

@@ -680,6 +680,15 @@ public final class ForgeExperienceEvaluator {
     /** As above, with the sample's references already collected (the gate collects them once per sample). */
     static List<String> referenceViolations(ExecutionMemory memory, ScopeId scope, ExperienceSample sample,
                                             List<LabelledRef> references) {
+        return referenceViolations(memory, scope, sample, references, Long.MAX_VALUE);
+    }
+
+    /**
+     * As above, for a sample exported as of a cutoff: every reference must also resolve to a ledger event at a
+     * sequence no later than {@code maxSequence}, so a historical sample never references a later fact.
+     */
+    static List<String> referenceViolations(ExecutionMemory memory, ScopeId scope, ExperienceSample sample,
+                                            List<LabelledRef> references, long maxSequence) {
         List<String> violations = new ArrayList<>();
         String exec = sample.executionId().value();
         for (LabelledRef labelled : references) {
@@ -689,6 +698,10 @@ public final class ForgeExperienceEvaluator {
             if (exact.isEmpty()) {
                 violations.add(what + " does not resolve");
             } else {
+                if (exact.get().sequence() > maxSequence) {
+                    violations.add(what + " lies at sequence " + exact.get().sequence() + " beyond the cutoff "
+                            + maxSequence);
+                }
                 List<String> coordinates = new ArrayList<>(coordinateViolations(what, scope, ref, exact.get()));
                 // a reference can match its own event perfectly and still belong to another execution than the sample
                 if (!ref.execution().equals(sample.executionId())) {
@@ -895,29 +908,41 @@ public final class ForgeExperienceEvaluator {
      */
     static List<String> paginationViolations(ExecutionMemory memory, ScopeId scope, ExperienceExportReport report,
                                              int pageSize, int executions) {
+        return pagedExportViolations(scope, "", report, memory.exportSamples(ExportRequest.firstPage(scope, 50)),
+                pageSize, executions, memory.history(scope).highWatermark());
+    }
+
+    /**
+     * The pagination rules of {@link #paginationViolations} for any export: {@code reference} is one unpaged export
+     * of the same scope and cutoff, {@code expectedCutoff} the ledger sequence every page must be cut at and
+     * {@code what} a prefix naming the export in messages ({@code ""} for the latest export, {@code "cutoff "} for an
+     * export at an explicit cutoff).
+     */
+    static List<String> pagedExportViolations(ScopeId scope, String what, ExperienceExportReport report,
+                                              com.monada.api.execution.ExperienceSamplePage reference, int pageSize,
+                                              int executions, long expectedCutoff) {
         List<String> violations = new ArrayList<>();
         int expectedPages = (executions + pageSize - 1) / pageSize;
         if (report.pages().size() != expectedPages) {
-            violations.add(scope.value() + ": export used " + report.pages().size() + " pages, expected "
+            violations.add(scope.value() + ": " + what + "export used " + report.pages().size() + " pages, expected "
                     + expectedPages + " for " + executions + " executions at page size " + pageSize);
         }
         if (report.pages().size() < 2) {
-            violations.add(scope.value() + ": the export never traversed a continuation page");
+            violations.add(scope.value() + ": the " + what + "export never traversed a continuation page");
         }
-        com.monada.api.execution.ExperienceSamplePage reference = memory.exportSamples(
-                ExportRequest.firstPage(scope, 50));
-        violations.addAll(pageMetadataViolations(memory, scope, report, reference));
+        violations.addAll(pageMetadataViolations(scope, what, report.pages(), reference, expectedCutoff));
         List<ExperienceSample> unpaged = reference.samples();
         List<ExperienceSample> paged = report.samples().stream().map(AnnotatedSample::sample).toList();
         if (!unpaged.equals(paged)) {
-            violations.add(scope.value() + ": the paged export differs from the unpaged export in content or order");
+            violations.add(scope.value() + ": the paged " + what + "export differs from the unpaged " + what
+                    + "export in content or order");
         }
         return violations;
     }
 
     /**
      * Every page must describe the same frozen snapshot: schema, scope, view, additional gates, ledger checkpoint and
-     * projection format equal those of the first page and of the unpaged export, the checkpoint cutoff is the end of
+     * projection stamp equal those of the first page and of the unpaged export, the checkpoint cutoff is the end of
      * the scope's history, the projection is current and covers it, and the continuation flags are consistent
      * ({@code hasMore} on every page but the last, {@code next} present exactly when {@code hasMore}).
      */
@@ -928,36 +953,45 @@ public final class ForgeExperienceEvaluator {
     /** As above, against an unpaged export that the caller already read (one export per project, not two). */
     static List<String> pageMetadataViolations(ExecutionMemory memory, ScopeId scope, ExperienceExportReport report,
                                                com.monada.api.execution.ExperienceSamplePage reference) {
+        return pageMetadataViolations(scope, "", report.pages(), reference, memory.history(scope).highWatermark());
+    }
+
+    /**
+     * As above, for pages that must be cut at {@code expectedCutoff}; {@code what} as in
+     * {@link #pagedExportViolations}.
+     */
+    static List<String> pageMetadataViolations(ScopeId scope, String what,
+                                               List<com.monada.api.execution.ExperienceSamplePage> pages,
+                                               com.monada.api.execution.ExperienceSamplePage reference,
+                                               long expectedCutoff) {
         List<String> violations = new ArrayList<>();
-        long highWatermark = memory.history(scope).highWatermark();
-        List<com.monada.api.execution.ExperienceSamplePage> pages = report.pages();
+        String unpaged = "the unpaged " + what + "export";
         for (int i = 0; i < pages.size(); i++) {
             var page = pages.get(i);
-            String label = scope.value() + " page " + (i + 1) + "/" + pages.size();
+            String label = scope.value() + " " + what + "page " + (i + 1) + "/" + pages.size();
             if (!com.monada.api.execution.ExperienceSamplePage.SCHEMA.equals(page.schema())) {
                 violations.add(label + ": schema " + page.schema());
             }
             if (!page.schema().equals(reference.schema()) || !page.scope().equals(reference.scope())
                     || page.view() != reference.view() || !page.additionalGates().equals(reference.additionalGates())) {
                 violations.add(label + ": schema/scope/view/gates " + page.schema() + "/" + page.scope().value() + "/"
-                        + page.view() + "/" + page.additionalGates() + " differ from the unpaged export");
+                        + page.view() + "/" + page.additionalGates() + " differ from " + unpaged);
             }
             if (page.view() != ExportView.ADAPTER_READY || !page.additionalGates().isEmpty()) {
                 violations.add(label + ": expected the adapter view with no additional gates");
             }
             if (!page.ledger().equals(reference.ledger()) || !page.ledger().equals(pages.get(0).ledger())) {
-                violations.add(label + ": ledger checkpoint " + page.ledger() + " differs from the first page or the "
-                        + "unpaged export " + reference.ledger());
+                violations.add(label + ": ledger checkpoint " + page.ledger() + " differs from the first page or "
+                        + unpaged + " " + reference.ledger());
             }
-            if (page.ledger().cutoffSequence() != highWatermark) {
-                violations.add(label + ": checkpoint cutoff " + page.ledger().cutoffSequence() + " but the history "
-                        + "ends at " + highWatermark);
+            if (page.ledger().cutoffSequence() != expectedCutoff) {
+                violations.add(label + ": checkpoint cutoff " + page.ledger().cutoffSequence() + " but the export "
+                        + "must be cut at " + expectedCutoff);
             }
-            if (page.projection().formatVersion() != reference.projection().formatVersion()
-                    || !page.projection().textScheme().equals(reference.projection().textScheme())
+            if (!page.projection().equals(reference.projection())
                     || !page.projection().equals(pages.get(0).projection())) {
                 violations.add(label + ": projection stamp " + page.projection() + " differs from the first page or "
-                        + "the unpaged export " + reference.projection());
+                        + unpaged + " " + reference.projection());
             }
             if (page.projection().state() != ProjectionStatus.State.CURRENT || !page.projection().coversCutoff()) {
                 violations.add(label + ": projection " + page.projection().state() + ", covers cutoff "

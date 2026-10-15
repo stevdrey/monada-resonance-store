@@ -112,7 +112,7 @@ class MultiAttemptEvaluationTest {
         MultiAttemptEvaluationReport again = MultiAttemptEvaluator.evaluate(MultiAttemptFixture.load(),
                 work.resolve("again"));
         assertEquals(report.render(), again.render());
-        assertFalse(report.render().contains("ms\n"), "timing must stay out of the deterministic report");
+        assertFalse(report.render().contains("== Elapsed timing"), "timing must stay out of the deterministic report");
     }
 
     @Test

@@ -25,12 +25,16 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * MA4 cutoff checks (issue #121). The paged export at the fixed cutoff is checked as strictly as the latest export:
- * against one unpaged export at the same cutoff, sample for sample, and page by page for its snapshot metadata. Its
- * executions are counted, never collapsed into a set, and the raw outcome marker of every attempt is compared with
- * its judgment separately from the validated accepted verdict.
+ * Gate checks of the multi-attempt evaluation (issue #121) driven on one recorded store, with forged inputs.
+ *
+ * <p>MA4: the paged export at the fixed cutoff is checked as strictly as the latest export: against one unpaged
+ * export at the same cutoff, sample for sample, and page by page for its snapshot metadata. Its executions are counted,
+ * never collapsed into a set, its references must be the exact historical events, and the raw outcome marker of every
+ * attempt is compared with its judgment separately from the validated accepted verdict.
+ *
+ * <p>MA5: every hit must join the sample of its own execution; identical-summary twins never borrow each other's.
  */
-class MultiAttemptCutoffPaginationTest {
+class MultiAttemptGateChecksTest {
     @TempDir
     static Path root;
 
@@ -174,8 +178,8 @@ class MultiAttemptCutoffPaginationTest {
                 p.projection().coversCutoff()), p.samples(), p.hasMore(), p.next())).toList();
         List<String> v = violations(new ExperienceExportReport(scope, pages, report.samples(), report.comparison(),
                 report.exportDigest()));
-        assertTrue(v.stream().anyMatch(x -> x.contains("cutoff page 1/2") && x.contains("differs from the unpaged "
-                + "cutoff export")), v.toString());
+        assertTrue(v.stream().anyMatch(x -> x.contains("cutoff page 1/2: projection stamp")
+                && x.contains("the unpaged cutoff export")), v.toString());
         assertTrue(v.stream().anyMatch(x -> x.contains("cutoff page 2/2")), v.toString());
     }
 
@@ -216,6 +220,35 @@ class MultiAttemptCutoffPaginationTest {
         }
         return new ExperienceExportReport(real.scope(), real.pages(), forged, real.comparison(),
                 real.exportDigest());
+    }
+
+    @Test
+    void aHitJoinedToItsTwinsSampleFailsIsolation() {
+        MultiAttemptEvaluator.Snapshot s = MultiAttemptEvaluator.snapshot(FIXTURE, root, new LinkedHashMap<>());
+        try {
+            assertTrue(MultiAttemptEvaluator.isolationGate(FIXTURE, s).passed());
+            // M05 recalls both twins through one shared atom; let m-twin-ko/a1 borrow m-twin-ok's sample and verdict
+            List<AttemptJoin.Row> rows = new ArrayList<>(s.latestRows.get("M05"));
+            int index = -1;
+            for (int i = 0; i < rows.size(); i++) {
+                if (rows.get(i).experienceId().equals("m-twin-ko/a1")) {
+                    index = i;
+                }
+            }
+            assertTrue(index >= 0, "M05 must recall m-twin-ko/a1");
+            AttemptJoin.Row r = rows.get(index);
+            rows.set(index, new AttemptJoin.Row(r.experienceId(), r.eventId(), r.revision(), r.sequence(), r.status(),
+                    "m-twin-ok", "SUCCESS", "VALIDATED_ACCEPTED", "COMPLETED", true, true));
+            s.latestRows.put("M05", rows);
+            ForgeGate gate = MultiAttemptEvaluator.isolationGate(FIXTURE, s);
+            assertFalse(gate.passed());
+            assertTrue(gate.details().contains("VIOLATION: M05: hit on m-twin-ko joined the sample of m-twin-ok"),
+                    gate.details().toString());
+            assertTrue(gate.details().stream().anyMatch(d -> d.contains("m-twin-ko/a1 of m-twin-ok/m-twin-ko joined")
+                    && d.contains("expected its own sample labelled FAILURE")), gate.details().toString());
+        } finally {
+            s.close();
+        }
     }
 
     @Test

@@ -70,6 +70,7 @@ class AttemptJoinTest {
     void failedAttemptOfASuccessExecutionKeepsTheRawLabelAndIsNotTheAcceptedAttempt() {
         AttemptJoin.Row r = join("m-repair/a1");
         assertEquals(AttemptJoin.Status.JOINED, r.status());
+        assertEquals("m-repair", r.sampleExecution()); // the sample actually matched, recorded apart from the hit
         assertEquals("FAILED", r.attemptResult());
         assertEquals("SUCCESS", r.executionLabel()); // the raw execution label, unchanged
         assertEquals("VALIDATED_ACCEPTED", r.executionAcceptance());
@@ -144,6 +145,7 @@ class AttemptJoinTest {
                 .filter(s -> !s.executionId().value().equals("m-repair")).toList();
         AttemptJoin.Row r = AttemptJoin.join(hit("m-repair/a1"), others, Long.MAX_VALUE);
         assertEquals(AttemptJoin.Status.NO_SAMPLE, r.status());
+        assertEquals(AttemptJoin.NONE, r.sampleExecution());
         assertEquals(AttemptJoin.NONE, r.executionLabel());
     }
 
@@ -202,12 +204,13 @@ class AttemptJoinTest {
         AttemptJoin.Row good = join("m-repair/a1");
         assertEquals(List.of(), MultiAttemptEvaluator.rowViolations(FIXTURE, "T", good));
         AttemptJoin.Row acceptedFailure = new AttemptJoin.Row(good.experienceId(), good.eventId(), good.revision(),
-                good.sequence(), good.status(), good.executionLabel(), good.executionAcceptance(), "FAILED", false,
-                true);
+                good.sequence(), good.status(), good.sampleExecution(), good.executionLabel(),
+                good.executionAcceptance(), "FAILED", false, true);
         assertTrue(MultiAttemptEvaluator.rowViolations(FIXTURE, "T", acceptedFailure).stream()
                 .anyMatch(v -> v.contains("FAILED attempt reported as the accepted attempt")));
         AttemptJoin.Row relabelled = new AttemptJoin.Row(good.experienceId(), good.eventId(), good.revision(),
-                good.sequence(), good.status(), "FAILURE", good.executionAcceptance(), "FAILED", false, false);
+                good.sequence(), good.status(), good.sampleExecution(), "FAILURE", good.executionAcceptance(),
+                "FAILED", false, false);
         assertTrue(MultiAttemptEvaluator.rowViolations(FIXTURE, "T", relabelled).stream()
                 .anyMatch(v -> v.contains("execution label FAILURE but judged SUCCESS")));
     }

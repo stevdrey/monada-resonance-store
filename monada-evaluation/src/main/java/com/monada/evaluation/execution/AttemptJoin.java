@@ -45,9 +45,13 @@ final class AttemptJoin {
         FINISH_MISMATCH
     }
 
-    /** One joined hit; dimensions the join could not establish are {@link #NONE}. */
+    /**
+     * One joined hit; dimensions the join could not establish are {@link #NONE}. {@code sampleExecution} is the
+     * execution id of the exported sample the hit was matched to ({@link #NONE} without one), recorded apart from the
+     * hit's own reference so that a join to another execution's sample stays detectable.
+     */
     record Row(String experienceId, String eventId, int revision, long sequence, Status status,
-               String executionLabel, String executionAcceptance, String attemptResult, boolean markedAccepted,
+               String sampleExecution, String executionLabel, String executionAcceptance, String attemptResult, boolean markedAccepted,
                boolean validatedAcceptedAttempt) {
         Row {
             Objects.requireNonNull(experienceId, "experienceId");
@@ -80,28 +84,30 @@ final class AttemptJoin {
             return unjoined(id, ref, sequence, Status.NO_SAMPLE);
         }
         ExperienceSample s = sample.get();
+        String matched = s.executionId().value();
         String label = s.label().name();
         String acceptance = s.acceptance().name();
         Optional<ExperienceSample.SampleAttempt> attempt = ref.attempt().flatMap(a -> s.attempts().stream()
                 .filter(sa -> sa.id().equals(a)).findFirst());
         if (attempt.isEmpty()) {
-            return new Row(id, ref.eventId().value(), ref.revision(), sequence, Status.ATTEMPT_NOT_IN_SAMPLE, label,
-                    acceptance, NONE, false, false);
+            return new Row(id, ref.eventId().value(), ref.revision(), sequence, Status.ATTEMPT_NOT_IN_SAMPLE, matched,
+                    label, acceptance, NONE, false, false);
         }
         ExperienceSample.SampleAttempt a = attempt.get();
         if (a.finish().filter(ref::equals).isEmpty()) {
             // the hit's fact is not the finish the sample exports: no attempt-level verdict is established
-            return new Row(id, ref.eventId().value(), ref.revision(), sequence, Status.FINISH_MISMATCH, label,
+            return new Row(id, ref.eventId().value(), ref.revision(), sequence, Status.FINISH_MISMATCH, matched, label,
                     acceptance, NONE, false, false);
         }
         String result = a.result().map(Enum::name).orElse(MultiAttemptFixture.UNFINISHED);
         boolean validated = s.acceptance() == DerivedAcceptance.Status.VALIDATED_ACCEPTED && a.accepted()
                 && a.result().filter(r -> r == AttemptResult.COMPLETED).isPresent();
-        return new Row(id, ref.eventId().value(), ref.revision(), sequence, Status.JOINED, label, acceptance, result,
-                a.accepted(), validated);
+        return new Row(id, ref.eventId().value(), ref.revision(), sequence, Status.JOINED, matched, label, acceptance,
+                result, a.accepted(), validated);
     }
 
     private static Row unjoined(String id, ExperienceRef ref, long sequence, Status status) {
-        return new Row(id, ref.eventId().value(), ref.revision(), sequence, status, NONE, NONE, NONE, false, false);
+        return new Row(id, ref.eventId().value(), ref.revision(), sequence, status, NONE, NONE, NONE, NONE, false,
+                false);
     }
 }
