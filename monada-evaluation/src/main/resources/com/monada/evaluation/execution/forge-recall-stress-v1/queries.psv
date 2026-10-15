@@ -1,0 +1,33 @@
+# Judged stress queries over the forge-experience-v1 corpus. Reviewed data, never generated from recall output.
+# relevant / confusable = experience ids (<execution>/a<ordinal>) of the query's own project, or - for none.
+#   relevant:   a reviewer judged it useful for the query (failed attempts may be relevant for their lesson).
+#   confusable: a reviewer judged it NOT relevant although it shares vocabulary or task with the query.
+# An empty relevant set is explicit (-): the query is reported but excluded from every metric denominator.
+# Query text tokens: <EMPTY> is the empty string, <WHITESPACE> is spaces and a tab; other text is used verbatim.
+# id | category | scope | query text | relevant | confusable | judgment
+S01|PARAPHRASE|alpha|split the customer lookup results into smaller chunks|a-page/a1,a-page/a2,a-page/a3|-|the pagination task in other words, sharing only "customer"; every attempt teaches something (offset failure, keyset repair, cursor helper)
+S02|PARAPHRASE|beta|make the notification service boot faster|b-cold/a1,b-cold2/a1,b-cold2/a2|-|cold start reduction of the notification worker in other words; both executions, including the failed preload attempt
+S03|PARAPHRASE|alpha|invoice sum crashes when some lines are missing|a-inv1/a1,a-inv1/a2,a-inv2/a1,a-inv3/a1|-|the invoice totals null pointer described by its symptom; all four alpha attempts address it
+S04|SYNONYM|beta|discard repeated messages in the intake stream|b-dedup/a1,b-dedup/a2|-|deduplicate = discard repeated, events = messages, ingestion pipeline = intake stream
+S05|SYNONYM|alpha|purge stale credentials from the session cache|a-tokens/a1|-|delete = purge, expired = stale, API tokens = credentials, store = cache; "session" is the only shared word
+S06|SYNONYM|beta|resend undelivered callbacks with growing delays|b-webhook/a1,b-webhook/a2|-|retry = resend, failed deliveries = undelivered, webhook = callback, exponential backoff = growing delays
+S07|NEGATION|alpha|paginate customer search without offset parameters|a-page/a2,a-page/a3|a-page/a1|offset paging is excluded: the keyset repair and the cursor helper answer it; the offset attempt is the excluded approach
+S08|NEGATION|alpha|fix the invoice totals null pointer without Optional wrappers|a-inv1/a1,a-inv1/a2,a-inv2/a1|a-inv3/a1|guard and empty-list fixes answer it; the rewrite with Optional wrappers is the excluded approach
+S09|NEGATION|beta|shorten notification worker cold start without preloading templates|b-cold/a1,b-cold2/a2|b-cold2/a1|lazy loading answers it; the failed preload attempt is the excluded approach
+S10|RELATION|alpha|migrate settings from yaml back to properties files|-|a-yaml/a1|the reverse direction of the recorded properties-to-yaml migration is a different task; a-yaml shares almost every content word
+S11|RELATION|beta|encryption key kept beside the nightly backup archive|b-backup/a1|-|preposition variant (beside / next to) of the key placement whose lesson warns against it
+S12|RELATION|alpha|scheduling tests that depend on the server time zone|a-import/a1|a-tz/a1|tests depending on the zone are answered by the injected clock; the locale task also mentions the server default but formats emails
+S13|TERMINOLOGY|alpha|cursor based paging for the customer search API|a-page/a2,a-page/a3|-|keyset pagination named by its cursor term; the offset attempt is not judged relevant
+S14|TERMINOLOGY|beta|idempotent consumer for at least once event delivery|b-dedup/a1,b-dedup/a2|-|messaging jargon for deduplicating events that survive restarts
+S15|TERMINOLOGY|alpha|NPE in billing aggregation|a-inv1/a1,a-inv1/a2,a-inv2/a1,a-inv3/a1|-|abbreviation and billing jargon for the invoice totals null pointer
+S16|TERMINOLOGY|beta|jittered backoff for outbound HTTP callbacks|b-webhook/a1,b-webhook/a2|-|both failed webhook attempts; the second one's lesson is exactly about missing jitter
+S17|NO_RELEVANT|alpha|add dark mode to the reminder emails|-|a-tz/a1|dark mode exists only in beta; the alpha reminder email locale task shares words but answers nothing
+S18|NO_RELEVANT|beta|rotate the encryption keys of nightly backups|-|b-backup/a1,b-tokens/a1|key rotation differs from key placement (b-backup) and from token cleanup (b-tokens, whose summary says rotate)
+S19|NO_RELEVANT|alpha|speed up the customer search index rebuild|-|a-page/a1,a-page/a2,a-page/a3,a-export/a1,a-export/a2|index rebuild performance is neither pagination nor report export speed
+S20|DUPLICATE_SUMMARY|alpha|Fix null pointer in invoice totals calculation|a-inv1/a1,a-inv1/a2,a-inv2/a1,a-inv3/a1|-|exact summary of three alpha executions (and of beta b-inv, out of scope); all four alpha attempts are relevant
+S21|DUPLICATE_SUMMARY|beta|Reduce cold start time of the notification worker|b-cold/a1,b-cold2/a1,b-cold2/a2|-|exact summary of two beta executions; all three attempts are relevant
+S22|DUPLICATE_SUMMARY|beta|Rotate expired API tokens in session store|b-tokens/a1|-|exact summary shared with alpha a-tokens; only the beta attempt is in scope
+S23|EMPTY_QUERY|beta|<EMPTY>|-|-|the empty query returns no hits by contract
+S24|EMPTY_QUERY|alpha|<WHITESPACE>|-|-|a whitespace-only query is blank and returns no hits by contract
+S25|EMPTY_QUERY|alpha|?! ... --|-|-|punctuation only: not blank, so no zero-hit contract applies; nothing can be relevant
+S26|EMPTY_QUERY|beta|the and of with|-|-|stopwords only: not blank; nothing can be relevant

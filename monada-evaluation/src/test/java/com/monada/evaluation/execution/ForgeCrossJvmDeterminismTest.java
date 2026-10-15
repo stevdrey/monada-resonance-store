@@ -38,7 +38,8 @@ class ForgeCrossJvmDeterminismTest {
     /** Each evaluation command with the decision its report prints when every gate passes. */
     static Stream<Arguments> commands() {
         return Stream.of(Arguments.of(ForgeExperienceEvaluationMain.class, "READY_FOR_HOST_ADAPTER_EXPERIMENT"),
-                Arguments.of(MultiAttemptEvaluationMain.class, "ATTEMPT_JOINS_VERIFIED"));
+                Arguments.of(MultiAttemptEvaluationMain.class, "ATTEMPT_JOINS_VERIFIED"),
+                Arguments.of(RecallStressEvaluationMain.class, "STRESS_SET_CHARACTERIZED"));
     }
 
     @ParameterizedTest(name = "{0}")
