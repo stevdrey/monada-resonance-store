@@ -93,6 +93,21 @@ The project follows a measurement-first path: improve retrieval quality only aft
   N=10,000 fell from 14.10 MB to 8.82 MB (frequency) and from 9.21 MB to 6.49 MB (speech). Formats, results, ordering and error
   messages are unchanged (existing stores reused; both read-parity tests pass unchanged). Latency gains are within run-to-run noise
   (single machine, exploratory).
+- Speech feature store windowed read (Issue #136): `SpeechFeatureLoadBreakdownRunner` and CLI
+  `./gradlew :monada-evaluation:runSpeechFeatureLoadBreakdown -q` split `FileSpeechFeatureStore.findAll()` into index parse, seek,
+  header read, value read, per-vector I/O and materialization at N=100/1,000/5,000/10,000 for 64 and 128 dimensions. They time a
+  replica of the pre-#136 per-vector path and a windowed candidate, both parity-checked against `findAll()`. At N=10,000 the replica made 10,000 seeks
+  and 20,000 `RandomAccessFile` reads per load; per-vector I/O was ~82-84% of its ~23 ms p50, index parse ~5% and
+  materialization ~4-8%. The candidate needed ~14-16% of the replica p50 with 3-5 window reads. Decision rule: per-vector I/O >= 40% of the replica
+  p50 and candidate <= 75% of the replica at p50 and p95 for every dimension at N >= 10,000. The report concludes
+  `PER_VECTOR_IO_DOMINANT_WINDOWED_READ_JUSTIFIED`. `findAll()` now reads append-ordered segments through one reused
+  positional-read window of at most 1 MiB (never more than the segment), refilled at the first frame that does not fit, and
+  decodes frames at their indexed offsets. Out-of-order indexes and frames larger than the window use the per-vector path. Entries
+  are still validated and read in index order, so results, ordering, error messages and error precedence are unchanged.
+  `FileSpeechFeatureStoreReadParityTest` passes unchanged and adds shuffled and overlapping offsets, segments and frames larger
+  than the window, and multi-error precedence. Production `findAll()` p50 at N=10,000 fell from ~22.6 ms to ~3.1 ms (64 dims) and
+  from ~24.6 ms to ~4.6 ms (128 dims) (warm page cache, single machine, exploratory). Format, index, API and defaults are unchanged,
+  and generated speech evaluation output is byte-identical. Not done here: cross-query caching and dedup of superseded entries.
 - Exact bounded top-K experiment (Issue #120): experimental `ExactBoundedTopKSelector` (bounded min-heap over the deduplicated
   candidates, production comparator score desc / atom id asc) and `ExperimentalBoundedTopKLinearScanIndex` (same scan, threshold and
   keep-max dedup, selector instead of sort+truncate) live in the unstable `com.monada.index.experimental` package and are never

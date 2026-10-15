@@ -85,6 +85,7 @@ The project requires **JDK 27** (Gradle toolchain `27`) and builds with the vers
 ./gradlew :monada-evaluation:runScanPhaseBreakdown -q
 ./gradlew :monada-evaluation:runVectorLoadBreakdown -q
 ./gradlew :monada-evaluation:runVectorCopyShare -q
+./gradlew :monada-evaluation:runSpeechFeatureLoadBreakdown -q
 ./gradlew :monada-evaluation:runBoundedTopKExperiment -q
 ./gradlew :monada-evaluation:runProjectMemory -q
 ./gradlew :monada-evaluation:runSpeechModalityComparison -q
@@ -537,6 +538,12 @@ Within the same run, production `findAll()` is ~55x faster than the per-float re
 
 ```bash
 ./gradlew :monada-evaluation:runVectorCopyShare -q
+```
+
+`SpeechFeatureLoadBreakdownRunner` (`runSpeechFeatureLoadBreakdown`, Issue #136) splits `FileSpeechFeatureStore.findAll()` into index parse, seek, header read, value read, per-vector I/O and materialization at N=100/1,000/5,000/10,000 for 64 and 128 dimensions. It times a parity-checked replica of the pre-#136 per-vector path (one seek plus two `RandomAccessFile` reads per vector) against a windowed sequential-read candidate. At N=10,000, per-vector I/O was ~82-84% of the replica p50 and the candidate needed ~14-16% of it, so the report concludes `PER_VECTOR_IO_DOMINANT_WINDOWED_READ_JUSTIFIED`. `findAll()` now reads append-ordered segments through one reused positional-read window of at most 1 MiB (never more than the segment) and decodes each frame at its indexed offset. Out-of-order indexes and frames larger than the window keep the per-vector path. Entries are still validated and read in index order, so results, last-wins ordering, error messages and error precedence are unchanged. Production `findAll()` p50 at N=10,000 fell from ~22.6 ms to ~3.1 ms at 64 dimensions and from ~24.6 ms to ~4.6 ms at 128 (warm page cache, single machine, exploratory). Format, index, API and defaults are unchanged, and generated speech evaluation output is byte-identical.
+
+```bash
+./gradlew :monada-evaluation:runSpeechFeatureLoadBreakdown -q
 ```
 
 ### Exact Bounded Top-K Experiment

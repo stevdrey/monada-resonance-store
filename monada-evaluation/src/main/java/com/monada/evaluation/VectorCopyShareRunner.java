@@ -193,10 +193,15 @@ public final class VectorCopyShareRunner {
 
     /** The seeded Gaussian vectors, in sample order. */
     static List<float[]> speechVectors(int corpusSize, long seed) {
+        return speechVectors(corpusSize, seed, SPEECH_DIMENSIONS);
+    }
+
+    /** The seeded Gaussian vectors of {@code dimensions} floats, in sample order (shared with Issue #136). */
+    static List<float[]> speechVectors(int corpusSize, long seed, int dimensions) {
         var random = new Random(seed);
         var vectors = new ArrayList<float[]>(corpusSize);
         for (int i = 0; i < corpusSize; i++) {
-            var values = new float[SPEECH_DIMENSIONS];
+            var values = new float[dimensions];
             for (int d = 0; d < values.length; d++) {
                 values[d] = (float) random.nextGaussian();
             }
@@ -213,12 +218,17 @@ public final class VectorCopyShareRunner {
      * {@code save} keep the layout honest.
      */
     static void seedSpeechStore(Path root, int corpusSize, long seed) throws IOException {
+        seedSpeechStore(root, corpusSize, seed, SPEECH_DIMENSIONS);
+    }
+
+    /** {@link #seedSpeechStore(Path, int, long)} with {@code dimensions} floats per vector (Issue #136). */
+    static void seedSpeechStore(Path root, int corpusSize, long seed, int dimensions) throws IOException {
         var segment = root.resolve(SPEECH_SEGMENT);
         var index = root.resolve(SPEECH_INDEX);
         Files.createDirectories(segment.getParent());
         Files.createDirectories(index.getParent());
         long offset = Files.exists(segment) ? Files.size(segment) : 0;
-        var vectors = speechVectors(corpusSize, seed);
+        var vectors = speechVectors(corpusSize, seed, dimensions);
         try (var data = new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(segment,
                 StandardOpenOption.CREATE, StandardOpenOption.APPEND)));
              var lines = Files.newBufferedWriter(index, StandardCharsets.UTF_8,
