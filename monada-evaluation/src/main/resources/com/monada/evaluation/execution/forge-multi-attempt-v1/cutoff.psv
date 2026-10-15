@@ -1,0 +1,19 @@
+# Hand-judged state of the cutoff export of the cutoff scope (manifest cutoff.scope / cutoff.event): one row per attempt
+# that exists at the cutoff. Executions and attempts not listed must be absent from that export (m-correct a2, m-twin-ko),
+# and every listed execution must be exported exactly once.
+# A later correction never changes a sample exported as of an earlier cutoff (contract v1 section 12): m-correct a1 is
+# still COMPLETED at revision 1 and m-correct has no outcome yet, so no outcome names any of its attempts.
+# outcome names attempt: y when the outcome recorded at the cutoff names this attempt as accepted (the raw marker).
+# validated accepted attempt: y only for the COMPLETED attempt a validated acceptance names at the cutoff.
+# execution | ordinal | result at cutoff | finish revision at cutoff (- when unfinished) | outcome names attempt (y/n) | validated accepted attempt (y/n) | label at cutoff | acceptance at cutoff
+m-repair|1|FAILED|1|n|n|SUCCESS|VALIDATED_ACCEPTED
+m-repair|2|COMPLETED|1|y|y|SUCCESS|VALIDATED_ACCEPTED
+m-abandon|1|CANCELLED|1|n|n|SUCCESS|VALIDATED_ACCEPTED
+m-abandon|2|COMPLETED|1|y|y|SUCCESS|VALIDATED_ACCEPTED
+m-chain3|1|FAILED|1|n|n|SUCCESS|VALIDATED_ACCEPTED
+m-chain3|2|FAILED|1|n|n|SUCCESS|VALIDATED_ACCEPTED
+m-chain3|3|COMPLETED|1|y|y|SUCCESS|VALIDATED_ACCEPTED
+m-unfinished|1|FAILED|1|n|n|UNLABELED|PENDING
+m-unfinished|2|UNFINISHED|-|n|n|UNLABELED|PENDING
+m-twin-ok|1|COMPLETED|1|y|y|SUCCESS|VALIDATED_ACCEPTED
+m-correct|1|COMPLETED|1|n|n|UNLABELED|PENDING

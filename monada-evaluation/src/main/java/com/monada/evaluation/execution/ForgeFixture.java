@@ -138,12 +138,7 @@ public record ForgeFixture(String version, String provenance, Map<String, String
 
     /** Loads and validates the version-1 corpus from the module resources. */
     public static ForgeFixture load() {
-        Properties manifest = new Properties();
-        try (InputStream in = open("manifest.properties")) {
-            manifest.load(new java.io.InputStreamReader(in, StandardCharsets.UTF_8));
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        Properties manifest = properties(RESOURCE_ROOT, "manifest.properties");
         Map<String, String> scopes = new LinkedHashMap<>();
         scopes.put("alpha", require(manifest, "scope.alpha"));
         scopes.put("beta", require(manifest, "scope.beta"));
@@ -156,7 +151,7 @@ public record ForgeFixture(String version, String provenance, Map<String, String
                 .map(Integer::valueOf).toList();
 
         List<Execution> executions = new ArrayList<>();
-        for (String[] f : rows("executions.psv", 12)) {
+        for (String[] f : rows(RESOURCE_ROOT, "executions.psv", 12)) {
             String[] outcome = f[8].split(":");
             executions.add(new Execution(f[0], f[1], f[2], f[3], f[4], f[5], f[6], dimensions(f[7]),
                     OutcomeKind.valueOf(outcome[0]), outcome.length > 1 ? Integer.parseInt(outcome[1]) : 0,
@@ -164,13 +159,13 @@ public record ForgeFixture(String version, String provenance, Map<String, String
                     : new LinkedHashSet<>(Arrays.stream(f[11].split(",")).map(String::trim).toList())));
         }
         List<Attempt> attempts = new ArrayList<>();
-        for (String[] f : rows("attempts.psv", 13)) {
+        for (String[] f : rows(RESOURCE_ROOT, "attempts.psv", 13)) {
             attempts.add(new Attempt(f[0], Integer.parseInt(f[1]), f[2], f[3], f[4], f[5], Long.parseLong(f[6]),
                     Long.parseLong(f[7]), Long.parseLong(f[8]), Long.parseLong(f[9]), evidence(f[10]),
                     dash(f[11]), dash(f[12])));
         }
         List<Query> queries = new ArrayList<>();
-        for (String[] f : rows("queries.psv", 6)) {
+        for (String[] f : rows(RESOURCE_ROOT, "queries.psv", 6)) {
             Set<String> relevant = f[4].equals("-") ? Set.of()
                     : new LinkedHashSet<>(Arrays.stream(f[4].split(",")).map(String::trim).toList());
             // a blank query is stored as an empty field after trimming; keep it blank on purpose
@@ -185,12 +180,7 @@ public record ForgeFixture(String version, String provenance, Map<String, String
     }
 
     private static Expectations loadExpectations() {
-        Properties p = new Properties();
-        try (InputStream in = open("expectations.properties")) {
-            p.load(new java.io.InputStreamReader(in, StandardCharsets.UTF_8));
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        Properties p = properties(RESOURCE_ROOT, "expectations.properties");
         Map<String, ExpectedChain> chains = new TreeMap<>();
         Map<String, Integer> ordinals = new TreeMap<>();
         Map<Integer, ExpectedComparison> comparisons = new TreeMap<>();
@@ -304,19 +294,22 @@ public record ForgeFixture(String version, String provenance, Map<String, String
         }
     }
 
-    private static void unique(Collection<String> values, String what) {
+    // --- resource parsing, shared by every versioned fixture of this package ----------------------------------
+
+    static void unique(Collection<String> values, String what) {
         if (new LinkedHashSet<>(values).size() != values.size()) {
             throw new IllegalStateException("duplicate " + what + " id");
         }
     }
 
-    private static Set<QualityDimension> dimensions(String csv) {
+    static Set<QualityDimension> dimensions(String csv) {
         Set<QualityDimension> out = EnumSet.noneOf(QualityDimension.class);
         Arrays.stream(csv.split(",")).map(String::trim).map(QualityDimension::valueOf).forEach(out::add);
         return out;
     }
 
-    private static Map<QualityDimension, String> evidence(String field) {
+    /** {@code DIMENSION=STATE;DIMENSION=STATE}, or {@code -} for none, in field order. */
+    static Map<QualityDimension, String> evidence(String field) {
         Map<QualityDimension, String> out = new LinkedHashMap<>();
         if (!field.equals("-")) {
             for (String part : field.split(";")) {
@@ -327,11 +320,11 @@ public record ForgeFixture(String version, String provenance, Map<String, String
         return out;
     }
 
-    private static String dash(String field) {
+    static String dash(String field) {
         return field.equals("-") ? null : field;
     }
 
-    private static String require(Properties p, String key) {
+    static String require(Properties p, String key) {
         String value = p.getProperty(key);
         if (value == null || value.isBlank()) {
             throw new IllegalStateException("missing fixture property: " + key);
@@ -339,17 +332,32 @@ public record ForgeFixture(String version, String provenance, Map<String, String
         return value.trim();
     }
 
-    private static InputStream open(String name) {
-        InputStream in = ForgeFixture.class.getResourceAsStream(RESOURCE_ROOT + name);
+    /** A UTF-8 properties resource below {@code root}. */
+    static Properties properties(String root, String name) {
+        Properties p = new Properties();
+        try (InputStream in = open(root, name)) {
+            p.load(new java.io.InputStreamReader(in, StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return p;
+    }
+
+    private static InputStream open(String root, String name) {
+        InputStream in = ForgeFixture.class.getResourceAsStream(root + name);
         if (in == null) {
-            throw new IllegalStateException("missing fixture resource: " + RESOURCE_ROOT + name);
+            throw new IllegalStateException("missing fixture resource: " + root + name);
         }
         return in;
     }
 
-    private static List<String[]> rows(String name, int columns) {
+    /**
+     * The rows of a pipe-separated resource below {@code root}: blank and {@code #} lines skipped, every row with
+     * exactly {@code columns} trimmed fields.
+     */
+    static List<String[]> rows(String root, String name, int columns) {
         List<String[]> out = new ArrayList<>();
-        try (InputStream in = open(name)) {
+        try (InputStream in = open(root, name)) {
             for (String line : new String(in.readAllBytes(), StandardCharsets.UTF_8).split("\n", -1)) {
                 if (line.isBlank() || line.startsWith("#")) {
                     continue;

@@ -1,0 +1,29 @@
+# One row per attempt of an execution (attempts are never separate executions). Experience id = <execution>/a<ordinal>.
+# execution | ordinal | reason | result | solution | lesson | input tokens | output tokens | start s | end s | evidence | revised result | revised solution | revised lesson | judged accepted attempt
+# result: COMPLETED | FAILED | CANCELLED | UNFINISHED (started, never finished: no ATTEMPT_FINISHED fact, never recallable;
+#   its solution and lesson are '-').
+# evidence: DIMENSION=STATE;DIMENSION=STATE or - for none.
+# revised columns: '-' or the revision-2 correction of the finish; a revised result replaces the original result.
+# judged accepted attempt: y only for the attempt that a VALIDATED acceptance names and that ends COMPLETED; every
+#   other attempt is n, including the failed and cancelled attempts of a SUCCESS execution.
+m-repair|1|INITIAL|FAILED|Split each CSV line on commas before mapping the columns|Naive splitting breaks quoted fields that contain commas|4000|400|0|20|TESTS=FAIL|-|-|-|n
+m-repair|2|REPAIR|COMPLETED|Parsed CSV rows with a quote aware tokenizer that keeps embedded commas|Use a quote aware parser for any CSV input from customers|3000|300|30|50|TESTS=PASS|-|-|-|y
+m-abandon|1|INITIAL|CANCELLED|Started a database trigger that writes role changes to the audit table|Abandoned because triggers bypass the application audit service|2000|200|0|10|-|-|-|-|n
+m-abandon|2|RETRY|COMPLETED|Emitted audit events from the role service before committing each role change|Write audit entries in the same transaction as the role change|3500|350|20|45|TESTS=PASS|-|-|-|y
+m-chain3|1|INITIAL|FAILED|Counted requests per client in a local map on each node|Per node counters let clients exceed the limit across nodes|5000|500|0|25|TESTS=FAIL|-|-|-|n
+m-chain3|2|RETRY|FAILED|Stored request counters in the shared cache without expiry|Counters without expiry blocked clients permanently after a burst|4000|400|30|55|TESTS=FAIL|-|-|-|n
+m-chain3|3|REPAIR|COMPLETED|Used a sliding window counter in the shared cache with per client expiry|Sliding windows with expiry keep limits fair across nodes|4500|450|60|90|TESTS=PASS|-|-|-|y
+m-unfinished|1|INITIAL|FAILED|Referenced system fonts by name in the PDF invoice template|System fonts are missing on the render servers|3000|300|0|15|TESTS=FAIL|-|-|-|n
+m-unfinished|2|REPAIR|UNFINISHED|-|-|1000|100|20|30|-|-|-|-|n
+m-twin-ok|1|INITIAL|COMPLETED|Preloaded the most viewed products into the cache after each deployment|Warm only the hottest products so deployment stays fast|2500|250|0|12|TESTS=PASS|-|-|-|y
+m-correct|1|INITIAL|COMPLETED|Marked addresses as invalid after the first bounce notification|A single bounce is enough to stop sending|3000|300|0|18|-|FAILED|Marked addresses as invalid after the first bounce notification without separating soft bounces|Soft bounces are temporary and must not invalidate an address|n
+m-correct|2|REPAIR|COMPLETED|Invalidated addresses only after hard bounces or three consecutive soft bounces|Separate hard and soft bounces before invalidating an address|3500|350|25|50|TESTS=PASS|-|-|-|y
+m-twin-ko|1|INITIAL|FAILED|Preloaded the most viewed products into the cache after each deployment|Warm only the hottest products so deployment stays fast|2500|250|0|12|TESTS=FAIL|-|-|-|n
+n-repair|1|INITIAL|FAILED|Split each CSV line on commas before mapping the columns|Naive splitting breaks quoted fields that contain commas|4000|400|0|20|TESTS=FAIL|-|-|-|n
+n-repair|2|REPAIR|COMPLETED|Parsed CSV rows with a quote aware tokenizer that keeps embedded commas|Use a quote aware parser for any CSV input from customers|3000|300|30|50|TESTS=PASS|-|-|-|n
+n-abandon|1|INITIAL|CANCELLED|Started resizing images synchronously in the upload request|Abandoned because large uploads timed out the request|1500|150|0|8|-|-|-|-|n
+n-abandon|2|RETRY|COMPLETED|Queued thumbnail generation in a background worker after each upload|Keep heavy image work out of the request path|3000|300|15|35|TESTS=PASS|-|-|-|n
+n-cancelled|1|INITIAL|FAILED|Rebuilt the search index in place while serving queries|In place rebuilds return partial results during reindexing|6000|600|0|40|TESTS=FAIL|-|-|-|n
+n-cancelled|2|RETRY|FAILED|Built a new index behind an alias but switched before the build finished|Switch the alias only after the new index is complete|5000|500|50|80|TESTS=FAIL|-|-|-|n
+n-fix|1|INITIAL|FAILED|Expired sessions thirty minutes after login regardless of activity|Absolute expiry logs out users who are still active|2000|200|0|10|TESTS=FAIL|-|-|-|n
+n-fix|2|REPAIR|COMPLETED|Refreshed the session expiry on every authenticated request|Idle timeouts must slide with user activity|2500|250|15|30|TESTS=PASS|-|-|-|y

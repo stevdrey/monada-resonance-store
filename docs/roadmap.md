@@ -183,6 +183,27 @@ executions into `ExecutionMemory`, applies its own similarity threshold, joins r
 execution, and is judged against its own manually reviewed queries with these same gates. No routing, learning or
 Neuron adaptation is enabled by this track.
 
+#### Multi-attempt fixture and attempt-level result joins (#121)
+
+Addresses the gap "Labels are per execution" with evidence, not with a semantic change. A separate, manually judged
+fixture `forge-multi-attempt-v1` (21 attempts in 11 executions, 2 projects, 10 judged queries) holds retries inside
+one execution (failed then repaired, abandoned then accepted, two failures then a repair, an unfinished repair), a
+correction that changes an attempt result (`COMPLETED` r1 to `FAILED` r2), independent executions with identical
+summaries and texts in one project, and an identical summary in the other project. The command
+`./gradlew :monada-evaluation:runMultiAttemptExecutionEvaluation -q` resolves every recall hit to its exact
+`ATTEMPT_FINISHED` event, joins it by execution id to the exported sample (latest export and an export at a fixed
+cutoff, both paged) and reports four separate dimensions: the raw execution label and acceptance (unchanged), the
+attempt result, whether the attempt is the validated accepted attempt, and the reference (event id, revision, ledger
+sequence). Six hard gates (`MA1`–`MA6`: exact resolution, attempt-result join, exported attempts, cutoff, scope
+isolation, determinism) all pass, decision `ATTEMPT_JOINS_VERIFIED`: no failed or cancelled attempt is reported as
+accepted while its execution keeps its `SUCCESS` label, and hits recorded after the cutoff are never joined to an
+earlier state.
+
+Not changed: `ExperienceSample`, `execution-sample/1`, labels, acceptance derivation, fixture `forge-experience-v1` and
+its seven gates (the `runForgeExperienceEvaluation` report is byte-identical apart from timing). The hits listed by the
+new report are lexical neighbours used as join evidence; no retrieval-quality or routing claim is made. A host still
+performs this join itself; promoting an attempt-level field into the export would need a separate contract change.
+
 Numbering is roadmap order; independent items (for example #94 and #95) may proceed in parallel.
 
 Non-goals:

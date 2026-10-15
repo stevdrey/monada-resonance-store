@@ -1,0 +1,246 @@
+package com.monada.evaluation.execution;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import java.util.function.UnaryOperator;
+import org.junit.jupiter.api.Test;
+
+/** The multi-attempt corpus (issue #121) holds the required scenarios, and its loader rejects inconsistent judgments. */
+class MultiAttemptFixtureTest {
+    private final MultiAttemptFixture fixture = MultiAttemptFixture.load();
+
+    @Test
+    void isASeparateVersionedFixtureWithTwoOpaqueProjects() {
+        assertEquals("1", fixture.version());
+        assertTrue(fixture.provenance().contains("synthetic"));
+        assertEquals(List.of("alpha", "beta"), List.copyOf(fixture.scopeIds().keySet()));
+        assertEquals(2, Set.copyOf(fixture.scopeIds().values()).size());
+        ForgeFixture v1 = ForgeFixture.load();
+        assertNotEquals(ForgeFixture.RESOURCE_ROOT, MultiAttemptFixture.RESOURCE_ROOT);
+        for (String id : fixture.scopeIds().values()) {
+            assertFalse(v1.scopeIds().containsValue(id), id);
+        }
+        for (String scopeKey : fixture.scopeIds().keySet()) {
+            assertTrue(fixture.executionsOf(scopeKey).size() > fixture.pageSize(), scopeKey + " must page");
+        }
+    }
+
+    @Test
+    void forgeExperienceV1IsUnchanged() {
+        ForgeFixture v1 = ForgeFixture.load();
+        assertEquals("1", v1.version());
+        assertEquals(25, v1.attempts().size());
+        assertEquals(18, v1.executions().size());
+        assertEquals(14, v1.queries().size());
+    }
+
+    @Test
+    void holdsRetriesInsideOneExecution() {
+        assertEquals(List.of("FAILED", "COMPLETED"), results("m-repair"));
+        assertEquals(List.of("CANCELLED", "COMPLETED"), results("m-abandon"));
+        assertEquals(List.of("FAILED", "FAILED", "COMPLETED"), results("m-chain3"));
+        assertEquals(List.of("FAILED", MultiAttemptFixture.UNFINISHED), results("m-unfinished"));
+        for (String exec : List.of("m-repair", "m-abandon", "m-chain3")) {
+            assertEquals("SUCCESS", fixture.execution(exec).expectedLabel());
+            List<MultiAttemptFixture.Attempt> attempts = fixture.attemptsOf(exec);
+            // only the last attempt is the accepted one; the earlier ones share the SUCCESS label but are not accepted
+            assertTrue(attempts.get(attempts.size() - 1).judgedAccepted(), exec);
+            attempts.subList(0, attempts.size() - 1).forEach(a -> assertFalse(a.judgedAccepted(), a.experienceId()));
+        }
+    }
+
+    @Test
+    void holdsACorrectionThatChangesTheAttemptResult() {
+        MultiAttemptFixture.Attempt a = fixture.findAttempt("m-correct/a1").orElseThrow();
+        assertEquals("COMPLETED", a.result());
+        assertEquals("FAILED", a.latestResult());
+        assertEquals(2, a.latestRevision());
+        assertTrue(fixture.cutoffEvent().startsWith("m-correct.a1."));
+    }
+
+    @Test
+    void holdsIdenticalSummariesWithinAndAcrossProjects() {
+        assertEquals(fixture.execution("m-twin-ok").summary(), fixture.execution("m-twin-ko").summary());
+        assertEquals(fixture.execution("m-twin-ok").scopeKey(), fixture.execution("m-twin-ko").scopeKey());
+        assertEquals(fixture.execution("m-repair").summary(), fixture.execution("n-repair").summary());
+        assertNotEquals(fixture.execution("m-repair").scopeKey(), fixture.execution("n-repair").scopeKey());
+    }
+
+    @Test
+    void rejectsAnAcceptedAttemptOutsideAValidatedAcceptance() {
+        // n-abandon/a2 is named by an imported claim only: it can never be the validated accepted attempt
+        assertInvalid(withAttempt("n-abandon/a2", a -> copy(a, a.result(), true)), "judged accepted attempt");
+    }
+
+    @Test
+    void rejectsAFailedAttemptJudgedAccepted() {
+        assertInvalid(withAttempt("m-repair/a1", a -> copy(a, a.result(), true)), "judged accepted attempt");
+    }
+
+    @Test
+    void rejectsAnUnfinishedAttemptThatIsNotTheLast() {
+        assertInvalid(withAttempt("m-repair/a1", a -> new MultiAttemptFixture.Attempt(a.execution(), a.ordinal(),
+                a.reason(), MultiAttemptFixture.UNFINISHED, null, null, a.inputTokens(), a.outputTokens(),
+                a.startSeconds(), a.endSeconds(), a.evidence(), null, null, null, false)), "only the last attempt");
+    }
+
+    @Test
+    void rejectsAPartiallyPopulatedUnfinishedAttempt() {
+        assertInvalid(withAttempt("m-unfinished/a2", a -> unfinished(a, "Started embedding the fonts", null)),
+                "neither a solution nor a lesson");
+        assertInvalid(withAttempt("m-unfinished/a2", a -> unfinished(a, null, "Fonts must be embedded")),
+                "neither a solution nor a lesson");
+    }
+
+    @Test
+    void rejectsPartiallyPopulatedCorrectionFields() {
+        assertInvalid(withAttempt("m-repair/a1", a -> revised(a, null, "Split on commas after unquoting", null)),
+                "revised result, solution and lesson together");
+        assertInvalid(withAttempt("m-repair/a1", a -> revised(a, null, null, "Quoted fields need a real parser")),
+                "revised result, solution and lesson together");
+        assertInvalid(withAttempt("m-correct/a1", a -> revised(a, a.revisedResult(), a.revisedSolution(), null)),
+                "revised result, solution and lesson together");
+    }
+
+    private static MultiAttemptFixture.Attempt revised(MultiAttemptFixture.Attempt a, String result, String solution,
+                                                       String lesson) {
+        return new MultiAttemptFixture.Attempt(a.execution(), a.ordinal(), a.reason(), a.result(), a.solution(),
+                a.lesson(), a.inputTokens(), a.outputTokens(), a.startSeconds(), a.endSeconds(), a.evidence(), result,
+                solution, lesson, a.judgedAccepted());
+    }
+
+    @Test
+    void rejectsAPartiallyPopulatedFinishedAttempt() {
+        assertInvalid(withAttempt("m-repair/a1", a -> new MultiAttemptFixture.Attempt(a.execution(), a.ordinal(),
+                a.reason(), a.result(), a.solution(), null, a.inputTokens(), a.outputTokens(), a.startSeconds(),
+                a.endSeconds(), a.evidence(), null, null, null, false)), "needs a solution and a lesson");
+    }
+
+    private static MultiAttemptFixture.Attempt unfinished(MultiAttemptFixture.Attempt a, String solution,
+                                                          String lesson) {
+        return new MultiAttemptFixture.Attempt(a.execution(), a.ordinal(), a.reason(), MultiAttemptFixture.UNFINISHED,
+                solution, lesson, a.inputTokens(), a.outputTokens(), a.startSeconds(), a.endSeconds(), a.evidence(),
+                null, null, null, false);
+    }
+
+    @Test
+    void rejectsACutoffRowForAnUnknownAttempt() {
+        List<MultiAttemptFixture.CutoffAttempt> cutoff = new ArrayList<>(fixture.cutoff());
+        cutoff.add(new MultiAttemptFixture.CutoffAttempt("m-correct", 9, "FAILED", 1, false, false, "UNLABELED",
+                "PENDING"));
+        assertInvalid(withCutoff(cutoff), "unknown attempt");
+    }
+
+    @Test
+    void parsesTheCutoffEventFromTheRightSoExecutionIdsMayContainDots() {
+        // rename m-correct to m.correct everywhere it is referenced, including the cutoff event
+        UnaryOperator<String> rename = id -> id.equals("m-correct") ? "m.correct" : id;
+        List<MultiAttemptFixture.Execution> executions = fixture.executions().stream().map(e -> new MultiAttemptFixture
+                .Execution(rename.apply(e.id()), e.scopeKey(), e.task(), e.summary(), e.sourceRevision(),
+                e.contextFingerprint(), e.constraintsFingerprint(), e.mandatory(), e.outcome(), e.outcomeAttempt(),
+                e.expectedLabel(), e.expectedAcceptance(), e.expectedReasons())).toList();
+        List<MultiAttemptFixture.Attempt> attempts = fixture.attempts().stream().map(a -> new MultiAttemptFixture
+                .Attempt(rename.apply(a.execution()), a.ordinal(), a.reason(), a.result(), a.solution(), a.lesson(),
+                a.inputTokens(), a.outputTokens(), a.startSeconds(), a.endSeconds(), a.evidence(), a.revisedResult(),
+                a.revisedSolution(), a.revisedLesson(), a.judgedAccepted())).toList();
+        List<MultiAttemptFixture.Query> queries = fixture.queries().stream().map(q -> new MultiAttemptFixture.Query(
+                q.id(), q.scopeKey(), q.text(), new java.util.LinkedHashSet<>(q.relevant().stream()
+                .map(r -> r.replace("m-correct/", "m.correct/")).toList()), q.judgment())).toList();
+        List<MultiAttemptFixture.CutoffAttempt> cutoff = fixture.cutoff().stream().map(c -> new MultiAttemptFixture
+                .CutoffAttempt(rename.apply(c.execution()), c.ordinal(), c.result(), c.revision(), c.markedAccepted(),
+                c.accepted(), c.label(), c.acceptance())).toList();
+        MultiAttemptFixture dotted = new MultiAttemptFixture(fixture.version(), fixture.provenance(),
+                fixture.scopeIds(), fixture.price(), fixture.recallLimit(), fixture.pageSize(), fixture.cutoffScope(),
+                "m.correct.a1.fin", executions, attempts, queries, cutoff);
+        dotted.validate(); // accepted: the attempt is parsed from the right
+        assertInvalid(withCutoffEvent("m-correct.fin"), "must be an attempt finish");
+        assertInvalid(withCutoffEvent("m-correct.a1.stage"), "must be an attempt finish");
+        assertInvalid(withCutoffEvent("m-correct.a9.fin"), "unknown attempt");
+    }
+
+    private MultiAttemptFixture withCutoffEvent(String event) {
+        return new MultiAttemptFixture(fixture.version(), fixture.provenance(), fixture.scopeIds(), fixture.price(),
+                fixture.recallLimit(), fixture.pageSize(), fixture.cutoffScope(), event, fixture.executions(),
+                fixture.attempts(), fixture.queries(), fixture.cutoff());
+    }
+
+    @Test
+    void judgesTheRawOutcomeMarkerAtTheCutoffSeparately() {
+        MultiAttemptFixture.CutoffAttempt accepted = cutoffRow("m-repair/a2");
+        assertTrue(accepted.markedAccepted());
+        assertTrue(accepted.accepted());
+        MultiAttemptFixture.CutoffAttempt pending = cutoffRow("m-correct/a1");
+        assertFalse(pending.markedAccepted()); // no outcome is recorded at the cutoff
+        assertFalse(pending.accepted());
+        assertFalse(cutoffRow("m-repair/a1").markedAccepted());
+    }
+
+    @Test
+    void rejectsACutoffMarkerForAnAttemptTheOutcomeNeverNames() {
+        assertInvalid(withCutoffRow("m-correct/a1", c -> new MultiAttemptFixture.CutoffAttempt(c.execution(),
+                c.ordinal(), c.result(), c.revision(), true, false, c.label(), c.acceptance())),
+                "outcome never names it");
+    }
+
+    @Test
+    void rejectsAValidatedCutoffAttemptThatTheOutcomeDoesNotName() {
+        assertInvalid(withCutoffRow("m-repair/a2", c -> new MultiAttemptFixture.CutoffAttempt(c.execution(),
+                c.ordinal(), c.result(), c.revision(), false, true, c.label(), c.acceptance())),
+                "must be the attempt the outcome names");
+    }
+
+    private MultiAttemptFixture.CutoffAttempt cutoffRow(String experienceId) {
+        return fixture.cutoff().stream().filter(c -> c.experienceId().equals(experienceId)).findFirst()
+                .orElseThrow();
+    }
+
+    private MultiAttemptFixture withCutoffRow(String experienceId,
+                                              UnaryOperator<MultiAttemptFixture.CutoffAttempt> change) {
+        return withCutoff(fixture.cutoff().stream()
+                .map(c -> c.experienceId().equals(experienceId) ? change.apply(c) : c).toList());
+    }
+
+    private MultiAttemptFixture withCutoff(List<MultiAttemptFixture.CutoffAttempt> cutoff) {
+        return new MultiAttemptFixture(fixture.version(), fixture.provenance(), fixture.scopeIds(), fixture.price(),
+                fixture.recallLimit(), fixture.pageSize(), fixture.cutoffScope(), fixture.cutoffEvent(),
+                fixture.executions(), fixture.attempts(), fixture.queries(), cutoff);
+    }
+
+    @Test
+    void rejectsAFixtureWithoutAResultChangingCorrection() {
+        assertInvalid(withAttempt("m-correct/a1", a -> new MultiAttemptFixture.Attempt(a.execution(), a.ordinal(),
+                a.reason(), a.result(), a.solution(), a.lesson(), a.inputTokens(), a.outputTokens(), a.startSeconds(),
+                a.endSeconds(), a.evidence(), a.result(), a.revisedSolution(), a.revisedLesson(), false)),
+                "changes the attempt result");
+    }
+
+    private List<String> results(String exec) {
+        return fixture.attemptsOf(exec).stream().map(MultiAttemptFixture.Attempt::latestResult).toList();
+    }
+
+    private static MultiAttemptFixture.Attempt copy(MultiAttemptFixture.Attempt a, String result, boolean accepted) {
+        return new MultiAttemptFixture.Attempt(a.execution(), a.ordinal(), a.reason(), result, a.solution(),
+                a.lesson(), a.inputTokens(), a.outputTokens(), a.startSeconds(), a.endSeconds(), a.evidence(),
+                a.revisedResult(), a.revisedSolution(), a.revisedLesson(), accepted);
+    }
+
+    private MultiAttemptFixture withAttempt(String experienceId, UnaryOperator<MultiAttemptFixture.Attempt> change) {
+        List<MultiAttemptFixture.Attempt> attempts = fixture.attempts().stream()
+                .map(a -> a.experienceId().equals(experienceId) ? change.apply(a) : a).toList();
+        return new MultiAttemptFixture(fixture.version(), fixture.provenance(), fixture.scopeIds(), fixture.price(),
+                fixture.recallLimit(), fixture.pageSize(), fixture.cutoffScope(), fixture.cutoffEvent(),
+                fixture.executions(), attempts, fixture.queries(), fixture.cutoff());
+    }
+
+    private static void assertInvalid(MultiAttemptFixture candidate, String message) {
+        IllegalStateException e = assertThrows(IllegalStateException.class, candidate::validate);
+        assertTrue(e.getMessage().contains(message), e.getMessage());
+    }
+}
