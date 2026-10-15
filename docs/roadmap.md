@@ -76,6 +76,11 @@ The project follows a measurement-first path: improve retrieval quality only aft
   against a verbatim copy of the previous per-float path covers raw bit patterns, multi-chunk and mixed dimensions, truncation and
   bad offsets/headers. Generated speech evaluation output is byte-identical. Measured `findAll()` p50 at N=10,000 x 64 dims fell from
   ~462 ms to ~22 ms (warm page cache, single machine, exploratory).
+- Shared chunked float reader (Issue #134): the two hand-synced `FrameBuffer` copies from #130 and #132 are replaced by one
+  `com.monada.core.io.ChunkedFloatReader` used by `FileFrequencyStore` and `FileSpeechFeatureStore` (vector-sized scratch, at most
+  16 KiB, for both). It lives in `monada-core` under a narrow ADR 0001 amendment because `monada-speech` must not depend on
+  `monada-storage`; the package is exported but not a supported consumer API (see `docs/specs/library-consumption.md`). Both parity
+  tests pass unchanged, generated speech evaluation output is byte-identical and `runVectorLoadBreakdown` differs only in timing.
 - Exact bounded top-K experiment (Issue #120): experimental `ExactBoundedTopKSelector` (bounded min-heap over the deduplicated
   candidates, production comparator score desc / atom id asc) and `ExperimentalBoundedTopKLinearScanIndex` (same scan, threshold and
   keep-max dedup, selector instead of sort+truncate) live in the unstable `com.monada.index.experimental` package and are never

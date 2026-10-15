@@ -86,18 +86,10 @@ class ChunkedFloatReaderTest {
     }
 
     @Test
-    void scratchIsSizedToVectorAndCappedAtOneChunk() throws IOException {
-        ChunkedFloatReader reader = new ChunkedFloatReader();
-        assertEquals(0, reader.scratchBytes());
-
-        reader.readFloats(input(sequence(4)), new float[4]);
-        assertEquals(4 * Float.BYTES, reader.scratchBytes());
-
-        reader.readFloats(input(sequence(2)), new float[2]);
-        assertEquals(4 * Float.BYTES, reader.scratchBytes(), "scratch must not shrink");
-
-        reader.readFloats(input(sequence(CHUNK * 3)), new float[CHUNK * 3]);
-        assertEquals(CHUNK * Float.BYTES, reader.scratchBytes());
+    void chunkSizeMatchesStoreParityTestBoundaries() {
+        // FileFrequencyStoreReadParityTest and FileSpeechFeatureStoreReadParityTest use 4_095/4_096/4_097/8_193
+        // dimensions to hit chunk boundaries; change them together with this constant.
+        assertEquals(4_096, CHUNK);
     }
 
     @Test

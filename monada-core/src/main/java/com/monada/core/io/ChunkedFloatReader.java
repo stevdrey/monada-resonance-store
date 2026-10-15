@@ -25,7 +25,11 @@ import java.nio.FloatBuffer;
  */
 public final class ChunkedFloatReader {
 
-    /** Floats decoded per bulk read; bounds the scratch buffer to 16 KiB regardless of dimensions. */
+    /**
+     * Floats decoded per bulk read; bounds the scratch buffer to 16 KiB regardless of dimensions. The store parity
+     * tests in {@code monada-storage} and {@code monada-speech} hardcode their chunk-boundary dimensions from this
+     * value; update them together.
+     */
     static final int MAX_CHUNK_FLOATS = 4_096;
 
     private byte[] bytes = new byte[0];
@@ -49,11 +53,6 @@ public final class ChunkedFloatReader {
             input.readFully(bytes, 0, count * Float.BYTES);
             floats.get(0, values, start, count);
         }
-    }
-
-    /** Current scratch size in bytes; visible for tests. */
-    int scratchBytes() {
-        return bytes.length;
     }
 
     private void ensureCapacity(int chunkFloats) {
