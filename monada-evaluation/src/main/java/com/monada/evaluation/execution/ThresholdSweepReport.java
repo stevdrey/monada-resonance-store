@@ -205,11 +205,19 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
         return ratio((int) rows.stream().filter(p).count(), rows.size());
     }
 
-    /** Lowest declared threshold at which every no-relevant content query abstains, if any. */
+    /**
+     * Lowest declared threshold at which every no-relevant content query abstains, if any. Empty when the set has no
+     * no-relevant content query (EMPTY probes do not count): an absent denominator is not evaluable, never a vacuous
+     * success.
+     */
     public Optional<Integer> firstFullNoRelevantAbstention() {
+        List<QuerySweep> none = rows.stream().filter(r -> r.kind() == Kind.NO_RELEVANT).toList();
+        if (none.isEmpty()) {
+            return Optional.empty();
+        }
         for (int i = 0; i < grid.size(); i++) {
             int point = i;
-            if (rows.stream().filter(r -> r.kind() == Kind.NO_RELEVANT).allMatch(r -> r.abstains(point))) {
+            if (none.stream().allMatch(r -> r.abstains(point))) {
                 return Optional.of(i);
             }
         }
@@ -355,7 +363,11 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
                 metric(keep.recall()), metric(keep.precision()), keep.falseReturnQueries(), keep.noRelevant(),
                 keep.falseHits()));
         Optional<Integer> silent = firstFullNoRelevantAbstention();
-        if (silent.isEmpty()) {
+        boolean evaluable = keep.noRelevant() > 0;
+        if (!evaluable) {
+            out.append("  Full no-relevant abstention: n/a — not evaluable: no content-bearing no-relevant queries in "
+                    + "this set (empty probes do not count).\n");
+        } else if (silent.isEmpty()) {
             out.append("  No declared threshold makes every no-relevant content query abstain.\n");
         } else {
             int point = silent.get();
@@ -369,12 +381,17 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
                     metric(s.coverage()), lost, uncovered, metric(s.abstention())));
         }
         boolean separable = silent.isPresent() && silent.get() <= lossless;
-        out.append(separable
-                ? "  Tradeoff: on this set one declared threshold silences every no-relevant query without losing a "
-                + "positive-similarity relevant hit."
-                : "  Tradeoff: on this set no declared threshold both silences every no-relevant query and keeps every "
-                + "positive-similarity relevant hit; in between, each step trades wrong matches for lost relevant "
-                + "ones.");
+        if (!evaluable) {
+            out.append("  Tradeoff: n/a on this set — without no-relevant content queries, silencing wrong matches "
+                    + "cannot be weighed against lost relevant hits.");
+        } else {
+            out.append(separable
+                    ? "  Tradeoff: on this set one declared threshold silences every no-relevant query without losing "
+                    + "a positive-similarity relevant hit."
+                    : "  Tradeoff: on this set no declared threshold both silences every no-relevant query and keeps "
+                    + "every positive-similarity relevant hit; in between, each step trades wrong matches for lost "
+                    + "relevant ones.");
+        }
         out.append(" The operating point is the host's choice (cost of a wrong match vs a lost relevant match) and "
                 + "stays undecided here: one small synthetic corpus, one encoder, no cross-dataset evidence.\n");
     }
