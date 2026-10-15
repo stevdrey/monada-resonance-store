@@ -8,7 +8,7 @@ Monada Resonance Store is a Gradle multi-module Java 27 project. The architectur
 
 | Module | Responsibility |
 | --- | --- |
-| `monada-core` | Domain primitives such as `KnowledgeAtom`, `FrequencyVector`, result models, atom types, and feedback signals. |
+| `monada-core` | Domain primitives such as `KnowledgeAtom`, `FrequencyVector`, result models, atom types, and feedback signals, plus the shared store codec `com.monada.core.io.ChunkedFloatReader` used by the storage and speech vector stores (exported but unsupported for consumers; see the ADR 0001 amendment). |
 | `monada-encoder` | Deterministic text-to-vector encoding, lexical resources, aliases, stop words, plural handling, and technical synonyms. |
 | `monada-storage` | Local persistence: manifests, atom logs, vector files, index files, and feedback logs. |
 | `monada-index` | Similarity search, deterministic ranking, and index implementations such as linear scan. |

@@ -28,6 +28,18 @@ Keep the core split by responsibility:
 - Speech can evolve without forcing changes into the text memory API.
 - New features must state their affected modules in Spec Context.
 
+## Amendment: Shared Store Codec in Core (Issue #134)
+
+`monada-core` may hold one narrow, format-agnostic byte codec, `com.monada.core.io.ChunkedFloatReader`, shared by the vector stores of `monada-storage` and `monada-speech`. It decodes big-endian floats in bulk chunks and nothing else.
+
+Why core: it is the only module both stores depend on, and `monada-speech` must not depend on `monada-storage`. A separate module would add a published artifact for a single class.
+
+Limits:
+
+- core holds no file layout, framing, paths, offsets, validation or error messages; those stay in the owning store;
+- `com.monada.core.io` is exported by the automatic module but is not a supported consumer API (see [library-consumption](../specs/library-consumption.md));
+- adding any other I/O code to core requires a new amendment to this ADR.
+
 ## Review Checklist
 
 A PR respects this ADR when:
@@ -35,4 +47,5 @@ A PR respects this ADR when:
 - code lands in the module that owns the behavior;
 - dependency direction stays clear;
 - public API changes are intentional;
-- evaluation-only behavior does not leak into production code.
+- evaluation-only behavior does not leak into production code;
+- no I/O code is added to `monada-core` beyond the amendment above without updating this ADR.

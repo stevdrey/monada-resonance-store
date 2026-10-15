@@ -18,7 +18,7 @@ contains the binary jar, a `-sources.jar`, a Maven POM and Gradle Module Metadat
 
 | Artifact | Automatic-Module-Name | Packages | Depends on (`api` = exposed to consumers) |
 | --- | --- | --- | --- |
-| `com.monada:monada-core` | `com.monada.core` | `com.monada.core`, `.execution` | — |
+| `com.monada:monada-core` | `com.monada.core` | `com.monada.core`, `.execution`, `.io` (unsupported, see Limits) | — |
 | `com.monada:monada-encoder` | `com.monada.encoder` | `com.monada.encoder` (+ `lexical/en` resources) | `api` core |
 | `com.monada:monada-storage` | `com.monada.storage` | `com.monada.storage`, `.audit`, `.feedback`, `.execution` | `api` core |
 | `com.monada:monada-index` | `com.monada.index` | `com.monada.index` | `api` core, storage |
@@ -128,6 +128,10 @@ byte-identical jars and sources jars; only the Maven SNAPSHOT timestamp in file 
 - Modules are **automatic modules** (stable `Automatic-Module-Name`), not full `module-info` descriptors.
   Automatic modules export and open all packages; a future explicit descriptor may narrow that surface.
   The module names above are the stable contract.
+- `com.monada.core.io` (`ChunkedFloatReader`) is exported because `monada-core` is an automatic module, but it
+  is not a supported consumer API: it exists for the storage and speech vector stores (ADR 0001 amendment,
+  Issue #134) and may change in any `0.x` release. Consumers should not depend on it, and a future explicit
+  descriptor should not export it.
 - `monada-learning` currently has no sources; it is published to keep the production graph and module
   name stable.
 - The `monada-api` jar still contains the demo `com.monada.api.Main` entry point.

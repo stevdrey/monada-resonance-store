@@ -1,14 +1,12 @@
 package com.monada.storage;
 
 import com.monada.core.FrequencyVector;
+import com.monada.core.io.ChunkedFloatReader;
 
 import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.nio.FloatBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,8 +22,6 @@ public class FileFrequencyStore implements FrequencyStore {
     private static final String DEFAULT_SEGMENT = "vectors/segment-000001.f32";
     /** Hard safety cap when we cannot cross-check the on-disk dimension header against a manifest. */
     private static final int MAX_LEGACY_DIMENSIONS = 1 << 20;
-    /** Floats decoded per bulk read; bounds the scratch buffer to 16 KiB regardless of dimensions. */
-    private static final int READ_CHUNK_FLOATS = 4_096;
 
     private final Path vectorFile;
     private final Path vectorMap;
@@ -113,7 +109,7 @@ public class FileFrequencyStore implements FrequencyStore {
         validateOffset(offset, fileSize, atomId);
         try (RandomAccessFile file = new RandomAccessFile(vectorFile.toFile(), "r")) {
             file.seek(offset);
-            return Optional.of(readVector(file, atomId, offset, new FrameBuffer()));
+            return Optional.of(readVector(file, atomId, offset, new ChunkedFloatReader()));
         }
     }
 
@@ -122,13 +118,13 @@ public class FileFrequencyStore implements FrequencyStore {
         List<IndexEntry> entries = readIndexEntries();
         List<StoredVector> vectors = new ArrayList<>(entries.size());
         long fileSize = Files.size(vectorFile);
-        FrameBuffer frameBuffer = new FrameBuffer();
+        ChunkedFloatReader floatReader = new ChunkedFloatReader();
         try (RandomAccessFile file = new RandomAccessFile(vectorFile.toFile(), "r")) {
             for (IndexEntry entry : entries) {
                 validateOffset(entry.offset(), fileSize, entry.atomId());
                 file.seek(entry.offset());
                 vectors.add(new StoredVector(entry.atomId(),
-                        readVector(file, entry.atomId(), entry.offset(), frameBuffer)));
+                        readVector(file, entry.atomId(), entry.offset(), floatReader)));
             }
         }
         return vectors;
@@ -255,7 +251,8 @@ public class FileFrequencyStore implements FrequencyStore {
         }
     }
 
-    private FrequencyVector readVector(RandomAccessFile file, String atomId, long offset, FrameBuffer frameBuffer)
+    private FrequencyVector readVector(
+            RandomAccessFile file, String atomId, long offset, ChunkedFloatReader floatReader)
             throws IOException {
         try {
             Integer dimensions = declaredDimensions();
@@ -275,7 +272,7 @@ public class FileFrequencyStore implements FrequencyStore {
                 }
             }
             float[] values = new float[dimensions];
-            frameBuffer.readFloats(file, values);
+            floatReader.readFloats(file, values);
             return new FrequencyVector(values);
         } catch (EOFException e) {
             throw new IOException(
@@ -320,24 +317,5 @@ public class FileFrequencyStore implements FrequencyStore {
     }
 
     private record IndexEntry(String atomId, long offset) {
-    }
-
-    /**
-     * Fixed-size scratch reused across the vectors of one read call. Values are read in bulk chunks
-     * instead of one {@code readFloat()} call per float (Issue #130); the big-endian view copies raw bits, so values
-     * are bit-identical to {@link RandomAccessFile#readFloat()}, and a short read still surfaces as
-     * {@link EOFException}.
-     */
-    private static final class FrameBuffer {
-        private final byte[] bytes = new byte[READ_CHUNK_FLOATS * Float.BYTES];
-        private final FloatBuffer floats = ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN).asFloatBuffer();
-
-        void readFloats(RandomAccessFile file, float[] values) throws IOException {
-            for (int start = 0; start < values.length; start += READ_CHUNK_FLOATS) {
-                int count = Math.min(READ_CHUNK_FLOATS, values.length - start);
-                file.readFully(bytes, 0, count * Float.BYTES);
-                floats.get(0, values, start, count);
-            }
-        }
     }
 }
