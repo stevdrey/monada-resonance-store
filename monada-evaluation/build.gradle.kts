@@ -153,6 +153,13 @@ tasks.register<JavaExec>("runForgeRecallStress") {
     classpath = sourceSets["main"].runtimeClasspath
 }
 
+tasks.register<JavaExec>("runForgeRecallThresholdSweep") {
+    description = "Sweep host-owned relevance thresholds as an evaluation-only post-filter over the judged Forge recall stress set (exploratory precision/recall/abstention tradeoffs plus hard checks; no threshold is recommended; no Forge, network or provider required)"
+    group = "application"
+    mainClass.set("com.monada.evaluation.execution.ThresholdSweepMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
 tasks.named<Test>("test") {
     // The cross-JVM determinism test starts child JVMs that run the evaluation command on this runtime classpath.
     doFirst {

@@ -246,6 +246,45 @@ These are 26 queries over 25 experiences: they localize failure modes for Next S
 claims. Not changed: encoders, `summary-text-v1`, query keys, thresholds, `forge-experience-v1` and its seven gates
 (the `runForgeExperienceEvaluation` report is byte-identical apart from timing).
 
+#### Host-owned relevance threshold sweep and abstention (#123)
+
+Measures, without recommending anything, what a host-side relevance floor would cost on the #122 judged set.
+`./gradlew :monada-evaluation:runForgeRecallThresholdSweep -q` takes the fixed #122 rankings and judgments and applies
+each threshold of a declared grid AFTER recall, as a host would: keep a hit when `similarity >= threshold` (inclusive,
+exact comparison, ties at the threshold kept or dropped together), then read the top 5 in unchanged rank order. The
+grid is `0.00` (current behaviour, zero-similarity fill included) and nine candidates `0.05`–`0.45`, declared from the
+#122 observations (relevant paraphrase hits about 0.06–0.18, no-relevant neighbours up to 0.21/0.25/0.33/0.40) and
+never derived from the sweep's output. Per threshold and per category it reports precision among kept hits, recall
+among judged positives, top-K coverage, Hit@1 and abstention for queries with relevant experiences; separately, for
+the six non-blank no-relevant queries, false returns, false hits and abstention (never in a positive denominator);
+blank queries only in the per-query table. Costs per candidate list every lost relevant hit (fill marked) and the
+wrong matches kept by neighbour category. Three hard checks decide the exit code (`TS1` the #122 checks pass, `TS2`
+`0.00` equals the unfiltered top 5, `TS3` each higher threshold keeps a prefix of the lower one); every metric is
+EXPLORATORY.
+
+Observed on 2026-10-15 (all checks pass; 31 scored queries, 66 judged positives, 6 non-blank no-relevant):
+
+| threshold | precision | recall | coverage | scored abstain | no-relevant returning | false hits |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0.00 | 0.36 | 0.85 | 0.94 | 0.00 | 4/6 | 20 |
+| 0.05 | 0.42 | 0.80 | 0.90 | 0.00 | 4/6 | 17 |
+| 0.10 | 0.60 | 0.76 | 0.87 | 0.10 | 4/6 | 9 |
+| 0.20 | 0.80 | 0.68 | 0.77 | 0.23 | 4/6 | 7 |
+| 0.25 | 0.86 | 0.65 | 0.71 | 0.29 | 2/6 | 2 |
+| 0.40 | 0.90 | 0.56 | 0.68 | 0.32 | 0/6 | 0 |
+
+- `0.05` is the highest declared threshold that loses no positive-similarity relevant hit (it drops only zero-similarity
+  fill, including the fill-only relevant hits of S04), yet four no-relevant queries still return 17 false hits.
+- `0.40` is the lowest at which every no-relevant query abstains (S18 at 0.3953 is the last), but it loses 19 relevant
+  hits and 8 scored queries lose every relevant hit; paraphrase and synonym groups abstain entirely, and the four
+  judged confusables ranked #1 by negation queries S07–S09 and the cursor-paging query S13 (0.49–0.74) still pass.
+- No declared threshold separates the two sides on this corpus. The operating point is **undecided and host-owned**:
+  it depends on the host's cost of a wrong match versus a lost relevant match, and 25 synthetic experiences with one
+  encoder are no cross-dataset evidence. No threshold is recommended, added as an option or made a default.
+
+Not changed: `ExecutionMemory.recall`, `MonadaMemory`, projections, the default threshold, fixtures and judgments, and
+the `runForgeExperienceEvaluation` and `runForgeRecallStress` reports (byte-identical apart from timing).
+
 Numbering is roadmap order; independent items (for example #94 and #95) may proceed in parallel.
 
 Non-goals:
