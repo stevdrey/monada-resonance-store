@@ -39,6 +39,10 @@ final class TextEvaluationCatalog {
             "expanded-technology", "1", EvaluationProfile.LEXICAL_ENRICHED.name(),
             TextEvaluationMode.EXPLORATORY);
 
+    static final TextEvaluationMetadata VECTOR_COPY_SHARE = new TextEvaluationMetadata(
+            "expanded-technology", "1", EvaluationProfile.LEXICAL_ENRICHED.name(),
+            TextEvaluationMode.EXPLORATORY);
+
     static final TextEvaluationMetadata BOUNDED_TOP_K_EXPERIMENT = new TextEvaluationMetadata(
             "expanded-technology", "1", EvaluationProfile.LEXICAL_ENRICHED.name(),
             TextEvaluationMode.EXPLORATORY);

@@ -271,9 +271,7 @@ public class FileFrequencyStore implements FrequencyStore {
                                     + "dimensions (" + dimensions + ") for atomId=" + atomId + " at offset=" + offset);
                 }
             }
-            float[] values = new float[dimensions];
-            floatReader.readFloats(file, values);
-            return new FrequencyVector(values);
+            return FrequencyVector.read(floatReader, file, dimensions);
         } catch (EOFException e) {
             throw new IOException(
                     "Vector segment truncated while reading atomId=" + atomId + " at offset=" + offset, e);

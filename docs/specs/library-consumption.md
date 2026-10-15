@@ -130,8 +130,9 @@ byte-identical jars and sources jars; only the Maven SNAPSHOT timestamp in file 
   The module names above are the stable contract.
 - `com.monada.core.io` (`ChunkedFloatReader`) is exported because `monada-core` is an automatic module, but it
   is not a supported consumer API: it exists for the storage and speech vector stores (ADR 0001 amendment,
-  Issue #134) and may change in any `0.x` release. Consumers should not depend on it, and a future explicit
-  descriptor should not export it.
+  Issue #134) and may change in any `0.x` release. Consumers should not depend on it. A future explicit
+  descriptor should export it only to the storage and speech modules, because the store-only
+  `FrequencyVector.read(ChunkedFloatReader, ...)` names it (ADR 0005, Issue #135).
 - `monada-learning` currently has no sources; it is published to keep the production graph and module
   name stable.
 - The `monada-api` jar still contains the demo `com.monada.api.Main` entry point.

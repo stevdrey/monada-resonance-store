@@ -166,9 +166,7 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
             throws IOException {
         int dimensions = readVectorDimensions(file, sampleId, offset);
         try {
-            var values = new float[dimensions];
-            floatReader.readFloats(file, values);
-            return new FrequencyVector(values);
+            return FrequencyVector.read(floatReader, file, dimensions);
         } catch (EOFException e) {
             throw new IOException(
                     "Feature vector segment truncated while reading sampleId=" + sampleId + " at offset=" + offset, e);
