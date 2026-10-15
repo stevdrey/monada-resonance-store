@@ -101,8 +101,9 @@ The project follows a measurement-first path: improve retrieval quality only aft
   materialization ~4-8%. The candidate needed ~14-16% of the replica p50 with 3-5 window reads. Decision rule: per-vector I/O >= 40% of the replica
   p50 and candidate <= 75% of the replica at p50 and p95 for every dimension at N >= 10,000. The report concludes
   `PER_VECTOR_IO_DOMINANT_WINDOWED_READ_JUSTIFIED`. `findAll()` now reads the segment through one reused positional-read
-  window of at most 1 MiB (never more than the segment) and decodes frames at their indexed offsets. The window only moves
-  forward: contiguous refills keep the unread tail, and a forward jump past the window reads at most 8 KiB or the frame. Entries
+  window of at most 1 MiB (the segment size when smaller, with a 4-byte floor for one header) and decodes frames at their
+  indexed offsets. The window only moves forward: contiguous refills keep the unread tail, and a forward jump past the window
+  reads at most 8 KiB or the frame. Entries
   whose offset is before the window (out-of-order indexes) and frames larger than the window use the per-vector path. Entries
   are still validated and read in index order, so results, ordering, error messages and error precedence are unchanged.
   `FileSpeechFeatureStoreReadParityTest` passes unchanged and adds shuffled and overlapping offsets, segments and frames larger

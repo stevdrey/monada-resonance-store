@@ -91,13 +91,14 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
     /**
      * Returns every active vector (last index entry per sample ID, in first-seen order).
      *
-     * <p>The segment is read through one reused window of at most {@value #BULK_WINDOW_BYTES} bytes (never more than
-     * the segment) with positional reads, and each frame is decoded at its indexed offset (Issue #136). The window
-     * only moves forward: a frame that continues the window keeps its unread tail and refills it to capacity, a
-     * forward jump past the window reads at most {@value #GAP_READ_BYTES} bytes or the frame, and no byte is read
-     * twice by contiguous refills. Entries whose offset is before the window (out-of-order indexes) and frames
-     * larger than the window use the per-vector seek-and-read path, so an append-ordered index needs a handful of
-     * reads, any other order still works, and no order rereads a whole window per entry. Entries are validated and
+     * <p>The segment is read through one reused window of at most {@value #BULK_WINDOW_BYTES} bytes (the segment size
+     * when smaller, with a 4-byte floor for one header) with positional reads, and each frame is decoded at its
+     * indexed offset (Issue #136). The window only moves forward: a frame that continues the window keeps its
+     * unread tail and refills it to capacity, a forward jump past the window reads at most {@value #GAP_READ_BYTES}
+     * bytes or the frame, and no byte is read twice by contiguous refills. Entries whose offset is before the window
+     * (out-of-order indexes) and frames larger than the window use the per-vector seek-and-read path, so an
+     * append-ordered index needs a handful of reads, any other order still works, and no order rereads a whole
+     * window per entry. Entries are validated and
      * read in index order, so results, offset and header checks, truncation messages and the precedence of errors
      * are unchanged. Read buffers are bounded by the window plus the 16 KiB chunk scratch of
      * {@link ChunkedFloatReader}, independent of segment size.
@@ -259,7 +260,10 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
                 "Invalid vector dimensions (" + dimensions + ") for sampleId=" + sampleId + " at offset=" + offset);
     }
 
-    /** The window never exceeds the segment, so small stores do not allocate the full {@value #BULK_WINDOW_BYTES}. */
+    /**
+     * The segment size capped at {@value #BULK_WINDOW_BYTES}, so small stores do not allocate a full window, with a
+     * floor of one 4-byte header so an empty or tiny truncated segment still gets a usable (4-byte) window.
+     */
     private static int windowCapacity(long fileSize) {
         return (int) Math.min(BULK_WINDOW_BYTES, Math.max(fileSize, Integer.BYTES));
     }

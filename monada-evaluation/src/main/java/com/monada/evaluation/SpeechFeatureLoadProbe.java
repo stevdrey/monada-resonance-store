@@ -36,7 +36,7 @@ import java.util.stream.Stream;
  */
 final class SpeechFeatureLoadProbe {
 
-    /** Maximum window of the candidate; one reused heap array, never larger than the segment or 1 MiB. */
+    /** Maximum window of the candidate; one reused heap array, at most 1 MiB and the segment size, with a 4-byte floor. */
     static final int WINDOW_BYTES = 1 << 20;
 
     private static final int MAX_DIMENSIONS = 1 << 20;
