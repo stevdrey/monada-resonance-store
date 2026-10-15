@@ -65,7 +65,7 @@ class RecallStressEvaluationTest {
     void zeroRelevantQueriesAreReportedButExcludedFromEveryDenominator() {
         GroupSummary all = group("ALL_STRESS");
         assertEquals(26, all.queries());
-        assertEquals(List.of("S10", "S17", "S18", "S19", "S23", "S24", "S25", "S26"), all.excludedIds());
+        assertEquals(List.of("S17", "S18", "S19", "S23", "S24", "S25", "S26"), all.excludedIds());
         assertEquals(all.queries(), all.scoredIds().size() + all.excludedIds().size());
         assertEquals(List.of("Q12", "Q14"), group("BASELINE").excludedIds());
         GroupSummary none = group("NO_RELEVANT");

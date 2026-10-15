@@ -62,9 +62,12 @@ class RecallStressFixtureTest {
             assertFalse(FIXTURE.queriesOf(c).isEmpty());
             FIXTURE.queriesOf(c).forEach(q -> assertTrue(q.relevant().isEmpty(), q.id()));
         }
-        // A category other than NO_RELEVANT may also judge that nothing answers a query (reverse migration).
-        assertTrue(FIXTURE.query("S10").orElseThrow().relevant().isEmpty());
-        assertEquals(Set.of("a-yaml/a1"), FIXTURE.query("S10").orElseThrow().confusable());
+        // Reviewed in PR #140: the reverse migration is answered by the a-yaml lesson, and only the second
+        // webhook attempt is about spreading retry delays.
+        assertEquals(Set.of("a-yaml/a1"), FIXTURE.query("S10").orElseThrow().relevant());
+        assertTrue(FIXTURE.query("S10").orElseThrow().confusable().isEmpty());
+        assertEquals(Set.of("b-webhook/a2"), FIXTURE.query("S16").orElseThrow().relevant());
+        assertTrue(FIXTURE.reviewer().startsWith("reviewed by the repository owner"), FIXTURE.reviewer());
     }
 
     @Test
