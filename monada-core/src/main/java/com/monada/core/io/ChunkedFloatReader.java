@@ -9,7 +9,9 @@ import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 
 /**
- * Internal use only: not part of the public API and may change without notice.
+ * Shared store codec, not a supported consumer API. The package is exported because {@code monada-core} is an
+ * automatic module, but it exists only for the storage and speech vector stores and may change in any {@code 0.x}
+ * release; see the ADR 0001 amendment and {@code docs/specs/library-consumption.md}.
  *
  * <p>Reads big-endian floats in bulk chunks instead of one {@code readFloat()} call per float. It is shared by the
  * vector stores of {@code monada-storage} and {@code monada-speech} (Issues #130, #132, #134); it lives in
@@ -29,9 +31,15 @@ public final class ChunkedFloatReader {
     private byte[] bytes = new byte[0];
     private FloatBuffer floats = view(bytes);
 
+    /** Creates a reader with an empty scratch; the first read allocates it. */
+    public ChunkedFloatReader() {
+    }
+
     /**
      * Fills {@code values} with the next {@code values.length} big-endian floats from {@code input}.
      *
+     * @param input  source positioned at the first float to read
+     * @param values destination, filled from index 0
      * @throws EOFException if {@code input} ends before all values are read
      */
     public void readFloats(DataInput input, float[] values) throws IOException {
