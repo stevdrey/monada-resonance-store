@@ -1,14 +1,12 @@
 package com.monada.speech.storage;
 
 import com.monada.core.FrequencyVector;
+import com.monada.core.io.ChunkedFloatReader;
 
 import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.nio.FloatBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,8 +22,6 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
     private static final String DEFAULT_SEGMENT = "features/speech-features-000001.f32";
     private static final String DEFAULT_INDEX_SEGMENT = "indexes/speech-feature-map.idx";
     private static final int MAX_DIMENSIONS = 1 << 20;
-    /** Floats decoded per bulk read; bounds the scratch buffer to 16 KiB regardless of dimensions. */
-    private static final int READ_CHUNK_FLOATS = 4_096;
 
     private final Path vectorFile;
     private final Path vectorMap;
@@ -72,7 +68,7 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
         validateOffset(offset, fileSize, sampleId);
         try (var file = new RandomAccessFile(vectorFile.toFile(), "r")) {
             file.seek(offset);
-            return Optional.of(readVector(file, sampleId, offset, new FrameBuffer()));
+            return Optional.of(readVector(file, sampleId, offset, new ChunkedFloatReader()));
         }
     }
 
@@ -81,12 +77,12 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
         var byId = new LinkedHashMap<String, StoredSpeechFeatureVector>();
         var entries = readIndexEntries();
         var fileSize = Files.size(vectorFile);
-        var frameBuffer = new FrameBuffer();
+        var floatReader = new ChunkedFloatReader();
         try (var file = new RandomAccessFile(vectorFile.toFile(), "r")) {
             for (var entry : entries) {
                 validateOffset(entry.offset(), fileSize, entry.sampleId());
                 file.seek(entry.offset());
-                var vector = readVector(file, entry.sampleId(), entry.offset(), frameBuffer);
+                var vector = readVector(file, entry.sampleId(), entry.offset(), floatReader);
                 byId.put(entry.sampleId(), new StoredSpeechFeatureVector(entry.sampleId(), vector));
             }
         }
@@ -165,12 +161,13 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
         }
     }
 
-    private FrequencyVector readVector(RandomAccessFile file, String sampleId, long offset, FrameBuffer frameBuffer)
+    private FrequencyVector readVector(
+            RandomAccessFile file, String sampleId, long offset, ChunkedFloatReader floatReader)
             throws IOException {
         int dimensions = readVectorDimensions(file, sampleId, offset);
         try {
             var values = new float[dimensions];
-            frameBuffer.readFloats(file, values);
+            floatReader.readFloats(file, values);
             return new FrequencyVector(values);
         } catch (EOFException e) {
             throw new IOException(
@@ -216,38 +213,5 @@ public class FileSpeechFeatureStore implements SpeechFeatureStore {
     }
 
     private record IndexEntry(String sampleId, long offset) {
-    }
-
-    /**
-     * Scratch reused across the vectors of one read call. It is sized to the largest chunk needed so far,
-     * at most 16 KiB, so a single small lookup does not allocate a full chunk and an empty store allocates
-     * nothing. Values are read in bulk chunks instead of one {@code readFloat()} call per float (Issue #132,
-     * same approach as Issue #130 in {@code FileFrequencyStore}); the big-endian view copies raw bits, so
-     * values are bit-identical to {@link RandomAccessFile#readFloat()}, and a short read still surfaces as
-     * {@link EOFException}.
-     */
-    private static final class FrameBuffer {
-        private byte[] bytes = new byte[0];
-        private FloatBuffer floats = view(bytes);
-
-        void readFloats(RandomAccessFile file, float[] values) throws IOException {
-            ensureCapacity(Math.min(values.length, READ_CHUNK_FLOATS));
-            for (int start = 0; start < values.length; start += READ_CHUNK_FLOATS) {
-                int count = Math.min(READ_CHUNK_FLOATS, values.length - start);
-                file.readFully(bytes, 0, count * Float.BYTES);
-                floats.get(0, values, start, count);
-            }
-        }
-
-        private void ensureCapacity(int chunkFloats) {
-            if (bytes.length < chunkFloats * Float.BYTES) {
-                bytes = new byte[chunkFloats * Float.BYTES];
-                floats = view(bytes);
-            }
-        }
-
-        private static FloatBuffer view(byte[] bytes) {
-            return ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN).asFloatBuffer();
-        }
     }
 }
