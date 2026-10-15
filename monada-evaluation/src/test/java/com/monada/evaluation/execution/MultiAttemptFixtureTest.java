@@ -116,11 +116,51 @@ class MultiAttemptFixtureTest {
     @Test
     void rejectsACutoffRowForAnUnknownAttempt() {
         List<MultiAttemptFixture.CutoffAttempt> cutoff = new ArrayList<>(fixture.cutoff());
-        cutoff.add(new MultiAttemptFixture.CutoffAttempt("m-correct", 9, "FAILED", 1, false, "UNLABELED", "PENDING"));
-        assertInvalid(new MultiAttemptFixture(fixture.version(), fixture.provenance(), fixture.scopeIds(),
-                fixture.price(), fixture.recallLimit(), fixture.pageSize(), fixture.cutoffScope(),
-                fixture.cutoffEvent(), fixture.executions(), fixture.attempts(), fixture.queries(), cutoff),
-                "unknown attempt");
+        cutoff.add(new MultiAttemptFixture.CutoffAttempt("m-correct", 9, "FAILED", 1, false, false, "UNLABELED",
+                "PENDING"));
+        assertInvalid(withCutoff(cutoff), "unknown attempt");
+    }
+
+    @Test
+    void judgesTheRawOutcomeMarkerAtTheCutoffSeparately() {
+        MultiAttemptFixture.CutoffAttempt accepted = cutoffRow("m-repair/a2");
+        assertTrue(accepted.markedAccepted());
+        assertTrue(accepted.accepted());
+        MultiAttemptFixture.CutoffAttempt pending = cutoffRow("m-correct/a1");
+        assertFalse(pending.markedAccepted()); // no outcome is recorded at the cutoff
+        assertFalse(pending.accepted());
+        assertFalse(cutoffRow("m-repair/a1").markedAccepted());
+    }
+
+    @Test
+    void rejectsACutoffMarkerForAnAttemptTheOutcomeNeverNames() {
+        assertInvalid(withCutoffRow("m-correct/a1", c -> new MultiAttemptFixture.CutoffAttempt(c.execution(),
+                c.ordinal(), c.result(), c.revision(), true, false, c.label(), c.acceptance())),
+                "outcome never names it");
+    }
+
+    @Test
+    void rejectsAValidatedCutoffAttemptThatTheOutcomeDoesNotName() {
+        assertInvalid(withCutoffRow("m-repair/a2", c -> new MultiAttemptFixture.CutoffAttempt(c.execution(),
+                c.ordinal(), c.result(), c.revision(), false, true, c.label(), c.acceptance())),
+                "must be the attempt the outcome names");
+    }
+
+    private MultiAttemptFixture.CutoffAttempt cutoffRow(String experienceId) {
+        return fixture.cutoff().stream().filter(c -> c.experienceId().equals(experienceId)).findFirst()
+                .orElseThrow();
+    }
+
+    private MultiAttemptFixture withCutoffRow(String experienceId,
+                                              UnaryOperator<MultiAttemptFixture.CutoffAttempt> change) {
+        return withCutoff(fixture.cutoff().stream()
+                .map(c -> c.experienceId().equals(experienceId) ? change.apply(c) : c).toList());
+    }
+
+    private MultiAttemptFixture withCutoff(List<MultiAttemptFixture.CutoffAttempt> cutoff) {
+        return new MultiAttemptFixture(fixture.version(), fixture.provenance(), fixture.scopeIds(), fixture.price(),
+                fixture.recallLimit(), fixture.pageSize(), fixture.cutoffScope(), fixture.cutoffEvent(),
+                fixture.executions(), fixture.attempts(), fixture.queries(), cutoff);
     }
 
     @Test

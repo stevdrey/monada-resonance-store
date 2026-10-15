@@ -129,7 +129,7 @@ class MultiAttemptEvaluationTest {
         }
         List<MultiAttemptFixture.CutoffAttempt> cutoff = f.cutoff().stream().map(c -> !c.experienceId()
                 .equals("m-correct/a1") ? c : new MultiAttemptFixture.CutoffAttempt(c.execution(), c.ordinal(),
-                "FAILED", 2, c.accepted(), c.label(), c.acceptance())).toList();
+                "FAILED", 2, c.markedAccepted(), c.accepted(), c.label(), c.acceptance())).toList();
         MultiAttemptFixture wrong = new MultiAttemptFixture(f.version(), f.provenance(), f.scopeIds(), f.price(),
                 f.recallLimit(), f.pageSize(), f.cutoffScope(), f.cutoffEvent(), executions, f.attempts(),
                 f.queries(), cutoff);

@@ -1,9 +1,11 @@
 package com.monada.evaluation.execution;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.monada.api.execution.ExecutionMemory;
+import com.monada.api.execution.ExperienceSample;
 import com.monada.api.execution.ExperienceSamplePage;
 import com.monada.api.execution.ExportCutoff;
 import com.monada.api.execution.ExportEvidencePolicy;
@@ -13,6 +15,7 @@ import com.monada.core.execution.EventId;
 import com.monada.core.execution.ScopeId;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.UnaryOperator;
@@ -22,8 +25,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * The paged export at the fixed cutoff (MA4, issue #121) is checked as strictly as the latest export: against one
- * unpaged export at the same cutoff, sample for sample, and page by page for its snapshot metadata.
+ * MA4 cutoff checks (issue #121). The paged export at the fixed cutoff is checked as strictly as the latest export:
+ * against one unpaged export at the same cutoff, sample for sample, and page by page for its snapshot metadata. Its
+ * executions are counted, never collapsed into a set, and the raw outcome marker of every attempt is compared with
+ * its judgment separately from the validated accepted verdict.
  */
 class MultiAttemptCutoffPaginationTest {
     @TempDir
@@ -38,9 +43,12 @@ class MultiAttemptCutoffPaginationTest {
     @BeforeAll
     static void exportAtTheCutoff() {
         scope = MultiAttemptFixtureRecorder.scope(FIXTURE, FIXTURE.cutoffScope());
-        try (ExecutionMemory writer = ExecutionMemory.open(root, scope)) {
-            MultiAttemptFixtureRecorder.recordScope(writer, FIXTURE, FIXTURE.cutoffScope());
-            writer.rebuildProjection(scope);
+        for (String scopeKey : FIXTURE.scopeIds().keySet()) { // every project, so a full snapshot can be taken
+            ScopeId each = MultiAttemptFixtureRecorder.scope(FIXTURE, scopeKey);
+            try (ExecutionMemory writer = ExecutionMemory.open(root, each)) {
+                MultiAttemptFixtureRecorder.recordScope(writer, FIXTURE, scopeKey);
+                writer.rebuildProjection(each);
+            }
         }
         memory = ExecutionMemory.openReadOnly(root, scope);
         cutoff = memory.loadEvent(scope, EventId.of(FIXTURE.cutoffEvent()), 1).orElseThrow().sequence();
@@ -108,6 +116,52 @@ class MultiAttemptCutoffPaginationTest {
         for (int i = 0; i < variants.size(); i++) {
             List<String> v = violations(withSecondPage(variants.get(i)));
             assertTrue(v.stream().anyMatch(x -> x.contains("cutoff page 2/2")), "variant " + i + ": " + v);
+        }
+    }
+
+    @Test
+    void executionsAtTheCutoffAreCountedNotCollapsed() {
+        List<ExperienceSample> real = report.samples().stream().map(AnnotatedSample::sample).toList();
+        assertEquals(List.of(), MultiAttemptEvaluator.cutoffMembershipViolations(FIXTURE, real));
+
+        // as if the exporter emitted m-repair twice in the paged and the unpaged export alike: every judged attempt
+        // is still present, so only the count catches it
+        List<ExperienceSample> duplicated = new ArrayList<>(real);
+        duplicated.add(real.get(0));
+        List<String> v = MultiAttemptEvaluator.cutoffMembershipViolations(FIXTURE, duplicated);
+        assertTrue(v.contains("m-repair: exported 2 times at the cutoff, expected once"), v.toString());
+        assertTrue(v.contains("m-repair/a1: exported 2 times at the cutoff, expected once"), v.toString());
+
+        List<String> dropped = MultiAttemptEvaluator.cutoffMembershipViolations(FIXTURE, real.subList(1, real.size()));
+        assertTrue(dropped.stream().anyMatch(x -> x.contains("but the fixture judges")), dropped.toString());
+    }
+
+    @Test
+    void theGateComparesTheRawOutcomeMarkerApartFromTheValidatedVerdict() {
+        MultiAttemptEvaluator.Snapshot s = MultiAttemptEvaluator.snapshot(FIXTURE, root, new LinkedHashMap<>());
+        try {
+            assertTrue(MultiAttemptEvaluator.cutoffGate(FIXTURE, s).passed());
+            // m-correct is PENDING at the cutoff; marking its a1 accepted cannot change the derived verdict (still
+            // false), so only the comparison of the raw marker detects it
+            List<AnnotatedSample> forged = new ArrayList<>();
+            for (AnnotatedSample a : s.cutoffExport.samples()) {
+                forged.add(!a.sample().executionId().value().equals("m-correct") ? a
+                        : new AnnotatedSample(ForgeTestSupport.withAttempt(a.sample(), 0, at ->
+                        ForgeTestSupport.copyAttempt(at, true, at.previousAttempt(), at.solutionSummary(),
+                                at.lessonSummary(), at.evidence())), a.cost(), a.comparison()));
+            }
+            ExperienceExportReport real = s.cutoffExport;
+            s.cutoffExport = new ExperienceExportReport(real.scope(), real.pages(), forged, real.comparison(),
+                    real.exportDigest());
+            ForgeGate gate = MultiAttemptEvaluator.cutoffGate(FIXTURE, s);
+            assertFalse(gate.passed());
+            assertTrue(gate.details().contains(
+                    "VIOLATION: m-correct/a1: at the cutoff outcome marker true but judged false"), gate.details()
+                    .toString());
+            assertTrue(gate.details().stream().noneMatch(d -> d.contains(
+                    "m-correct/a1: at the cutoff validated accepted attempt")), gate.details().toString());
+        } finally {
+            s.close();
         }
     }
 

@@ -545,6 +545,7 @@ public final class MultiAttemptEvaluator {
         violations.addAll(cutoffPaginationViolations(s.memories.get(fixture.cutoffScope()),
                 MultiAttemptFixtureRecorder.scope(fixture, fixture.cutoffScope()), report, s.cutoffSequence,
                 fixture.pageSize()));
+        violations.addAll(cutoffMembershipViolations(fixture, samples(report)));
         Map<String, MultiAttemptFixture.CutoffAttempt> judged = new TreeMap<>();
         fixture.cutoff().forEach(c -> judged.put(c.experienceId(), c));
         Set<String> exported = new java.util.TreeSet<>();
@@ -563,7 +564,8 @@ public final class MultiAttemptEvaluator {
                 }
                 violations.addAll(cutoffViolations(id, c, sample.label().name(), sample.acceptance().name(),
                         a.result().map(Enum::name).orElse(MultiAttemptFixture.UNFINISHED),
-                        a.finish().map(ExperienceRef::revision).orElse(0), validatedAccepted(sample, a)));
+                        a.finish().map(ExperienceRef::revision).orElse(0), a.accepted(),
+                        validatedAccepted(sample, a)));
             }
         }
         for (String id : judged.keySet()) {
@@ -591,14 +593,18 @@ public final class MultiAttemptEvaluator {
                     continue;
                 }
                 violations.addAll(cutoffViolations(what, c, r.executionLabel(), r.executionAcceptance(),
-                        r.attemptResult(), r.revision(), r.validatedAcceptedAttempt()));
+                        r.attemptResult(), r.revision(), r.markedAccepted(), r.validatedAcceptedAttempt()));
             }
         }
         if (beyond == 0) {
             violations.add("no hit lies beyond the cutoff: the cutoff scenario was not exercised");
         }
+        long judgedExecutions = fixture.cutoff().stream().map(MultiAttemptFixture.CutoffAttempt::execution).distinct()
+                .count();
         List<String> evidence = List.of("cutoff " + fixture.cutoffScope() + " after " + fixture.cutoffEvent()
-                + " = sequence " + s.cutoffSequence + "; attempts at the cutoff: " + exported.size() + " (judged "
+                + " = sequence " + s.cutoffSequence + "; executions at the cutoff: " + samples(report).size()
+                + " (judged " + judgedExecutions + ", each exported once); attempts at the cutoff: " + exported.size()
+                + " (judged "
                 + judged.size() + "); cutoff export pages at size " + fixture.pageSize() + ": "
                 + report.pages().size() + " (paged export equals the unpaged export at the same cutoff; every page "
                 + "carries the same checkpoint and projection stamp)",
@@ -666,8 +672,42 @@ public final class MultiAttemptEvaluator {
         return violations;
     }
 
+    /**
+     * The cutoff export holds exactly the executions the fixture judges present at the cutoff, each exactly once, and
+     * no attempt twice. Counted on the list, not a set: an exporter that emits one execution twice in the paged and in
+     * the unpaged export alike passes the paged/unpaged comparison, so only the count catches it.
+     */
+    static List<String> cutoffMembershipViolations(MultiAttemptFixture fixture, List<ExperienceSample> samples) {
+        List<String> violations = new ArrayList<>();
+        List<String> expected = fixture.cutoff().stream().map(MultiAttemptFixture.CutoffAttempt::execution).distinct()
+                .toList();
+        List<String> exported = samples.stream().map(s -> s.executionId().value()).toList();
+        Map<String, Integer> counts = new TreeMap<>();
+        exported.forEach(e -> counts.merge(e, 1, Integer::sum));
+        counts.forEach((e, n) -> {
+            if (n > 1) {
+                violations.add(e + ": exported " + n + " times at the cutoff, expected once");
+            }
+        });
+        if (!new java.util.TreeSet<>(exported).equals(new java.util.TreeSet<>(expected))
+                || exported.size() != expected.size()) {
+            violations.add("cutoff export holds " + exported + " but the fixture judges " + expected
+                    + " present at the cutoff");
+        }
+        Map<String, Integer> attempts = new TreeMap<>();
+        samples.forEach(s -> s.attempts().forEach(a -> attempts.merge(
+                ForgeFixtureRecorder.experienceId(s.executionId().value(), a.id()), 1, Integer::sum)));
+        attempts.forEach((id, n) -> {
+            if (n > 1) {
+                violations.add(id + ": exported " + n + " times at the cutoff, expected once");
+            }
+        });
+        return violations;
+    }
+
     private static List<String> cutoffViolations(String what, MultiAttemptFixture.CutoffAttempt c, String label,
-                                                 String acceptance, String result, int revision, boolean accepted) {
+                                                 String acceptance, String result, int revision, boolean marked,
+                                                 boolean accepted) {
         List<String> violations = new ArrayList<>();
         if (!label.equals(c.label()) || !acceptance.equals(c.acceptance())) {
             violations.add(what + ": at the cutoff " + label + "/" + acceptance + " but judged " + c.label() + "/"
@@ -676,6 +716,9 @@ public final class MultiAttemptEvaluator {
         if (!result.equals(c.result()) || revision != c.revision()) {
             violations.add(what + ": at the cutoff " + result + " r" + revision + " but judged " + c.result() + " r"
                     + c.revision());
+        }
+        if (marked != c.markedAccepted()) {
+            violations.add(what + ": at the cutoff outcome marker " + marked + " but judged " + c.markedAccepted());
         }
         if (accepted != c.accepted()) {
             violations.add(what + ": at the cutoff validated accepted attempt " + accepted + " but judged "

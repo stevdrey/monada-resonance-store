@@ -93,9 +93,13 @@ public record MultiAttemptFixture(String version, String provenance, Map<String,
     public record Query(String id, String scopeKey, String text, Set<String> relevant, String judgment) {
     }
 
-    /** Hand-judged state of one attempt in the cutoff export ({@code revision} 0 = no finish at the cutoff). */
-    public record CutoffAttempt(String execution, int ordinal, String result, int revision, boolean accepted,
-                                String label, String acceptance) {
+    /**
+     * Hand-judged state of one attempt in the cutoff export ({@code revision} 0 = no finish at the cutoff).
+     * {@code markedAccepted} is the raw marker (the outcome recorded at the cutoff names this attempt);
+     * {@code accepted} is the validated accepted attempt verdict. Both are judged and checked separately.
+     */
+    public record CutoffAttempt(String execution, int ordinal, String result, int revision, boolean markedAccepted,
+                                boolean accepted, String label, String acceptance) {
         public String experienceId() {
             return execution + "/a" + ordinal;
         }
@@ -171,9 +175,9 @@ public record MultiAttemptFixture(String version, String provenance, Map<String,
             queries.add(new Query(f[0], f[1], f[2], new LinkedHashSet<>(csv(f[3])), f[4]));
         }
         List<CutoffAttempt> cutoff = new ArrayList<>();
-        for (String[] f : rows("cutoff.psv", 7)) {
+        for (String[] f : rows("cutoff.psv", 8)) {
             cutoff.add(new CutoffAttempt(f[0], Integer.parseInt(f[1]), f[2], f[3].equals("-") ? 0
-                    : Integer.parseInt(f[3]), yesNo(f[4]), f[5], f[6]));
+                    : Integer.parseInt(f[3]), yesNo(f[4]), yesNo(f[5]), f[6], f[7]));
         }
         MultiAttemptFixture fixture = new MultiAttemptFixture(require(manifest, "fixtureVersion"),
                 require(manifest, "provenance"), scopes, price, Integer.parseInt(require(manifest, "recall.limit")),
@@ -292,6 +296,14 @@ public record MultiAttemptFixture(String version, String provenance, Map<String,
             if (!RESULTS.contains(c.result()) || c.result().equals(UNFINISHED) != (c.revision() == 0)) {
                 throw new IllegalStateException("cutoff row " + c.experienceId() + ": an unfinished attempt has no "
                         + "finish revision, a finished one has one");
+            }
+            if (c.markedAccepted() && !execution(a.execution()).namesAttempt(a.ordinal())) {
+                throw new IllegalStateException("cutoff row " + c.experienceId() + ": marked as named by the outcome, "
+                        + "but its execution's outcome never names it");
+            }
+            if (c.accepted() && !c.markedAccepted()) {
+                throw new IllegalStateException("cutoff row " + c.experienceId() + ": a validated accepted attempt "
+                        + "must be the attempt the outcome names");
             }
         }
     }
