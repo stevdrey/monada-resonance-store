@@ -131,7 +131,7 @@ public record VectorCopyShareReport(
         sb.append("Measured Repetitions: ").append(repetitionCount).append('\n');
         sb.append("Allocation Accounting: ").append(allocationMeasured
                 ? "ThreadMXBean.getCurrentThreadAllocatedBytes (per call, median)"
-                : "not measured (per-thread allocation accounting unsupported or disabled)").append('\n');
+                : "not measured (per-thread allocation accounting unsupported or disabled, or no measured repetitions)").append('\n');
         sb.append("Invocation: ./gradlew :monada-evaluation:runVectorCopyShare -q\n");
         sb.append("Timing Policy: Diagnostic wall-clock only; never asserted in CI. Both replicas are checked against\n");
         sb.append("  the real store's findAll() (same ids, same order, bit-identical floats) at every scale point before\n");

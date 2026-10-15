@@ -103,8 +103,10 @@ public final class VectorCopyShareRunner {
         }
 
         var decision = decide(results);
+        // Derived from the points: false when accounting is unsupported or no repetition was measured.
+        boolean allocationMeasured = !results.isEmpty() && results.stream().allMatch(PointResult::allocationMeasured);
         return new VectorCopyShareReport(datasetName, seed, FREQUENCY_DIMENSIONS, SPEECH_DIMENSIONS, scalePoints,
-                warmupCount, repetitionCount, allocationMeter.supported(), results, decision,
+                warmupCount, repetitionCount, allocationMeasured, results, decision,
                 rationale(decision, results));
     }
 

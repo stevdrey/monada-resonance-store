@@ -15,6 +15,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -100,9 +101,13 @@ class VectorCopyShareRunnerTest {
 
     @Test
     void smallScalesOrZeroRepetitionsAreInconclusive(@TempDir Path a, @TempDir Path b) throws IOException {
-        assertEquals(Decision.INCONCLUSIVE, smallRunner(1).run(a).decision());
+        var one = smallRunner(1).run(a);
+        assertEquals(Decision.INCONCLUSIVE, one.decision());
+        assertEquals(AllocationMeter.create().supported(), one.allocationMeasured());
         var zero = smallRunner(0).run(b);
         assertEquals(Decision.INCONCLUSIVE, zero.decision());
+        assertFalse(zero.allocationMeasured(), "no measured repetition, so no allocation figure");
+        assertTrue(zero.render().contains("Allocation Accounting: not measured"));
         assertTrue(zero.results().stream().allMatch(r -> r.sampleCount() == 0));
     }
 
