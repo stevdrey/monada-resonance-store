@@ -18,14 +18,17 @@ offer a no-copy construction path.
 Stage 1 of Issue #135 measured the copy with `./gradlew :monada-evaluation:runVectorCopyShare -q`. At N=10,000,
 the copy accounted for:
 
-| Store | Dimensions | Share of `findAll()` bytes | Bytes per call | Share of p50 |
+| Store | Dimensions | Share of the copying path's bytes | Bytes per call | Share of p50 |
 | --- | --- | --- | --- | --- |
 | `FileFrequencyStore` | 128 | 37.4% | 5,280,000 (N × 528) | ~6% |
-| `FileSpeechFeatureStore` | 64 | 29.5% | 2,720,000 (N × 272) | ~1% |
+| `FileSpeechFeatureStore` | 64 | 29.7% | 2,720,000 (N × 272) | ~1% |
+
+Shares are measured against the copying replica, which keeps the pre-#135 materialization, so rerunning the command
+after this change still reports the same shares. Production now matches the adopting replica.
 
 These figures come from one machine with a warm page cache, so they are exploratory. The decision rule was: at
-least one store reaches ≥ 10% of p50 or ≥ 30% of allocated bytes. The frequency store meets the allocation
-threshold. The time share is modest and noisy.
+least one store reaches ≥ 10% of p50 or ≥ 30% of allocated bytes. Without allocation data, a time share below the
+threshold is inconclusive. The frequency store meets the allocation threshold. The time share is modest and noisy.
 
 ## Decision
 

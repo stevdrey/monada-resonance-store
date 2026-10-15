@@ -208,33 +208,56 @@ public final class VectorCopyShareRunner {
         return largest;
     }
 
-    static Decision decide(List<PointResult> results) {
-        var largest = largestPerStore(results);
+    /** True when every store has timing samples at its largest point and that point is N >= 10,000. */
+    private static boolean timingEvidenceComplete(List<PointResult> largest) {
         if (largest.size() != StoreKind.values().length) {
-            return Decision.INCONCLUSIVE;
+            return false;
         }
-        boolean meaningful = false;
         for (var r : largest) {
             if (r.corpusSize() < VectorCopyShareReport.MIN_DECISION_SCALE || r.sampleCount() == 0
-                    || r.productionFindAll().p50Nanos() == 0) {
-                return Decision.INCONCLUSIVE;
+                    || r.copyingReplica().p50Nanos() == 0) {
+                return false;
             }
-            meaningful |= r.timeShare() >= VectorCopyShareReport.MEANINGFUL_TIME_SHARE
-                    || (r.allocationMeasured()
-                    && r.allocationShare() >= VectorCopyShareReport.MEANINGFUL_ALLOCATION_SHARE);
         }
-        return meaningful ? Decision.COPY_SHARE_MEANINGFUL_REMOVE_COPY : Decision.COPY_SHARE_NEGLIGIBLE;
+        return true;
+    }
+
+    /**
+     * Meaningful as soon as one store reaches either threshold. Otherwise negligible only when every store's
+     * allocation was measured: without it the allocation criterion was never observed, so the verdict is
+     * inconclusive rather than negligible.
+     */
+    static Decision decide(List<PointResult> results) {
+        var largest = largestPerStore(results);
+        if (!timingEvidenceComplete(largest)) {
+            return Decision.INCONCLUSIVE;
+        }
+        boolean allocationMeasured = true;
+        for (var r : largest) {
+            if (r.timeShare() >= VectorCopyShareReport.MEANINGFUL_TIME_SHARE
+                    || (r.allocationMeasured()
+                    && r.allocationShare() >= VectorCopyShareReport.MEANINGFUL_ALLOCATION_SHARE)) {
+                return Decision.COPY_SHARE_MEANINGFUL_REMOVE_COPY;
+            }
+            allocationMeasured &= r.allocationMeasured();
+        }
+        return allocationMeasured ? Decision.COPY_SHARE_NEGLIGIBLE : Decision.INCONCLUSIVE;
     }
 
     static String rationale(Decision decision, List<PointResult> results) {
         if (decision == Decision.INCONCLUSIVE) {
+            if (timingEvidenceComplete(largestPerStore(results))) {
+                return "Insufficient evidence: no store reaches the time threshold and allocation was not measured"
+                        + " for every store (per-thread allocation accounting unsupported or disabled), so the"
+                        + " allocation criterion was never observed.";
+            }
             return "Insufficient evidence: need timing samples and a largest scale point >= "
                     + VectorCopyShareReport.MIN_DECISION_SCALE + " for every store.";
         }
         var sb = new StringBuilder();
         for (var r : largestPerStore(results)) {
             sb.append(String.format(Locale.ROOT,
-                    "%s N=%d: the copy is %.1f%% of production findAll() p50 (%.1f%% at p95) and %s of its allocated"
+                    "%s N=%d: the copy is %.1f%% of the copying findAll() p50 (%.1f%% at p95) and %s of its allocated"
                             + " bytes (%s measured vs %d expected). ",
                     r.store(), r.corpusSize(), r.timeShare() * 100, r.timeShareP95() * 100,
                     r.allocationMeasured() ? String.format(Locale.ROOT, "%.1f%%", r.allocationShare() * 100) : "n/a",

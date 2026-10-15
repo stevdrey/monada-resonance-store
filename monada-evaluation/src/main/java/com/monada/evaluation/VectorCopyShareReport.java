@@ -27,10 +27,12 @@ public record VectorCopyShareReport(
         String decisionRationale
 ) {
 
-    /** Copy share of production {@code findAll()} p50 at or above which removing the copy is justified. */
+    /**
+     * Copy share of the copying (pre-#135) {@code findAll()} p50 at or above which removing the copy is justified.
+     */
     public static final double MEANINGFUL_TIME_SHARE = 0.10;
 
-    /** Copy share of production {@code findAll()} allocated bytes at or above which removing it is justified. */
+    /** Copy share of the copying {@code findAll()} path's allocated bytes at or above which removing it is justified. */
     public static final double MEANINGFUL_ALLOCATION_SHARE = 0.30;
 
     /** Every store must reach this scale for the decision to be informative. */
@@ -41,7 +43,10 @@ public record VectorCopyShareReport(
         COPY_SHARE_MEANINGFUL_REMOVE_COPY,
         /** The copy stays below both thresholds in every store. */
         COPY_SHARE_NEGLIGIBLE,
-        /** Not enough evidence (no timing samples or a store without an N >= 10,000 point). */
+        /**
+         * Not enough evidence: no timing samples, a store without an N >= 10,000 point, or no time share at the
+         * threshold while allocation was not measured for some store.
+         */
         INCONCLUSIVE
     }
 
@@ -78,26 +83,29 @@ public record VectorCopyShareReport(
             return corpusSize * expectedCopyBytesPerVector();
         }
 
-        /** (copying p50 - adopting p50) / production p50; 0 when unmeasured. */
+        /**
+         * (copying p50 - adopting p50) / copying p50; 0 when unmeasured. The copying replica keeps the pre-#135
+         * materialization, so the share stays comparable whether or not production still copies.
+         */
         public double timeShare() {
-            return productionFindAll.p50Nanos() == 0 ? 0.0
-                    : (double) (copyingReplica.p50Nanos() - adoptingReplica.p50Nanos()) / productionFindAll.p50Nanos();
+            return copyingReplica.p50Nanos() == 0 ? 0.0
+                    : (double) (copyingReplica.p50Nanos() - adoptingReplica.p50Nanos()) / copyingReplica.p50Nanos();
         }
 
-        /** (copying p95 - adopting p95) / production p95; 0 when unmeasured. */
+        /** (copying p95 - adopting p95) / copying p95; 0 when unmeasured. */
         public double timeShareP95() {
-            return productionFindAll.p95Nanos() == 0 ? 0.0
-                    : (double) (copyingReplica.p95Nanos() - adoptingReplica.p95Nanos()) / productionFindAll.p95Nanos();
+            return copyingReplica.p95Nanos() == 0 ? 0.0
+                    : (double) (copyingReplica.p95Nanos() - adoptingReplica.p95Nanos()) / copyingReplica.p95Nanos();
         }
 
         public boolean allocationMeasured() {
             return productionBytes >= 0 && copyingBytes >= 0 && adoptingBytes >= 0;
         }
 
-        /** (copying bytes - adopting bytes) / production bytes; 0 when unmeasured. */
+        /** (copying bytes - adopting bytes) / copying bytes; 0 when unmeasured. */
         public double allocationShare() {
-            return !allocationMeasured() || productionBytes == 0 ? 0.0
-                    : (double) (copyingBytes - adoptingBytes) / productionBytes;
+            return !allocationMeasured() || copyingBytes == 0 ? 0.0
+                    : (double) (copyingBytes - adoptingBytes) / copyingBytes;
         }
     }
 
@@ -130,7 +138,8 @@ public record VectorCopyShareReport(
         sb.append("  anything is timed.\n");
         sb.append("Replicas: the copying replica materializes like production (new FrequencyVector(values) copies the\n");
         sb.append("  decoded array). The adopting replica wraps the same decoded array in a same-shape holder without\n");
-        sb.append("  the copy. Copy share = (copying - adopting) / production.\n");
+        sb.append("  the copy. Copy share = (copying - adopting) / copying, so it is measured against the pre-#135\n");
+        sb.append("  path and stays comparable after production stops copying (production then matches adopting).\n");
         sb.append("Cache Assumption: Warm OS page cache; single machine; results are exploratory.\n\n");
 
         sb.append("1. findAll() Latency p50 / p95 (microseconds per call)\n");
@@ -162,10 +171,11 @@ public record VectorCopyShareReport(
         sb.append("3. Decision\n");
         sb.append("-----------\n");
         sb.append(String.format(Locale.ROOT,
-                "Rule: at N >= %d, remove the copy if, in at least one store, it is >= %.0f%% of production findAll() p50\n",
+                "Rule: at N >= %d, remove the copy if, in at least one store, it is >= %.0f%% of the copying findAll() p50\n",
                 MIN_DECISION_SCALE, MEANINGFUL_TIME_SHARE * 100));
-        sb.append(String.format(Locale.ROOT, "  or >= %.0f%% of the bytes production findAll() allocates.%n",
+        sb.append(String.format(Locale.ROOT, "  or >= %.0f%% of the bytes the copying findAll() allocates. Without allocation data, a time%n",
                 MEANINGFUL_ALLOCATION_SHARE * 100));
+        sb.append("  share below the threshold is INCONCLUSIVE, not negligible.\n");
         sb.append("Decision: ").append(decision).append('\n');
         sb.append("Rationale: ").append(decisionRationale).append('\n');
         sb.append("Policy: Evaluation only; reported vectors, ordering, public APIs, defaults and persisted formats\n");

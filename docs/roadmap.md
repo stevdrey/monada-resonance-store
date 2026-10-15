@@ -83,10 +83,11 @@ The project follows a measurement-first path: improve retrieval quality only aft
   tests pass unchanged, generated speech evaluation output is byte-identical and `runVectorLoadBreakdown` differs only in timing.
 - Vector copy share and no-copy store read (Issue #135): `VectorCopyShareRunner` and CLI
   `./gradlew :monada-evaluation:runVectorCopyShare -q` time both stores' `findAll()` against two parity-checked replicas that differ
-  only in `FrequencyVector`'s defensive copy, and read per-call allocated bytes from `ThreadMXBean`. At N=10,000 the copy was 37.4%
-  of `FileFrequencyStore.findAll()` allocation (5,280,000 bytes, exactly N x 528) and 29.5% for `FileSpeechFeatureStore` (N x 272),
+  only in `FrequencyVector`'s defensive copy, and read per-call allocated bytes from `ThreadMXBean`. Shares are relative to the copying replica
+  (the pre-#135 path), so they stay reproducible after the change. At N=10,000 the copy was 37.4% of the copying
+  `FileFrequencyStore.findAll()` allocation (5,280,000 bytes, exactly N x 528) and 29.7% for `FileSpeechFeatureStore` (N x 272),
   but only ~6% and ~1% of p50 (noisy). That meets the allocation threshold of the decision rule (>= 10% of p50 or >= 30% of bytes in
-  at least one store), so the report concludes `COPY_SHARE_MEANINGFUL_REMOVE_COPY`. `FrequencyVector` is now a final class with the
+  at least one store; inconclusive when allocation is not measured and no time share qualifies), so the report concludes `COPY_SHARE_MEANINGFUL_REMOVE_COPY`. `FrequencyVector` is now a final class with the
   same public API plus a store-only `FrequencyVector.read(ChunkedFloatReader, DataInput, int)` that decodes into its own array
   without a copy ([ADR 0005](adr/0005-frequency-vector-final-class.md)). Both stores use it. Production `findAll()` allocation at
   N=10,000 fell from 14.10 MB to 8.82 MB (frequency) and from 9.21 MB to 6.49 MB (speech). Formats, results, ordering and error

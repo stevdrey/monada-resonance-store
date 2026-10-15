@@ -89,6 +89,16 @@ class VectorCopyShareRunnerTest {
     }
 
     @Test
+    void sharesAreRelativeToTheCopyingPathNotProduction() {
+        // Post-#135 shape: production no longer copies, so it matches the adopting replica.
+        var r = new PointResult(StoreKind.FREQUENCY, 10_000, 128, 1, new PhaseLatency(70, 140),
+                new PhaseLatency(100, 200), new PhaseLatency(70, 140), 700, 1_000, 700);
+        assertEquals(0.30, r.timeShare(), 1e-9, "not (100 - 70) / 70");
+        assertEquals(0.30, r.timeShareP95(), 1e-9);
+        assertEquals(0.30, r.allocationShare(), 1e-9, "not (1000 - 700) / 700");
+    }
+
+    @Test
     void smallScalesOrZeroRepetitionsAreInconclusive(@TempDir Path a, @TempDir Path b) throws IOException {
         assertEquals(Decision.INCONCLUSIVE, smallRunner(1).run(a).decision());
         var zero = smallRunner(0).run(b);
@@ -109,8 +119,18 @@ class VectorCopyShareRunnerTest {
         assertEquals(Decision.COPY_SHARE_MEANINGFUL_REMOVE_COPY,
                 VectorCopyShareRunner.decide(bothStores(10_000, 0, 0, 0, 300)), "allocation threshold, one store");
         var unmeasured = new PointResult(StoreKind.SPEECH, 10_000, 64, 1, lat(100), lat(100), lat(100), -1, -1, -1);
-        assertEquals(Decision.COPY_SHARE_NEGLIGIBLE, VectorCopyShareRunner.decide(
-                List.of(point(StoreKind.FREQUENCY, 10_000, 0, 0), unmeasured)));
+        var unmeasuredDecision = List.of(point(StoreKind.FREQUENCY, 10_000, 0, 0), unmeasured);
+        assertEquals(Decision.INCONCLUSIVE, VectorCopyShareRunner.decide(unmeasuredDecision),
+                "allocation criterion never observed for one store");
+        assertTrue(VectorCopyShareRunner.rationale(Decision.INCONCLUSIVE, unmeasuredDecision)
+                .contains("allocation was not measured"));
+        var unmeasuredSlowCopy = new PointResult(StoreKind.SPEECH, 10_000, 64, 1, lat(100), lat(100), lat(90),
+                -1, -1, -1);
+        assertEquals(Decision.COPY_SHARE_MEANINGFUL_REMOVE_COPY, VectorCopyShareRunner.decide(
+                List.of(point(StoreKind.FREQUENCY, 10_000, 0, 0), unmeasuredSlowCopy)),
+                "an observed time share still justifies removal without allocation data");
+        assertTrue(VectorCopyShareRunner.rationale(Decision.INCONCLUSIVE, List.of())
+                .contains("largest scale point"));
 
         var rationale = VectorCopyShareRunner.rationale(Decision.COPY_SHARE_MEANINGFUL_REMOVE_COPY,
                 bothStores(10_000, 20, 400, 5, 100));
