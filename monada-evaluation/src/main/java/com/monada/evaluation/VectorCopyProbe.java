@@ -55,9 +55,6 @@ final class VectorCopyProbe {
     record Loaded(String id, Object vector) {
     }
 
-    private record IndexEntry(String id, long offset) {
-    }
-
     private final StoreKind kind;
     private final Path vectorFile;
     private final Path vectorMap;
@@ -80,11 +77,13 @@ final class VectorCopyProbe {
                 FileFrequencyStore.resolveVectorMapPath(root), dimensions);
     }
 
-    /** Probe over a {@code FileSpeechFeatureStore} with its default segment and index paths. */
-    static VectorCopyProbe speech(Path root) {
+    /**
+     * Probe over a {@code FileSpeechFeatureStore} opened with the same {@code vectorSegment} and
+     * {@code indexSegment} (the store's three-argument constructor), so the paths have one source.
+     */
+    static VectorCopyProbe speech(Path root, String vectorSegment, String indexSegment) {
         Objects.requireNonNull(root, "root");
-        return new VectorCopyProbe(StoreKind.SPEECH, root.resolve("features/speech-features-000001.f32"),
-                root.resolve("indexes/speech-feature-map.idx"), 0);
+        return new VectorCopyProbe(StoreKind.SPEECH, root.resolve(vectorSegment), root.resolve(indexSegment), 0);
     }
 
     StoreKind kind() {
@@ -112,43 +111,31 @@ final class VectorCopyProbe {
                 file.seek(entry.offset());
                 int dimensions = file.readInt();
                 if (dimensions <= 0 || dimensions > 1 << 20) {
-                    throw new IOException("Invalid vector dimensions (" + dimensions + ") for id=" + entry.id());
+                    throw new IOException("Invalid vector dimensions (" + dimensions + ") for id=" + entry.atomId());
                 }
-                byId.put(entry.id(), read(file, entry, dimensions, floatReader, materialization));
+                byId.put(entry.atomId(), read(file, entry, dimensions, floatReader, materialization));
             }
             return List.copyOf(byId.values());
         }
     }
 
-    private static Loaded read(RandomAccessFile file, IndexEntry entry, int dimensions,
+    private static Loaded read(RandomAccessFile file, VectorLoadProbe.IndexEntry entry, int dimensions,
                                ChunkedFloatReader floatReader, Materialization materialization) throws IOException {
         var values = new float[dimensions];
         floatReader.readFloats(file, values);
         Object vector = materialization == Materialization.COPY ? new FrequencyVector(values) : new AdoptedVector(values);
-        return new Loaded(entry.id(), vector);
+        return new Loaded(entry.atomId(), vector);
     }
 
-    private List<IndexEntry> parseIndex() throws IOException {
+    private List<VectorLoadProbe.IndexEntry> parseIndex() throws IOException {
         try (Stream<String> lines = Files.lines(vectorMap, StandardCharsets.UTF_8)) {
-            return lines.filter(line -> !line.isBlank()).map(VectorCopyProbe::parseEntry).toList();
+            return lines.filter(line -> !line.isBlank()).map(VectorLoadProbe::parseEntry).toList();
         }
     }
 
-    private static IndexEntry parseEntry(String line) {
-        String[] parts = line.split("\t", 2);
-        if (parts.length != 2 || parts[0].isBlank()) {
-            throw new IllegalStateException("Malformed index entry: " + line);
-        }
-        try {
-            return new IndexEntry(parts[0], Long.parseLong(parts[1].trim()));
-        } catch (NumberFormatException e) {
-            throw new IllegalStateException("Invalid offset in index entry: " + line, e);
-        }
-    }
-
-    private static void requireOffset(IndexEntry entry, long fileSize) throws IOException {
+    private static void requireOffset(VectorLoadProbe.IndexEntry entry, long fileSize) throws IOException {
         if (entry.offset() < 0 || entry.offset() >= fileSize) {
-            throw new IOException("Offset (" + entry.offset() + ") out of range for id=" + entry.id());
+            throw new IOException("Offset (" + entry.offset() + ") out of range for id=" + entry.atomId());
         }
     }
 
@@ -162,11 +149,14 @@ final class VectorCopyProbe {
         return vectors.stream().map(v -> new Loaded(v.sampleId(), v.vector())).toList();
     }
 
-    /** Copy of the decoded floats held by a {@link Loaded} vector, whichever materialization produced it. */
+    /**
+     * The decoded floats of a {@link Loaded} vector, whichever materialization produced it: a copy for
+     * {@code FrequencyVector}, the held array for {@link AdoptedVector}. Callers only read the result.
+     */
     static float[] valuesOf(Loaded loaded) {
         return switch (loaded.vector()) {
             case FrequencyVector v -> v.values();
-            case AdoptedVector v -> v.values().clone();
+            case AdoptedVector v -> v.values();
             default -> throw new IllegalStateException("unexpected vector type " + loaded.vector().getClass());
         };
     }
@@ -176,26 +166,31 @@ final class VectorCopyProbe {
      * identical raw bits.
      */
     static void verifyParity(String what, List<Loaded> expected, List<Loaded> actual) {
+        verifyParity(what, "findAll()", expected, actual);
+    }
+
+    /** As {@link #verifyParity(String, List, List)}, naming {@code source} (the reference call) in messages. */
+    static void verifyParity(String what, String source, List<Loaded> expected, List<Loaded> actual) {
         if (expected.size() != actual.size()) {
-            throw new IllegalStateException(what + " diverged from findAll(): size " + actual.size()
+            throw new IllegalStateException(what + " diverged from " + source + ": size " + actual.size()
                     + " != " + expected.size());
         }
         for (int i = 0; i < expected.size(); i++) {
             var e = expected.get(i);
             var a = actual.get(i);
             if (!e.id().equals(a.id())) {
-                throw new IllegalStateException(what + " diverged from findAll() at index " + i + ": id "
+                throw new IllegalStateException(what + " diverged from " + source + " at index " + i + ": id "
                         + a.id() + " != " + e.id());
             }
             var ev = valuesOf(e);
             var av = valuesOf(a);
             if (ev.length != av.length) {
-                throw new IllegalStateException(what + " diverged from findAll() for id=" + e.id()
+                throw new IllegalStateException(what + " diverged from " + source + " for id=" + e.id()
                         + ": dimensions " + av.length + " != " + ev.length);
             }
             for (int d = 0; d < ev.length; d++) {
                 if (Float.floatToRawIntBits(ev[d]) != Float.floatToRawIntBits(av[d])) {
-                    throw new IllegalStateException(what + " diverged from findAll() for id=" + e.id()
+                    throw new IllegalStateException(what + " diverged from " + source + " for id=" + e.id()
                             + " at dimension " + d);
                 }
             }

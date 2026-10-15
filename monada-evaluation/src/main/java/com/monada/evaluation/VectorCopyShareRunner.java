@@ -1,7 +1,6 @@
 package com.monada.evaluation;
 
 import com.monada.api.MonadaMemoryOptions;
-import com.monada.core.FrequencyVector;
 import com.monada.encoder.LexicalEnrichmentPipeline;
 import com.monada.encoder.SimpleFrequencyEncoder;
 import com.monada.evaluation.VectorCopyProbe.Materialization;
@@ -13,9 +12,13 @@ import com.monada.speech.storage.FileSpeechFeatureStore;
 import com.monada.storage.FileFrequencyStore;
 import com.monada.storage.VectorFormatProfile;
 
+import java.io.BufferedOutputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -42,6 +45,9 @@ public final class VectorCopyShareRunner {
     static final int FREQUENCY_DIMENSIONS = 128;
     static final int SPEECH_DIMENSIONS = 64;
     private static final String VECTOR_FILE = "vectors/segment-000001.f32";
+    /** Same values as {@code FileSpeechFeatureStore}'s defaults, passed explicitly to the store and the probe. */
+    static final String SPEECH_SEGMENT = "features/speech-features-000001.f32";
+    static final String SPEECH_INDEX = "indexes/speech-feature-map.idx";
     private static final int PASS_COUNT = 3;
 
     private final String datasetName;
@@ -95,9 +101,9 @@ public final class VectorCopyShareRunner {
                     () -> VectorCopyProbe.fromFrequencyStore(frequencyStore.findAll())));
 
             var speechDir = rootTempDir.resolve("copy-share-speech-" + corpusSize);
-            var speechStore = new FileSpeechFeatureStore(speechDir);
-            seedSpeechStore(speechStore, corpusSize, seed);
-            var speechProbe = VectorCopyProbe.speech(speechDir);
+            var speechStore = new FileSpeechFeatureStore(speechDir, SPEECH_SEGMENT, SPEECH_INDEX);
+            seedSpeechStore(speechDir, corpusSize, seed);
+            var speechProbe = VectorCopyProbe.speech(speechDir, SPEECH_SEGMENT, SPEECH_INDEX);
             results.add(measure(speechProbe, corpusSize, SPEECH_DIMENSIONS, speechStore::findAll,
                     () -> VectorCopyProbe.fromSpeechStore(speechStore.findAll())));
         }
@@ -180,15 +186,52 @@ public final class VectorCopyShareRunner {
         sample[1] = bytes;
     }
 
-    /** Seeds {@code corpusSize} speech feature vectors through the production {@code save} path. */
-    static void seedSpeechStore(FileSpeechFeatureStore store, int corpusSize, long seed) throws IOException {
+    /** The {@code index}-th seeded sample id. */
+    static String speechSampleId(int index) {
+        return String.format(Locale.ROOT, "speech-sample-%06d", index);
+    }
+
+    /** The seeded Gaussian vectors, in sample order. */
+    static List<float[]> speechVectors(int corpusSize, long seed) {
         var random = new Random(seed);
+        var vectors = new ArrayList<float[]>(corpusSize);
         for (int i = 0; i < corpusSize; i++) {
             var values = new float[SPEECH_DIMENSIONS];
             for (int d = 0; d < values.length; d++) {
                 values[d] = (float) random.nextGaussian();
             }
-            store.save(String.format(Locale.ROOT, "speech-sample-%06d", i), new FrequencyVector(values));
+            vectors.add(values);
+        }
+        return vectors;
+    }
+
+    /**
+     * Appends {@code corpusSize} seeded speech vectors to the store files under {@code root} in one buffered pass,
+     * in the exact layout of {@code FileSpeechFeatureStore.save} ({@code int dims} + big-endian floats per frame,
+     * {@code id\toffset} + line separator per index line). {@code save} reopens both files per sample; the
+     * runner's parity check against the real store's {@code findAll()} and a byte-equality test against
+     * {@code save} keep the layout honest.
+     */
+    static void seedSpeechStore(Path root, int corpusSize, long seed) throws IOException {
+        var segment = root.resolve(SPEECH_SEGMENT);
+        var index = root.resolve(SPEECH_INDEX);
+        Files.createDirectories(segment.getParent());
+        Files.createDirectories(index.getParent());
+        long offset = Files.exists(segment) ? Files.size(segment) : 0;
+        var vectors = speechVectors(corpusSize, seed);
+        try (var data = new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(segment,
+                StandardOpenOption.CREATE, StandardOpenOption.APPEND)));
+             var lines = Files.newBufferedWriter(index, StandardCharsets.UTF_8,
+                     StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
+            for (int i = 0; i < vectors.size(); i++) {
+                var values = vectors.get(i);
+                data.writeInt(values.length);
+                for (float value : values) {
+                    data.writeFloat(value);
+                }
+                lines.write(speechSampleId(i) + "\t" + offset + System.lineSeparator());
+                offset += Integer.BYTES + (long) values.length * Float.BYTES;
+            }
         }
     }
 
@@ -225,7 +268,8 @@ public final class VectorCopyShareRunner {
     }
 
     /**
-     * Meaningful as soon as one store reaches either threshold. Otherwise negligible only when every store's
+     * Meaningful as soon as one store reaches either threshold; the time threshold needs both the p50 and the p95
+     * share, so a single noisy percentile cannot trigger it. Otherwise negligible only when every store's
      * allocation was measured: without it the allocation criterion was never observed, so the verdict is
      * inconclusive rather than negligible.
      */
@@ -236,7 +280,7 @@ public final class VectorCopyShareRunner {
         }
         boolean allocationMeasured = true;
         for (var r : largest) {
-            if (r.timeShare() >= VectorCopyShareReport.MEANINGFUL_TIME_SHARE
+            if (timeShareMeaningful(r)
                     || (r.allocationMeasured()
                     && r.allocationShare() >= VectorCopyShareReport.MEANINGFUL_ALLOCATION_SHARE)) {
                 return Decision.COPY_SHARE_MEANINGFUL_REMOVE_COPY;
@@ -244,6 +288,11 @@ public final class VectorCopyShareRunner {
             allocationMeasured &= r.allocationMeasured();
         }
         return allocationMeasured ? Decision.COPY_SHARE_NEGLIGIBLE : Decision.INCONCLUSIVE;
+    }
+
+    private static boolean timeShareMeaningful(PointResult r) {
+        return r.timeShare() >= VectorCopyShareReport.MEANINGFUL_TIME_SHARE
+                && r.timeShareP95() >= VectorCopyShareReport.MEANINGFUL_TIME_SHARE;
     }
 
     static String rationale(Decision decision, List<PointResult> results) {
@@ -269,10 +318,10 @@ public final class VectorCopyShareRunner {
         int timePct = (int) Math.round(VectorCopyShareReport.MEANINGFUL_TIME_SHARE * 100);
         int allocPct = (int) Math.round(VectorCopyShareReport.MEANINGFUL_ALLOCATION_SHARE * 100);
         sb.append(decision == Decision.COPY_SHARE_MEANINGFUL_REMOVE_COPY
-                ? "At least one store reaches the threshold (>= " + timePct + "% of p50 or >= " + allocPct
+                ? "At least one store reaches the threshold (>= " + timePct + "% of p50 and p95, or >= " + allocPct
                 + "% of allocated bytes), so a no-copy FrequencyVector construction path for the stores (stage 2)"
                 + " is justified."
-                : "No store reaches the threshold (>= " + timePct + "% of p50 or >= " + allocPct
+                : "No store reaches the threshold (>= " + timePct + "% of p50 and p95, or >= " + allocPct
                 + "% of allocated bytes); stage 2 is not justified by this evidence.");
         sb.append(" Single-machine, warm page cache; treat as exploratory.");
         return sb.toString();

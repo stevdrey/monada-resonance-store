@@ -264,33 +264,11 @@ final class VectorLoadProbe {
 
     /**
      * Throws unless {@code actual} has the same atom ids in the same order as {@code expected} and
-     * every float has identical raw bits.
+     * every float has identical raw bits. Delegates to the store-neutral {@link VectorCopyProbe#verifyParity}.
      */
     static void verifyParity(String what, List<StoredVector> expected, List<StoredVector> actual) {
-        if (expected.size() != actual.size()) {
-            throw new IllegalStateException(what + " diverged from FileFrequencyStore.findAll(): size "
-                    + actual.size() + " != " + expected.size());
-        }
-        for (int i = 0; i < expected.size(); i++) {
-            var e = expected.get(i);
-            var a = actual.get(i);
-            if (!e.atomId().equals(a.atomId())) {
-                throw new IllegalStateException(what + " diverged from FileFrequencyStore.findAll() at index "
-                        + i + ": atomId " + a.atomId() + " != " + e.atomId());
-            }
-            var ev = e.vector().values();
-            var av = a.vector().values();
-            if (ev.length != av.length) {
-                throw new IllegalStateException(what + " diverged from FileFrequencyStore.findAll() for atomId="
-                        + e.atomId() + ": dimensions " + av.length + " != " + ev.length);
-            }
-            for (int d = 0; d < ev.length; d++) {
-                if (Float.floatToRawIntBits(ev[d]) != Float.floatToRawIntBits(av[d])) {
-                    throw new IllegalStateException(what + " diverged from FileFrequencyStore.findAll() for atomId="
-                            + e.atomId() + " at dimension " + d);
-                }
-            }
-        }
+        VectorCopyProbe.verifyParity(what, "FileFrequencyStore.findAll()",
+                VectorCopyProbe.fromFrequencyStore(expected), VectorCopyProbe.fromFrequencyStore(actual));
     }
 
     static long rawBitsSum(float[] values, int from, int to) {
@@ -308,7 +286,8 @@ final class VectorLoadProbe {
         }
     }
 
-    private static IndexEntry parseEntry(String line) {
+    /** Parses one {@code id\toffset} index line; shared with {@link VectorCopyProbe}. */
+    static IndexEntry parseEntry(String line) {
         String[] parts = line.split("\t", 2);
         if (parts.length != 2 || parts[0].isBlank()) {
             throw new IllegalStateException("Malformed vector index entry: " + line);

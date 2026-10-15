@@ -86,7 +86,7 @@ The project follows a measurement-first path: improve retrieval quality only aft
   only in `FrequencyVector`'s defensive copy, and read per-call allocated bytes from `ThreadMXBean`. Shares are relative to the copying replica
   (the pre-#135 path), so they stay reproducible after the change. At N=10,000 the copy was 37.4% of the copying
   `FileFrequencyStore.findAll()` allocation (5,280,000 bytes, exactly N x 528) and 29.7% for `FileSpeechFeatureStore` (N x 272),
-  but only ~6% and ~1% of p50 (noisy). That meets the allocation threshold of the decision rule (>= 10% of p50 or >= 30% of bytes in
+  but only ~6% and ~1% of p50 (noisy). That meets the allocation threshold of the decision rule (>= 10% of both p50 and p95, or >= 30% of bytes in
   at least one store; inconclusive when allocation is not measured and no time share qualifies), so the report concludes `COPY_SHARE_MEANINGFUL_REMOVE_COPY`. `FrequencyVector` is now a final class with the
   same public API plus a store-only `FrequencyVector.read(ChunkedFloatReader, DataInput, int)` that decodes into its own array
   without a copy ([ADR 0005](adr/0005-frequency-vector-final-class.md)). Both stores use it. Production `findAll()` allocation at

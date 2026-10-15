@@ -28,7 +28,9 @@ public record VectorCopyShareReport(
 ) {
 
     /**
-     * Copy share of the copying (pre-#135) {@code findAll()} p50 at or above which removing the copy is justified.
+     * Copy share of the copying (pre-#135) {@code findAll()} time at or above which removing the copy is justified.
+     * Both the p50 and the p95 share must reach it: each is a difference of independently sampled percentiles, so
+     * one of them alone can cross the threshold on run-to-run noise.
      */
     public static final double MEANINGFUL_TIME_SHARE = 0.10;
 
@@ -171,7 +173,7 @@ public record VectorCopyShareReport(
         sb.append("3. Decision\n");
         sb.append("-----------\n");
         sb.append(String.format(Locale.ROOT,
-                "Rule: at N >= %d, remove the copy if, in at least one store, it is >= %.0f%% of the copying findAll() p50\n",
+                "Rule: at N >= %d, remove the copy if, in at least one store, it is >= %.0f%% of the copying findAll() p50 and p95\n",
                 MIN_DECISION_SCALE, MEANINGFUL_TIME_SHARE * 100));
         sb.append(String.format(Locale.ROOT, "  or >= %.0f%% of the bytes the copying findAll() allocates. Without allocation data, a time%n",
                 MEANINGFUL_ALLOCATION_SHARE * 100));

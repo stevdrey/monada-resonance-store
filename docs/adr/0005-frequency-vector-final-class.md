@@ -27,7 +27,7 @@ Shares are measured against the copying replica, which keeps the pre-#135 materi
 after this change still reports the same shares. Production now matches the adopting replica.
 
 These figures come from one machine with a warm page cache, so they are exploratory. The decision rule was: at
-least one store reaches ≥ 10% of p50 or ≥ 30% of allocated bytes. Without allocation data, a time share below the
+least one store reaches ≥ 10% of both p50 and p95 (one noisy percentile cannot trigger it) or ≥ 30% of allocated bytes. Without allocation data, a time share below the
 threshold is inconclusive. The frequency store meets the allocation threshold. The time share is modest and noisy.
 
 ## Decision

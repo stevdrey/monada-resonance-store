@@ -119,44 +119,66 @@ class FrequencyVectorTest {
 
     // --- read (Issue #135): no-copy construction for the vector stores ---
 
-    private static byte[] bigEndian(float[] values) throws IOException {
+    /**
+     * Big-endian raw bits. Writes with {@code writeInt}, not {@code writeFloat}: {@code writeFloat} goes through
+     * {@code floatToIntBits}, which collapses every NaN to the canonical {@code 0x7fc00000}.
+     */
+    private static byte[] bigEndian(int[] bits) throws IOException {
         var bytes = new ByteArrayOutputStream();
         try (var out = new DataOutputStream(bytes)) {
-            for (float v : values) {
-                out.writeFloat(v);
+            for (int b : bits) {
+                out.writeInt(b);
             }
         }
         return bytes.toByteArray();
     }
 
-    private static float[] rawBitPatterns(int dimensions) {
-        var random = new Random(dimensions);
-        float[] values = new float[dimensions];
-        for (int i = 0; i < dimensions; i++) {
-            values[i] = Float.intBitsToFloat(random.nextInt());
+    private static byte[] bigEndian(float[] values) throws IOException {
+        int[] bits = new int[values.length];
+        for (int i = 0; i < values.length; i++) {
+            bits[i] = Float.floatToRawIntBits(values[i]);
         }
-        values[0] = Float.intBitsToFloat(0x7fc00001); // NaN payload
-        values[dimensions - 1] = -0.0f;
-        return values;
+        return bigEndian(bits);
+    }
+
+    /** Seeded raw bit patterns with NaN payloads (quiet and signalling), -0.0, infinity and a subnormal. */
+    private static int[] rawBitPatterns(int dimensions) {
+        var random = new Random(dimensions);
+        int[] bits = new int[dimensions];
+        for (int i = 0; i < dimensions; i++) {
+            bits[i] = random.nextInt();
+        }
+        int[] specials = {0x7fc00001, 0x7f800001, 0xffc12345, 0x80000000, 0x7f800000, 0x00000001};
+        for (int i = 0; i < specials.length && i < dimensions; i++) {
+            bits[(int) ((long) i * dimensions / specials.length)] = specials[i];
+        }
+        return bits;
     }
 
     @Test
-    void readIsBitIdenticalToReadFloatsAcrossChunkBoundaries() throws IOException {
+    void readIsBitIdenticalToTheWrittenBitsAcrossChunkBoundaries() throws IOException {
         var reader = new ChunkedFloatReader();
-        for (int dimensions : new int[]{1, 3, 4_095, 4_096, 4_097, 10_000}) {
-            float[] expected = rawBitPatterns(dimensions);
-            var bytes = bigEndian(expected);
-            var oracle = new float[dimensions];
-            new ChunkedFloatReader().readFloats(new DataInputStream(new ByteArrayInputStream(bytes)), oracle);
+        for (int dimensions : new int[]{1, 3, 6, 4_095, 4_096, 4_097, 10_000}) {
+            int[] expected = rawBitPatterns(dimensions);
+            var input = new DataInputStream(new ByteArrayInputStream(bigEndian(expected)));
 
-            var vector = FrequencyVector.read(reader, new DataInputStream(new ByteArrayInputStream(bytes)), dimensions);
+            var vector = FrequencyVector.read(reader, input, dimensions);
             float[] actual = vector.values();
             assertEquals(dimensions, vector.dimensions());
             for (int i = 0; i < dimensions; i++) {
-                assertEquals(Float.floatToRawIntBits(oracle[i]), Float.floatToRawIntBits(actual[i]),
+                assertEquals(expected[i], Float.floatToRawIntBits(actual[i]),
                         "dimensions=" + dimensions + " index=" + i);
             }
         }
+    }
+
+    @Test
+    void readKeepsNanPayloadsThatWriteFloatWouldCanonicalize() throws IOException {
+        int payload = 0x7fc00001;
+        var input = new DataInputStream(new ByteArrayInputStream(bigEndian(new int[]{payload})));
+        var vector = FrequencyVector.read(new ChunkedFloatReader(), input, 1);
+        assertEquals(payload, Float.floatToRawIntBits(vector.values()[0]));
+        assertNotEquals(payload, Float.floatToIntBits(Float.intBitsToFloat(payload)), "guard: canonical form differs");
     }
 
     @Test

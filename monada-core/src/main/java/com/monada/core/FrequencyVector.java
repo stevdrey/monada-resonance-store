@@ -22,12 +22,16 @@ public final class FrequencyVector {
     private final float[] values;
 
     public FrequencyVector(float[] values) {
-        this(requireDimensions(values).clone(), true);
+        this.values = requireDimensions(values).clone();
     }
 
-    /** Adopts {@code values} without copying; callers must own the only reference to the array. */
-    private FrequencyVector(float[] values, boolean adopted) {
-        this.values = values;
+    /**
+     * Allocates the backing array and fills it from {@code input} inside the constructor, so the array is never
+     * shared and its contents are covered by the final-field publication guarantee.
+     */
+    private FrequencyVector(ChunkedFloatReader reader, DataInput input, int dimensions) throws IOException {
+        this.values = new float[dimensions];
+        reader.readFloats(input, this.values);
     }
 
     /**
@@ -53,9 +57,7 @@ public final class FrequencyVector {
         if (dimensions <= 0) {
             throw new IllegalArgumentException("FrequencyVector must have at least one dimension");
         }
-        var values = new float[dimensions];
-        reader.readFloats(input, values);
-        return new FrequencyVector(values, true);
+        return new FrequencyVector(reader, input, dimensions);
     }
 
     private static float[] requireDimensions(float[] values) {

@@ -1,5 +1,6 @@
 package com.monada.evaluation;
 
+import com.monada.core.FrequencyVector;
 import com.monada.evaluation.ScanPhaseBreakdownReport.PhaseLatency;
 import com.monada.evaluation.VectorCopyProbe.Materialization;
 import com.monada.evaluation.VectorCopyProbe.StoreKind;
@@ -11,9 +12,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -53,23 +56,45 @@ class VectorCopyShareRunnerTest {
         }
     }
 
+    private static FileSpeechFeatureStore speechStore(Path root) throws IOException {
+        return new FileSpeechFeatureStore(root, VectorCopyShareRunner.SPEECH_SEGMENT, VectorCopyShareRunner.SPEECH_INDEX);
+    }
+
+    private static VectorCopyProbe speechProbe(Path root) {
+        return VectorCopyProbe.speech(root, VectorCopyShareRunner.SPEECH_SEGMENT, VectorCopyShareRunner.SPEECH_INDEX);
+    }
+
+    @Test
+    void bulkSpeechSeedingWritesTheSameBytesAsSave(@TempDir Path bulk, @TempDir Path saved) throws IOException {
+        VectorCopyShareRunner.seedSpeechStore(bulk, 4, 7L);
+        VectorCopyShareRunner.seedSpeechStore(bulk, 2, 8L); // appends after existing frames
+        var store = speechStore(saved);
+        for (var seed : new long[]{7L, 8L}) {
+            var vectors = VectorCopyShareRunner.speechVectors(seed == 7L ? 4 : 2, seed);
+            for (int i = 0; i < vectors.size(); i++) {
+                store.save(VectorCopyShareRunner.speechSampleId(i), new FrequencyVector(vectors.get(i)));
+            }
+        }
+        for (var file : List.of(VectorCopyShareRunner.SPEECH_SEGMENT, VectorCopyShareRunner.SPEECH_INDEX)) {
+            assertArrayEquals(Files.readAllBytes(saved.resolve(file)), Files.readAllBytes(bulk.resolve(file)), file);
+        }
+    }
+
     @Test
     void replicasMatchTheRealSpeechStoreIncludingLastWins(@TempDir Path tempDir) throws IOException {
-        var store = new FileSpeechFeatureStore(tempDir);
-        VectorCopyShareRunner.seedSpeechStore(store, 5, 7L);
-        VectorCopyShareRunner.seedSpeechStore(store, 3, 8L); // overwrites the first three ids
-        var expected = VectorCopyProbe.fromSpeechStore(store.findAll());
+        VectorCopyShareRunner.seedSpeechStore(tempDir, 5, 7L);
+        VectorCopyShareRunner.seedSpeechStore(tempDir, 3, 8L); // overwrites the first three ids
+        var expected = VectorCopyProbe.fromSpeechStore(speechStore(tempDir).findAll());
         assertEquals(5, expected.size());
-        var probe = VectorCopyProbe.speech(tempDir);
+        var probe = speechProbe(tempDir);
         VectorCopyProbe.verifyParity("copy", expected, probe.load(Materialization.COPY));
         VectorCopyProbe.verifyParity("adopt", expected, probe.load(Materialization.ADOPT));
     }
 
     @Test
     void parityCheckRejectsDivergentValues(@TempDir Path tempDir) throws IOException {
-        var store = new FileSpeechFeatureStore(tempDir);
-        VectorCopyShareRunner.seedSpeechStore(store, 2, 7L);
-        var probe = VectorCopyProbe.speech(tempDir);
+        VectorCopyShareRunner.seedSpeechStore(tempDir, 2, 7L);
+        var probe = speechProbe(tempDir);
         var expected = probe.load(Materialization.ADOPT);
         var tampered = probe.load(Materialization.ADOPT);
         ((VectorCopyProbe.AdoptedVector) tampered.get(1).vector()).values()[3] += 1.0f;
@@ -121,6 +146,14 @@ class VectorCopyShareRunnerTest {
         assertEquals(Decision.COPY_SHARE_NEGLIGIBLE, VectorCopyShareRunner.decide(bothStores(10_000, 9, 299, 9, 299)));
         assertEquals(Decision.COPY_SHARE_MEANINGFUL_REMOVE_COPY,
                 VectorCopyShareRunner.decide(bothStores(10_000, 10, 0, 0, 0)), "time threshold is inclusive");
+        var noisyP50 = new PointResult(StoreKind.FREQUENCY, 10_000, 128, 1, new PhaseLatency(100, 100),
+                new PhaseLatency(100, 100), new PhaseLatency(80, 95), 1_000, 1_000, 900);
+        assertEquals(Decision.COPY_SHARE_NEGLIGIBLE, VectorCopyShareRunner.decide(
+                List.of(noisyP50, point(StoreKind.SPEECH, 10_000, 0, 0))), "p50 alone (20%, p95 5%) is not enough");
+        var noisyP95 = new PointResult(StoreKind.FREQUENCY, 10_000, 128, 1, new PhaseLatency(100, 100),
+                new PhaseLatency(100, 100), new PhaseLatency(95, 50), 1_000, 1_000, 900);
+        assertEquals(Decision.COPY_SHARE_NEGLIGIBLE, VectorCopyShareRunner.decide(
+                List.of(noisyP95, point(StoreKind.SPEECH, 10_000, 0, 0))), "p95 alone (50%, p50 5%) is not enough");
         assertEquals(Decision.COPY_SHARE_MEANINGFUL_REMOVE_COPY,
                 VectorCopyShareRunner.decide(bothStores(10_000, 0, 0, 0, 300)), "allocation threshold, one store");
         var unmeasured = new PointResult(StoreKind.SPEECH, 10_000, 64, 1, lat(100), lat(100), lat(100), -1, -1, -1);
