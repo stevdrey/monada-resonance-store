@@ -154,6 +154,35 @@ class FileSpeechFeatureStoreReadStructureTest {
     }
 
     @Test
+    void supersededFramesAreNeverRead() throws IOException {
+        // k full re-encode rounds in append order (Issue #137): only the last round's frames are active.
+        for (int versions : new int[]{2, 4}) {
+            var dir = root.resolve("versions" + versions);
+            var rawBits = new ArrayList<int[]>();
+            for (int i = 0; i < 100 * versions; i++) {
+                rawBits.add(new int[64]);
+            }
+            var frames = SpeechFeatureSegmentFixture.write(dir, rawBits);
+            var renamed = new ArrayList<Frame>(frames.size());
+            for (int i = 0; i < frames.size(); i++) {
+                var frame = frames.get(i);
+                renamed.add(new Frame("sample-" + (i % 100), frame.offset(), frame.bytes()));
+            }
+            SpeechFeatureSegmentFixture.writeIndex(dir, renamed);
+            long activeBytes = renamed.subList(renamed.size() - 100, renamed.size()).stream()
+                    .mapToLong(Frame::bytes).sum();
+
+            var store = new FileSpeechFeatureStore(dir);
+            var stats = new ReadStats();
+            assertEquals(100, store.findAll(stats).size());
+            assertEquals(activeBytes, stats.windowBytesRead(), "only the last round is read, versions=" + versions);
+            assertEquals(0, stats.windowBytesReread());
+            assertEquals(0, stats.perVectorReads());
+            assertEquals(100L * (versions - 1), stats.supersededEntriesSkipped(), "versions=" + versions);
+        }
+    }
+
+    @Test
     void countersAreDeterministicAndThePublicPathRecordsNothing() throws IOException {
         var frames = writeStore(List.of(64, 3, 777, 4_097, 1));
         var order = new ArrayList<>(frames);
@@ -168,7 +197,8 @@ class FileSpeechFeatureStoreReadStructureTest {
             file.seek(40);
             none.perVectorRead(file, 0);
         }
-        assertEquals(List.of(0L, 0L, 0L, 0L, 0L, 0L), counts(none));
+        none.supersededEntrySkipped();
+        assertEquals(List.of(0L, 0L, 0L, 0L, 0L, 0L, 0L), counts(none));
 
         // Fresh counters give identical counts on every run, and the public findAll() leaves them untouched.
         var first = findAll(frames.size());
@@ -211,7 +241,8 @@ class FileSpeechFeatureStoreReadStructureTest {
 
     private static List<Long> counts(ReadStats stats) {
         return List.of(stats.windowFills(), stats.channelReads(), stats.windowBytesRead(),
-                stats.windowBytesReread(), stats.perVectorReads(), stats.perVectorBytesRead());
+                stats.windowBytesReread(), stats.perVectorReads(), stats.perVectorBytesRead(),
+                stats.supersededEntriesSkipped());
     }
 
     /** Writes frames of the given dimensions back to back with an append-ordered index; returns them in order. */

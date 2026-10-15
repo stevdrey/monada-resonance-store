@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.nio.file.Path;
 
 import org.junit.jupiter.api.Test;
@@ -113,6 +114,22 @@ class FileSpeechFeatureStoreTest {
         assertEquals(1, all.size());
         assertEquals("sample1", all.get(0).sampleId());
         assertArrayEquals(new float[]{0.3f, 0.4f}, all.get(0).vector().values());
+    }
+
+    @Test
+    void ignoresACorruptSupersededEntryOnEveryReadPath() throws IOException {
+        var store = new FileSpeechFeatureStore(tempDir);
+        store.save("sample1", new FrequencyVector(new float[]{0.1f, 0.2f}));
+        store.save("sample1", new FrequencyVector(new float[]{0.3f, 0.4f}));
+        try (var file = new RandomAccessFile(tempDir.resolve(SpeechFeatureSegmentFixture.SEGMENT).toFile(), "rw")) {
+            file.writeInt(-1); // the superseded first frame
+        }
+
+        var all = store.findAll();
+        assertEquals(1, all.size());
+        assertArrayEquals(new float[]{0.3f, 0.4f}, all.get(0).vector().values());
+        assertArrayEquals(new float[]{0.3f, 0.4f}, store.findBySampleId("sample1").orElseThrow().values());
+        assertEquals(1, store.validateStoredVectorDimensions(2));
     }
 
     @Test
