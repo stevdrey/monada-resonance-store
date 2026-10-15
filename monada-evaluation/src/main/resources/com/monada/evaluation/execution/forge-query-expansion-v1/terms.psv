@@ -1,0 +1,30 @@
+# Query-side term map (issue #124). A rule fires when its source token occurs in the query as a whole token (lowercase,
+# split on non-alphanumeric characters exactly like the default lexical encoder); plural or inflected forms are listed
+# as separate rules, never inferred. Fired rules append their terms, in table order, after the UNCHANGED source text;
+# a term already in the query or already added is skipped; at most max.addedTermsPerQuery terms are added.
+# risk: LOW = near-synonym in this domain; MEDIUM = plausible but has another common sense; HIGH = deliberately risky.
+# Risk and rationale were declared before the comparison ran and are never edited from its output.
+# id | source token | added terms (space separated) | risk | rationale (why safe or unsafe)
+R01|npe|null pointer|LOW|standard abbreviation of null pointer exception; no other meaning in a code-task corpus
+R02|callback|webhook|LOW|an outbound HTTP callback is what a webhook is; risk: in-process callbacks are not webhooks
+R03|callbacks|webhook|LOW|plural of R02, listed explicitly because matching is exact
+R04|resend|retry retried|LOW|resending a failed delivery is a retry; the corpus spells it retried
+R05|undelivered|failed deliveries|LOW|an undelivered message is a failed delivery; adds failed, which is also a common outcome word
+R06|purge|delete deletes|LOW|purge means bulk delete; the corpus spells deletes
+R07|stale|expired|LOW|stale credentials or entries are expired ones in cache and token contexts
+R08|intake|ingestion|LOW|an intake stream is an ingestion pipeline in data-processing language
+R09|billing|invoice|LOW|billing work in this domain is about invoices; risk: billing also covers payments and plans
+R10|paginate|pagination|LOW|verb to noun of the same concept
+R11|paging|pagination|LOW|paging is the gerund of pagination; the corpus already contains paging in the offset lesson
+R12|boot|startup start|LOW|boot faster means faster startup; does not add cold, so it cannot alone reach cold start wording
+R13|credentials|tokens|MEDIUM|API tokens are credentials, but credentials also means passwords and keys (backup keys in beta)
+R14|repeated|duplicate duplicates|MEDIUM|repeated messages are duplicates; repeated also describes retries and loops
+R15|discard|dropped|MEDIUM|discarding is dropping; dropped also appears in unrelated contexts (dropped connections)
+R16|aggregation|totals|MEDIUM|an aggregation computes totals; aggregation also means grouping or metrics rollups
+R17|messages|events|MEDIUM|messages and events are interchangeable in streaming; messages also means emails and chat
+R18|cursor|keyset|MEDIUM|cursor paging is implemented with keyset pagination; risk for queries that contrast the two
+R19|idempotent|dedup deduplication|HIGH|an idempotent consumer deduplicates, but idempotent also describes migrations (a-yaml lesson)
+R20|randomized|jitter|HIGH|randomized retry spread is jitter, but randomized appears in tests, sampling and ids
+R21|crashes|null pointer|HIGH|maps a symptom to one cause: most crashes are not null pointers
+R22|chunks|pagination page|HIGH|chunking can mean paging, batching or streaming; over-general on purpose
+R23|rotate|rotation tokens|HIGH|token rotation is one kind of rotation; key rotation and log rotation share the verb (S18 collision)

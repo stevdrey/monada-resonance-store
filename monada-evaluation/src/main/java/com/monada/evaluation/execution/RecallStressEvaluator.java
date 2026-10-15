@@ -26,6 +26,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /**
@@ -89,7 +91,7 @@ public final class RecallStressEvaluator {
                 fixture.recallLimit(), fixture.ks(), outcomes, gates, elapsed);
     }
 
-    private static Path fresh(Path workDir, String prefix) {
+    static Path fresh(Path workDir, String prefix) {
         try {
             Files.createDirectories(workDir);
             return Files.createTempDirectory(workDir, prefix);
@@ -100,9 +102,13 @@ public final class RecallStressEvaluator {
 
     /** Records the corpus into {@code root}, rebuilds each projection and recalls every query of the set. */
     static Observation observe(RecallStressFixture fixture, Path root) {
+        record(fixture, root);
+        return recallAll(fixture, root, StressQuery::text);
+    }
+
+    /** Records the corpus into {@code root} and rebuilds each project's projection. */
+    static void record(RecallStressFixture fixture, Path root) {
         ForgeFixture corpus = fixture.corpus();
-        Map<String, String> state = new LinkedHashMap<>();
-        Map<String, List<Observed>> hits = new LinkedHashMap<>();
         for (String scopeKey : corpus.scopeIds().keySet()) {
             ScopeId scope = ForgeFixtureRecorder.scope(corpus, scopeKey);
             try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
@@ -115,15 +121,39 @@ public final class RecallStressEvaluator {
                 memory.rebuildProjection(scope);
             }
         }
+    }
+
+    /**
+     * Recalls every query of the set from the store already recorded in {@code root}, opened read-only, with the
+     * text {@code text} gives for it (the query's own text for the stress evaluation).
+     */
+    static Observation recallAll(RecallStressFixture fixture, Path root, Function<StressQuery, String> text) {
+        return recallAll(fixture, root, text, q -> true);
+    }
+
+    /**
+     * Like {@link #recallAll(RecallStressFixture, Path, Function)} but recalls only the queries {@code include}
+     * accepts; the observation has no entry for the others and opens only the projects it needs.
+     */
+    static Observation recallAll(RecallStressFixture fixture, Path root, Function<StressQuery, String> text,
+                                 Predicate<StressQuery> include) {
+        ForgeFixture corpus = fixture.corpus();
+        List<StressQuery> queries = fixture.queries().stream().filter(include).toList();
+        Map<String, String> state = new LinkedHashMap<>();
+        Map<String, List<Observed>> hits = new LinkedHashMap<>();
         Map<String, ExecutionMemory> memories = new LinkedHashMap<>();
         try {
             for (String scopeKey : corpus.scopeIds().keySet()) {
-                memories.put(scopeKey, ExecutionMemory.openReadOnly(root, ForgeFixtureRecorder.scope(corpus, scopeKey)));
+                if (queries.stream().anyMatch(q -> q.scopeKey().equals(scopeKey))) {
+                    memories.put(scopeKey, ExecutionMemory.openReadOnly(root,
+                            ForgeFixtureRecorder.scope(corpus, scopeKey)));
+                }
             }
             // Fixture order, not scope order: the report and the fingerprint follow the query list.
-            for (StressQuery q : fixture.queries()) {
+            for (StressQuery q : queries) {
                 ScopeId scope = ForgeFixtureRecorder.scope(corpus, q.scopeKey());
-                ExperienceRecall recall = memories.get(q.scopeKey()).recall(scope, q.text(), fixture.recallLimit());
+                ExperienceRecall recall = memories.get(q.scopeKey()).recall(scope, text.apply(q),
+                        fixture.recallLimit());
                 state.put(q.id(), recall.status().state().name());
                 hits.put(q.id(), recall.hits().stream().map(RecallStressEvaluator::observed).toList());
             }

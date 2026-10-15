@@ -47,7 +47,8 @@ class ForgeCrossJvmDeterminismTest {
         return Stream.of(Arguments.of(ForgeExperienceEvaluationMain.class, "READY_FOR_HOST_ADAPTER_EXPERIMENT"),
                 Arguments.of(MultiAttemptEvaluationMain.class, "ATTEMPT_JOINS_VERIFIED"),
                 Arguments.of(RecallStressEvaluationMain.class, "STRESS_SET_CHARACTERIZED"),
-                Arguments.of(ThresholdSweepMain.class, "SWEEP_CHARACTERIZED"));
+                Arguments.of(ThresholdSweepMain.class, "SWEEP_CHARACTERIZED"),
+                Arguments.of(QueryExpansionMain.class, "COMPARISON_CHARACTERIZED"));
     }
 
     /** A new evaluation command fails here until it is added to {@link #commands()} or, if it prints no report, excluded. */

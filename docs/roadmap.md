@@ -287,6 +287,62 @@ Observed on 2026-10-15 (all checks pass; 31 scored queries, 66 judged positives,
 Not changed: `ExecutionMemory.recall`, `MonadaMemory`, projections, the default threshold, fixtures and judgments, and
 the `runForgeExperienceEvaluation` and `runForgeRecallStress` reports (byte-identical apart from timing).
 
+#### Bounded query-side lexical expansion, offline A/B (#124)
+
+Tests one narrow paraphrase-recovery hypothesis without touching encoding: append documented terms to the QUERY only
+and compare against the exact query on the same persisted projection.
+`./gradlew :monada-evaluation:runForgeQueryExpansionComparison -q` records the `forge-experience-v1` corpus once into a
+scratch store and recalls every #122 query through the public read-only API with its exact text and with each
+candidate's expanded text; judgments stay those of the source query. The expansion table
+`forge-query-expansion-v1/terms.psv` (evaluation resources only) has 23 whole-token rules (cap 24, at most 3 terms per
+rule, at most 8 added terms per query, source text kept verbatim), each with a risk (12 LOW, 6 MEDIUM, 5 deliberately
+risky HIGH) and a safe/unsafe rationale declared before the comparison ran. Candidates: `FULL` (all rules), `LOW_RISK`
+(LOW rules only) and each rule in isolation.
+
+Six hard checks decide the exit code (`QX1` #122 checks pass, `QX2` the exact side equals the #122 rankings, `QX3`
+unexpanded and blank queries are sent unchanged and rank identically, `QX4` every expansion stays within its bounds and
+only adds new terms of fired rules, `QX5` every store file is byte-identical after all candidate recalls, `QX6` two
+fresh stores give identical candidate rankings). Candidate verdicts are exploratory and vetoed by any regression of a
+scored BASELINE/NEGATION/RELATION/DUPLICATE_SUMMARY query (`V1`) or other scored query (`V2`), a judged confusable in
+the top 5 that ranks better or scores higher than under exact recall (`V3`), or, on a query with nothing relevant, a new top-5 neighbour or a wrong match gaining similarity
+(`V4`). The best verdict is `JUSTIFIED_FOR_FOLLOW_UP`; there is no adopt verdict.
+
+Observed on 2026-10-14 (all six checks pass; 19 scored stress queries):
+
+| candidate | verdict | ALL_STRESS Hit@1 | R@5 | MRR | improved | vetoes |
+| --- | --- | --- | --- | --- | --- | --- |
+| exact | — | 0.58 | 0.80 | 0.71 | — | — |
+| FULL (23 rules) | REJECTED | 0.89 | 1.00 | 0.95 | S02 S03 S04 S06 S13 S14 S15 S16 | V3 S07, S13, S18; V4 S18 |
+| LOW_RISK (12 rules) | REJECTED | 0.74 | 0.96 | 0.86 | S02 S04 S06 S13 S15 S16 | V3 S07, S13 |
+
+- **Aggregate gain did not decide.** Both candidates improve every aggregate and both are rejected. R23
+  (`rotate -> rotation tokens`) makes the no-relevant key-rotation query S18 return a new neighbour and doubles the
+  similarity of the judged confusable token-cleanup attempt (0.13 -> 0.28): the key-versus-token collision the rule's
+  rationale predicted.
+- **Even LOW-risk rules strengthen the excluded approach of negation queries.** R10 (`paginate -> pagination`) raises
+  the excluded offset attempt of S07 at #1 (0.5601 -> 0.6288); R11 (`paging -> pagination`) lifts the relevant keyset
+  attempt of S13 to #1 but also raises the excluded offset attempt (0.4901 -> 0.5717, 0.0009 below it). A term map that
+  adds the topic word cannot respect "without X"; R18 (`cursor -> keyset`) alone is the only S13 rule without a veto.
+- **Risky rules look good in-sample.** R21 (`crashes -> null pointer`, symptom mapped to one cause) and R19
+  (`idempotent -> dedup deduplication`) each improve their one query (S03, S14) without a veto, because this corpus has
+  no crash that is not a null pointer and no other idempotent consumer. Their safety is not established; that is why
+  the risk column, not the observed effect, defines `LOW_RISK`.
+- No rule fires on S08–S12, so relation queries and the other negation queries are unchanged.
+- **False sharing comes from the encoder, not only from meaning.** Under `LOW_RISK`, adding `ingestion` to S04 lifts
+  the unrelated pagination attempt `b-page/a1` to #1: in the 128-bucket signed lexical hash, `ingestion` shares a
+  bucket and sign with `customer` and `protect`. A query-side term map cannot control such collisions.
+- Paraphrases needing several new words (S01 "chunks", S05 "purge stale credentials") stay unchanged or unimproved.
+
+Decision: query-side expansion is **rejected** for this track: no candidate survives the collision and negation vetoes,
+and nothing is adopted. Individually unvetoed rules (for example R01, R03–R05, R12) are in-sample observations only; a
+follow-up would need its own approved Issue, a held-out judged set written without this table in view, negation-aware
+handling and collision analysis against the encoder's hash buckets. The table was written with the judged
+vocabulary in view, so all effects are in-sample evidence on 25 synthetic experiences.
+
+Not changed: encoders, `ProjectionText`/`summary-text-v1`, projection rebuild format, query keys, `ExecutionMemory.recall`,
+`MonadaMemory`, defaults, fixtures and judgments; the `runForgeExperienceEvaluation`, `runForgeRecallStress` and
+`runForgeRecallThresholdSweep` reports are byte-identical apart from timing.
+
 Numbering is roadmap order; independent items (for example #94 and #95) may proceed in parallel.
 
 Non-goals:

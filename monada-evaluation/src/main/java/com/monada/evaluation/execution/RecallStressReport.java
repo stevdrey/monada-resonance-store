@@ -124,6 +124,12 @@ public record RecallStressReport(String fixtureVersion, String provenance, Strin
         return gates.stream().filter(g -> !g.passed()).map(ForgeGate::id).toList();
     }
 
+    /** A gate of a report built on these rankings: it passes exactly when every check of this report passed. */
+    ForgeGate checksGate(String id, String name) {
+        List<String> violations = failedGates().stream().map(g -> "stress check " + g + " failed").toList();
+        return ForgeGate.of(id, name, violations, List.of("stress decision: " + decision()));
+    }
+
     public static Set<String> expectedGateIds() {
         return Set.of(SCOPED_RECALL, BLANK_QUERY, DETERMINISM, BASELINE_PARITY);
     }
