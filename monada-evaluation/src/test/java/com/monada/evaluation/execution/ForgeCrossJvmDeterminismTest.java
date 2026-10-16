@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -38,6 +39,13 @@ class ForgeCrossJvmDeterminismTest {
 
     /** Commands in this package that print no evaluation report, so there is nothing to compare across JVMs. */
     private static final Set<Class<?>> NOT_REPORT_COMMANDS = Set.of(ExperienceExportMain.class);
+    /**
+     * Arguments of commands whose default run is too heavy for {@value #JVMS} concurrent JVMs (each fsyncs its own
+     * store). The scale sweep keeps three sizes and every K but uses smaller sizes and fewer timed iterations; its
+     * deterministic report is still compared in full.
+     */
+    private static final Map<Class<?>, List<String>> COMMAND_ARGS = Map.of(ExecutionScaleSweepMain.class,
+            List.of("--sizes=25,100,250", "--warmup=1", "--iterations=2"));
 
     private record Result(int exit, String out, String err) {
     }
@@ -48,7 +56,8 @@ class ForgeCrossJvmDeterminismTest {
                 Arguments.of(MultiAttemptEvaluationMain.class, "ATTEMPT_JOINS_VERIFIED"),
                 Arguments.of(RecallStressEvaluationMain.class, "STRESS_SET_CHARACTERIZED"),
                 Arguments.of(ThresholdSweepMain.class, "SWEEP_CHARACTERIZED"),
-                Arguments.of(QueryExpansionMain.class, "COMPARISON_CHARACTERIZED"));
+                Arguments.of(QueryExpansionMain.class, "COMPARISON_CHARACTERIZED"),
+                Arguments.of(ExecutionScaleSweepMain.class, "SCALE_SWEEP_CHARACTERIZED"));
     }
 
     /** A new evaluation command fails here until it is added to {@link #commands()} or, if it prints no report, excluded. */
@@ -80,8 +89,9 @@ class ForgeCrossJvmDeterminismTest {
         List<CompletableFuture<String>> outs = new ArrayList<>();
         List<CompletableFuture<String>> errs = new ArrayList<>();
         for (int i = 0; i < JVMS; i++) {
-            Process p = new ProcessBuilder(java, "-cp", classpath, command.getName())
-                    .start();
+            List<String> commandLine = new ArrayList<>(List.of(java, "-cp", classpath, command.getName()));
+            commandLine.addAll(COMMAND_ARGS.getOrDefault(command, List.of()));
+            Process p = new ProcessBuilder(commandLine).start();
             processes.add(p);
             outs.add(CompletableFuture.supplyAsync(() -> read(p.getInputStream())));
             errs.add(CompletableFuture.supplyAsync(() -> read(p.getErrorStream())));

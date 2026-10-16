@@ -238,7 +238,8 @@ Observed gaps, to be handled by separate bounded Issues if the host experiment n
   must apply its own threshold; Store adds no default one here.
 - **Labels are per execution.** A failed attempt inside an accepted execution is exported and recalled with the
   execution's `SUCCESS` label; a host that wants "what failed" must join the attempt result (`FAILED`) to the hit.
-- **Scale.** 25 experiences cannot support statistical claims; scoped linear-scan latency was not part of this gate.
+- **Scale.** 25 experiences cannot support statistical claims; scoped linear-scan latency was not part of this gate
+  (measured separately up to 1000 experiences per scope by #125 below).
 
 Next bounded consumer experiment (future, outside this repository): a host adapter in Forge that records real
 executions into `ExecutionMemory`, applies its own similarity threshold, joins recall hits to exported samples by
@@ -404,6 +405,58 @@ vocabulary in view, so all effects are in-sample evidence on 25 synthetic experi
 Not changed: encoders, `ProjectionText`/`summary-text-v1`, projection rebuild format, query keys, `ExecutionMemory.recall`,
 `MonadaMemory`, defaults, fixtures and judgments; the `runForgeExperienceEvaluation`, `runForgeRecallStress` and
 `runForgeRecallThresholdSweep` reports are byte-identical apart from timing.
+
+#### Scoped recall at realistic corpus sizes (#125)
+
+Measures what the 25-experience #102 gate could not: how append, projection rebuild, reopen, read-only open and
+scoped top-K recall behave as experience count grows, without changing anything they measure.
+`./gradlew :monada-evaluation:runExecutionScaleSweep -q` (options via `--args`, e.g.
+`--args="--sizes=25,250,1000,2500 --iterations=10"`) generates a synthetic corpus from an explicit seed (default
+42) for three isolated scopes (`scale-alpha`, `scale-beta`, `scale-gamma`) at N = 25/250/1000 recallable experiences
+per scope, using the #121 occurrence patterns: single accepted attempt, failure then repair, failure then an unfinished
+repair, a finish corrected r1 -> r2 (its first text becomes a retired atom), groups of independent executions with
+identical text (one atom, several refs) and one probe text identical in every scope. Each size runs in a fresh root:
+append every event, check the incrementally maintained projection, rebuild twice, reopen writable, open all scopes
+read-only and recall 10 queries per scope at K = 1/5/20 (2 untimed warmup + 5 timed recalls per query and K).
+
+Five hard checks decide the exit code at every size (decision `SCALE_SWEEP_CHARACTERIZED`): `S1` zero foreign-scope
+hits and foreign `ScopeId`s rejected by recall, load and export; `S2` every hit is an expected latest-revision finish
+whose ref loads exactly from the ledger with matching coordinates, result and latest solution; `S3` hits ordered by
+similarity, atom id and canonical ref, with each atom's refs contiguous and equal to the published checkpoint's; `S4`
+rankings identical after append, first and second rebuild, writable reopen, read-only open and across every repeated
+timed recall, with the projection `CURRENT` and covering the whole ledger in each phase; `S5` ledger events, refs,
+live atoms (distinct texts), retired atoms (corrected texts) and dimensions (128) match the generated ground truth.
+The deterministic report also lists per scope executions, attempts started, unfinished attempts, corrections, active
+attempts, the projection generation after each phase and the structural candidate count (live + retired atoms in
+the published generation). Timing, latency percentiles, a heap proxy (used-heap delta after `System.gc()` when the
+three read-only snapshots open) and on-disk bytes are printed separately and never gate. The cross-JVM determinism
+test runs the command in 6 concurrent JVMs with `--sizes=25,100,250 --warmup=1 --iterations=2` (the full default
+exceeds its 120 s budget when six JVMs fsync their stores at once).
+
+Observed on 2026-10-15 (all five checks pass at every size; two runs render byte-identical reports; Java 27
+OpenJDK 64-Bit Server VM 27+35, Azul; Linux 7.2.10 x86_64; 16 processors; max heap 3832 MiB):
+
+| N per scope | ledger events (α/β/γ) | live / retired atoms (α) | rebuild, 3 scopes | read-only open | recall p50 / p95 K=1 | K=20 | heap delta | disk per scope (ledger + projection) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 25 | 120 / 118 / 126 | 16 / 0 | 127 ms | 59 ms | 38 / 98 µs | 66 / 101 µs | 0.4 MiB | ~36 + ~40 KiB |
+| 250 | 1232 / 1227 / 1244 | 208 / 25 | 304 ms | 90 ms | 105 / 165 µs | 90 / 122 µs | 3.8 MiB | ~365 + ~413 KiB |
+| 1000 | 4982 / 4942 / 4916 | 853 / 91 | 1341 ms | 308 ms | 431 / 1190 µs | 424 / 546 µs | 15.3 MiB | ~1.5 + ~1.6 MiB |
+
+- **Correctness held at every size.** No leakage, every ref exact, tie order and atom grouping stable, parity across
+  every phase and repeated recall; 18/18 exact-text queries per size returned the target (or an identical-text twin)
+  at rank 1 (exploratory, not gated).
+- **Recall and memory grow about linearly with scope size.** From 250 to 1000 experiences recall p50 rises about 4x
+  and the read-only heap delta about 4x; K barely matters because the scan, not the top-K, dominates. Single machine,
+  150 samples per K and size: these are orders of magnitude, not benchmarks.
+- **Retired atoms stay in the scan.** Corrected r1 texts remain retired atoms after both rebuilds (91 of 944 candidates
+  in `scale-alpha` at N=1000, about 10%), so linear-scan work tracks every text ever projected, not only live refs.
+- **Rebuild is the most expensive phase** (about 0.45 s per 1000-experience scope here) and grows with scope size;
+  append stayed under 1 s for all three scopes at every size.
+
+Not changed: `ExecutionMemory`, `LinearScanResonanceIndex`, `MAX_LIMIT`, projection and ledger formats, defaults,
+caching and rebuild policy (no implicit rebuild); the #102, #121, #122, #123 and #124 reports are unchanged apart
+from timing. Follow-up decisions (each needs its own Issue): whether retired atoms should be compacted out of a
+rebuilt generation, and whether sizes beyond a few thousand per scope warrant an index other than the linear scan.
 
 Numbering is roadmap order; independent items (for example #94 and #95) may proceed in parallel.
 
