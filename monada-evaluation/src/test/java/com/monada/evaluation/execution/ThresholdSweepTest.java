@@ -28,6 +28,8 @@ import org.junit.jupiter.api.Test;
  */
 class ThresholdSweepTest {
     private static final List<Double> GRID = List.of(0.0, 0.1, 0.2, 0.25, 0.3, 0.5);
+    private static final String NOT_EVALUABLE = "not evaluable: no content-bearing no-relevant queries";
+    private static final String NONE_SILENCES = "No declared threshold makes every no-relevant content query abstain.";
 
     @Test
     void theBoundaryIsInclusiveAndTiesAtTheThresholdMoveTogether() {
@@ -101,11 +103,97 @@ class ThresholdSweepTest {
         ThresholdSweepReport report = ThresholdSweep.sweep(stress(), GRID);
         assertEquals(Optional.of(report.point(0.25)), report.firstFullNoRelevantAbstention());
         // The 0.0 fill relevant hit of S92 is lost at 0.1 but does not count as a positive-similarity loss.
-        assertEquals(report.point(0.1), report.lastWithoutPositiveRelevantLoss());
+        assertEquals(Optional.of(report.point(0.1)), report.lastWithoutPositiveRelevantLoss());
         String text = report.render();
+        assertTrue(text.contains("Lowest threshold at which every no-relevant content query abstains: 0.25"), text);
+        assertFalse(text.contains(NOT_EVALUABLE), text);
         assertTrue(text.contains("no declared threshold both silences every no-relevant query"), text);
         assertTrue(text.contains("Threshold: UNDECIDED (host-owned"), text);
         assertTrue(text.contains("illustrations, not recommendations"), text);
+    }
+
+    @Test
+    void onlyScoredQueriesLeaveFullNoRelevantAbstentionNotEvaluable() {
+        assertNotEvaluable(ThresholdSweep.sweep(stress(s91(), s92()), GRID));
+    }
+
+    @Test
+    void onlyEmptyProbesNeverManufactureAFullAbstention() {
+        QueryOutcome stopwords = outcome("S96", Category.EMPTY_QUERY, "the and of", Set.of(), List.of());
+        ThresholdSweepReport report = ThresholdSweep.sweep(stress(s94(), s95(), stopwords), GRID);
+        assertEquals(Kind.EMPTY, report.row("S96").kind(), "a stopwords-only probe is EMPTY, not NO_RELEVANT");
+        assertNotEvaluable(report);
+    }
+
+    @Test
+    void aContentNegativeWithZeroHitsIsAnObservedAbstentionNotAnEmptyProbe() {
+        ThresholdSweepReport report = ThresholdSweep.sweep(stress(s91(), quiet()), GRID);
+        assertEquals(Reason.NO_HITS, report.row("S98").outcome().reason());
+        assertEquals(Kind.NO_RELEVANT, report.row("S98").kind(), "emptiness comes from the query, not retrieval");
+        PointSummary base = report.summary("ALL", 0);
+        assertEquals(1, base.noRelevant());
+        assertEquals(0, base.falseReturnQueries());
+        assertEquals(1.0, base.noRelevantAbstention());
+        assertEquals(Optional.of(report.point(0.0)), report.firstFullNoRelevantAbstention());
+        String text = report.render();
+        assertTrue(text.contains("Lowest threshold at which every no-relevant content query abstains: 0.00"), text);
+        assertFalse(text.contains(NOT_EVALUABLE), text);
+    }
+
+    @Test
+    void aZeroHitNegativeAndAFalseReturningNegativeBothCount() {
+        ThresholdSweepReport report = ThresholdSweep.sweep(stress(quiet(), s90(), s91()), GRID);
+        PointSummary base = report.summary("ALL", 0);
+        assertEquals(2, base.noRelevant());
+        assertEquals(1, base.falseReturnQueries(), "only S90 returns at 0.00");
+        assertEquals(0.5, base.noRelevantAbstention());
+        assertTrue(report.row("S98").abstains(0));
+        assertFalse(report.row("S90").abstains(0));
+        assertEquals(Optional.of(report.point(0.25)), report.firstFullNoRelevantAbstention());
+    }
+
+    @Test
+    void withoutPositiveSimilarityRelevantHitsTheLosslessPointIsNotEvaluable() {
+        for (QueryOutcome[] set : List.of(new QueryOutcome[] {s90(), s94()}, new QueryOutcome[] {s90(), s92()})) {
+            ThresholdSweepReport report = ThresholdSweep.sweep(stress(set), GRID);
+            assertEquals(Optional.empty(), report.lastWithoutPositiveRelevantLoss(), "nothing to lose is no evidence");
+            assertEquals(Optional.of(report.point(0.25)), report.firstFullNoRelevantAbstention());
+            String text = report.render();
+            assertTrue(text.contains("Highest threshold losing no positive-similarity relevant hit: n/a — not "
+                    + "evaluable: no relevant hit with positive similarity at 0.00."), text);
+            assertTrue(text.contains("Tradeoff: n/a on this set — without positive-similarity relevant hits"), text);
+            assertFalse(text.contains("without losing a positive-similarity relevant hit"), text);
+            assertFalse(text.contains(NOT_EVALUABLE), text);
+        }
+    }
+
+    @Test
+    void scoredAndEmptyQueriesWithoutNoRelevantOnesAreNotEvaluable() {
+        assertNotEvaluable(ThresholdSweep.sweep(stress(s91(), s92(), s94(), s95()), GRID));
+    }
+
+    @Test
+    void aNoRelevantQueryThatNeverAbstainsIsExplainedDifferentlyFromAnAbsentSet() {
+        QueryOutcome loud = outcome("S97", Category.NO_RELEVANT, "loud", Set.of(),
+                List.of(hit(1, "n/a9", 0.90, Neighbour.JUDGED_CONFUSABLE)));
+        ThresholdSweepReport report = ThresholdSweep.sweep(stress(s90(), loud, s91(), s94()), GRID);
+        assertEquals(Optional.empty(), report.firstFullNoRelevantAbstention());
+        String text = report.render();
+        assertTrue(text.contains(NONE_SILENCES), text);
+        assertFalse(text.contains(NOT_EVALUABLE), text);
+        assertTrue(text.contains("no declared threshold both silences every no-relevant query"), text);
+    }
+
+    private static void assertNotEvaluable(ThresholdSweepReport report) {
+        assertEquals(0, report.summary("ALL", 0).noRelevant());
+        assertEquals(Optional.empty(), report.firstFullNoRelevantAbstention(), "no vacuous operating point at 0.00");
+        String text = report.render();
+        assertTrue(text.contains("Full no-relevant abstention: n/a — " + NOT_EVALUABLE), text);
+        assertTrue(text.contains("Tradeoff: n/a on this set"), text);
+        assertFalse(text.contains("Lowest threshold at which every no-relevant"), text);
+        assertFalse(text.contains(NONE_SILENCES), text);
+        assertFalse(text.contains("silences every no-relevant query"), text);
+        assertTrue(text.contains("Threshold: UNDECIDED (host-owned"), text);
     }
 
     @Test
@@ -193,19 +281,45 @@ class ThresholdSweepTest {
     /** S90 no-relevant (best 0.21), S91 two relevant at 0.40 and 0.15, S92 relevant only as 0.0 fill, S94 blank, S95
      * punctuation-only. */
     private static RecallStressReport stress() {
-        List<QueryOutcome> queries = List.of(
-                outcome("S90", Category.NO_RELEVANT, "nothing", Set.of(), List.of(
-                        hit(1, "n/a1", 0.21, Neighbour.JUDGED_CONFUSABLE), hit(2, "n/a2", 0.05,
-                                Neighbour.LEXICAL_NEIGHBOUR), hit(3, "n/a3", 0.0, Neighbour.ZERO_SIMILARITY))),
-                outcome("S91", Category.SYNONYM, "positive", Set.of("p/a1", "p/a2"), List.of(
-                        hit(1, "p/a1", 0.40, Neighbour.RELEVANT), hit(2, "c/a1", 0.30, Neighbour.JUDGED_CONFUSABLE),
-                        hit(3, "p/a2", 0.15, Neighbour.RELEVANT), hit(4, "l/a1", 0.05, Neighbour.LEXICAL_NEIGHBOUR))),
-                outcome("S92", Category.TERMINOLOGY, "fill", Set.of("f/a1"), List.of(
-                        hit(1, "f/a1", 0.0, Neighbour.RELEVANT), hit(2, "z/a1", 0.0, Neighbour.ZERO_SIMILARITY))),
-                outcome("S94", Category.EMPTY_QUERY, " ", Set.of(), List.of()),
-                outcome("S95", Category.EMPTY_QUERY, "?!", Set.of(), List.of()));
-        return new RecallStressReport("1", "synthetic", "judged", "test", 3, 1, 50, List.of(1, 5), queries,
+        return stress(s90(), s91(), s92(), s94(), s95());
+    }
+
+    private static RecallStressReport stress(QueryOutcome... queries) {
+        return new RecallStressReport("1", "synthetic", "judged", "test", 3, 1, 50, List.of(1, 5), List.of(queries),
                 List.of(), Map.of());
+    }
+
+    private static QueryOutcome s90() {
+        return outcome("S90", Category.NO_RELEVANT, "nothing", Set.of(), List.of(
+                hit(1, "n/a1", 0.21, Neighbour.JUDGED_CONFUSABLE), hit(2, "n/a2", 0.05, Neighbour.LEXICAL_NEIGHBOUR),
+                hit(3, "n/a3", 0.0, Neighbour.ZERO_SIMILARITY)));
+    }
+
+    private static QueryOutcome s91() {
+        return outcome("S91", Category.SYNONYM, "positive", Set.of("p/a1", "p/a2"), List.of(
+                hit(1, "p/a1", 0.40, Neighbour.RELEVANT), hit(2, "c/a1", 0.30, Neighbour.JUDGED_CONFUSABLE),
+                hit(3, "p/a2", 0.15, Neighbour.RELEVANT), hit(4, "l/a1", 0.05, Neighbour.LEXICAL_NEIGHBOUR)));
+    }
+
+    private static QueryOutcome s92() {
+        return outcome("S92", Category.TERMINOLOGY, "fill", Set.of("f/a1"), List.of(
+                hit(1, "f/a1", 0.0, Neighbour.RELEVANT), hit(2, "z/a1", 0.0, Neighbour.ZERO_SIMILARITY)));
+    }
+
+    private static QueryOutcome s94() {
+        return outcome("S94", Category.EMPTY_QUERY, " ", Set.of(), List.of());
+    }
+
+    private static QueryOutcome s95() {
+        return outcome("S95", Category.EMPTY_QUERY, "?!", Set.of(), List.of());
+    }
+
+    /** A non-blank content query judged to have no answer whose recall returns nothing ({@code NO_HITS}). */
+    private static QueryOutcome quiet() {
+        StressQuery q = new StressQuery("S98", Category.NO_RELEVANT, "NO_RELEVANT", "alpha", "deploy the quantum ledger",
+                Set.of(), Set.of(), "test");
+        return new QueryOutcome(q, "CURRENT", List.of(), List.of(), Map.of(), Map.of(), 0.0, Reason.NO_HITS,
+                Optional.empty());
     }
 
     private static QueryOutcome outcome(String id, Category category, String text, Set<String> relevant,

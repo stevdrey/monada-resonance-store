@@ -49,6 +49,8 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
      * judged to have no answer, whose returns are false matches) or {@code EMPTY} (a blank query or an
      * {@link Category#EMPTY_QUERY} probe without content, such as punctuation or stopwords only). EMPTY queries enter
      * no denominator: they return nothing at every threshold, so counting them would inflate no-relevant abstention.
+     * Emptiness comes from the query and its declared category, never from retrieval: a content query judged to have
+     * no answer that retrieves nothing ({@code NO_HITS}) is an observed abstention and stays {@code NO_RELEVANT}.
      */
     public enum Kind {
         SCORED, NO_RELEVANT, EMPTY;
@@ -205,22 +207,41 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
         return ratio((int) rows.stream().filter(p).count(), rows.size());
     }
 
-    /** Lowest declared threshold at which every no-relevant content query abstains, if any. */
+    /**
+     * Lowest declared threshold at which every no-relevant content query abstains, if any. Empty when the set has no
+     * no-relevant content query (EMPTY probes do not count): an absent denominator is not evaluable, never a vacuous
+     * success.
+     */
     public Optional<Integer> firstFullNoRelevantAbstention() {
+        List<QuerySweep> none = noRelevantRows();
+        if (none.isEmpty()) {
+            return Optional.empty();
+        }
         for (int i = 0; i < grid.size(); i++) {
             int point = i;
-            if (rows.stream().filter(r -> r.kind() == Kind.NO_RELEVANT).allMatch(r -> r.abstains(point))) {
+            if (none.stream().allMatch(r -> r.abstains(point))) {
                 return Optional.of(i);
             }
         }
         return Optional.empty();
     }
 
+    private List<QuerySweep> noRelevantRows() {
+        return rows.stream().filter(r -> r.kind() == Kind.NO_RELEVANT).toList();
+    }
+
     /**
      * Highest declared threshold that loses no relevant hit with a positive similarity. Zero-similarity relevant
      * hits are limit fill (a tie-order artefact, not a match), so losing them is reported but not counted here.
+     * Empty when the 0.00 baseline keeps no positive-similarity relevant hit: there is nothing to lose, which is not
+     * evaluable, never a vacuous success.
      */
-    public int lastWithoutPositiveRelevantLoss() {
+    public Optional<Integer> lastWithoutPositiveRelevantLoss() {
+        boolean anyPositiveRelevant = rows.stream().flatMap(r -> r.kept().get(0).stream())
+                .anyMatch(h -> h.neighbour() == Neighbour.RELEVANT && h.similarity() > 0.0);
+        if (!anyPositiveRelevant) {
+            return Optional.empty();
+        }
         int last = 0;
         for (int i = 1; i < grid.size(); i++) {
             int point = i;
@@ -231,7 +252,7 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
             }
             last = i;
         }
-        return last;
+        return Optional.of(last);
     }
 
     /** Deterministic report text; contains no timing. */
@@ -348,14 +369,23 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
 
     private void appendOperatingPoints(StringBuilder out) {
         out.append("\n== Operating points (EXPLORATORY, host-owned; illustrations, not recommendations) ==\n");
-        int lossless = lastWithoutPositiveRelevantLoss();
-        PointSummary keep = summary("ALL", lossless);
-        out.append(fmt("  Highest threshold losing no positive-similarity relevant hit: %s — recall %s, prec %s, "
-                + "no-relevant still returning %d/%d (%d false hits)\n", thr(grid.get(lossless)),
-                metric(keep.recall()), metric(keep.precision()), keep.falseReturnQueries(), keep.noRelevant(),
-                keep.falseHits()));
+        Optional<Integer> lossless = lastWithoutPositiveRelevantLoss();
+        if (lossless.isEmpty()) {
+            out.append("  Highest threshold losing no positive-similarity relevant hit: n/a — not evaluable: no "
+                    + "relevant hit with positive similarity at 0.00.\n");
+        } else {
+            PointSummary keep = summary("ALL", lossless.get());
+            out.append(fmt("  Highest threshold losing no positive-similarity relevant hit: %s — recall %s, prec %s, "
+                    + "no-relevant still returning %d/%d (%d false hits)\n", thr(grid.get(lossless.get())),
+                    metric(keep.recall()), metric(keep.precision()), keep.falseReturnQueries(), keep.noRelevant(),
+                    keep.falseHits()));
+        }
         Optional<Integer> silent = firstFullNoRelevantAbstention();
-        if (silent.isEmpty()) {
+        boolean negatives = !noRelevantRows().isEmpty();
+        if (!negatives) {
+            out.append("  Full no-relevant abstention: n/a — not evaluable: no content-bearing no-relevant queries in "
+                    + "this set (empty probes do not count).\n");
+        } else if (silent.isEmpty()) {
             out.append("  No declared threshold makes every no-relevant content query abstain.\n");
         } else {
             int point = silent.get();
@@ -368,13 +398,21 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
                     + "abstention %s\n", thr(grid.get(point)), metric(s.recall()), metric(s.precision()),
                     metric(s.coverage()), lost, uncovered, metric(s.abstention())));
         }
-        boolean separable = silent.isPresent() && silent.get() <= lossless;
-        out.append(separable
-                ? "  Tradeoff: on this set one declared threshold silences every no-relevant query without losing a "
-                + "positive-similarity relevant hit."
-                : "  Tradeoff: on this set no declared threshold both silences every no-relevant query and keeps every "
-                + "positive-similarity relevant hit; in between, each step trades wrong matches for lost relevant "
-                + "ones.");
+        if (!negatives) {
+            out.append("  Tradeoff: n/a on this set — without no-relevant content queries, silencing wrong matches "
+                    + "cannot be weighed against lost relevant hits.");
+        } else if (lossless.isEmpty()) {
+            out.append("  Tradeoff: n/a on this set — without positive-similarity relevant hits, lost relevant "
+                    + "matches cannot be weighed against silenced wrong matches.");
+        } else {
+            boolean separable = silent.isPresent() && silent.get() <= lossless.get();
+            out.append(separable
+                    ? "  Tradeoff: on this set one declared threshold silences every no-relevant query without losing "
+                    + "a positive-similarity relevant hit."
+                    : "  Tradeoff: on this set no declared threshold both silences every no-relevant query and keeps "
+                    + "every positive-similarity relevant hit; in between, each step trades wrong matches for lost "
+                    + "relevant ones.");
+        }
         out.append(" The operating point is the host's choice (cost of a wrong match vs a lost relevant match) and "
                 + "stays undecided here: one small synthetic corpus, one encoder, no cross-dataset evidence.\n");
     }
