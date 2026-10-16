@@ -181,6 +181,13 @@ tasks.register<JavaExec>("runForgeQueryExpansionComparison") {
     classpath = sourceSets["main"].runtimeClasspath
 }
 
+tasks.register<JavaExec>("runExecutionScaleSweep") {
+    description = "Measure scoped execution recall at N=25/250/1000 experiences per scope over several isolated scopes: append, projection rebuild, reopen, read-only open and top-K recall, with hard isolation, exact-ref, tie-order and parity checks (timing and memory informational only; no Forge, network or provider required). Options via --args, e.g. --args=\"--sizes=25,250,1000 --iterations=10\""
+    group = "application"
+    mainClass.set("com.monada.evaluation.execution.ExecutionScaleSweepMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
 tasks.named<Test>("test") {
     // The cross-JVM determinism test starts child JVMs that run the evaluation command on this runtime classpath.
     doFirst {

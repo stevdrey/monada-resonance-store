@@ -406,7 +406,7 @@ public final class ForgeExperienceEvaluator {
         return violations;
     }
 
-    private static List<String> mustReject(String what, Runnable call) {
+    static List<String> mustReject(String what, Runnable call) {
         try {
             call.run();
             return List.of(what + " was served instead of being rejected");
