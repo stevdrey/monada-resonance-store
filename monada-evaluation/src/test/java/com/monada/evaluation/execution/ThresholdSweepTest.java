@@ -126,13 +126,30 @@ class ThresholdSweepTest {
     }
 
     @Test
-    void contentFreeQueriesOutsideTheEmptyCategoryAreEmptyToo() {
-        QueryOutcome stopwords = outcome("S96", Category.NO_RELEVANT, "the and of", Set.of(), List.of());
-        QueryOutcome punctuation = outcome("S97", Category.NO_RELEVANT, "?!", Set.of(), List.of());
-        ThresholdSweepReport report = ThresholdSweep.sweep(stress(s91(), stopwords, punctuation), GRID);
-        assertEquals(Kind.EMPTY, report.row("S96").kind(), "no ranking at all: content-free, whatever the category");
-        assertEquals(Kind.EMPTY, report.row("S97").kind());
-        assertNotEvaluable(report);
+    void aContentNegativeWithZeroHitsIsAnObservedAbstentionNotAnEmptyProbe() {
+        ThresholdSweepReport report = ThresholdSweep.sweep(stress(s91(), quiet()), GRID);
+        assertEquals(Reason.NO_HITS, report.row("S98").outcome().reason());
+        assertEquals(Kind.NO_RELEVANT, report.row("S98").kind(), "emptiness comes from the query, not retrieval");
+        PointSummary base = report.summary("ALL", 0);
+        assertEquals(1, base.noRelevant());
+        assertEquals(0, base.falseReturnQueries());
+        assertEquals(1.0, base.noRelevantAbstention());
+        assertEquals(Optional.of(report.point(0.0)), report.firstFullNoRelevantAbstention());
+        String text = report.render();
+        assertTrue(text.contains("Lowest threshold at which every no-relevant content query abstains: 0.00"), text);
+        assertFalse(text.contains(NOT_EVALUABLE), text);
+    }
+
+    @Test
+    void aZeroHitNegativeAndAFalseReturningNegativeBothCount() {
+        ThresholdSweepReport report = ThresholdSweep.sweep(stress(quiet(), s90(), s91()), GRID);
+        PointSummary base = report.summary("ALL", 0);
+        assertEquals(2, base.noRelevant());
+        assertEquals(1, base.falseReturnQueries(), "only S90 returns at 0.00");
+        assertEquals(0.5, base.noRelevantAbstention());
+        assertTrue(report.row("S98").abstains(0));
+        assertFalse(report.row("S90").abstains(0));
+        assertEquals(Optional.of(report.point(0.25)), report.firstFullNoRelevantAbstention());
     }
 
     @Test
@@ -295,6 +312,14 @@ class ThresholdSweepTest {
 
     private static QueryOutcome s95() {
         return outcome("S95", Category.EMPTY_QUERY, "?!", Set.of(), List.of());
+    }
+
+    /** A non-blank content query judged to have no answer whose recall returns nothing ({@code NO_HITS}). */
+    private static QueryOutcome quiet() {
+        StressQuery q = new StressQuery("S98", Category.NO_RELEVANT, "NO_RELEVANT", "alpha", "deploy the quantum ledger",
+                Set.of(), Set.of(), "test");
+        return new QueryOutcome(q, "CURRENT", List.of(), List.of(), Map.of(), Map.of(), 0.0, Reason.NO_HITS,
+                Optional.empty());
     }
 
     private static QueryOutcome outcome(String id, Category category, String text, Set<String> relevant,

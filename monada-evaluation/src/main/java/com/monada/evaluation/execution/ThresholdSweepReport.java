@@ -46,10 +46,11 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
 
     /**
      * How a query enters the metrics: {@code SCORED} (has relevant experiences), {@code NO_RELEVANT} (a content query
-     * judged to have no answer, whose returns are false matches) or {@code EMPTY} (a blank query, an
-     * {@link Category#EMPTY_QUERY} probe, or any other query without relevant experiences whose recall returns no hit,
-     * such as punctuation or stopwords only, whatever its category). EMPTY queries enter no denominator: they return
-     * nothing at every threshold, so counting them would inflate no-relevant abstention.
+     * judged to have no answer, whose returns are false matches) or {@code EMPTY} (a blank query or an
+     * {@link Category#EMPTY_QUERY} probe without content, such as punctuation or stopwords only). EMPTY queries enter
+     * no denominator: they return nothing at every threshold, so counting them would inflate no-relevant abstention.
+     * Emptiness comes from the query and its declared category, never from retrieval: a content query judged to have
+     * no answer that retrieves nothing ({@code NO_HITS}) is an observed abstention and stays {@code NO_RELEVANT}.
      */
     public enum Kind {
         SCORED, NO_RELEVANT, EMPTY;
@@ -58,8 +59,7 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
             if (q.scored()) {
                 return SCORED;
             }
-            boolean empty = q.query().text().isBlank() || q.query().category() == Category.EMPTY_QUERY
-                    || q.hits().isEmpty();
+            boolean empty = q.query().text().isBlank() || q.query().category() == Category.EMPTY_QUERY;
             return empty ? EMPTY : NO_RELEVANT;
         }
     }
@@ -276,8 +276,7 @@ public record ThresholdSweepReport(RecallStressReport stress, List<Double> grid,
                 + "kept / kept, recall = relevant kept / judged positives, cover = queries with a relevant hit kept, "
                 + "abst = queries keeping nothing. No-relevant content queries are reported separately (ret = "
                 + "queries still returning a hit, false = hits kept) and never enter a scored denominator. Empty "
-                + "queries (blank, EMPTY_QUERY probes, or any query without relevant experiences whose recall returns "
-                + "no hit, such as punctuation or stopwords only) enter no denominator and are listed only "
+                + "queries (blank, or EMPTY_QUERY probes without content) enter no denominator and are listed only "
                 + "in the per-query table. n/a = empty denominator.\n");
 
         out.append("\n== Sweep per group ==\n");
