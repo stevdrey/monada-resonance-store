@@ -58,7 +58,7 @@ public record ExecutionScaleSweepReport(ExecutionScaleSweepEvaluator.Config conf
     /** Nondeterministic measurements of one size. */
     public record SizeTiming(int experiencesPerScope, Map<String, Long> phaseNanos,
                              Map<Integer, ScaleTimingStatistics> recallLatency, long readOnlyHeapDeltaBytes,
-                             Map<String, Disk> disk) {
+                             int readOnlySnapshots, Map<String, Disk> disk) {
         public SizeTiming {
             phaseNanos = new LinkedHashMap<>(phaseNanos);
             recallLatency = new LinkedHashMap<>(recallLatency);
@@ -174,7 +174,7 @@ public record ExecutionScaleSweepReport(ExecutionScaleSweepEvaluator.Config conf
                     s.medianNanos() / 1_000.0, s.p95Nanos() / 1_000.0, s.maxNanos() / 1_000.0,
                     s.avgNanos() / 1_000.0)));
             out.append(fmt("  heap proxy: used-heap delta after opening %d read-only snapshots (after System.gc()) "
-                    + "%.1f KiB\n", t.disk().size(), t.readOnlyHeapDeltaBytes() / 1024.0));
+                    + "%.1f KiB\n", t.readOnlySnapshots(), t.readOnlyHeapDeltaBytes() / 1024.0));
             t.disk().forEach((scope, d) -> out.append(fmt("  disk %-11s ledger=%.1f KiB projection=%.1f KiB\n",
                     scope, d.ledgerBytes() / 1024.0, d.projectionBytes() / 1024.0)));
         }

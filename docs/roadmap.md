@@ -425,12 +425,15 @@ one query set digest per size) and only the corpus size changes between scale po
 
 Five hard checks decide the exit code at every size (decision `SCALE_SWEEP_CHARACTERIZED`): `S1` zero foreign-scope
 hits and foreign `ScopeId`s rejected by recall, load and export; `S2` every hit is an expected latest-revision finish
-whose ref loads exactly from the ledger with matching coordinates, result and latest solution; `S3` hits ordered by
+whose ref loads exactly from the ledger with matching coordinates, result and latest solution, and no recall returns
+more than K hits; `S3` hits ordered by
 similarity, atom id and canonical ref, with each atom's refs contiguous and equal to the published checkpoint's; `S4`
-rankings identical after append, first and second rebuild, writable reopen, read-only open and across every repeated
-timed recall, with the projection `CURRENT` and covering the whole ledger in each phase; `S5` ledger events, refs,
-live atoms (distinct texts), retired atoms (corrected texts; checked after append, each rebuild, the reopen and in
-the read-only generation, and disjoint from live atoms) and dimensions (128) match the generated ground truth.
+rankings identical after append (taken from the instance that appended, so its incrementally maintained projection is
+what is compared), first and second rebuild, writable reopen, read-only open and across every repeated timed recall,
+with the projection `CURRENT` and covering the whole ledger in each phase and every hit stamped with a covered
+sequence equal to the recorded ledger and the projection version the recall reports; `S5` ledger events, refs,
+live atoms (distinct texts), retired atoms (corrected texts; the same retired atom ids after append, each rebuild,
+the reopen and in the read-only generation, never live in the same generation) and dimensions (128) match the generated ground truth.
 The deterministic report also lists per scope executions, attempts started, unfinished attempts, corrections, active
 attempts, the projection generation after each phase and the structural candidate count (live + retired atoms in
 the published generation). Timing, latency percentiles, a heap proxy (used-heap delta after `System.gc()` when the

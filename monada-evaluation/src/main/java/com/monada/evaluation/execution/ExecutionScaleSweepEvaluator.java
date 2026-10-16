@@ -38,6 +38,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -59,8 +60,8 @@ public final class ExecutionScaleSweepEvaluator {
     static final int DEFAULT_ITERATIONS = 5;
 
     /** What one sweep measures; every field is printed in the deterministic report. */
-    record Config(long seed, List<Integer> sizes, List<Integer> ks, int warmup, int iterations) {
-        Config {
+    public record Config(long seed, List<Integer> sizes, List<Integer> ks, int warmup, int iterations) {
+        public Config {
             sizes = List.copyOf(sizes);
             ks = List.copyOf(ks);
             if (sizes.isEmpty()) {
@@ -94,7 +95,7 @@ public final class ExecutionScaleSweepEvaluator {
             ks = ks.stream().sorted().toList();
         }
 
-        static Config defaults() {
+        public static Config defaults() {
             return new Config(ExecutionScaleCorpusGenerator.DEFAULT_SEED, DEFAULT_SIZES, DEFAULT_KS, DEFAULT_WARMUP,
                     DEFAULT_ITERATIONS);
         }
@@ -107,7 +108,8 @@ public final class ExecutionScaleSweepEvaluator {
             hits.forEach((key, list) -> {
                 out.append(key);
                 list.forEach(h -> out.append(' ').append(ExperienceRefCodec.canonical(h.ref())).append('#')
-                        .append(h.atomId()).append(':').append(h.similarity()));
+                        .append(h.atomId()).append(':').append(h.similarity()).append("@c")
+                        .append(h.coveredSequence()).append('v').append(h.projectionVersion()));
                 out.append('\n');
             });
             return out.toString();
@@ -137,13 +139,16 @@ public final class ExecutionScaleSweepEvaluator {
                         v.isolation, List.of("hits checked: " + v.hitsChecked + "; cross-scope probes rejected: "
                                 + v.probes)),
                 ForgeGate.of(ExecutionScaleSweepReport.EXACT_REFERENCES,
-                        "every hit is an expected latest-revision finish that loads exactly from the ledger",
-                        v.references, List.of("hits resolved against the ledger: " + v.hitsChecked)),
+                        "every hit is an expected latest-revision finish that loads exactly from the ledger; never "
+                                + "more than K hits",
+                        v.references, List.of("hits checked: " + v.hitsChecked + "; distinct refs resolved against "
+                                + "the ledger: " + v.refsResolved)),
                 ForgeGate.of(ExecutionScaleSweepReport.DETERMINISTIC_TIES,
                         "hits ordered by similarity, atom id, canonical ref; an atom's refs contiguous and complete",
                         v.ties, List.of("rankings checked: " + v.rankingsChecked)),
                 ForgeGate.of(ExecutionScaleSweepReport.PARITY,
-                        "append, rebuild, second rebuild, reopen, read-only and repeated recalls rank identically",
+                        "append (same instance), rebuild, second rebuild, reopen, read-only and repeated recalls rank "
+                                + "identically from projections covering the whole ledger",
                         v.parity, List.of("phase comparisons: " + v.parityComparisons
                                 + "; repeated timed recalls compared: " + v.repeatedRecalls)),
                 ForgeGate.of(ExecutionScaleSweepReport.STRUCTURAL_ACCOUNTING,
@@ -160,6 +165,7 @@ public final class ExecutionScaleSweepEvaluator {
         final List<String> parity = new ArrayList<>();
         final List<String> structure = new ArrayList<>();
         int hitsChecked;
+        int refsResolved;
         int probes;
         int rankingsChecked;
         int parityComparisons;
@@ -176,13 +182,16 @@ public final class ExecutionScaleSweepEvaluator {
         private final String label;
         private final Map<String, Long> phases = new LinkedHashMap<>();
         private final Map<String, List<String>> generations = new LinkedHashMap<>();
-        private final Map<String, List<Integer>> retiredByPhase = new LinkedHashMap<>();
+        /** Retired and live atom ids of the published generation after each observed phase, per scope. */
+        private final Map<String, List<SortedSet<String>>> retiredByPhase = new LinkedHashMap<>();
+        private final Map<String, List<Set<String>>> liveByPhase = new LinkedHashMap<>();
         private final Map<Integer, ScaleTimingStatistics> latency = new TreeMap<>();
         private final Map<String, Disk> disk = new LinkedHashMap<>();
         private final List<ScopeStructure> structures = new ArrayList<>();
         private int selfRecallTargets;
         private int selfRecallAtOne;
         private long heapDelta;
+        private int readOnlySnapshots;
 
         SizeRun(Config config, ScaleCorpus corpus, Path root, Violations v) {
             this.config = config;
@@ -193,27 +202,27 @@ public final class ExecutionScaleSweepEvaluator {
         }
 
         void execute() {
+            // The rankings after append come from the very instance that appended: its incrementally maintained
+            // projection is what is compared, not one a later open would reconcile.
             Map<String, Rankings> appended = new LinkedHashMap<>();
-            long t = System.nanoTime();
+            long append = 0;
             for (ScopeCorpus scope : corpus.scopes()) {
+                long t = System.nanoTime();
                 try (ExecutionMemory memory = ExecutionMemory.open(root, scope.scope())) {
                     List<RecordResult> recorded = ForgeFixtureRecorder.record(memory, scope.events());
+                    append += System.nanoTime() - t;
                     for (int i = 0; i < recorded.size(); i++) {
                         if (recorded.get(i).status() != RecordResult.Status.APPENDED) {
                             v.structure.add(label + " " + scope.scope().value() + ": event " + i + " was "
                                     + recorded.get(i).status() + " " + recorded.get(i).reason());
                         }
                     }
-                }
-            }
-            phases.put("append", System.nanoTime() - t);
-            for (ScopeCorpus scope : corpus.scopes()) {
-                try (ExecutionMemory memory = ExecutionMemory.open(root, scope.scope())) {
                     status(scope, "after append", memory.projectionStatus(scope.scope()));
-                    appended.put(key(scope), rankings(memory, scope));
+                    appended.put(key(scope), rankings(memory, scope, "after append"));
                 }
-                generation(scope, "append");
+                observe(scope, "append");
             }
+            phases.put("append", append);
 
             Map<String, Rankings> rebuilt = new LinkedHashMap<>();
             Map<String, Rankings> rebuiltAgain = new LinkedHashMap<>();
@@ -221,18 +230,18 @@ public final class ExecutionScaleSweepEvaluator {
             long rebuildAgain = 0;
             for (ScopeCorpus scope : corpus.scopes()) {
                 try (ExecutionMemory memory = ExecutionMemory.open(root, scope.scope())) {
-                    t = System.nanoTime();
+                    long t = System.nanoTime();
                     ProjectionStatus first = memory.rebuildProjection(scope.scope());
                     rebuild += System.nanoTime() - t;
                     status(scope, "after rebuild", first);
-                    generation(scope, "rebuild");
-                    rebuilt.put(key(scope), rankings(memory, scope));
+                    observe(scope, "rebuild");
+                    rebuilt.put(key(scope), rankings(memory, scope, "after rebuild"));
                     t = System.nanoTime();
                     ProjectionStatus second = memory.rebuildProjection(scope.scope());
                     rebuildAgain += System.nanoTime() - t;
                     status(scope, "after second rebuild", second);
-                    generation(scope, "second rebuild");
-                    rebuiltAgain.put(key(scope), rankings(memory, scope));
+                    observe(scope, "second rebuild");
+                    rebuiltAgain.put(key(scope), rankings(memory, scope, "after second rebuild"));
                 }
             }
             phases.put("rebuild", rebuild);
@@ -241,7 +250,7 @@ public final class ExecutionScaleSweepEvaluator {
             Map<String, Rankings> reopened = new LinkedHashMap<>();
             long reopen = 0;
             for (ScopeCorpus scope : corpus.scopes()) {
-                t = System.nanoTime();
+                long t = System.nanoTime();
                 try (ExecutionMemory memory = ExecutionMemory.open(root, scope.scope())) {
                     ProjectionStatus status = memory.projectionStatus(scope.scope());
                     reopen += System.nanoTime() - t;
@@ -251,33 +260,36 @@ public final class ExecutionScaleSweepEvaluator {
                                 + memory.history(scope.scope()).highWatermark() + ", recorded "
                                 + scope.events().size());
                     }
-                    reopened.put(key(scope), rankings(memory, scope));
+                    reopened.put(key(scope), rankings(memory, scope, "after writable reopen"));
                 }
-                generation(scope, "reopen");
+                observe(scope, "reopen");
             }
             phases.put("writable reopen", reopen);
 
             Map<String, ExecutionMemory> readOnly = new LinkedHashMap<>();
             try {
                 long before = usedHeap();
-                t = System.nanoTime();
+                long t = System.nanoTime();
                 for (ScopeCorpus scope : corpus.scopes()) {
                     readOnly.put(key(scope), ExecutionMemory.openReadOnly(root, scope.scope()));
                 }
                 phases.put("read-only open", System.nanoTime() - t);
                 heapDelta = usedHeap() - before;
+                readOnlySnapshots = readOnly.size();
                 for (ScopeCorpus scope : corpus.scopes()) {
                     ExecutionMemory memory = readOnly.get(key(scope));
                     status(scope, "read-only", memory.projectionStatus(scope.scope()));
-                    Rankings frozen = rankings(memory, scope);
+                    Rankings frozen = rankings(memory, scope, "read-only");
                     String reference = frozen.fingerprint();
+                    // read once: the read-only generation's checkpoint serves the hit and structure checks
+                    Optional<ProjectionCheckpoint.Snapshot> snapshot = checkpoint(scope, "read-only");
                     compare(scope, "append", appended.get(key(scope)), reference);
                     compare(scope, "rebuild", rebuilt.get(key(scope)), reference);
                     compare(scope, "second rebuild", rebuiltAgain.get(key(scope)), reference);
                     compare(scope, "writable reopen", reopened.get(key(scope)), reference);
-                    checkHits(scope, memory, frozen);
+                    checkHits(scope, memory, frozen, snapshot);
                     probeForeignScopes(scope, memory);
-                    structure(scope);
+                    structure(scope, snapshot);
                     selfRecall(scope, frozen);
                 }
                 measureLatency(readOnly);
@@ -291,11 +303,25 @@ public final class ExecutionScaleSweepEvaluator {
 
         // --- rankings and parity --------------------------------------------------------------------------
 
-        private Rankings rankings(ExecutionMemory memory, ScopeCorpus scope) {
+        /**
+         * Recalls every query at every K. Each hit must come from a projection that covers the whole recorded ledger
+         * and carry the projection version the recall reports: a hit of a stale projection is a parity violation.
+         */
+        private Rankings rankings(ExecutionMemory memory, ScopeCorpus scope, String phase) {
             Map<String, List<ExperienceHit>> hits = new LinkedHashMap<>();
             for (Query q : scope.queries()) {
                 for (int k : config.ks()) {
-                    hits.put(q.id() + "@" + k, memory.recall(scope.scope(), q.text(), k).hits());
+                    ExperienceRecall recall = memory.recall(scope.scope(), q.text(), k);
+                    for (ExperienceHit h : recall.hits()) {
+                        if (h.coveredSequence() != scope.events().size()
+                                || h.projectionVersion() != recall.status().projectionVersion()) {
+                            v.parity.add(label + " " + q.id() + "@" + k + " " + phase + ": hit "
+                                    + ExperienceRefCodec.canonical(h.ref()) + " covers " + h.coveredSequence() + " of "
+                                    + scope.events().size() + " events at projection version "
+                                    + h.projectionVersion() + ", recall reports " + recall.status().projectionVersion());
+                        }
+                    }
+                    hits.put(q.id() + "@" + k, recall.hits());
                 }
             }
             return new Rankings(hits);
@@ -368,17 +394,17 @@ public final class ExecutionScaleSweepEvaluator {
 
         // --- isolation, references and ties -------------------------------------------------------------------
 
-        private void checkHits(ScopeCorpus scope, ExecutionMemory memory, Rankings rankings) {
+        private void checkHits(ScopeCorpus scope, ExecutionMemory memory, Rankings rankings,
+                               Optional<ProjectionCheckpoint.Snapshot> snapshot) {
             Map<String, Experience> expected = scope.experiences().stream().collect(Collectors.toMap(
                     e -> ExperienceRefCodec.canonical(e.ref()), Function.identity()));
-            ProjectionCheckpoint.Snapshot snapshot = checkpoint(scope);
             Map<String, ExperienceHit> resolved = new LinkedHashMap<>();
             rankings.hits().forEach((key, hits) -> {
                 int k = Integer.parseInt(key.substring(key.lastIndexOf('@') + 1));
                 String where = label + " " + key;
                 v.rankingsChecked++;
                 if (hits.size() > k) {
-                    v.ties.add(where + ": " + hits.size() + " hits for K=" + k);
+                    v.references.add(where + ": " + hits.size() + " hits for K=" + k);
                 }
                 for (ExperienceHit h : hits) {
                     v.hitsChecked++;
@@ -393,11 +419,12 @@ public final class ExecutionScaleSweepEvaluator {
                     resolved.putIfAbsent(canonical, h);
                 }
                 v.ties.addAll(orderViolations(where, hits));
-                v.ties.addAll(atomViolations(where, hits, k, snapshot));
+                snapshot.ifPresent(cp -> v.ties.addAll(atomViolations(where, hits, k, cp)));
             });
             resolved.forEach((canonical, h) -> {
                 Experience e = expected.get(canonical);
                 if (e != null) {
+                    v.refsResolved++;
                     v.references.addAll(referenceViolations(label + " " + key(scope), memory, scope.scope(), h, e));
                 }
             });
@@ -411,11 +438,11 @@ public final class ExecutionScaleSweepEvaluator {
                 ScopeId foreign = other.scope();
                 String what = label + " " + key(scope) + " memory, ";
                 v.probes += 3;
-                v.isolation.addAll(mustReject(what + "recall of " + key(other),
+                v.isolation.addAll(ForgeExperienceEvaluator.mustReject(what + "recall of " + key(other),
                         () -> memory.recall(foreign, other.queries().get(0).text(), 5)));
-                v.isolation.addAll(mustReject(what + "load of " + key(other),
+                v.isolation.addAll(ForgeExperienceEvaluator.mustReject(what + "load of " + key(other),
                         () -> memory.loadExecution(foreign, other.experiences().get(0).ref().execution())));
-                v.isolation.addAll(mustReject(what + "export of " + key(other),
+                v.isolation.addAll(ForgeExperienceEvaluator.mustReject(what + "export of " + key(other),
                         () -> memory.exportSamples(ExportRequest.firstPage(foreign, 5))));
             }
         }
@@ -441,10 +468,13 @@ public final class ExecutionScaleSweepEvaluator {
 
         // --- structure -----------------------------------------------------------------------------------------
 
-        private void structure(ScopeCorpus scope) {
+        private void structure(ScopeCorpus scope, Optional<ProjectionCheckpoint.Snapshot> published) {
             v.scopesChecked++;
-            ProjectionCheckpoint.Snapshot snapshot = checkpoint(scope);
             String where = label + " " + key(scope);
+            if (published.isEmpty()) {
+                return; // checkpoint(...) already recorded why the read-only generation could not be read
+            }
+            ProjectionCheckpoint.Snapshot snapshot = published.get();
             if (!snapshot.isSound() || !snapshot.cleanTail()) {
                 v.structure.add(where + ": checkpoint is not sound " + snapshot.problems());
             }
@@ -471,28 +501,37 @@ public final class ExecutionScaleSweepEvaluator {
             if (!partitionByAtom(snapshot).equals(partitionByText(scope))) {
                 v.structure.add(where + ": refs are not grouped into atoms by identical text");
             }
-            // every phase's published generation must retire exactly the corrected texts, not only the first one
-            List<String> phaseNames = generations.get(key(scope));
-            List<Integer> retiredPerPhase = retiredByPhase.get(key(scope));
-            for (int i = 0; i < retiredPerPhase.size(); i++) {
-                if (retiredPerPhase.get(i) != scope.retiredTexts().size()) {
-                    v.structure.add(where + ": " + retiredPerPhase.get(i) + " retired atoms after "
-                            + phaseNames.get(i) + ", expected " + scope.retiredTexts().size() + " corrected texts");
-                }
-            }
+            // Every phase's published generation must retire exactly the corrected texts, by identity: the same
+            // retired atom ids as the read-only generation, none of them live in that phase.
             if (snapshot.retiredAtoms().size() != scope.retiredTexts().size()) {
                 v.structure.add(where + ": " + snapshot.retiredAtoms().size() + " retired atoms in the read-only "
-                        + "generation, expected " + scope.retiredTexts().size());
+                        + "generation, expected " + scope.retiredTexts().size() + " corrected texts");
+            }
+            List<String> phaseNames = generations.get(key(scope));
+            List<SortedSet<String>> retiredPerPhase = retiredByPhase.getOrDefault(key(scope), List.of());
+            List<Set<String>> livePerPhase = liveByPhase.getOrDefault(key(scope), List.of());
+            for (int i = 0; i < retiredPerPhase.size(); i++) {
+                String phase = phaseNames.get(i);
+                if (!retiredPerPhase.get(i).equals(snapshot.retiredAtoms())) {
+                    v.structure.add(where + ": retired atoms after " + phase + " " + retiredPerPhase.get(i).size()
+                            + " differ from the read-only generation's " + snapshot.retiredAtoms().size());
+                }
+                Set<String> liveAndRetired = new HashSet<>(retiredPerPhase.get(i));
+                liveAndRetired.retainAll(livePerPhase.get(i));
+                if (!liveAndRetired.isEmpty()) {
+                    v.structure.add(where + ": atoms both live and retired after " + phase + " " + liveAndRetired);
+                }
             }
             Set<String> liveAndRetired = new HashSet<>(snapshot.retiredAtoms());
             liveAndRetired.retainAll(snapshot.refsByAtom().keySet());
             if (!liveAndRetired.isEmpty()) {
-                v.structure.add(where + ": atoms both live and retired " + liveAndRetired);
+                v.structure.add(where + ": atoms both live and retired in the read-only generation " + liveAndRetired);
             }
             structures.add(new ScopeStructure(key(scope), scope.events().size(), scope.executions(),
                     scope.patternCounts(), scope.attemptsStarted(), scope.unfinishedAttempts(),
                     scope.correctedFinishes(), scope.activeAttempts(), refCount, snapshot.refsByAtom().size(),
-                    retiredPerPhase, snapshot.retiredAtoms().size(), snapshot.dimensions(),
+                    retiredPerPhase.stream().map(Set::size).toList(), snapshot.retiredAtoms().size(),
+                    snapshot.dimensions(),
                     snapshot.refsByAtom().size() + snapshot.retiredAtoms().size(), generations.get(key(scope)),
                     scope.queries().size()));
         }
@@ -511,27 +550,44 @@ public final class ExecutionScaleSweepEvaluator {
             return new HashSet<>(byText.values());
         }
 
-        private void generation(ScopeCorpus scope, String phase) {
+        /**
+         * Reads the published generation once after {@code phase}: its name and its retired and live atom ids. A
+         * missing or unreadable projection is recorded as a structural violation, never thrown.
+         */
+        private void observe(ScopeCorpus scope, String phase) {
+            Optional<ProjectionCheckpoint.Snapshot> snapshot = checkpoint(scope, "after " + phase);
             String name;
             try {
                 name = ProjectionLayout.of(root, scope.scope()).currentDir().map(p -> p.getFileName().toString())
                         .orElse("<none>");
             } catch (IOException e) {
-                name = "<unreadable: " + e.getMessage() + ">";
+                name = "<unreadable>";
             }
             generations.computeIfAbsent(key(scope), k -> new ArrayList<>()).add(phase + "=" + name);
-            retiredByPhase.computeIfAbsent(key(scope), k -> new ArrayList<>()).add(checkpoint(scope).retiredAtoms()
-                    .size());
+            if (snapshot.isPresent()) {
+                retiredByPhase.computeIfAbsent(key(scope), k -> new ArrayList<>()).add(snapshot.get().retiredAtoms());
+                liveByPhase.computeIfAbsent(key(scope), k -> new ArrayList<>()).add(snapshot.get().refsByAtom()
+                        .keySet());
+            } else {
+                retiredByPhase.computeIfAbsent(key(scope), k -> new ArrayList<>()).add(new java.util.TreeSet<>());
+                liveByPhase.computeIfAbsent(key(scope), k -> new ArrayList<>()).add(Set.of());
+            }
         }
 
-        private ProjectionCheckpoint.Snapshot checkpoint(ScopeCorpus scope) {
+        /** The published generation's checkpoint, or empty with a structural violation when it cannot be read. */
+        private Optional<ProjectionCheckpoint.Snapshot> checkpoint(ScopeCorpus scope, String phase) {
+            String where = label + " " + key(scope) + " " + phase;
             try {
                 ProjectionLayout layout = ProjectionLayout.of(root, scope.scope());
-                Path current = layout.currentDir().orElseThrow(() -> new IllegalStateException(
-                        label + " " + key(scope) + ": no published projection"));
-                return ProjectionCheckpoint.read(layout.checkpoint(current), scope.scope());
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
+                Optional<Path> current = layout.currentDir();
+                if (current.isEmpty()) {
+                    v.structure.add(where + ": no published projection");
+                    return Optional.empty();
+                }
+                return Optional.of(ProjectionCheckpoint.read(layout.checkpoint(current.get()), scope.scope()));
+            } catch (IOException | RuntimeException e) {
+                v.structure.add(where + ": published projection is unreadable: " + e.getMessage());
+                return Optional.empty();
             }
         }
 
@@ -554,7 +610,7 @@ public final class ExecutionScaleSweepEvaluator {
         }
 
         SizeTiming timing() {
-            return new SizeTiming(corpus.experiencesPerScope(), phases, latency, heapDelta, disk);
+            return new SizeTiming(corpus.experiencesPerScope(), phases, latency, heapDelta, readOnlySnapshots, disk);
         }
     }
 
@@ -640,15 +696,6 @@ public final class ExecutionScaleSweepEvaluator {
                     + "revision");
         }
         return violations;
-    }
-
-    private static List<String> mustReject(String what, Runnable call) {
-        try {
-            call.run();
-            return List.of(what + " was served instead of being rejected");
-        } catch (IllegalArgumentException expected) {
-            return List.of();
-        }
     }
 
     /** SHA-256 (first 16 hex digits) of every scope's queries: id, kind, text and target, in order. */

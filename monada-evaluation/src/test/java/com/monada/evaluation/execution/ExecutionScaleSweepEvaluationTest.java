@@ -94,6 +94,18 @@ class ExecutionScaleSweepEvaluationTest {
     }
 
     @Test
+    void theGateEvidenceSeparatesHitsFromResolvedRefsAndNamesTheLimit() {
+        ForgeGate references = report.gates().stream()
+                .filter(g -> g.id().equals(ExecutionScaleSweepReport.EXACT_REFERENCES)).findFirst().orElseThrow();
+        assertTrue(references.name().contains("never more than K hits"), references.name());
+        String evidence = references.details().get(0);
+        assertTrue(evidence.matches("hits checked: \\d+; distinct refs resolved against the ledger: \\d+"), evidence);
+        String[] counts = evidence.replaceAll("[^0-9 ]", "").trim().split(" +");
+        assertTrue(Integer.parseInt(counts[1]) < Integer.parseInt(counts[0]), "refs are resolved once, not per hit");
+        assertTrue(report.renderTiming().contains("opening 3 read-only snapshots"));
+    }
+
+    @Test
     void everySizeReportsTheSameQuerySet() {
         assertEquals(1, report.sizes().stream().map(SizeResult::queryDigest).distinct().count());
         assertTrue(report.render().contains("query set sha256=" + report.sizes().get(0).queryDigest()));
@@ -152,6 +164,10 @@ class ExecutionScaleSweepEvaluationTest {
             assertTrue(hits.size() >= 3 && hits.get(0).atomId().equals(hits.get(1).atomId()),
                     "the duplicate group shares the top atom");
             assertEquals(List.of(), ExecutionScaleSweepEvaluator.orderViolations("ok", hits));
+            String fingerprint = new ExecutionScaleSweepEvaluator.Rankings(java.util.Map.of("dup@5", hits))
+                    .fingerprint();
+            assertTrue(fingerprint.contains("@c" + scope.events().size() + "v"), "freshness is fingerprinted: "
+                    + fingerprint);
             assertEquals(List.of(), ExecutionScaleSweepEvaluator.atomViolations("ok", hits, 5, snapshot));
 
             List<ExperienceHit> swapped = new ArrayList<>(hits);
