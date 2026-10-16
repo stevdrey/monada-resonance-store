@@ -417,7 +417,11 @@ per scope, using the #121 occurrence patterns: single accepted attempt, failure 
 repair, a finish corrected r1 -> r2 (its first text becomes a retired atom), groups of independent executions with
 identical text (one atom, several refs) and one probe text identical in every scope. Each size runs in a fresh root:
 append every event, check the incrementally maintained projection, rebuild twice, reopen writable, open all scopes
-read-only and recall 10 queries per scope at K = 1/5/20 (2 untimed warmup + 5 timed recalls per query and K).
+read-only and recall 10 queries per scope at K = 1/5/20 (2 untimed warmup + 5 timed rounds over every query and K,
+with the K order rotated by one every round so no K arm always runs warmer). The probe, the first duplicate group and
+three anchor executions (failure then repair, corrected finish, single attempt) form a size-independent prefix; the
+queries are drawn from it before any size-dependent draw, so every size recalls the same queries (the report prints
+one query set digest per size) and only the corpus size changes between scale points.
 
 Five hard checks decide the exit code at every size (decision `SCALE_SWEEP_CHARACTERIZED`): `S1` zero foreign-scope
 hits and foreign `ScopeId`s rejected by recall, load and export; `S2` every hit is an expected latest-revision finish
@@ -425,7 +429,8 @@ whose ref loads exactly from the ledger with matching coordinates, result and la
 similarity, atom id and canonical ref, with each atom's refs contiguous and equal to the published checkpoint's; `S4`
 rankings identical after append, first and second rebuild, writable reopen, read-only open and across every repeated
 timed recall, with the projection `CURRENT` and covering the whole ledger in each phase; `S5` ledger events, refs,
-live atoms (distinct texts), retired atoms (corrected texts) and dimensions (128) match the generated ground truth.
+live atoms (distinct texts), retired atoms (corrected texts; checked after append, each rebuild, the reopen and in
+the read-only generation, and disjoint from live atoms) and dimensions (128) match the generated ground truth.
 The deterministic report also lists per scope executions, attempts started, unfinished attempts, corrections, active
 attempts, the projection generation after each phase and the structural candidate count (live + retired atoms in
 the published generation). Timing, latency percentiles, a heap proxy (used-heap delta after `System.gc()` when the
@@ -438,20 +443,21 @@ OpenJDK 64-Bit Server VM 27+35, Azul; Linux 7.2.10 x86_64; 16 processors; max he
 
 | N per scope | ledger events (α/β/γ) | live / retired atoms (α) | rebuild, 3 scopes | read-only open | recall p50 / p95 K=1 | K=20 | heap delta | disk per scope (ledger + projection) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 25 | 120 / 118 / 126 | 16 / 0 | 127 ms | 59 ms | 38 / 98 µs | 66 / 101 µs | 0.4 MiB | ~36 + ~40 KiB |
-| 250 | 1232 / 1227 / 1244 | 208 / 25 | 304 ms | 90 ms | 105 / 165 µs | 90 / 122 µs | 3.8 MiB | ~365 + ~413 KiB |
-| 1000 | 4982 / 4942 / 4916 | 853 / 91 | 1341 ms | 308 ms | 431 / 1190 µs | 424 / 546 µs | 15.3 MiB | ~1.5 + ~1.6 MiB |
+| 25 | 119 / 120 / 124 | 20 / 1 | 74 ms | 34 ms | 28 / 40 µs | 49 / 80 µs | 0.4 MiB | ~36 + ~41 KiB |
+| 250 | 1231 / 1232 / 1240 | 211 / 26 | 338 ms | 76 ms | 82 / 108 µs | 96 / 117 µs | 3.8 MiB | ~368 + ~415 KiB |
+| 1000 | 4983 / 4946 / 4915 | 857 / 93 | 954 ms | 305 ms | 389 / 462 µs | 419 / 482 µs | 15.3 MiB | ~1.5 + ~1.6 MiB |
 
 - **Correctness held at every size.** No leakage, every ref exact, tie order and atom grouping stable, parity across
   every phase and repeated recall; 18/18 exact-text queries per size returned the target (or an identical-text twin)
   at rank 1 (exploratory, not gated).
 - **Recall and memory grow about linearly with scope size.** From 250 to 1000 experiences recall p50 rises about 4x
-  and the read-only heap delta about 4x; K barely matters because the scan, not the top-K, dominates. Single machine,
-  150 samples per K and size: these are orders of magnitude, not benchmarks.
-- **Retired atoms stay in the scan.** Corrected r1 texts remain retired atoms after both rebuilds (91 of 944 candidates
+  and the read-only heap delta about 4x. With the K arms interleaved, larger K costs a little more (K=20 vs K=1 p50:
+  +76% at N=25, +17% at N=250, +8% at N=1000): the per-hit work shrinks relative to the scan as the scope grows.
+  Single machine, 150 samples per K and size: these are orders of magnitude, not benchmarks.
+- **Retired atoms stay in the scan.** Corrected r1 texts remain retired atoms after both rebuilds (93 of 950 candidates
   in `scale-alpha` at N=1000, about 10%), so linear-scan work tracks every text ever projected, not only live refs.
-- **Rebuild is the most expensive phase** (about 0.45 s per 1000-experience scope here) and grows with scope size;
-  append stayed under 1 s for all three scopes at every size.
+- **Rebuild grows with scope size** (about 0.3 s per 1000-experience scope here, similar to appending the whole
+  scope); append stayed under 1 s for all three scopes at every size.
 
 Not changed: `ExecutionMemory`, `LinearScanResonanceIndex`, `MAX_LIMIT`, projection and ledger formats, defaults,
 caching and rebuild policy (no implicit rebuild); the #102, #121, #122, #123 and #124 reports are unchanged apart

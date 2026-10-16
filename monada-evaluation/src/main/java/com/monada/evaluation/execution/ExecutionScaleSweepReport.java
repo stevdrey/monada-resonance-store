@@ -33,17 +33,18 @@ public record ExecutionScaleSweepReport(ExecutionScaleSweepEvaluator.Config conf
     /** Deterministic structure of one scope at one size, from the generated corpus and the published checkpoint. */
     public record ScopeStructure(String scope, int ledgerEvents, int executions, Map<Pattern, Integer> patterns,
                                  int attemptsStarted, int unfinishedAttempts, int correctedFinishes,
-                                 int activeAttempts, int projectedRefs, int liveAtoms, int retiredAtomsAfterAppend,
+                                 int activeAttempts, int projectedRefs, int liveAtoms, List<Integer> retiredAtomsPerPhase,
                                  int retiredAtomsPublished, int dimensions, int structuralCandidates,
                                  List<String> generations, int queries) {
         public ScopeStructure {
             patterns = Map.copyOf(patterns);
+            retiredAtomsPerPhase = List.copyOf(retiredAtomsPerPhase);
             generations = List.copyOf(generations);
         }
     }
 
     /** One size of the sweep; {@code selfRecallAtOne} is exploratory and never gated. */
-    public record SizeResult(int experiencesPerScope, int scopeCount, List<ScopeStructure> scopes,
+    public record SizeResult(int experiencesPerScope, int scopeCount, String queryDigest, List<ScopeStructure> scopes,
                              int selfRecallTargets, int selfRecallAtOne) {
         public SizeResult {
             scopes = List.copyOf(scopes);
@@ -103,25 +104,30 @@ public record ExecutionScaleSweepReport(ExecutionScaleSweepEvaluator.Config conf
         out.append(fmt("  dimensions=%d text scheme=%s recall MAX_LIMIT=%d\n",
                 ProjectionCheckpoint.PROJECTION_DIMENSIONS, ProjectionCheckpoint.TEXT_SCHEME,
                 com.monada.api.execution.ExperienceRecall.MAX_LIMIT));
-        out.append(fmt("  latency: warmup=%d untimed + iterations=%d timed recalls per query and K, read-only "
-                + "snapshots\n", config.warmup(), config.iterations()));
+        out.append(fmt("  latency: warmup=%d untimed + iterations=%d timed rounds over every query and K on the "
+                + "read-only snapshots; the K order rotates by one every round\n", config.warmup(),
+                config.iterations()));
         out.append("  scopes: ").append(String.join(", ", ExecutionScaleCorpusGenerator.SCOPES)).append('\n');
         out.append("  patterns: PROBE (identical text in every scope), SINGLE, REPAIR (fail then repair), "
                 + "UNFINISHED_REPAIR (repair never finished), CORRECTED (finish corrected r1->r2, r1 text retired), "
                 + "DUPLICATE (independent executions with identical text: one atom, several refs)\n");
 
         out.append("\n== Structure per size (deterministic) ==\n");
+        out.append("  every size recalls the same queries (same query set digest): only the corpus size changes\n");
         out.append("  ledger=ledger events; active=finished attempts at latest revision (recallable); "
-                + "retired=retired atoms after append / in the published generation; candidates=live+retired "
+                + "retired=retired atoms after append/rebuild/second rebuild/reopen, then in the read-only generation; "
+                + "candidates=live+retired "
                 + "atoms in the published generation (atoms a linear-scan recall visits)\n");
         for (SizeResult size : sizes) {
-            out.append(fmt("\nN=%d per scope x %d scopes\n", size.experiencesPerScope(), size.scopeCount()));
+            out.append(fmt("\nN=%d per scope x %d scopes; query set sha256=%s\n", size.experiencesPerScope(),
+                    size.scopeCount(), size.queryDigest()));
             for (ScopeStructure s : size.scopes()) {
                 out.append(fmt("  %-11s ledger=%d executions=%d attempts=%d unfinished=%d corrected=%d active=%d "
-                                + "refs=%d live-atoms=%d retired=%d/%d candidates=%d dims=%d queries=%d\n",
+                                + "refs=%d live-atoms=%d retired=%s->%d candidates=%d dims=%d queries=%d\n",
                         s.scope(), s.ledgerEvents(), s.executions(), s.attemptsStarted(), s.unfinishedAttempts(),
                         s.correctedFinishes(), s.activeAttempts(), s.projectedRefs(), s.liveAtoms(),
-                        s.retiredAtomsAfterAppend(), s.retiredAtomsPublished(), s.structuralCandidates(),
+                        s.retiredAtomsPerPhase().stream().map(String::valueOf).collect(java.util.stream.Collectors.joining("/")),
+                        s.retiredAtomsPublished(), s.structuralCandidates(),
                         s.dimensions(), s.queries()));
                 List<String> patterns = new ArrayList<>();
                 for (Pattern p : Pattern.values()) {

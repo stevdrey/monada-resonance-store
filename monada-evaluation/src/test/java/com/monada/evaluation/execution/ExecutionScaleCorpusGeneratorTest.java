@@ -36,7 +36,7 @@ class ExecutionScaleCorpusGeneratorTest {
 
     @Test
     void everyScopeHoldsExactlyTheRequestedRecallableExperiences() {
-        for (int n : List.of(5, 6, 25, 250)) {
+        for (int n : List.of(7, 8, 25, 250)) {
             ScaleCorpus corpus = ExecutionScaleCorpusGenerator.generate(7, n);
             assertEquals(ExecutionScaleCorpusGenerator.SCOPES.size(), corpus.scopes().size());
             for (ScopeCorpus scope : corpus.scopes()) {
@@ -50,6 +50,34 @@ class ExecutionScaleCorpusGeneratorTest {
     void sizesBelowTheMinimumAreRejected() {
         assertThrows(IllegalArgumentException.class, () -> ExecutionScaleCorpusGenerator.generate(42,
                 ExecutionScaleCorpusGenerator.MIN_EXPERIENCES_PER_SCOPE - 1));
+    }
+
+    @Test
+    void everySizeRecallsTheSameQueries() {
+        List<List<ExecutionScaleCorpusGenerator.Query>> perScope = ExecutionScaleCorpusGenerator.generate(42,
+                ExecutionScaleCorpusGenerator.MIN_EXPERIENCES_PER_SCOPE).scopes().stream()
+                .map(ScopeCorpus::queries).toList();
+        for (int n : List.of(25, 250, 1000)) {
+            assertEquals(perScope, ExecutionScaleCorpusGenerator.generate(42, n).scopes().stream()
+                    .map(ScopeCorpus::queries).toList(), "N=" + n);
+        }
+        assertNotEquals(perScope, ExecutionScaleCorpusGenerator.generate(43, 25).scopes().stream()
+                .map(ScopeCorpus::queries).toList());
+    }
+
+    @Test
+    void exactQueriesTargetTheAnchorPatterns() {
+        for (ScopeCorpus scope : ExecutionScaleCorpusGenerator.generate(42, 250).scopes()) {
+            List<String> targets = scope.queries().stream().filter(q -> q.kind() == QueryKind.EXACT)
+                    .map(q -> q.target().orElseThrow()).toList();
+            assertEquals(ExecutionScaleCorpusGenerator.EXACT_QUERIES_PER_SCOPE, targets.size());
+            List<Experience> anchors = scope.experiences().subList(3, 7);
+            assertEquals(anchors.stream().map(Experience::experienceId).toList(), targets);
+            assertEquals(List.of("a1", "a2", "a1", "a1"), anchors.stream()
+                    .map(e -> e.ref().attempt().orElseThrow().value()).toList());
+            assertEquals(com.monada.core.execution.AttemptResult.FAILED, anchors.get(0).result());
+            assertEquals(2, anchors.get(2).ref().revision(), "the corrected anchor is recalled at r2");
+        }
     }
 
     @Test

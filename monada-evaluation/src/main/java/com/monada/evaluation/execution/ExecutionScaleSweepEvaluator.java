@@ -176,7 +176,7 @@ public final class ExecutionScaleSweepEvaluator {
         private final String label;
         private final Map<String, Long> phases = new LinkedHashMap<>();
         private final Map<String, List<String>> generations = new LinkedHashMap<>();
-        private final Map<String, Integer> retiredAfterAppend = new LinkedHashMap<>();
+        private final Map<String, List<Integer>> retiredByPhase = new LinkedHashMap<>();
         private final Map<Integer, ScaleTimingStatistics> latency = new TreeMap<>();
         private final Map<String, Disk> disk = new LinkedHashMap<>();
         private final List<ScopeStructure> structures = new ArrayList<>();
@@ -212,8 +212,6 @@ public final class ExecutionScaleSweepEvaluator {
                     status(scope, "after append", memory.projectionStatus(scope.scope()));
                     appended.put(key(scope), rankings(memory, scope));
                 }
-                ProjectionCheckpoint.Snapshot snapshot = checkpoint(scope);
-                retiredAfterAppend.put(key(scope), snapshot.retiredAtoms().size());
                 generation(scope, "append");
             }
 
@@ -240,6 +238,7 @@ public final class ExecutionScaleSweepEvaluator {
             phases.put("rebuild", rebuild);
             phases.put("second rebuild", rebuildAgain);
 
+            Map<String, Rankings> reopened = new LinkedHashMap<>();
             long reopen = 0;
             for (ScopeCorpus scope : corpus.scopes()) {
                 t = System.nanoTime();
@@ -252,6 +251,7 @@ public final class ExecutionScaleSweepEvaluator {
                                 + memory.history(scope.scope()).highWatermark() + ", recorded "
                                 + scope.events().size());
                     }
+                    reopened.put(key(scope), rankings(memory, scope));
                 }
                 generation(scope, "reopen");
             }
@@ -274,6 +274,7 @@ public final class ExecutionScaleSweepEvaluator {
                     compare(scope, "append", appended.get(key(scope)), reference);
                     compare(scope, "rebuild", rebuilt.get(key(scope)), reference);
                     compare(scope, "second rebuild", rebuiltAgain.get(key(scope)), reference);
+                    compare(scope, "writable reopen", reopened.get(key(scope)), reference);
                     checkHits(scope, memory, frozen);
                     probeForeignScopes(scope, memory);
                     structure(scope);
@@ -318,34 +319,51 @@ public final class ExecutionScaleSweepEvaluator {
         }
 
         /**
-         * Times every query of every scope at each K on the read-only snapshots: {@code warmup} untimed calls, then
-         * {@code iterations} timed calls, each of which must return exactly the snapshot's ranking.
+         * Times every query of every scope at each K on the read-only snapshots. Every round visits all K arms, in an
+         * order rotated by one each round so no K always runs warmer or later than another; the first
+         * {@code warmup} rounds are untimed, the next {@code iterations} are timed, and every call must return
+         * exactly the snapshot's ranking.
          */
         private void measureLatency(Map<String, ExecutionMemory> readOnly) {
             int queries = corpus.scopes().stream().mapToInt(s -> s.queries().size()).sum();
-            for (int k : config.ks()) {
-                List<Long> samples = new ArrayList<>();
+            List<Integer> ks = config.ks();
+            Map<String, List<ExperienceHit>> expected = new LinkedHashMap<>();
+            Map<Integer, List<Long>> samples = new TreeMap<>();
+            for (int k : ks) {
+                samples.put(k, new ArrayList<>());
                 for (ScopeCorpus scope : corpus.scopes()) {
-                    ExecutionMemory memory = readOnly.get(key(scope));
                     for (Query q : scope.queries()) {
-                        List<ExperienceHit> expected = memory.recall(scope.scope(), q.text(), k).hits();
-                        for (int i = 0; i < config.warmup(); i++) {
-                            memory.recall(scope.scope(), q.text(), k);
-                        }
-                        for (int i = 0; i < config.iterations(); i++) {
+                        expected.put(q.id() + "@" + k, readOnly.get(key(scope)).recall(scope.scope(), q.text(), k)
+                                .hits());
+                    }
+                }
+            }
+            int rounds = config.warmup() + config.iterations();
+            for (int round = 0; round < rounds; round++) {
+                boolean timed = round >= config.warmup();
+                for (int j = 0; j < ks.size(); j++) {
+                    int k = ks.get((j + round) % ks.size());
+                    for (ScopeCorpus scope : corpus.scopes()) {
+                        ExecutionMemory memory = readOnly.get(key(scope));
+                        for (Query q : scope.queries()) {
                             long t = System.nanoTime();
                             ExperienceRecall recall = memory.recall(scope.scope(), q.text(), k);
-                            samples.add(System.nanoTime() - t);
+                            long elapsed = System.nanoTime() - t;
+                            if (!timed) {
+                                continue;
+                            }
+                            samples.get(k).add(elapsed);
                             v.repeatedRecalls++;
-                            if (!recall.hits().equals(expected)) {
-                                v.parity.add(label + " " + q.id() + "@" + k + ": repeated recall " + i
+                            if (!recall.hits().equals(expected.get(q.id() + "@" + k))) {
+                                v.parity.add(label + " " + q.id() + "@" + k + ": repeated recall in round " + round
                                         + " differs");
                             }
                         }
                     }
                 }
-                latency.put(k, ScaleTimingStatistics.from(samples, List.of(), queries, config.iterations()));
             }
+            samples.forEach((k, list) -> latency.put(k, ScaleTimingStatistics.from(list, List.of(), queries,
+                    config.iterations())));
         }
 
         // --- isolation, references and ties -------------------------------------------------------------------
@@ -453,15 +471,28 @@ public final class ExecutionScaleSweepEvaluator {
             if (!partitionByAtom(snapshot).equals(partitionByText(scope))) {
                 v.structure.add(where + ": refs are not grouped into atoms by identical text");
             }
-            int retired = retiredAfterAppend.get(key(scope));
-            if (retired != scope.retiredTexts().size()) {
-                v.structure.add(where + ": " + retired + " retired atoms after append, expected "
-                        + scope.retiredTexts().size() + " corrected texts");
+            // every phase's published generation must retire exactly the corrected texts, not only the first one
+            List<String> phaseNames = generations.get(key(scope));
+            List<Integer> retiredPerPhase = retiredByPhase.get(key(scope));
+            for (int i = 0; i < retiredPerPhase.size(); i++) {
+                if (retiredPerPhase.get(i) != scope.retiredTexts().size()) {
+                    v.structure.add(where + ": " + retiredPerPhase.get(i) + " retired atoms after "
+                            + phaseNames.get(i) + ", expected " + scope.retiredTexts().size() + " corrected texts");
+                }
+            }
+            if (snapshot.retiredAtoms().size() != scope.retiredTexts().size()) {
+                v.structure.add(where + ": " + snapshot.retiredAtoms().size() + " retired atoms in the read-only "
+                        + "generation, expected " + scope.retiredTexts().size());
+            }
+            Set<String> liveAndRetired = new HashSet<>(snapshot.retiredAtoms());
+            liveAndRetired.retainAll(snapshot.refsByAtom().keySet());
+            if (!liveAndRetired.isEmpty()) {
+                v.structure.add(where + ": atoms both live and retired " + liveAndRetired);
             }
             structures.add(new ScopeStructure(key(scope), scope.events().size(), scope.executions(),
                     scope.patternCounts(), scope.attemptsStarted(), scope.unfinishedAttempts(),
                     scope.correctedFinishes(), scope.activeAttempts(), refCount, snapshot.refsByAtom().size(),
-                    retired, snapshot.retiredAtoms().size(), snapshot.dimensions(),
+                    retiredPerPhase, snapshot.retiredAtoms().size(), snapshot.dimensions(),
                     snapshot.refsByAtom().size() + snapshot.retiredAtoms().size(), generations.get(key(scope)),
                     scope.queries().size()));
         }
@@ -489,6 +520,8 @@ public final class ExecutionScaleSweepEvaluator {
                 name = "<unreadable: " + e.getMessage() + ">";
             }
             generations.computeIfAbsent(key(scope), k -> new ArrayList<>()).add(phase + "=" + name);
+            retiredByPhase.computeIfAbsent(key(scope), k -> new ArrayList<>()).add(checkpoint(scope).retiredAtoms()
+                    .size());
         }
 
         private ProjectionCheckpoint.Snapshot checkpoint(ScopeCorpus scope) {
@@ -516,7 +549,7 @@ public final class ExecutionScaleSweepEvaluator {
         }
 
         SizeResult result() {
-            return new SizeResult(corpus.experiencesPerScope(), corpus.scopes().size(), structures,
+            return new SizeResult(corpus.experiencesPerScope(), corpus.scopes().size(), queryDigest(corpus), structures,
                     selfRecallTargets, selfRecallAtOne);
         }
 
@@ -615,6 +648,20 @@ public final class ExecutionScaleSweepEvaluator {
             return List.of(what + " was served instead of being rejected");
         } catch (IllegalArgumentException expected) {
             return List.of();
+        }
+    }
+
+    /** SHA-256 (first 16 hex digits) of every scope's queries: id, kind, text and target, in order. */
+    static String queryDigest(ScaleCorpus corpus) {
+        StringBuilder text = new StringBuilder();
+        corpus.scopes().forEach(s -> s.queries().forEach(q -> text.append(q.id()).append('|').append(q.kind())
+                .append('|').append(q.text()).append('|').append(q.target().orElse("")).append('\n')));
+        try {
+            byte[] hash = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(text.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(hash).substring(0, 16);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
         }
     }
 

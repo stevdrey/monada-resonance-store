@@ -82,7 +82,9 @@ class ExecutionScaleSweepEvaluationTest {
                 assertEquals(size.experiencesPerScope(), s.activeAttempts());
                 assertEquals(size.experiencesPerScope(), s.projectedRefs());
                 assertEquals(expected.liveTexts().size(), s.liveAtoms());
-                assertEquals(expected.retiredTexts().size(), s.retiredAtomsAfterAppend());
+                assertEquals(List.of(expected.retiredTexts().size(), expected.retiredTexts().size(),
+                        expected.retiredTexts().size(), expected.retiredTexts().size()), s.retiredAtomsPerPhase());
+                assertEquals(expected.retiredTexts().size(), s.retiredAtomsPublished());
                 assertEquals(ProjectionCheckpoint.PROJECTION_DIMENSIONS, s.dimensions());
                 assertEquals(s.liveAtoms() + s.retiredAtomsPublished(), s.structuralCandidates());
                 assertEquals(List.of("append=projection-000001", "rebuild=projection-000002",
@@ -92,10 +94,25 @@ class ExecutionScaleSweepEvaluationTest {
     }
 
     @Test
+    void everySizeReportsTheSameQuerySet() {
+        assertEquals(1, report.sizes().stream().map(SizeResult::queryDigest).distinct().count());
+        assertTrue(report.render().contains("query set sha256=" + report.sizes().get(0).queryDigest()));
+        assertTrue(report.render().contains("the K order rotates by one every round"));
+    }
+
+    @Test
+    void latencySamplesCoverEveryQueryAndIterationForEveryK() {
+        for (ExecutionScaleSweepReport.SizeTiming t : report.timings()) {
+            assertEquals(SMALL.ks(), List.copyOf(t.recallLatency().keySet()));
+            t.recallLatency().values().forEach(s -> assertEquals(30 * SMALL.iterations(), s.sampleCount()));
+        }
+    }
+
+    @Test
     void theRunnerPrintsTheReportThenTimingAndExitsZero() {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         int exit = ExecutionScaleSweepMain.run(new PrintStream(bytes, true, StandardCharsets.UTF_8),
-                new Config(1, List.of(5, 6, 7), List.of(1), 0, 1));
+                new Config(1, List.of(7, 8, 9), List.of(1), 0, 1));
         String out = bytes.toString(StandardCharsets.UTF_8);
         assertEquals(0, exit, out);
         assertTrue(out.indexOf("SCALE_SWEEP_CHARACTERIZED") < out.indexOf("== Elapsed timing"));
@@ -111,7 +128,7 @@ class ExecutionScaleSweepEvaluationTest {
         assertEquals(new Config(7, List.of(10, 50, 100), List.of(1, 5), 0, 3), c);
         assertThrows(IllegalArgumentException.class, () -> ExecutionScaleSweepMain.parse("--sizes="));
         assertThrows(IllegalArgumentException.class, () -> ExecutionScaleSweepMain.parse("--sizes=25,25"));
-        assertThrows(IllegalArgumentException.class, () -> ExecutionScaleSweepMain.parse("--sizes=4"));
+        assertThrows(IllegalArgumentException.class, () -> ExecutionScaleSweepMain.parse("--sizes=6"));
         assertThrows(IllegalArgumentException.class, () -> ExecutionScaleSweepMain.parse("--ks=51"));
         assertThrows(IllegalArgumentException.class, () -> ExecutionScaleSweepMain.parse("--ks=0"));
         assertThrows(IllegalArgumentException.class, () -> ExecutionScaleSweepMain.parse("--warmup=-1"));

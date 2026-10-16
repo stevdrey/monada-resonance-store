@@ -35,6 +35,11 @@ import java.util.Set;
  * independent executions with identical texts (one shared atom, several refs). Each scope also holds one execution
  * whose text is identical in every scope, the probe for cross-scope leakage.
  *
+ * <p>Every scope starts with the same N-independent prefix: the probe, a duplicate group of two and three anchor
+ * executions (a failure then repair, a corrected finish and a single attempt) whose four experiences are the exact-text
+ * query targets. The queries are drawn right after that prefix, before any size-dependent draw, so every size of a
+ * sweep recalls the same queries and the scale points differ only in corpus size.
+ *
  * <p>Texts carry a per-execution case token, so two texts are identical only where a pattern makes them so and the
  * ground truth (live atoms, retired atoms, refs per atom) follows from the generated texts alone.
  */
@@ -43,8 +48,8 @@ final class ExecutionScaleCorpusGenerator {
     static final Instant T0 = Instant.parse("2026-03-01T00:00:00Z");
     /** The isolated scopes of every size, in recording order. */
     static final List<String> SCOPES = List.of("scale-alpha", "scale-beta", "scale-gamma");
-    /** Smallest size that still holds the probe, one duplicate group and one generated execution. */
-    static final int MIN_EXPERIENCES_PER_SCOPE = 5;
+    /** Smallest size that still holds the probe, the first duplicate group and the four anchor experiences. */
+    static final int MIN_EXPERIENCES_PER_SCOPE = 7;
     static final int EXACT_QUERIES_PER_SCOPE = 4;
     static final int TEMPLATE_QUERIES_PER_SCOPE = 4;
     static final ForgeFixture.Price PRICE = new ForgeFixture.Price("scale-sweep-prices", "1", "fixture-provider",
@@ -151,6 +156,11 @@ final class ExecutionScaleCorpusGenerator {
         ScopeCorpus build() {
             probe();
             duplicates(2);
+            int anchors = experiences.size();
+            repair();
+            corrected();
+            single();
+            List<Query> queries = queries(experiences.subList(anchors, experiences.size()));
             while (experiences.size() < target) {
                 int remaining = target - experiences.size();
                 int draw = random.nextInt(100);
@@ -171,18 +181,19 @@ final class ExecutionScaleCorpusGenerator {
                     throw new IllegalStateException("a retired text is still live: " + text);
                 }
             }
-            return new ScopeCorpus(scope, events, experiences, queries(), patterns, executions, attemptsStarted,
+            return new ScopeCorpus(scope, events, experiences, queries, patterns, executions, attemptsStarted,
                     unfinished, corrected, liveTexts, retiredTexts);
         }
 
-        private List<Query> queries() {
+        /** The queries of every size: drawn from the N-independent prefix only, {@code anchors} are the targets. */
+        private List<Query> queries(List<Experience> anchors) {
             List<Query> queries = new ArrayList<>();
             queries.add(new Query(key + "-q-probe", QueryKind.PROBE, text(PROBE_TEXT_SUMMARY, PROBE_SOLUTION,
                     PROBE_LESSON), Optional.of(experiences.get(0).experienceId())));
             queries.add(new Query(key + "-q-dup", QueryKind.DUPLICATE, duplicateTexts.get(0),
                     Optional.of(experiences.get(1).experienceId())));
             for (int i = 0; i < EXACT_QUERIES_PER_SCOPE; i++) {
-                Experience e = experiences.get(random.nextInt(experiences.size()));
+                Experience e = anchors.get(i);
                 queries.add(new Query(key + "-q-exact-" + i, QueryKind.EXACT, e.text(), Optional.of(e.experienceId())));
             }
             for (int i = 0; i < TEMPLATE_QUERIES_PER_SCOPE; i++) {
