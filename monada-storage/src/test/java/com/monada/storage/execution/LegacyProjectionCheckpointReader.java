@@ -257,10 +257,10 @@ final class LegacyProjectionCheckpointReader {
         }
     }
 
-    private record Line(byte[] bytes, boolean terminated, boolean oversized) {
+    record Line(byte[] bytes, boolean terminated, boolean oversized) {
     }
 
-    private static Line nextLine(InputStream in) throws IOException {
+    static Line nextLine(InputStream in) throws IOException {
         ByteArrayOutputStream buf = new ByteArrayOutputStream();
         boolean oversized = false;
         int b;

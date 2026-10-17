@@ -21,6 +21,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -68,9 +69,6 @@ public final class ProjectionCheckpoint implements AutoCloseable {
     public static final String TEXT_SCHEME = "summary-text-v1";
     static final String MAGIC = "MXP1";
     static final int MAX_LINE_BYTES = RecordLine.MAX_LINE_BYTES;
-    private static final Pattern ATOM_ID =
-            Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
-    private static final Pattern DIGEST = Pattern.compile("[0-9a-f]{64}");
     private static final int STREAM_BUFFER_BYTES = 65_536;
     private static final byte[] COVER_PREFIX = "COVER|".getBytes(StandardCharsets.US_ASCII);
     private static final Pattern DIMENSIONS = Pattern.compile("[1-9][0-9]{0,5}");
@@ -84,7 +82,7 @@ public final class ProjectionCheckpoint implements AutoCloseable {
             Objects.requireNonNull(kind, "kind");
             Objects.requireNonNull(atomId, "atomId");
             Objects.requireNonNull(ref, "ref");
-            if (!ATOM_ID.matcher(atomId).matches()) {
+            if (!isAtomId(atomId)) {
                 throw new IllegalArgumentException("atomId is not a canonical atom UUID");
             }
         }
@@ -193,7 +191,7 @@ public final class ProjectionCheckpoint implements AutoCloseable {
                 throw new IllegalArgumentException("entry ref belongs to scope " + e.ref().scope());
             }
         }
-        if (!DIGEST.matcher(ledgerDigest).matches()) {
+        if (!isDigest(ledgerDigest)) {
             throw new IllegalArgumentException("ledger digest must be 64 lowercase hex characters");
         }
         try (Batch batch = begin(ledgerSequence)) {
@@ -264,7 +262,7 @@ public final class ProjectionCheckpoint implements AutoCloseable {
         public void cover(String ledgerDigest) throws IOException {
             Objects.requireNonNull(ledgerDigest, "ledgerDigest");
             requireActive();
-            if (!DIGEST.matcher(ledgerDigest).matches()) {
+            if (!isDigest(ledgerDigest)) {
                 fail();
                 throw new IllegalArgumentException("ledger digest must be 64 lowercase hex characters");
             }
@@ -404,7 +402,7 @@ public final class ProjectionCheckpoint implements AutoCloseable {
         private final CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
                 .onMalformedInput(CodingErrorAction.REPORT)
                 .onUnmappableCharacter(CodingErrorAction.REPORT);
-        private final CharBuffer chars = CharBuffer.allocate(MAX_LINE_BYTES);
+        private CharBuffer chars; // allocated on the first non-ASCII line only
         private final MessageDigest sha256 = RecordLine.newSha256();
         private final int[] tabs = new int[4];
 
@@ -449,6 +447,9 @@ public final class ProjectionCheckpoint implements AutoCloseable {
             if (i == len) {
                 return true; // ASCII
             }
+            if (chars == null) {
+                chars = CharBuffer.allocate(MAX_LINE_BYTES); // UTF-8 never decodes to more chars than bytes
+            }
             decoder.reset();
             chars.clear();
             ByteBuffer in = ByteBuffer.wrap(b, 0, len);
@@ -489,8 +490,9 @@ public final class ProjectionCheckpoint implements AutoCloseable {
 
     /**
      * Streams LF-terminated lines through one reusable read window and one reusable line buffer. A line keeps at
-     * most {@link #MAX_LINE_BYTES} bytes; longer ones are scanned to their LF and flagged {@code oversized}. A last
-     * line without LF is returned with {@code terminated == false}.
+     * most {@link #MAX_LINE_BYTES} bytes (the buffer grows to that limit only when a line needs it); longer ones are
+     * scanned to their LF and flagged {@code oversized}. A last line without LF is returned with
+     * {@code terminated == false}.
      */
     static final class LineReader {
         private final InputStream in;
@@ -498,7 +500,7 @@ public final class ProjectionCheckpoint implements AutoCloseable {
         private int pos;
         private int limit;
         private boolean eof;
-        final byte[] bytes = new byte[MAX_LINE_BYTES];
+        byte[] bytes = new byte[Math.min(1024, MAX_LINE_BYTES)];
         int length;
         boolean terminated;
         boolean oversized;
@@ -534,6 +536,10 @@ public final class ProjectionCheckpoint implements AutoCloseable {
                 }
                 int available = lf - pos;
                 int take = Math.min(available, MAX_LINE_BYTES - length);
+                if (length + take > bytes.length) {
+                    bytes = Arrays.copyOf(bytes, Math.min(MAX_LINE_BYTES,
+                            Math.max(length + take, 2 * bytes.length)));
+                }
                 System.arraycopy(window, pos, bytes, length, take);
                 length += take;
                 if (take < available) {
@@ -632,26 +638,25 @@ public final class ProjectionCheckpoint implements AutoCloseable {
             }
         }
 
-        private boolean apply(long line, String kind, String atom, ExperienceRef ref) {
+        private void apply(long line, String kind, String atom, ExperienceRef ref) {
             String key = ExperienceRefCodec.canonical(ref);
             if (kind.equals("PROJECT")) {
                 TreeMap<String, ExperienceRef> refs = live.computeIfAbsent(atom, k -> new TreeMap<>());
                 if (refs.putIfAbsent(key, ref) != null) {
                     problem(line, "duplicate projection of " + key);
-                    return false;
+                    return;
                 }
                 projected.add(atom);
             } else {
                 TreeMap<String, ExperienceRef> refs = live.get(atom);
                 if (refs == null || refs.remove(key) == null) {
                     problem(line, "retirement of a ref the atom does not represent: " + key);
-                    return false;
+                    return;
                 }
                 if (refs.isEmpty()) {
                     live.remove(atom);
                 }
             }
-            return true;
         }
 
         Snapshot snapshot() {
@@ -682,7 +687,7 @@ public final class ProjectionCheckpoint implements AutoCloseable {
         return fields;
     }
 
-    /** {@code ATOM_ID.matcher(s).matches()}. */
+    /** Whether {@code s} is a canonical lowercase atom UUID: 8-4-4-4-12 hex digits {@code [0-9a-f]}. */
     static boolean isAtomId(String s) {
         if (s.length() != 36) {
             return false;
@@ -696,7 +701,7 @@ public final class ProjectionCheckpoint implements AutoCloseable {
         return true;
     }
 
-    /** {@code DIGEST.matcher(s).matches()}. */
+    /** Whether {@code s} is a SHA-256 hex digest: {@code [0-9a-f]{64}}. */
     static boolean isDigest(String s) {
         if (s.length() != 64) {
             return false;

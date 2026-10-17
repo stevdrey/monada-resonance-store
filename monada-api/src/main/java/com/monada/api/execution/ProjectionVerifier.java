@@ -194,7 +194,7 @@ final class ProjectionVerifier {
      * ({@link WeightedAtomEncoder}, the side-effect-free helper {@code MonadaMemory.remember} relies on, at the
      * manifest's verified dimension) and requires it to equal the stored vector ({@link FrequencyVector#equals}
      * is exact {@code Arrays.equals} on the floats). Null when all match; then {@code verifiedOut} and
-     * {@code atomsOut} hold every checked atom's stored vector and its atom.
+     * {@code atomsOut} hold every live atom's verified stored vector and its atom (retired ones are only checked).
      */
     private static String vectorProblem(List<StoredVector> stored, Manifest manifest, Projector replayed,
                                         Set<String> present, Map<String, StoredVector> verifiedOut,
@@ -215,8 +215,10 @@ final class ProjectionVerifier {
             if (actual == null || !expected.equals(actual.vector())) {
                 return "stored vector of atom " + atomId + " does not match its projected text";
             }
-            verifiedOut.put(atomId, actual);
-            atomsOut.put(atomId, atom);
+            if (replayed.refsByAtom().containsKey(atomId)) {
+                verifiedOut.put(atomId, actual);
+                atomsOut.put(atomId, atom);
+            }
         }
         return null;
     }

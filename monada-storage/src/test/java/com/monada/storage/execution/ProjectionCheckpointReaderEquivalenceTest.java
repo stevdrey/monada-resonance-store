@@ -413,27 +413,13 @@ class ProjectionCheckpointReaderEquivalenceTest {
         }
     }
 
-    /** Line splitting of the pre-#158 {@code nextLine}: at most MAX bytes kept per line. */
-    private static List<String> legacyLines(byte[] bytes) {
+    /** Line splitting of the pre-#158 reader: at most MAX bytes kept per line. */
+    private static List<String> legacyLines(byte[] bytes) throws IOException {
         List<String> out = new ArrayList<>();
-        ByteArrayOutputStream buf = new ByteArrayOutputStream();
-        boolean oversized = false;
-        boolean any = false;
-        for (byte b : bytes) {
-            any = true;
-            if (b == '\n') {
-                out.add(describe(buf.toByteArray(), true, oversized));
-                buf.reset();
-                oversized = false;
-                any = false;
-            } else if (buf.size() < MAX) {
-                buf.write(b);
-            } else {
-                oversized = true;
-            }
-        }
-        if (any) {
-            out.add(describe(buf.toByteArray(), false, oversized));
+        InputStream in = new ByteArrayInputStream(bytes);
+        for (LegacyProjectionCheckpointReader.Line line = LegacyProjectionCheckpointReader.nextLine(in); line != null;
+                line = LegacyProjectionCheckpointReader.nextLine(in)) {
+            out.add(describe(line.bytes(), line.terminated(), line.oversized()));
         }
         return out;
     }
