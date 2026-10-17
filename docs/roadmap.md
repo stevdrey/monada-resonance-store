@@ -630,7 +630,82 @@ skipping them, and the #126 report is unchanged. Follow-up decision (needs its o
 - The next candidate is in-place work on the projection open path, with formats unchanged and verification semantics
   preserved: buffered checkpoint line reading, one framing pass, and cheaper vector verification (whether
   verification could be deferred changes when `INCOMPATIBLE` is reported, so it needs its own decision). After that, ledger line decode (`Instant.parse`, regexes, re-encode check).
-  Each change should be gated by this benchmark's `B1`-`B3` and by the existing projection-integrity tests.
+  Each change should be gated by this benchmark's `B1`-`B3` and by the existing projection-integrity tests. The projection part is done in #158 (below).
+
+#### Cheaper projection open path (#158, phase 1)
+
+Cuts the CPU cost of loading and verifying a scope's projection at open, without changing any format, diagnostic,
+projection state, public signature or default. Verification checks the same things, in the same order, on every open.
+
+- `ProjectionCheckpoint.read` reads lines through one reusable 64 KiB window and one reusable line buffer instead
+  of byte-by-byte reads into a `ByteArrayOutputStream`. Framing is checked on the line's bytes: one strict UTF-8
+  decoder per pass (skipped for ASCII lines), tab offsets instead of `split`, and a SHA-256 compared directly
+  against the hex field with one `MessageDigest` per pass. Entry fields are split and checked without regexes. Both
+  passes stay: entries are applied only up to the last well-framed `COVER` found by the first pass, a `COVER`
+  appended between passes is never applied, and memory stays bounded by the folded state.
+- `ProjectionVerifier` builds each atom once and reuses it for the read-only index, and reuses the stored vectors
+  it verified instead of copying them. The check itself is unchanged: every stored, known atom (live and retired) is
+  re-encoded through the production pipeline and compared exactly, in atom-ID order.
+- Ledger digest per covered event, option (a): `RecordLine.sha256Hex` reuses one `MessageDigest` per thread. The
+  digest still comes from re-encoding the event; no digest is carried over from the ledger scan.
+
+Equivalence is pinned by new tests. `ProjectionCheckpointReaderEquivalenceTest` compares every snapshot, field by
+field, with a test-only copy of the old reader. It covers the line limit and one byte over, torn and unterminated
+last lines, characters split across the read window, invalid UTF-8, framing, header and entry defects, a `COVER`
+appended between passes, every truncation of a sample file, and seeded byte and payload mutations.
+`ProjectionOpenEquivalenceTest` passes unchanged on the old and new code. It pins the first-mismatch message of a
+swapped live vector and an altered retired vector (writable and read-only), the diverging sequence of a foreign
+ledger, and identical recall from writable, read-only and rebuilt opens. Existing tests are unchanged and pass.
+
+The deterministic reports of `runOpenCostBreakdownBenchmark` (btrfs and tmpfs) and `runLedgerGrowthBenchmark`
+(default) are byte-identical before and after; `B1`-`B3` pass at every size.
+
+Observed on 2026-10-17 (same machine, JVM and arguments as #156; `--iterations=10`, medians in ms, projection
+component by difference of medians). Baseline is `main` at 11914fa. At 20 000 and 50 000 events, baseline and
+candidate ran alternately twice, and both pairs are shown, because run-to-run drift on this machine (up to about
+25 %) is larger than many single differences:
+
+| N | FS | mode | projection, baseline -> candidate | total open, baseline -> candidate |
+| --- | --- | --- | --- | --- |
+| 1000 | btrfs | writable / read-only | 26.1 -> 18.2 (-30 %) / 27.2 -> 21.2 (-22 %) | 40.3 -> 27.3 / 40.7 -> 29.3 |
+| 5000 | btrfs | writable / read-only | 59.4 -> 40.9 (-31 %) / 62.9 -> 44.0 (-30 %) | 89.3 -> 70.1 / 94.0 -> 73.1 |
+| 20000 | btrfs | writable, pair 1 / 2 | 229.7 -> 159.6 (-31 %) / 274.5 -> 174.4 (-36 %) | 343.6 -> 276.3 / 407.4 -> 300.9 |
+| 20000 | btrfs | read-only, pair 1 / 2 | 232.0 -> 168.1 (-28 %) / 253.6 -> 166.7 (-34 %) | 345.4 -> 282.2 / 389.2 -> 293.8 |
+| 50000 | btrfs | writable, pair 1 / 2 | 546.5 -> 449.3 (-18 %) / 745.4 -> 541.3 (-27 %) | 857.9 -> 784.3 / 1088.5 -> 913.5 |
+| 50000 | btrfs | read-only, pair 1 / 2 | 626.3 -> 492.1 (-21 %) / 711.5 -> 535.3 (-25 %) | 923.2 -> 834.6 / 1074.3 -> 908.7 |
+| 50000 | tmpfs | writable, pair 1 / 2 | 823.0 -> 508.3 (-38 %) / 664.9 -> 397.7 (-40 %) | 1225.7 -> 876.6 / 1010.3 -> 710.7 |
+| 50000 | tmpfs | read-only, pair 1 / 2 | 823.6 -> 586.9 (-29 %) / 655.2 -> 403.6 (-38 %) | 1241.9 -> 974.0 / 1019.3 -> 731.0 |
+
+The ledger scan and history index code did not change. Their medians move within noise in both directions: the
+ledger scan was 3-7 % higher in the btrfs pairs at 50 000 and 11-13 % lower in the tmpfs pairs.
+
+JFR CPU profile (`-XX:StartFlightRecording=settings=profile`, N=50000, 1 warmup + 3 rounds, samples inside the
+facade opens), before -> after:
+
+| code path | before (#158 baseline) | after |
+| --- | --- | --- |
+| ledger scan | 591 (45 %) | 576 (54 %) |
+| `ProjectionCheckpoint.read` | 296 (23 %) | 99 (9 %) |
+| `ProjectionVerifier` | 166 (13 %) | 159 (15 %) |
+| ledger digest per covered event | 128 (10 %) | 119 (11 %) |
+| history index | 68 (5 %) | 61 (6 %) |
+| `Projector` replay | 34 (3 %) | 42 (4 %) |
+| total | 1307 | 1075 (-18 %) |
+
+- **The checkpoint read is no longer a main cost.** It fell to a third of its CPU samples. Nearly all of the gain
+  comes from there.
+- **Vector verification did not get cheaper.** Its cost is inside the encoder (normalizing and re-encoding each
+  atom's text), not in the verifier's own bookkeeping. Making it cheaper means changing `monada-encoder` or deferring
+  verification, and both are out of scope here.
+- **The per-event ledger digest is dominated by `EventPayloadCodec.encode`, not SHA-256.** Reusing the digest saves
+  little. Carrying the digest the scan already verified (option b) would remove it, but needs plumbing through the
+  ledger and history index APIs.
+
+Follow-up decision: the ledger scan is now about half of the open's CPU (per-line decode: `Instant.parse`, regexes,
+the codec's re-encode check). Phase 2 of #158 (ledger line decode) is the next candidate, gated by the same benchmark
+and the ledger corruption and hardening tests. Encoder-level verification cost and deferred or cached verification
+each need their own design Issue. They are not worth pursuing before phase 2 is measured.
+
 
 Numbering is roadmap order; independent items (for example #94 and #95) may proceed in parallel.
 

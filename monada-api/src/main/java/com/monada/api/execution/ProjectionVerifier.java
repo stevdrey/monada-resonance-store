@@ -4,7 +4,9 @@ import com.monada.api.MonadaMemory;
 import com.monada.api.MonadaMemoryOptions;
 import com.monada.core.FrequencyVector;
 import com.monada.core.KnowledgeAtom;
+import com.monada.encoder.LexicalExpansionOptions;
 import com.monada.encoder.SimpleFrequencyEncoder;
+import com.monada.encoder.TextNormalizer;
 import com.monada.encoder.WeightedAtomEncoder;
 import com.monada.storage.FileFrequencyStore;
 import com.monada.storage.Manifest;
@@ -21,7 +23,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -95,8 +96,9 @@ final class ProjectionVerifier {
         // openExisting requires every artifact to exist and never creates one.
         List<StoredVector> vectors = FileFrequencyStore.openExisting(memoryDir, ProjectionLayout.VECTOR_SEGMENT,
                 manifest.vectorFormatProfile()).findAll();
-        Map<String, float[]> expected = new HashMap<>();
-        String vectorProblem = vectorProblem(vectors, manifest, replayed, present, expected);
+        Map<String, StoredVector> verified = new HashMap<>();
+        Map<String, KnowledgeAtom> encoded = new HashMap<>();
+        String vectorProblem = vectorProblem(vectors, manifest, replayed, present, verified, encoded);
         if (vectorProblem != null) {
             return Result.failed(List.of(vectorProblem));
         }
@@ -115,12 +117,13 @@ final class ProjectionVerifier {
                 return Result.failed(List.of("projection memory is incompatible: " + e.getMessage()));
             }
         }
-        // The live atoms and their verified vectors: a frozen snapshot needs no file after verification.
+        // The live atoms and their verified vectors: a frozen snapshot needs no file after verification. Each
+        // stored vector here equals the re-encoding of its atom's text, and its atom was built once while checking.
         List<KnowledgeAtom> atoms = new ArrayList<>();
         List<StoredVector> live = new ArrayList<>();
         for (String atomId : replayed.refsByAtom().keySet()) {
-            atoms.add(KnowledgeAtom.text(replayed.textOf(atomId)));
-            live.add(new StoredVector(atomId, new FrequencyVector(expected.get(atomId))));
+            atoms.add(encoded.get(atomId));
+            live.add(verified.get(atomId));
         }
         return new Result(List.of(), memory, atoms, live, Set.copyOf(present), Set.copyOf(extra));
     }
@@ -189,25 +192,33 @@ final class ProjectionVerifier {
      * Re-encodes the projection text of every stored atom the checkpoint knows, live and retired (a later
      * correction can reactivate a retired atom without rewriting it), with the production pipeline
      * ({@link WeightedAtomEncoder}, the side-effect-free helper {@code MonadaMemory.remember} relies on, at the
-     * manifest's verified dimension) and requires it to equal the stored vector. Null when all match.
+     * manifest's verified dimension) and requires it to equal the stored vector ({@link FrequencyVector#equals}
+     * is exact {@code Arrays.equals} on the floats). Null when all match; then {@code verifiedOut} and
+     * {@code atomsOut} hold every live atom's verified stored vector and its atom (retired ones are only checked).
      */
     private static String vectorProblem(List<StoredVector> stored, Manifest manifest, Projector replayed,
-                                        Set<String> present, Map<String, float[]> expectedOut) {
-        Map<String, float[]> vectors = new HashMap<>();
-        stored.forEach(v -> vectors.put(v.atomId(), v.vector().values()));
+                                        Set<String> present, Map<String, StoredVector> verifiedOut,
+                                        Map<String, KnowledgeAtom> atomsOut) {
+        Map<String, StoredVector> vectors = new HashMap<>();
+        stored.forEach(v -> vectors.put(v.atomId(), v));
         MonadaMemoryOptions options = MonadaMemoryOptions.defaults();
+        TextNormalizer normalizer = options.textNormalizer();
+        LexicalExpansionOptions expansion = options.expansionOptions();
         SimpleFrequencyEncoder encoder = new SimpleFrequencyEncoder(manifest.dimensions());
         TreeSet<String> known = new TreeSet<>(replayed.refsByAtom().keySet());
         known.addAll(replayed.retired());
         known.retainAll(present);
         for (String atomId : known) {
-            float[] expected = encoder.encode(WeightedAtomEncoder.toWeightedText(
-                    KnowledgeAtom.text(replayed.textOf(atomId)), options.textNormalizer(),
-                    options.expansionOptions())).values();
-            if (!Arrays.equals(expected, vectors.get(atomId))) {
+            KnowledgeAtom atom = KnowledgeAtom.text(replayed.textOf(atomId));
+            FrequencyVector expected = encoder.encode(WeightedAtomEncoder.toWeightedText(atom, normalizer, expansion));
+            StoredVector actual = vectors.get(atomId);
+            if (actual == null || !expected.equals(actual.vector())) {
                 return "stored vector of atom " + atomId + " does not match its projected text";
             }
-            expectedOut.put(atomId, expected);
+            if (replayed.refsByAtom().containsKey(atomId)) {
+                verifiedOut.put(atomId, actual);
+                atomsOut.put(atomId, atom);
+            }
         }
         return null;
     }
