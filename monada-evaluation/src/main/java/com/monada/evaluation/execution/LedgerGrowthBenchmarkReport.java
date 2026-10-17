@@ -185,40 +185,55 @@ public record LedgerGrowthBenchmarkReport(LedgerGrowthBenchmarkEvaluator.Config 
      * also absorbs JIT warm-up; the last step (the two largest sizes) is the less biased one and orders the list.
      */
     private String growth() {
-        if (timings.size() < 2) {
+        return growthTable(timings.stream().map(SizeTiming::events).toList(),
+                timings.stream().map(LedgerGrowthBenchmarkReport::medians).toList(), 46, 12);
+    }
+
+    private static Map<String, Long> medians(SizeTiming t) {
+        Map<String, Long> out = new LinkedHashMap<>();
+        t.phases().forEach((name, p) -> out.put(name + " (total)", p.nanos()));
+        t.operations().forEach((name, s) -> out.put(name, s.medianNanos()));
+        return out;
+    }
+
+    /**
+     * Growth exponents log(median ratio)/log(event ratio) per named median, for the last step (two largest sizes)
+     * and overall (smallest to largest), sorted by the last step; non-positive medians are skipped. Empty when there
+     * are fewer than two sizes. {@code medians.get(i)} belongs to {@code events.get(i)}, in ascending size order.
+     */
+    static String growthTable(List<Integer> events, List<Map<String, Long>> medians, int nameWidth,
+                              int columnWidth) {
+        int n = events.size();
+        if (n < 2) {
             return "";
         }
-        SizeTiming first = timings.get(0);
-        SizeTiming previous = timings.get(timings.size() - 2);
-        SizeTiming last = timings.get(timings.size() - 1);
-        Map<String, Double> overall = exponents(first, last);
-        Map<String, Double> lastStep = exponents(previous, last);
+        Map<String, Double> overall = exponents(events.get(0), medians.get(0), events.get(n - 1),
+                medians.get(n - 1));
+        Map<String, Double> lastStep = exponents(events.get(n - 2), medians.get(n - 2), events.get(n - 1),
+                medians.get(n - 1));
         List<String> names = new ArrayList<>(lastStep.keySet());
-        names.sort(Comparator.comparing((String n) -> lastStep.get(n), Comparator.reverseOrder())
+        names.sort(Comparator.comparing((String name) -> lastStep.get(name), Comparator.reverseOrder())
                 .thenComparing(Comparator.naturalOrder()));
+        String header = "  %-" + nameWidth + "s %" + columnWidth + "s %" + columnWidth + "s\n";
+        String row = "  %-" + nameWidth + "s %" + columnWidth + ".2f %" + columnWidth + "s\n";
         StringBuilder out = new StringBuilder(fmt("\nGrowth exponent log(median ratio)/log(event ratio); "
-                + "informational, sorted by the last step\n  %-46s %12s %12s\n", "operation",
-                "N=" + previous.events() + "->" + last.events(), "N=" + first.events() + "->" + last.events()));
+                + "informational, sorted by the last step\n" + header, "operation",
+                "N=" + events.get(n - 2) + "->" + events.get(n - 1), "N=" + events.get(0) + "->" + events.get(n - 1)));
         for (String name : names) {
-            out.append(fmt("  %-46s %12.2f %12s\n", name, lastStep.get(name),
+            out.append(fmt(row, name, lastStep.get(name),
                     overall.containsKey(name) ? fmt("%.2f", overall.get(name)) : "-"));
         }
         return out.toString();
     }
 
-    private static Map<String, Double> exponents(SizeTiming small, SizeTiming large) {
-        double sizeRatio = Math.log((double) large.events() / small.events());
+    private static Map<String, Double> exponents(int smallEvents, Map<String, Long> small, int largeEvents,
+                                                 Map<String, Long> large) {
+        double sizeRatio = Math.log((double) largeEvents / smallEvents);
         Map<String, Double> out = new LinkedHashMap<>();
-        small.phases().forEach((name, p) -> {
-            Phase other = large.phases().get(name);
-            if (other != null && p.nanos() > 0 && other.nanos() > 0) {
-                out.put(name + " (total)", Math.log((double) other.nanos() / p.nanos()) / sizeRatio);
-            }
-        });
-        small.operations().forEach((name, s) -> {
-            ScaleTimingStatistics other = large.operations().get(name);
-            if (other != null && s.medianNanos() > 0 && other.medianNanos() > 0) {
-                out.put(name, Math.log((double) other.medianNanos() / s.medianNanos()) / sizeRatio);
+        small.forEach((name, m) -> {
+            Long other = large.get(name);
+            if (other != null && m > 0 && other > 0) {
+                out.put(name, Math.log((double) other / m) / sizeRatio);
             }
         });
         return out;

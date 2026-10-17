@@ -534,10 +534,103 @@ On tmpfs at N=5000: record p50 51 / 6.3 µs, append 0.44 s, writable open 95 / 2
 
 Not changed: ledger codec, segment layout, `ExecutionMemory`, `ExecutionLedger`, `ExecutionLedgerReader`, the export
 API, cursors, limits and defaults; the only edit to existing evaluation code makes two helpers of
-`ExecutionScaleSweepEvaluator` package-private for reuse, and the #125 report is unchanged apart from timing. Follow-up decision (needs its own
-Issue): measure, still without changing formats, how `ExecutionMemory.open` / `openReadOnly` split between ledger scan,
+`ExecutionScaleSweepEvaluator` package-private for reuse, and the #125 report is unchanged apart from timing. Follow-up decision (#156,
+below): measure, still without changing formats, how `ExecutionMemory.open` / `openReadOnly` split between ledger scan,
 history index build and projection load/verification, at larger N, before considering a persisted index or a segment
 lifecycle. No compaction is suggested: the ledger itself is not the dominant cost at these sizes.
+
+#### Open cost split: ledger scan, history index and projection (#156)
+
+Splits the scope open that #126 ranked as the main growth cost, still without changing any format.
+`./gradlew :monada-evaluation:runOpenCostBreakdownBenchmark -q` (options via `--args`, e.g.
+`--args="--sizes=1000,5000,20000,50000 --iterations=10"`) records exactly N = 1000/5000/20000/50000 events of the #126
+corpus (scope `scale-alpha` of the #125 generator, seed 42) through `ExecutionMemory`, so the projection is built
+incrementally and is `CURRENT`. It then copies the root without `projection.current` and the `projection-*`
+generations; the writer lock file is copied, so no timed open of the copy pays for creating it. That copy has byte-identical ledger segments and opens with projection `MISSING`: the projection
+load stops right after the layout lookup and never builds anything. `HistoryIndex` and `ExperienceProjection` are
+internal to `monada-api`, so each open is split by difference of medians (one fresh instance per round, 2 untimed
+warmup + N timed rounds; the two roots are opened in alternating order counted from the first timed round, so timed rounds split evenly
+between both orders):
+
+- ledger scan = `ExecutionLedger.open` (or `ExecutionLedgerReader.open`) + `replay()`;
+- history index = facade open of the copy - ledger scan;
+- projection = facade open of the full root - facade open of the copy.
+
+Three hard checks decide the exit code at every size (decision `OPEN_COST_CHARACTERIZED`):
+
+- `B1`: the full root opens `CURRENT` and the copy `MISSING`, writable and read-only, in every round, over the same
+  ledger digest;
+- `B2`: both storage layers replay exactly the recorded events in order in every round, healthy and without a torn
+  tail; every facade open of both roots has the recorded high watermark and no torn tail, and its whole history equals
+  the recorded events in the first and last round; sampled events load identically on both roots; opening the copy
+  creates no projection;
+- `B3`: no open changes the ledger bytes or digest of either root, or the projection generation fingerprint (pointer,
+  file names and sizes) or the content digest of the current projection generation of the full root.
+
+The deterministic report holds the corpus shape, ledger bytes and digest, the projection generation and the projection
+states observed per root and open mode. The
+projection's bytes on disk are printed with the timings, because its memory files are not byte-stable across JVMs (a
+few bytes differ at N=200). Timings, shares, heap and growth exponents never gate. The cross-JVM determinism test runs
+it with `--sizes=50,200 --warmup=0 --iterations=1`.
+
+Observed on 2026-10-17 (all three checks pass at every size; Java 27 OpenJDK 64-Bit Server VM 27+35, Azul; Linux
+7.2.10 x86_64; 16 processors; max heap 3832 MiB; 10 timed rounds; warm page cache). Medians, btrfs on NVMe
+(`JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=<disk dir>` with `--no-daemon`):
+
+| N events | executions | writable open: ledger / index / projection = total | read-only open: ledger / index / projection = total | projection on disk | heap after read-only open, full / no projection |
+| --- | --- | --- | --- | --- | --- |
+| 1000 | 181 | 6.9 / -0.2 / 18.7 = 25 ms | 6.3 / 0.5 / 17.3 = 24 ms | 0.35 MiB | 1.0 / 0.7 MiB |
+| 5000 | 909 | 33 / 0.8 / 75 = 109 ms | 31 / 3.8 / 72 = 106 ms | 1.7 MiB | 5.1 / 3.7 MiB |
+| 20000 | 3579 | 110 / 11 / 232 = 354 ms | 110 / 14 / 229 = 352 ms | 7.0 MiB | 20.6 / 15.0 MiB |
+| 50000 | 8985 | 296 / 32 / 591 = 919 ms | 304 / 34 / 614 = 951 ms | 17.4 MiB | 51.9 / 37.7 MiB |
+
+On tmpfs the split is the same within noise: 309 / 36 / 650 = 995 ms writable and 310 / 44 / 715 = 1069 ms
+read-only at N=50000.
+
+The table above was taken with a fixed open order (copy first, then full root). A second btrfs run with the open order
+alternating from round to round (the current default) was taken on a busier machine. Its absolute times are higher:
+about 2.5x at N=1000, falling to about 10 % at N=50000 (318 / 53 / 647 = 1018 ms writable, 344 / 51 / 664 = 1059 ms
+read-only). The split is the same: projection 60-68 %, ledger scan 27-38 %, history index 5 % or less, except 9-14 %
+at N=5000, where it is within noise.
+
+A JFR CPU profile (`-XX:StartFlightRecording=settings=profile`, N=50000, 1 warmup + 3 rounds, informational) of the
+samples inside the facade opens attributes them as follows:
+
+- ledger scan 46 %: per-line decode, mostly `Instant.parse`, line regexes and the codec's re-encode check;
+- `ProjectionCheckpoint.read` 21 %: lines are read byte by byte through a `ByteArrayOutputStream`, and the cover
+  lines are framed and hashed again in `lastCoverLine`;
+- `ProjectionVerifier` 14 %: it re-normalizes and re-encodes every stored atom's text to compare vectors;
+- ledger digest per covered event 8 %;
+- history index 6 %;
+- `Projector` replay 3 %.
+
+CPU samples miss I/O waits, so these shares rank code paths, not wall time.
+
+- **Projection load/verification dominates: about two thirds of every open.** This holds for writable and read-only
+  opens, on disk and on tmpfs, at every size (60-74 % across both runs). The ledger scan is about 30 %. The history
+  index is about 5 % or less at 20 000 and 50 000 events, and noisy below that.
+- **Everything is linear in N.** Growth exponents between 20 000 and 50 000 events are about 0.9-1.1 for every
+  component. No component is superlinear, so no size limit appears; the cost is a constant per event of about 18 µs
+  per open (6 µs ledger, 0.7 µs index, 12 µs projection).
+- **The cost is CPU, not I/O.** tmpfs and btrfs give the same numbers. The profile points at decode and
+  re-verification work done on every open: timestamp parsing, byte-wise checkpoint reading, a second framing pass, and
+  re-encoding every atom vector.
+- **Heap is linear too.** About 0.75 KiB per event without the projection, and about 1.05 KiB per event with it.
+
+Not changed: `monada-api`, `monada-storage`, ledger codec, segment and projection layout, checkpoint format, limits and
+defaults. Existing evaluation code only gains shared package-private helpers (ledger and tree digests, facade
+history paging with per-page watermarks, size validation and the growth-exponent table, extracted from
+`LedgerGrowthBenchmarkEvaluator` and `LedgerGrowthBenchmarkReport`; CLI list parsing moves to
+`RecallStressEvaluationMain` for every list option). Ledger digests now also cover symbolic links by target instead of
+skipping them, and the #126 report is unchanged. Follow-up decision (needs its own Issue):
+
+- No persisted history index: the index is about 5 % or less of an open at 20 000 and 50 000 events.
+- No segment lifecycle or compaction yet: nothing grows superlinearly, and the ledger scan is CPU-bound decode, not
+  segment size.
+- The next candidate is in-place work on the projection open path, with formats unchanged and verification semantics
+  preserved: buffered checkpoint line reading, one framing pass, and cheaper vector verification (whether
+  verification could be deferred changes when `INCOMPATIBLE` is reported, so it needs its own decision). After that, ledger line decode (`Instant.parse`, regexes, re-encode check).
+  Each change should be gated by this benchmark's `B1`-`B3` and by the existing projection-integrity tests.
 
 Numbering is roadmap order; independent items (for example #94 and #95) may proceed in parallel.
 
