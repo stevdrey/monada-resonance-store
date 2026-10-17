@@ -46,7 +46,8 @@ import java.util.Set;
  *       the projection load stops after the layout lookup) minus the ledger scan;</li>
  *   <li>projection: the facade open of the full root (state {@code CURRENT}) minus the copy.</li>
  * </ul>
- * The two roots are opened in alternating order from round to round, so neither median systematically runs first.
+ * The two roots are opened in alternating order, counted from the first timed round, so the timed rounds split
+ * evenly between both orders (with an odd number of iterations, the copy goes first in one more round).
  *
  * <p>As in #126, three hard checks (both roots open in the expected projection state over the same ledger bytes,
  * replay fidelity and exact loads on both roots, and no open writes anything) are deterministic and decide the exit
@@ -69,8 +70,13 @@ public final class OpenCostBreakdownEvaluator {
     static final String READ_ONLY_FULL = "read-only open (ExecutionMemory.openReadOnly)";
 
     /** Keys of the projection states observed per root and open mode, in report order. */
-    static final List<String> STATE_KEYS = List.of("full root writable", "full root read-only", "copy writable",
-            "copy read-only");
+    static final List<String> STATE_KEYS = List.of(stateKey(true, true), stateKey(true, false),
+            stateKey(false, true), stateKey(false, false));
+
+    /** The one spelling of a projection-state key: which root, which open mode. */
+    static String stateKey(boolean full, boolean writable) {
+        return (full ? "full root" : "copy") + (writable ? " writable" : " read-only");
+    }
 
     /** What one breakdown measures; every field is printed in the deterministic report. */
     public record Config(long seed, List<Integer> sizes, int warmup, int iterations) {
@@ -279,8 +285,9 @@ public final class OpenCostBreakdownEvaluator {
                 boolean compareHistory = round == 0 || round == rounds - 1;
                 ledger(root, round, timed);
                 reader(root, round, timed);
-                // alternate which root goes first, so neither median always pays for running first
-                boolean fullFirst = round % 2 == 1;
+                // alternate which root goes first, counted from the first timed round, so the timed samples split
+                // evenly between both orders
+                boolean fullFirst = Math.floorMod(round - config.warmup(), 2) == 1;
                 facade(fullFirst ? root : copy, round, timed, fullFirst, compareHistory);
                 facade(fullFirst ? copy : root, round, timed, !fullFirst, compareHistory);
                 if (round == config.warmup()) {
@@ -351,16 +358,15 @@ public final class OpenCostBreakdownEvaluator {
 
         private void facade(Path root, int round, boolean timed, boolean full, boolean compareHistory) {
             ProjectionStatus.State want = full ? ProjectionStatus.State.CURRENT : ProjectionStatus.State.MISSING;
-            String what = full ? "full root" : "copy";
             long t = System.nanoTime();
             try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
                 keep(timed, full ? WRITABLE_FULL : WRITABLE_NO_PROJECTION, System.nanoTime() - t);
-                check(what + " writable", round, memory, want, compareHistory);
+                check(stateKey(full, true), round, memory, want, compareHistory);
             }
             t = System.nanoTime();
             try (ExecutionMemory memory = ExecutionMemory.openReadOnly(root, scope)) {
                 keep(timed, full ? READ_ONLY_FULL : READ_ONLY_NO_PROJECTION, System.nanoTime() - t);
-                check(what + " read-only", round, memory, want, compareHistory);
+                check(stateKey(full, false), round, memory, want, compareHistory);
             }
         }
 
@@ -380,17 +386,25 @@ public final class OpenCostBreakdownEvaluator {
             if (memory.hasTornTail()) {
                 v.fidelity.add(label + " " + where + ": torn tail");
             }
-            long watermark = memory.history(scope).highWatermark();
-            if (watermark != expected.size()) {
-                v.fidelity.add(label + " " + where + ": high watermark " + watermark + ", recorded "
+            if (!compareHistory) {
+                long watermark = memory.history(scope).highWatermark();
+                if (watermark != expected.size()) {
+                    v.fidelity.add(label + " " + where + ": high watermark " + watermark + ", recorded "
+                            + expected.size());
+                }
+                return;
+            }
+            LedgerGrowthBenchmarkEvaluator.FacadeHistory history =
+                    LedgerGrowthBenchmarkEvaluator.facadeHistory(memory, scope);
+            Optional<Long> wrong = history.watermarks().stream().filter(w -> w != expected.size()).findFirst();
+            if (wrong.isPresent()) {
+                v.fidelity.add(label + " " + where + ": high watermark " + wrong.get() + ", recorded "
                         + expected.size());
                 return;
             }
-            if (compareHistory) {
-                v.replays++;
-                v.fidelity.addAll(LedgerGrowthBenchmarkEvaluator.historyViolations(label + " " + where, expected,
-                        LedgerGrowthBenchmarkEvaluator.facadeHistory(memory, scope)));
-            }
+            v.replays++;
+            v.fidelity.addAll(LedgerGrowthBenchmarkEvaluator.historyViolations(label + " " + where, expected,
+                    history.entries()));
         }
 
         private void replay(String where, List<LedgerRecord> records) {

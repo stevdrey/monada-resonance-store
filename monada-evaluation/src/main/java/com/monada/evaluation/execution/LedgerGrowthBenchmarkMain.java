@@ -1,7 +1,6 @@
 package com.monada.evaluation.execution;
 
 import java.io.PrintStream;
-import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -49,9 +48,9 @@ public final class LedgerGrowthBenchmarkMain {
             String value = arg.substring(eq + 1);
             switch (arg.substring(2, eq)) {
                 case "seed" -> seed = Long.parseLong(value);
-                case "sizes" -> sizes = ints(value);
-                case "exportPageSizes" -> exportPageSizes = ints(value);
-                case "historyPageSizes" -> historyPageSizes = ints(value);
+                case "sizes" -> sizes = RecallStressEvaluationMain.ints(value);
+                case "exportPageSizes" -> exportPageSizes = RecallStressEvaluationMain.ints(value);
+                case "historyPageSizes" -> historyPageSizes = RecallStressEvaluationMain.ints(value);
                 case "warmup" -> warmup = Integer.parseInt(value);
                 case "iterations" -> iterations = Integer.parseInt(value);
                 default -> throw new IllegalArgumentException("unknown option: " + arg);
@@ -59,12 +58,5 @@ public final class LedgerGrowthBenchmarkMain {
         }
         return new LedgerGrowthBenchmarkEvaluator.Config(seed, sizes, exportPageSizes, historyPageSizes, warmup,
                 iterations);
-    }
-
-    static List<Integer> ints(String csv) {
-        if (csv.isBlank()) {
-            return List.of();
-        }
-        return Arrays.stream(csv.split(",")).map(String::trim).map(Integer::parseInt).toList();
     }
 }

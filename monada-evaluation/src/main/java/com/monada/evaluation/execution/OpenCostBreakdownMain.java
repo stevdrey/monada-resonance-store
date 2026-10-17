@@ -45,7 +45,7 @@ public final class OpenCostBreakdownMain {
             String value = arg.substring(eq + 1);
             switch (arg.substring(2, eq)) {
                 case "seed" -> seed = Long.parseLong(value);
-                case "sizes" -> sizes = LedgerGrowthBenchmarkMain.ints(value);
+                case "sizes" -> sizes = RecallStressEvaluationMain.ints(value);
                 case "warmup" -> warmup = Integer.parseInt(value);
                 case "iterations" -> iterations = Integer.parseInt(value);
                 default -> throw new IllegalArgumentException("unknown option: " + arg);

@@ -5,7 +5,9 @@ import java.io.PrintStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Comparator;
+import java.util.List;
 import java.util.function.Function;
 
 /**
@@ -61,6 +63,14 @@ public final class RecallStressEvaluationMain {
         } finally {
             deleteQuietly(work);
         }
+    }
+
+    /** Parses a comma-separated list of integers for the evaluation commands' list options; blank is empty. */
+    static List<Integer> ints(String csv) {
+        if (csv.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(csv.split(",")).map(String::trim).map(Integer::parseInt).toList();
     }
 
     private static void deleteQuietly(Path dir) {

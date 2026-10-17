@@ -1,7 +1,6 @@
 package com.monada.evaluation.execution;
 
 import java.io.PrintStream;
-import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -47,20 +46,13 @@ public final class ExecutionScaleSweepMain {
             String value = arg.substring(eq + 1);
             switch (arg.substring(2, eq)) {
                 case "seed" -> seed = Long.parseLong(value);
-                case "sizes" -> sizes = ints(value);
-                case "ks" -> ks = ints(value);
+                case "sizes" -> sizes = RecallStressEvaluationMain.ints(value);
+                case "ks" -> ks = RecallStressEvaluationMain.ints(value);
                 case "warmup" -> warmup = Integer.parseInt(value);
                 case "iterations" -> iterations = Integer.parseInt(value);
                 default -> throw new IllegalArgumentException("unknown option: " + arg);
             }
         }
         return new ExecutionScaleSweepEvaluator.Config(seed, sizes, ks, warmup, iterations);
-    }
-
-    private static List<Integer> ints(String csv) {
-        if (csv.isBlank()) {
-            return List.of();
-        }
-        return Arrays.stream(csv.split(",")).map(String::trim).map(Integer::parseInt).toList();
     }
 }

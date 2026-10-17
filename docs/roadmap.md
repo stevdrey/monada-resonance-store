@@ -549,7 +549,8 @@ incrementally and is `CURRENT`. It then copies the root without `projection.curr
 generations; the writer lock file is copied, so no timed open of the copy pays for creating it. That copy has byte-identical ledger segments and opens with projection `MISSING`: the projection
 load stops right after the layout lookup and never builds anything. `HistoryIndex` and `ExperienceProjection` are
 internal to `monada-api`, so each open is split by difference of medians (one fresh instance per round, 2 untimed
-warmup + N timed rounds; the two roots are opened in alternating order from round to round):
+warmup + N timed rounds; the two roots are opened in alternating order counted from the first timed round, so timed rounds split evenly
+between both orders):
 
 - ledger scan = `ExecutionLedger.open` (or `ExecutionLedgerReader.open`) + `replay()`;
 - history index = facade open of the copy - ledger scan;
@@ -618,9 +619,10 @@ CPU samples miss I/O waits, so these shares rank code paths, not wall time.
 
 Not changed: `monada-api`, `monada-storage`, ledger codec, segment and projection layout, checkpoint format, limits and
 defaults. Existing evaluation code only gains shared package-private helpers (ledger and tree digests, facade
-history paging, size validation, CLI list parsing and the growth-exponent table, extracted from
-`LedgerGrowthBenchmarkEvaluator`, `LedgerGrowthBenchmarkMain` and `LedgerGrowthBenchmarkReport`), and the #126 report
-is unchanged. Follow-up decision (needs its own Issue):
+history paging with per-page watermarks, size validation and the growth-exponent table, extracted from
+`LedgerGrowthBenchmarkEvaluator` and `LedgerGrowthBenchmarkReport`; CLI list parsing moves to
+`RecallStressEvaluationMain` for every list option). Ledger digests now also cover symbolic links by target instead of
+skipping them, and the #126 report is unchanged. Follow-up decision (needs its own Issue):
 
 - No persisted history index: the index is about 5 % or less of an open at 20 000 and 50 000 events.
 - No segment lifecycle or compaction yet: nothing grows superlinearly, and the ledger scan is CPU-bound decode, not

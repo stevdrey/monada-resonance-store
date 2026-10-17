@@ -141,21 +141,46 @@ class OpenCostBreakdownEvaluationTest {
     @Test
     void relativeAndUnnormalizedRootsAreCopiedWithoutTheProjection() throws IOException {
         LedgerCorpus corpus = LedgerGrowthBenchmarkEvaluator.corpus(42, 30);
-        Path root = Files.createDirectories(work.resolve("relative-source"));
-        try (ExecutionMemory memory = ExecutionMemory.open(root, corpus.scope())) {
-            corpus.events().forEach(memory::record);
+        // a relative root below the working directory, whatever it is, on the working directory's file system
+        Path relative = Files.createTempDirectory(Path.of(""), "open-cost-relative-");
+        try {
+            assertFalse(relative.isAbsolute());
+            try (ExecutionMemory memory = ExecutionMemory.open(relative, corpus.scope())) {
+                corpus.events().forEach(memory::record);
+            }
+            Path unnormalized = relative.resolve("..").resolve(relative.getFileName());
+            int i = 0;
+            for (Path source : List.of(relative, unnormalized)) {
+                Path copy = Files.createDirectories(work.resolve("relative-target-" + i++));
+                OpenCostBreakdownEvaluator.copyWithoutProjection(source, corpus.scope(), copy);
+                assertTrue(ProjectionLayout.of(copy, corpus.scope()).currentDir().isEmpty(), source.toString());
+                assertEquals(List.of(), ProjectionLayout.of(copy, corpus.scope()).generationDirs(),
+                        source.toString());
+                assertEquals(LedgerGrowthBenchmarkEvaluator.ledgerDigest(relative, corpus.scope()),
+                        LedgerGrowthBenchmarkEvaluator.ledgerDigest(copy, corpus.scope()));
+            }
+        } finally {
+            try (var walk = Files.walk(relative)) {
+                for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                    Files.deleteIfExists(p);
+                }
+            }
         }
-        Path relative = Path.of("").toAbsolutePath().relativize(root.toAbsolutePath());
-        Path unnormalized = root.resolve("..").resolve(root.getFileName());
-        int i = 0;
-        for (Path source : List.of(relative, unnormalized)) {
-            Path copy = Files.createDirectories(work.resolve("relative-target-" + i++));
-            OpenCostBreakdownEvaluator.copyWithoutProjection(source, corpus.scope(), copy);
-            assertTrue(ProjectionLayout.of(copy, corpus.scope()).currentDir().isEmpty(), source.toString());
-            assertEquals(List.of(), ProjectionLayout.of(copy, corpus.scope()).generationDirs(), source.toString());
-            assertEquals(LedgerGrowthBenchmarkEvaluator.ledgerDigest(root, corpus.scope()),
-                    LedgerGrowthBenchmarkEvaluator.ledgerDigest(copy, corpus.scope()));
-        }
+    }
+
+    @Test
+    void treeDigestCountsLinksWithoutFollowingThem() throws IOException {
+        Path dir = Files.createDirectories(work.resolve("links"));
+        Files.writeString(dir.resolve("a"), "x");
+        Files.writeString(work.resolve("target-1"), "1");
+        Files.writeString(work.resolve("target-2"), "2");
+        String plain = LedgerGrowthBenchmarkEvaluator.treeDigest(dir);
+        Path link = Files.createSymbolicLink(dir.resolve("b"), work.resolve("target-1"));
+        String linked = LedgerGrowthBenchmarkEvaluator.treeDigest(dir);
+        assertNotEquals(plain, linked, "a link is never skipped");
+        Files.delete(link);
+        Files.createSymbolicLink(dir.resolve("b"), work.resolve("target-2"));
+        assertNotEquals(linked, LedgerGrowthBenchmarkEvaluator.treeDigest(dir), "a retargeted link changes it");
     }
 
     @Test

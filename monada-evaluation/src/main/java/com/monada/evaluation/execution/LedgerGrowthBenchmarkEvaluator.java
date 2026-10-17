@@ -477,14 +477,16 @@ public final class LedgerGrowthBenchmarkEvaluator {
             if (memory.hasTornTail()) {
                 v.fidelity.add(label + " " + where + ": torn tail");
             }
-            long watermark = memory.history(scope).highWatermark();
-            if (watermark != expected.size()) {
-                v.fidelity.add(label + " " + where + ": high watermark " + watermark + ", recorded "
-                        + expected.size());
-                return;
+            FacadeHistory history = facadeHistory(memory, scope);
+            for (long watermark : history.watermarks()) {
+                if (watermark != expected.size()) {
+                    v.fidelity.add(label + " " + where + ": high watermark " + watermark + ", recorded "
+                            + expected.size());
+                    return;
+                }
             }
             v.replays++;
-            v.fidelity.addAll(historyViolations(label + " " + where, expected, facadeHistory(memory, scope)));
+            v.fidelity.addAll(historyViolations(label + " " + where, expected, history.entries()));
         }
 
         private void replay(String where, List<LedgerRecord> records) {
@@ -852,16 +854,22 @@ public final class LedgerGrowthBenchmarkEvaluator {
         return ids.size();
     }
 
-    /** The whole facade history of {@code scope}, paged at the maximum page size. */
-    static List<HistoryEntry> facadeHistory(ExecutionMemory memory, ScopeId scope) {
+    /** A whole facade history traversal: its entries and the high watermark every page reported, in page order. */
+    record FacadeHistory(List<HistoryEntry> entries, List<Long> watermarks) {
+    }
+
+    /** The whole facade history of {@code scope}, paged at the maximum page size, with each page's watermark. */
+    static FacadeHistory facadeHistory(ExecutionMemory memory, ScopeId scope) {
         List<HistoryEntry> entries = new ArrayList<>();
+        List<Long> watermarks = new ArrayList<>();
         HistoryCursor cursor = null;
         do {
             HistoryPage page = memory.history(scope, cursor, ExecutionMemoryConfig.MAX_PAGE_SIZE_LIMIT);
+            watermarks.add(page.highWatermark());
             entries.addAll(page.entries());
             cursor = page.next().orElse(null);
         } while (cursor != null);
-        return entries;
+        return new FacadeHistory(entries, watermarks);
     }
 
     /** Storage-level records as the history entries a facade replay must return. */
@@ -1004,20 +1012,25 @@ public final class LedgerGrowthBenchmarkEvaluator {
     }
 
     /**
-     * SHA-256 (first 16 hex digits) over the relative names and contents of every regular file below {@code dir}
-     * (links not followed), in name order.
+     * SHA-256 (first 16 hex digits) over the relative names and contents of every entry below {@code dir} except
+     * directories, in name order. Links are never followed and never skipped: a link contributes its name and its
+     * target path, so a symlinked file can't drop out of the digest.
      */
     static String treeDigest(Path dir) {
         try {
             List<Path> files;
             try (var walk = Files.walk(dir)) {
-                files = walk.filter(p -> Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS)).sorted().toList();
+                files = walk.filter(p -> !Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)).sorted().toList();
             }
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             for (Path file : files) {
                 digest.update(dir.relativize(file).toString().getBytes(StandardCharsets.UTF_8));
                 digest.update((byte) 0);
-                digest.update(Files.readAllBytes(file));
+                if (Files.isSymbolicLink(file)) {
+                    digest.update(("-> " + Files.readSymbolicLink(file)).getBytes(StandardCharsets.UTF_8));
+                } else {
+                    digest.update(Files.readAllBytes(file));
+                }
             }
             return HexFormat.of().formatHex(digest.digest()).substring(0, 16);
         } catch (IOException e) {
