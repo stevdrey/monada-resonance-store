@@ -485,7 +485,8 @@ Five hard checks decide the exit code at every size (decision `LEDGER_GROWTH_CHA
 `APPENDED` at the next sequence through both layers with byte-identical ledger segments, and re-records (up to 50
 evenly spaced events, every event below 50, plus every correction) `IDEMPOTENT` at the original sequence without
 changing the watermark or the segment; `L2` every writable reopen and read-only open (paged entry by entry in every
-round), `ExecutionLedger.replay()` and `ExecutionLedgerReader.replay()` return exactly the recorded events in order,
+round, and once more after the tail), `ExecutionLedger.replay()` and `ExecutionLedgerReader.replay()` return exactly
+the recorded events in order,
 as does a read-only snapshot at every history page size, healthy and without a torn tail, with the expected execution
 count; `L3` every event loads exactly by id and revision, and every ref a sample carries (execution,
 outcome, gates, attempt start/finish, stages, evidence, revisions) loads at or before the cutoff with matching
@@ -513,7 +514,7 @@ fsync is nearly free), medians:
 On tmpfs at N=5000: record p50 51 / 6.3 µs, append 0.44 s, writable open 95 / 28 ms, read-only open 97 / 28 ms.
 
 - **Correctness held at every size.** Idempotent re-records, exact replay of every reopened facade and at every page
-  size, 18 648 sample ref resolutions (N distinct refs at each size: the samples reference every ledger event),
+  size, 18 300 sample ref resolutions (N distinct refs at each size: the samples reference every ledger event),
   identical samples across page sizes and instances, and pinned pages and all 2 278 pre-append cursors unchanged after later
   appends on the writer and on a new snapshot.
 - **Append cost is durability, not growth.** Per-event cost is flat from 1000 to 5000 events (growth exponent about 0);

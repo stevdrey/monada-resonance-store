@@ -74,8 +74,14 @@ public final class LedgerGrowthBenchmarkEvaluator {
     static final List<Integer> DEFAULT_HISTORY_PAGE_SIZES = List.of(1, 100, 500);
     static final int DEFAULT_WARMUP = 2;
     static final int DEFAULT_ITERATIONS = 5;
-    /** Smallest ledger that still holds a complete execution with a corrected finish. */
+    /**
+     * Smallest ledger accepted. With the default seed it already holds two executions with a finished attempt and an
+     * outcome, so exports at page size 1 resume a cursor; corrected revisions appear only in longer prefixes (the first
+     * before event 60), so the smallest sizes do not exercise revision-2 refs.
+     */
     static final int MIN_EVENTS = 10;
+    /** Largest ledger accepted: keeps N + tail and the generator's doubling far from int overflow. */
+    static final int MAX_EVENTS = 1_000_000;
     /** Evenly spaced events re-recorded to prove idempotency, besides every correction. */
     static final int IDEMPOTENCY_PROBES = 50;
     /** The one scope the corpus is cut from: the first of {@link ExecutionScaleCorpusGenerator#SCOPES}. */
@@ -89,8 +95,9 @@ public final class LedgerGrowthBenchmarkEvaluator {
             exportPageSizes = sortedDistinct("export page sizes", exportPageSizes);
             historyPageSizes = sortedDistinct("history page sizes", historyPageSizes);
             for (int n : sizes) {
-                if (n < MIN_EVENTS) {
-                    throw new IllegalArgumentException("every size must be >= " + MIN_EVENTS + " events, got: " + n);
+                if (n < MIN_EVENTS || n > MAX_EVENTS) {
+                    throw new IllegalArgumentException("every size must be in " + MIN_EVENTS + ".." + MAX_EVENTS
+                            + " events, got: " + n);
                 }
             }
             pageSizes("export page sizes", exportPageSizes);
@@ -168,7 +175,7 @@ public final class LedgerGrowthBenchmarkEvaluator {
         int needed = size + tailSize(size);
         int experiences = Math.max(ExecutionScaleCorpusGenerator.MIN_EXPERIENCES_PER_SCOPE, needed / 4);
         while (true) {
-            ScopeCorpus scope = ExecutionScaleCorpusGenerator.generate(seed, experiences).scopes().get(0);
+            ScopeCorpus scope = ExecutionScaleCorpusGenerator.generateScope(seed, experiences, 0);
             if (scope.events().size() >= needed) {
                 return new LedgerCorpus(seed, scope.scope(), experiences, scope.events().subList(0, size),
                         scope.events().subList(size, needed));
@@ -198,8 +205,10 @@ public final class LedgerGrowthBenchmarkEvaluator {
                         v.append, List.of("events appended: " + v.appended + "; idempotent re-records: "
                                 + v.idempotent)),
                 ForgeGate.of(LedgerGrowthBenchmarkReport.REPLAY_FIDELITY,
-                        "writable reopen, read-only open, ExecutionLedger and ExecutionLedgerReader replay exactly the "
-                                + "recorded events in order at every history page size; healthy, no torn tail",
+                        "every writable reopen and read-only open (paged at the maximum page size, also after "
+                                + "the tail), ExecutionLedger and ExecutionLedgerReader replay exactly the recorded "
+                                + "events in order, as does a read-only snapshot at every history page size; healthy, "
+                                + "no torn tail",
                         v.fidelity, List.of("replays compared: " + v.replays + "; history traversals compared: "
                                 + v.traversals)),
                 ForgeGate.of(LedgerGrowthBenchmarkReport.EXACT_REFERENCES,
@@ -245,7 +254,7 @@ public final class LedgerGrowthBenchmarkEvaluator {
         int replays;
         int traversals;
         long loads;
-        /** Every resolution of a sample ref, once per distinct ref of each export page size. */
+        /** Every resolution of a sample ref: once per distinct canonical ref of each export page size. */
         int refChecks;
         /** Distinct canonical sample refs resolved per ledger size, across every export page size. */
         final Map<Integer, Integer> distinctRefsPerSize = new LinkedHashMap<>();
@@ -296,7 +305,7 @@ public final class LedgerGrowthBenchmarkEvaluator {
             Path storageRoot = RecallStressEvaluator.fresh(workDir, "ledger-storage-n" + corpus.size() + "-");
             append(root);
             appendStorage(storageRoot);
-            String storageDigest = ledgerDigest(storageRoot);
+            String storageDigest = ledgerDigest(storageRoot, scope);
             if (!segmentDigest.equals(storageDigest)) {
                 v.append.add(label + ": the ledger written through ExecutionMemory (" + segmentDigest + ") differs "
                         + "from the one written through ExecutionLedger (" + storageDigest + ")");
@@ -324,8 +333,8 @@ public final class LedgerGrowthBenchmarkEvaluator {
                 }
                 phases.put("append (ExecutionMemory.record)", new Phase(System.nanoTime() - start, corpus.size(),
                         "events"));
-                segmentBytes = ledgerBytes(root);
-                segmentDigest = ledgerDigest(root);
+                segmentBytes = ledgerBytes(root, scope);
+                segmentDigest = ledgerDigest(root, scope);
 
                 Set<Integer> probes = idempotencyProbes(corpus.events());
                 long t = System.nanoTime();
@@ -344,7 +353,7 @@ public final class LedgerGrowthBenchmarkEvaluator {
                     v.append.add(label + ": high watermark " + watermark + " after re-records, expected "
                             + corpus.size());
                 }
-                if (ledgerBytes(root) != segmentBytes || !ledgerDigest(root).equals(segmentDigest)) {
+                if (ledgerBytes(root, scope) != segmentBytes || !ledgerDigest(root, scope).equals(segmentDigest)) {
                     v.append.add(label + ": idempotent re-records changed the ledger segment");
                 }
             }
@@ -453,16 +462,21 @@ public final class LedgerGrowthBenchmarkEvaluator {
         }
 
         private void facadeSnapshot(String where, ExecutionMemory memory) {
+            facadeSnapshot(where, memory, expected);
+        }
+
+        /** Pages the whole facade history at the maximum page size and compares it entry by entry. */
+        private void facadeSnapshot(String where, ExecutionMemory memory, List<HistoryEntry> expected) {
             if (memory.hasTornTail()) {
                 v.fidelity.add(label + " " + where + ": torn tail");
             }
-            List<HistoryEntry> entries = new ArrayList<>(corpus.size());
+            List<HistoryEntry> entries = new ArrayList<>(expected.size());
             HistoryCursor cursor = null;
             do {
                 HistoryPage page = memory.history(scope, cursor, ExecutionMemoryConfig.MAX_PAGE_SIZE_LIMIT);
-                if (page.highWatermark() != corpus.size()) {
+                if (page.highWatermark() != expected.size()) {
                     v.fidelity.add(label + " " + where + ": high watermark " + page.highWatermark() + ", recorded "
-                            + corpus.size());
+                            + expected.size());
                     return;
                 }
                 entries.addAll(page.entries());
@@ -606,14 +620,15 @@ public final class LedgerGrowthBenchmarkEvaluator {
 
         /** Every distinct ref of every sample loads exactly, at or before the cutoff, with matching coordinates. */
         private void refs(String where, ExecutionMemory memory, List<ExperienceSamplePage> pages) {
-            Map<String, RefAt> distinct = new LinkedHashMap<>();
+            // one resolution per canonical ref; every sequence a sample carries for it is checked against that entry
+            Map<String, List<RefAt>> distinct = new LinkedHashMap<>();
             for (ExperienceSample s : flatten(pages)) {
                 for (RefAt r : refsOf(s)) {
-                    distinct.putIfAbsent(ExperienceRefCodec.canonical(r.ref()) + "@" + r.sequence(), r);
+                    distinct.computeIfAbsent(ExperienceRefCodec.canonical(r.ref()), k -> new ArrayList<>()).add(r);
                 }
             }
-            for (RefAt r : distinct.values()) {
-                ExperienceRef ref = r.ref();
+            for (List<RefAt> occurrences : distinct.values()) {
+                ExperienceRef ref = occurrences.get(0).ref();
                 Optional<HistoryEntry> entry = memory.loadEvent(scope, ref.eventId(), ref.revision());
                 if (entry.isEmpty()) {
                     v.references.add(where + ": sample ref " + ExperienceRefCodec.canonical(ref) + " does not load");
@@ -630,9 +645,11 @@ public final class LedgerGrowthBenchmarkEvaluator {
                     v.references.add(where + ": sample ref " + ref.eventId().value() + " r" + ref.revision()
                             + " loads revision " + e.event().envelope().revision());
                 }
-                if (r.sequence().isPresent() && r.sequence().getAsLong() != e.sequence()) {
-                    v.references.add(where + ": sample ref " + ref.eventId().value() + " carries sequence "
-                            + r.sequence().getAsLong() + ", the ledger holds it at " + e.sequence());
+                for (RefAt r : occurrences) {
+                    if (r.sequence().isPresent() && r.sequence().getAsLong() != e.sequence()) {
+                        v.references.add(where + ": sample ref " + ref.eventId().value() + " carries sequence "
+                                + r.sequence().getAsLong() + ", the ledger holds it at " + e.sequence());
+                    }
                 }
                 v.references.addAll(ForgeExperienceEvaluator.coordinateViolations(where + ": sample ref", scope, ref,
                         e));
@@ -643,6 +660,7 @@ public final class LedgerGrowthBenchmarkEvaluator {
 
         private void afterTail(Path root) {
             int historyPageSize = config.historyPageSizes().get(0);
+            // a first page of one entry always leaves a cursor to resume (N >= MIN_EVENTS), whatever the config
             HistoryPage historyBefore;
             try (ExecutionMemory writer = ExecutionMemory.open(root, scope)) {
                 // the writer exports exactly what the read-only snapshot exported
@@ -653,7 +671,7 @@ public final class LedgerGrowthBenchmarkEvaluator {
                     v.pages.addAll(pageDigestViolations(label + " writable export ps=" + pageSize + " vs read-only",
                             reference.get(pageSize), pages));
                 }
-                historyBefore = writer.history(scope, null, historyPageSize);
+                historyBefore = writer.history(scope, null, 1);
 
                 for (int i = 0; i < corpus.tail().size(); i++) {
                     RecordResult r = writer.record(corpus.tail().get(i));
@@ -683,12 +701,13 @@ public final class LedgerGrowthBenchmarkEvaluator {
                             + latestSamples + " samples, expected " + all.size() + " and " + executionsAfterTail);
                 }
             }
-            segmentBytesAfterTail = ledgerBytes(root);
+            segmentBytesAfterTail = ledgerBytes(root, scope);
+            List<HistoryEntry> expectedAfterTail = new ArrayList<>(expected);
+            for (int i = 0; i < corpus.tail().size(); i++) {
+                expectedAfterTail.add(new HistoryEntry(corpus.size() + i + 1L, corpus.tail().get(i)));
+            }
             try (ExecutionMemory snapshot = ExecutionMemory.openReadOnly(root, scope)) {
-                long watermark = snapshot.history(scope, null, 1).highWatermark();
-                if (watermark != corpus.size() + corpus.tail().size()) {
-                    v.fidelity.add(label + " read-only after tail: high watermark " + watermark);
-                }
+                facadeSnapshot("read-only open after tail", snapshot, expectedAfterTail);
                 pinnedPages("new read-only snapshot after tail", snapshot);
                 resumedCursors("new read-only snapshot", snapshot);
                 resumedHistory("new read-only snapshot", snapshot, historyBefore, historyPageSize);
@@ -720,10 +739,17 @@ public final class LedgerGrowthBenchmarkEvaluator {
             }
         }
 
-        /** A history cursor taken before the tail still ends at its own high watermark. */
+        /**
+         * A history cursor taken before the tail, resumed at {@code pageSize}, still ends at its own high watermark
+         * and returns exactly the pre-tail history.
+         */
         private void resumedHistory(String where, ExecutionMemory memory, HistoryPage first, int pageSize) {
             List<HistoryEntry> entries = new ArrayList<>(first.entries());
             HistoryCursor cursor = first.next().map(c -> HistoryCursor.parse(c.token())).orElse(null);
+            if (cursor == null) {
+                v.cutoff.add(label + " " + where + ": the pre-tail history page left no cursor to resume");
+                return;
+            }
             while (cursor != null) {
                 HistoryPage page = memory.history(scope, cursor, pageSize);
                 entries.addAll(page.entries());
@@ -943,18 +969,18 @@ public final class LedgerGrowthBenchmarkEvaluator {
     }
 
     /** Bytes of the scope's ledger directory (the event segment), excluding projections. */
-    private static long ledgerBytes(Path root) {
+    private static long ledgerBytes(Path root, ScopeId scope) {
         try {
-            return ExecutionScaleSweepEvaluator.bytes(ledgerDir(root, ScopeId.of(SCOPE)));
+            return ExecutionScaleSweepEvaluator.bytes(ledgerDir(root, scope));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
     }
 
     /** SHA-256 (first 16 hex digits) over the names and contents of the scope's ledger files, in name order. */
-    private static String ledgerDigest(Path root) {
+    private static String ledgerDigest(Path root, ScopeId scope) {
         try {
-            Path dir = ledgerDir(root, ScopeId.of(SCOPE));
+            Path dir = ledgerDir(root, scope);
             List<Path> files;
             try (var walk = Files.walk(dir)) {
                 files = walk.filter(Files::isRegularFile).sorted().toList();

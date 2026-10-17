@@ -139,8 +139,9 @@ class LedgerGrowthBenchmarkEvaluationTest {
     @Test
     void theEvidenceCountsEveryReopenedFacadeAndEveryResumeOnTheNewSnapshot() {
         int rounds = SMALL.warmup() + SMALL.iterations();
-        // per size and round: writable reopen, read-only open, ExecutionLedger and ExecutionLedgerReader replays
-        assertEquals("replays compared: " + 4 * rounds * SMALL.sizes().size() + "; history traversals compared: "
+        // per size and round: writable reopen, read-only open, ExecutionLedger and ExecutionLedgerReader replays;
+        // per size: the read-only snapshot opened after the tail
+        assertEquals("replays compared: " + (4 * rounds + 1) * SMALL.sizes().size() + "; history traversals compared: "
                         + rounds * SMALL.sizes().size() * SMALL.historyPageSizes().size(),
                 gate(LedgerGrowthBenchmarkReport.REPLAY_FIDELITY).details().get(0));
         // every pre-tail export cursor and the pre-tail history cursor, on the writer and on the new snapshot
@@ -250,6 +251,33 @@ class LedgerGrowthBenchmarkEvaluationTest {
     }
 
     @Test
+    void aHistoryPageLargerThanTheLedgerStillResumesThePreTailHistoryCursor() {
+        Config wide = new Config(42, List.of(10, 15), List.of(1), List.of(500), 0, 1);
+        LedgerGrowthBenchmarkReport r = LedgerGrowthBenchmarkEvaluator.evaluate(wide, work.resolve("wide"));
+        assertEquals(List.of(), r.failedGates(), r.render());
+        int resumed = 0;
+        for (SizeResult s : r.sizes()) {
+            assertEquals(1, s.historyPages().get(500), "the whole history fits in one page");
+            // export cursors (pages - 1) plus the history cursor, on the writer and on the snapshot
+            resumed += 2 * (s.exportPages().get(1) - 1 + 1);
+        }
+        assertTrue(r.gates().stream().filter(g -> g.id().equals(LedgerGrowthBenchmarkReport.CUTOFF_STABILITY))
+                .findFirst().orElseThrow().details().get(0).endsWith("; resumed cursors: " + resumed),
+                "the pre-tail history cursor is resumed on the writer and the snapshot at every size");
+    }
+
+    @Test
+    void theSingleScopeGeneratorMatchesTheFullCorpus() {
+        for (int experiences : List.of(7, 41, 275)) {
+            var full = ExecutionScaleCorpusGenerator.generate(42, experiences).scopes();
+            for (int i = 0; i < full.size(); i++) {
+                assertEquals(full.get(i), ExecutionScaleCorpusGenerator.generateScope(42, experiences, i));
+            }
+        }
+        assertThrows(IllegalArgumentException.class, () -> ExecutionScaleCorpusGenerator.generateScope(42, 6, 0));
+    }
+
+    @Test
     void theRunnerPrintsTheReportThenTimingAndExitsZero() {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         int exit = LedgerGrowthBenchmarkMain.run(new PrintStream(bytes, true, StandardCharsets.UTF_8),
@@ -268,7 +296,7 @@ class LedgerGrowthBenchmarkEvaluationTest {
         Config parsed = LedgerGrowthBenchmarkMain.parse("--seed=7", "--sizes=500, 50", "--exportPageSizes=100,1",
                 "--historyPageSizes=500,1", "--warmup=0", "--iterations=3");
         assertEquals(new Config(7, List.of(50, 500), List.of(1, 100), List.of(1, 500), 0, 3), parsed);
-        for (String bad : List.of("--sizes=", "--sizes=20,20", "--sizes=9", "--exportPageSizes=0",
+        for (String bad : List.of("--sizes=", "--sizes=20,20", "--sizes=9", "--sizes=1000001", "--exportPageSizes=0",
                 "--exportPageSizes=501", "--historyPageSizes=", "--warmup=-1", "--iterations=0", "--other=1",
                 "sizes")) {
             assertThrows(IllegalArgumentException.class, () -> LedgerGrowthBenchmarkMain.parse(bad), bad);
