@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.agents/scripts/pr-size-preflight.mjs\" --hook",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

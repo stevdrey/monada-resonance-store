@@ -20,6 +20,20 @@ Monada Resonance Store is not a relational database clone, document database clo
 | [`.windsurf/skills/`](.windsurf/skills/) | Mirror of project skills for Devin Desktop / Windsurf discovery. |
 | [`.windsurf/rules/`](.windsurf/rules/) | Local IDE/Cascade-compatible project rules. |
 
+## Pull Request Size Guard
+
+PRs targeting `main` may change at most **40 files** (0–30 pass, 31–40 warn, 41+ fail). The read-only **Pull Request Size Guard** workflow checks GitHub's complete changed-file count; its **`PR file count`** job must be required in the branch ruleset for the limit to block merging. Coding agents must estimate file scope **before implementation**, split oversized work into separate Spec Context child Issues and PRs, and leave the parent open until all children are verified and merged.
+
+With Node.js 22+ and a current `origin/main` ref, manually check the local repository:
+
+```bash
+git fetch origin main
+node .agents/scripts/pr-size-preflight.mjs
+node --test .agents/scripts/pr-size-preflight.test.mjs
+```
+
+Claude Code and Codex hook configuration is included at `.claude/settings.json` and `.codex/hooks.json`. Runtime hook support and activation depend on the agent environment; the local check is advisory, not a replacement for the required GitHub status check. See [`docs/verification/pr-size-guard.md`](docs/verification/pr-size-guard.md) for ruleset setup and limitations.
+
 ## Core Flow
 
 ```text
