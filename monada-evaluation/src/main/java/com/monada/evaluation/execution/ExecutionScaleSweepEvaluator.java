@@ -722,13 +722,13 @@ public final class ExecutionScaleSweepEvaluator {
         return out.size() > 5 ? Set.of(out.size() + " refs") : out;
     }
 
-    private static long usedHeap() {
+    static long usedHeap() {
         Runtime runtime = Runtime.getRuntime();
         System.gc();
         return runtime.totalMemory() - runtime.freeMemory();
     }
 
-    private static long bytes(Path dir) throws IOException {
+    static long bytes(Path dir) throws IOException {
         try (var walk = Files.walk(dir)) {
             return walk.filter(Files::isRegularFile).mapToLong(p -> {
                 try {

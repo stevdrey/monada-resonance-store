@@ -188,6 +188,13 @@ tasks.register<JavaExec>("runExecutionScaleSweep") {
     classpath = sourceSets["main"].runtimeClasspath
 }
 
+tasks.register<JavaExec>("runLedgerGrowthBenchmark") {
+    description = "Measure the execution ledger as it grows: append, writable reopen, lock-free read-only open, history replay, exact loadEvent and pinned-cutoff sample-export paging at N=100/1000/5000 events, with hard idempotency, replay-fidelity, exact-ref, page-equality and cutoff/cursor-stability checks (timing and memory informational only; no Forge, network or provider required). Options via --args, e.g. --args=\"--sizes=100,1000,5000 --exportPageSizes=1,50,100 --iterations=10\""
+    group = "application"
+    mainClass.set("com.monada.evaluation.execution.LedgerGrowthBenchmarkMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
 tasks.named<Test>("test") {
     // The cross-JVM determinism test starts child JVMs that run the evaluation command on this runtime classpath.
     doFirst {
