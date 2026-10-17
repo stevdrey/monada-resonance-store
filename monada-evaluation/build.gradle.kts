@@ -195,6 +195,13 @@ tasks.register<JavaExec>("runLedgerGrowthBenchmark") {
     classpath = sourceSets["main"].runtimeClasspath
 }
 
+tasks.register<JavaExec>("runOpenCostBreakdownBenchmark") {
+    description = "Split ExecutionMemory.open / openReadOnly into ledger scan, history index build and projection load/verification at N=1000/5000/20000/50000 events, by difference against the storage-level open and a projection-less copy of the root, with hard projection-state, replay-fidelity and no-write checks (timing and memory informational only; no Forge, network or provider required). Options via --args, e.g. --args=\"--sizes=1000,5000,20000,50000 --iterations=10\""
+    group = "application"
+    mainClass.set("com.monada.evaluation.execution.OpenCostBreakdownMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
 tasks.named<Test>("test") {
     // The cross-JVM determinism test starts child JVMs that run the evaluation command on this runtime classpath.
     doFirst {

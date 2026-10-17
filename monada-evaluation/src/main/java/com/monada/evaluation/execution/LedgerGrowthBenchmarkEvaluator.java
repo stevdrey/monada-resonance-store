@@ -233,7 +233,7 @@ public final class LedgerGrowthBenchmarkEvaluator {
     }
 
     /** The file system the ledgers were written to: every append forces the segment, so its kind matters. */
-    private static String fileStore(Path workDir) {
+    static String fileStore(Path workDir) {
         try {
             var store = Files.getFileStore(workDir);
             return store.type() + " (" + store.name() + ")";
@@ -801,7 +801,7 @@ public final class LedgerGrowthBenchmarkEvaluator {
 
     // --- shared helpers and checks ---------------------------------------------------------------------------
 
-    private static void keep(boolean timed, List<Long> samples, long nanos) {
+    static void keep(boolean timed, List<Long> samples, long nanos) {
         if (timed) {
             samples.add(nanos);
         }
@@ -964,12 +964,12 @@ public final class LedgerGrowthBenchmarkEvaluator {
                 first.ledger(), first.projection(), flatten(pages), false, Optional.empty()).digest().substring(0, 16);
     }
 
-    private static Path ledgerDir(Path root, ScopeId scope) throws IOException {
+    static Path ledgerDir(Path root, ScopeId scope) throws IOException {
         return ProjectionLayout.of(root, scope).scopeDir().resolve("ledger");
     }
 
     /** Bytes of the scope's ledger directory (the event segment), excluding projections. */
-    private static long ledgerBytes(Path root, ScopeId scope) {
+    static long ledgerBytes(Path root, ScopeId scope) {
         try {
             return ExecutionScaleSweepEvaluator.bytes(ledgerDir(root, scope));
         } catch (IOException e) {
@@ -978,7 +978,7 @@ public final class LedgerGrowthBenchmarkEvaluator {
     }
 
     /** SHA-256 (first 16 hex digits) over the names and contents of the scope's ledger files, in name order. */
-    private static String ledgerDigest(Path root, ScopeId scope) {
+    static String ledgerDigest(Path root, ScopeId scope) {
         try {
             Path dir = ledgerDir(root, scope);
             List<Path> files;
