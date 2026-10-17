@@ -44,6 +44,19 @@ The previous root-level `skills/` directory has been replaced. When updating a p
 | `monada-evaluation` | Metrics, datasets, A/B reports, diagnostics. |
 | `monada-speech` | Speech samples, TORGO import, acoustic vectors, speech retrieval. |
 
+## PR Size Planning and Enforcement
+
+Before implementing **any** Issue, inventory likely touched paths in the current `main` branch and **estimate the total files** that each PR will change (including application code, tests, documentation, configuration, fixtures, generated files, additions, deletions and renames). Record the estimated count and file groups in the plan or Spec Context. Target **30 files or fewer** per PR. The hard maximum is **40**: 31–40 is allowed but generates a warning; 41+ cannot be merged.
+
+If the plan is likely to exceed 40 files:
+
+1. **Stop before coding**. Propose a dependency-ordered decomposition with each child Issue's own Spec Context, permitted paths, non-goals, acceptance criteria and tests; create child Issues only if the task authorizes it and the agent has an authorized GitHub capability.
+2. Give each child a separate, coherent, independently testable PR and keep `main` buildable at every merge. Make blockers and prerequisite branches explicit; avoid circular dependencies or hidden work in large parent PRs.
+3. Child PR descriptions must use `Refs #PARENT` and `Closes #CHILD`, **never** `Closes #PARENT`. Keep the parent open until all required children are merged, verified and explicitly accepted, then close it.
+4. Do **not** remove essential tests/docs, introduce broken intermediate states, or move implementation into generated files to evade the limit.
+
+During implementation and **before any push or PR creation**, run `git fetch origin main` (if needed) and `node .agents/scripts/pr-size-preflight.mjs`. The Claude Code and Codex `PreToolUse` Bash hooks run the same local script where supported. Hooks may not intercept other tools or API-based publication: **the GitHub Actions job `PR file count` and its required branch ruleset are authoritative**. See [`docs/verification/pr-size-guard.md`](docs/verification/pr-size-guard.md).
+
 ## Operating Principles
 
 - Measure before optimizing.

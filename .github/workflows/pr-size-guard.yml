@@ -1,0 +1,61 @@
+name: Pull Request Size Guard
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review, edited]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  file-count:
+    name: PR file count
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Enforce changed-file limit
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const MAX_FILES = 40;
+            const WARNING_FILES = 30;
+
+            const { owner, repo } = context.repo;
+            const pull_number = context.issue.number;
+            const { data: pull } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number,
+            });
+
+            const changed = pull.changed_files;
+            if (!Number.isSafeInteger(changed) || changed < 0) {
+              core.setFailed('Could not determine the pull request changed-file count.');
+              return;
+            }
+
+            await core.summary
+              .addHeading('Pull request file-count policy')
+              .addTable([
+                [{ data: 'Metric', header: true }, { data: 'Value', header: true }],
+                ['Changed files', String(changed)],
+                ['Warning range', `${WARNING_FILES + 1}-${MAX_FILES}`],
+                ['Maximum allowed', String(MAX_FILES)],
+              ])
+              .write();
+
+            if (changed > MAX_FILES) {
+              core.setFailed(
+                `PR #${pull_number} changes ${changed} files (limit: ${MAX_FILES}). ` +
+                'Split the work into smaller, independently reviewable PRs. ' +
+                'Do not remove required tests or documentation to meet the limit.'
+              );
+            } else if (changed > WARNING_FILES) {
+              core.warning(
+                `PR #${pull_number} changes ${changed} files. ` +
+                'Review scope before adding more changes.'
+              );
+            } else {
+              core.info(`PR #${pull_number} passes: ${changed}/${MAX_FILES} changed files.`);
+            }

@@ -1,0 +1,26 @@
+name: Agent PR Preflight Tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.agents/scripts/pr-size-preflight.mjs'
+      - '.agents/scripts/pr-size-preflight.test.mjs'
+      - '.claude/settings.json'
+      - '.codex/hooks.json'
+      - '.github/workflows/pr-preflight-tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Agent PR preflight tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - run: node --test .agents/scripts/pr-size-preflight.test.mjs
