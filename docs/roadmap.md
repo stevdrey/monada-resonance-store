@@ -467,6 +467,78 @@ caching and rebuild policy (no implicit rebuild); the #102, #121, #122, #123 and
 from timing. Follow-up decisions (each needs its own Issue): whether retired atoms should be compacted out of a
 rebuilt generation, and whether sizes beyond a few thousand per scope warrant an index other than the linear scan.
 
+#### Ledger growth, reopen/replay and sample-export paging (#126)
+
+Finds where cost grows in the authoritative event history and the read-only export before any change to the ledger
+layout is considered. `./gradlew :monada-evaluation:runLedgerGrowthBenchmark -q` (options via `--args`, e.g.
+`--args="--sizes=100,1000,5000,10000 --exportPageSizes=1,50,100 --iterations=10"`) cuts exactly N = 100/1000/5000
+events (plus a tail of N/10) from scope `scale-alpha` of the #125 generator (seed 42): single, repair, unfinished
+repair, corrected r1 -> r2 and duplicate executions with several events per attempt; every prefix is a valid ledger.
+Each size gets a fresh root and measures, through `ExecutionMemory` and through the storage-level `ExecutionLedger`
+/ `ExecutionLedgerReader` so ledger cost can be told apart from index and projection cost: append (per event),
+idempotent re-records, writable reopen, lock-free read-only open (with a cold first export page and a heap proxy),
+replay view, full history paging at page sizes 1/100/500, exact `loadEvent` of every event, and full sample export
+with the cutoff pinned at N at page sizes 1/50/100 (2 untimed warmup + 5 timed rounds; one fresh instance per open
+round). It then appends the tail and re-reads the pinned export and pre-append cursors.
+
+Five hard checks decide the exit code at every size (decision `LEDGER_GROWTH_CHARACTERIZED`): `L1` every event
+`APPENDED` at the next sequence through both layers with byte-identical ledger segments, and re-records (up to 50
+evenly spaced events, every event below 50, plus every correction) `IDEMPOTENT` at the original sequence without
+changing the watermark or the segment; `L2` every writable reopen and read-only open (paged entry by entry in every
+round, and once more after the tail), `ExecutionLedger.replay()` and `ExecutionLedgerReader.replay()` return exactly
+the recorded events in order,
+as does a read-only snapshot at every history page size, healthy and without a torn tail, with the expected execution
+count; `L3` every event loads exactly by id and revision, and every ref a sample carries (execution,
+outcome, gates, attempt start/finish, stages, evidence, revisions) loads at or before the cutoff with matching
+coordinates and sequence; `L4` the same samples in the same order at every export page size, on writable and
+read-only instances and in every round, one per execution, with the expected page counts; `L5` after the tail is
+appended, pinned pages, every resumed pre-append export cursor and a resumed pre-append history cursor return
+byte-identical pages, each checked both on the writer and on a new read-only snapshot, while a `latest()` export sees
+the tail. The
+deterministic report prints event kinds, segment bytes and digest, history and export page counts, the samples digest
+(independent of paging), the ledger prefix digest and per-page-size export digests. Timings, throughput, p50/p95,
+the heap proxy, growth exponents and the file system of the work directory are printed separately and never gate.
+The cross-JVM determinism test runs it with `--sizes=50,200,500 --warmup=0 --iterations=1`.
+
+Observed on 2026-10-16 (all five checks pass at every size; two runs and a run on another file system render
+byte-identical reports; Java 27 OpenJDK 64-Bit Server VM 27+35, Azul; Linux 7.2.10 x86_64; 16 processors; max heap
+3832 MiB). Durable storage, btrfs on NVMe (`-Djava.io.tmpdir` on disk; the Gradle task uses `/tmp`, tmpfs here, where
+fsync is nearly free), medians:
+
+| N events | executions = samples | segment | record p50 facade / ledger | append N, facade | writable open facade / ledger | read-only open facade / reader | `loadEvent` | full export ps=1 / 50 / 100 | cold first page | heap delta |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 100 | 18 | 30 KiB | 2.1 / 0.97 ms | 0.27 s | 13 / 3.9 ms | 15 / 3.9 ms | 1.1 µs | 2.6 / 1.5 / 0.6 ms | 3.2 ms | 0.1 MiB |
+| 1000 | 181 | 300 KiB | 2.4 / 1.3 ms | 2.5 s | 53 / 14 ms | 59 / 16 ms | 0.7 µs | 56 / 4.1 / 3.4 ms | 9.5 ms | 1.0 MiB |
+| 5000 | 909 | 1.5 MiB | 2.5 / 1.3 ms | 13.6 s | 148 / 38 ms | 177 / 43 ms | 0.3 µs | 118 / 7.2 / 6.1 ms | 19 ms | 5.1 MiB |
+
+On tmpfs at N=5000: record p50 51 / 6.3 µs, append 0.44 s, writable open 95 / 28 ms, read-only open 97 / 28 ms.
+
+- **Correctness held at every size.** Idempotent re-records, exact replay of every reopened facade and at every page
+  size, 18 300 sample ref resolutions (N distinct refs at each size: the samples reference every ledger event),
+  identical samples across page sizes and instances, and pinned pages and all 2 278 pre-append cursors unchanged after later
+  appends on the writer and on a new snapshot.
+- **Append cost is durability, not growth.** Per-event cost is flat from 1000 to 5000 events (growth exponent about 0);
+  on disk it is the per-append force (about 1.3 ms per ledger append, about 2.4 ms per `ExecutionMemory.record`, that
+  is roughly 370 events/s through the facade), on tmpfs it drops to 6 / 51 µs. Total append time is linear in N only
+  because each event costs the same.
+- **Primary growth bottleneck: opening the scope.** Writable reopen and read-only open grow with N (exponent about
+  0.6-0.7 between 1000 and 5000 on disk, about 0.35 on tmpfs) and take 3.5-4x the storage-level open or reader of the
+  same ledger (148 / 38 ms and 177 / 43 ms at N=5000). Most of the open is therefore above the whole-scope ledger
+  validation (history index and projection load and verification), and a read-only snapshot retains about 1 KiB of
+  heap per event. Five thousand events is still well under a second; this ranks costs, it does not show a limit.
+- **Reads after open are flat or bounded by the page.** `loadEvent` stays sub-microsecond, full history paging of 5000
+  events at page size 500 takes about 13 µs, and an export page costs the same at 1000 and 5000 events (about 120 µs at
+  page size 1): resuming a cursor does not rescan the ledger. Full export time follows the number of samples and pages;
+  page size 1 costs about 16-19x page size 100 for the same samples. The first page of a fresh instance (about 19 ms at
+  N=5000) pays for the per-cutoff work once.
+
+Not changed: ledger codec, segment layout, `ExecutionMemory`, `ExecutionLedger`, `ExecutionLedgerReader`, the export
+API, cursors, limits and defaults; the only edit to existing evaluation code makes two helpers of
+`ExecutionScaleSweepEvaluator` package-private for reuse, and the #125 report is unchanged apart from timing. Follow-up decision (needs its own
+Issue): measure, still without changing formats, how `ExecutionMemory.open` / `openReadOnly` split between ledger scan,
+history index build and projection load/verification, at larger N, before considering a persisted index or a segment
+lifecycle. No compaction is suggested: the ledger itself is not the dominant cost at these sizes.
+
 Numbering is roadmap order; independent items (for example #94 and #95) may proceed in parallel.
 
 Non-goals:

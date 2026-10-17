@@ -41,11 +41,13 @@ class ForgeCrossJvmDeterminismTest {
     private static final Set<Class<?>> NOT_REPORT_COMMANDS = Set.of(ExperienceExportMain.class);
     /**
      * Arguments of commands whose default run is too heavy for {@value #JVMS} concurrent JVMs (each fsyncs its own
-     * store). The scale sweep keeps three sizes and every K but uses smaller sizes and fewer timed iterations; its
-     * deterministic report is still compared in full.
+     * store). The scale sweep keeps three sizes and every K, and the ledger growth benchmark three sizes and every
+     * default page size, but both use smaller sizes and fewer timed iterations; their deterministic reports are
+     * still compared in full.
      */
     private static final Map<Class<?>, List<String>> COMMAND_ARGS = Map.of(ExecutionScaleSweepMain.class,
-            List.of("--sizes=25,100,250", "--warmup=1", "--iterations=2"));
+            List.of("--sizes=25,100,250", "--warmup=1", "--iterations=2"),
+            LedgerGrowthBenchmarkMain.class, List.of("--sizes=50,200,500", "--warmup=0", "--iterations=1"));
 
     private record Result(int exit, String out, String err) {
     }
@@ -57,7 +59,8 @@ class ForgeCrossJvmDeterminismTest {
                 Arguments.of(RecallStressEvaluationMain.class, "STRESS_SET_CHARACTERIZED"),
                 Arguments.of(ThresholdSweepMain.class, "SWEEP_CHARACTERIZED"),
                 Arguments.of(QueryExpansionMain.class, "COMPARISON_CHARACTERIZED"),
-                Arguments.of(ExecutionScaleSweepMain.class, "SCALE_SWEEP_CHARACTERIZED"));
+                Arguments.of(ExecutionScaleSweepMain.class, "SCALE_SWEEP_CHARACTERIZED"),
+                Arguments.of(LedgerGrowthBenchmarkMain.class, "LEDGER_GROWTH_CHARACTERIZED"));
     }
 
     /** A new evaluation command fails here until it is added to {@link #commands()} or, if it prints no report, excluded. */

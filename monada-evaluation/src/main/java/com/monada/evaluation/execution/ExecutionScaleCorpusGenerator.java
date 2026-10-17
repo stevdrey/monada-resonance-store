@@ -122,11 +122,23 @@ final class ExecutionScaleCorpusGenerator {
         }
         List<ScopeCorpus> scopes = new ArrayList<>();
         for (int s = 0; s < SCOPES.size(); s++) {
-            // One independent stream per scope: a scope's corpus never depends on how many draws another took.
-            scopes.add(new ScopeBuilder(ScopeId.of(SCOPES.get(s)), new Random(seed * 31 + s),
-                    experiencesPerScope).build());
+            scopes.add(generateScope(seed, experiencesPerScope, s));
         }
         return new ScaleCorpus(seed, experiencesPerScope, scopes);
+    }
+
+    /**
+     * The scope at {@code index} of {@link #generate}, built alone: equal to
+     * {@code generate(seed, experiencesPerScope).scopes().get(index)}.
+     */
+    static ScopeCorpus generateScope(long seed, int experiencesPerScope, int index) {
+        if (experiencesPerScope < MIN_EXPERIENCES_PER_SCOPE) {
+            throw new IllegalArgumentException("experiencesPerScope must be >= " + MIN_EXPERIENCES_PER_SCOPE
+                    + ", got: " + experiencesPerScope);
+        }
+        // One independent stream per scope: a scope's corpus never depends on how many draws another took.
+        return new ScopeBuilder(ScopeId.of(SCOPES.get(index)), new Random(seed * 31 + index), experiencesPerScope)
+                .build();
     }
 
     private static final class ScopeBuilder {
