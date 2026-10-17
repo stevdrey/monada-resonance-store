@@ -3,21 +3,23 @@ package com.monada.storage.execution;
 import com.monada.core.execution.ExecutionEvent;
 import com.monada.core.execution.ExperienceRef;
 import com.monada.core.execution.ScopeId;
-import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.OutputStream;
 import java.nio.channels.Channels;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
-import java.nio.charset.CharacterCodingException;
+import java.nio.CharBuffer;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CoderResult;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -69,8 +71,8 @@ public final class ProjectionCheckpoint implements AutoCloseable {
     private static final Pattern ATOM_ID =
             Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
     private static final Pattern DIGEST = Pattern.compile("[0-9a-f]{64}");
-    private static final Pattern SEQUENCE = Pattern.compile("[1-9][0-9]{0,18}");
     private static final int STREAM_BUFFER_BYTES = 65_536;
+    private static final byte[] COVER_PREFIX = "COVER|".getBytes(StandardCharsets.US_ASCII);
     private static final Pattern DIMENSIONS = Pattern.compile("[1-9][0-9]{0,5}");
 
     /** Kind of a mapping entry. */
@@ -330,27 +332,37 @@ public final class ProjectionCheckpoint implements AutoCloseable {
         // Two streaming passes keep memory bounded by the folded state: the first finds the last COVER of the
         // well-framed prefix; the second applies every entry up to it immediately (no per-batch buffer) and only
         // syntax-checks what follows, which is an uncovered tail and never applied.
-        Fold fold = new Fold(scope, lastCoverLine(file, scope));
-        try (InputStream in = new BufferedInputStream(Files.newInputStream(file), 65_536)) {
+        return read(file, scope, lastCoverLine(file, scope));
+    }
+
+    /**
+     * The second pass: folds the file, applying entries only up to line {@code lastCover} (the first pass's
+     * result). Package-private so tests can append a COVER between the passes.
+     */
+    static Snapshot read(Path file, ScopeId scope, long lastCover) throws IOException {
+        Fold fold = new Fold(scope, lastCover);
+        Unframer unframer = new Unframer();
+        try (InputStream in = Files.newInputStream(file)) {
+            LineReader line = new LineReader(in);
             long lineNumber = 0;
             while (fold.problems.isEmpty()) {
-                Line line = nextLine(in);
-                if (line == null) {
+                if (!line.next()) {
                     break;
                 }
                 lineNumber++;
-                if (!line.terminated()) {
+                if (!line.terminated) {
                     fold.tornTail = true;
                     break;
                 }
                 fold.lines = lineNumber;
-                if (line.oversized()) {
+                if (line.oversized) {
                     fold.problem(lineNumber, "line exceeds " + MAX_LINE_BYTES + " bytes");
                     break;
                 }
-                String payload = unframe(line.bytes(), lineNumber, fold);
-                if (payload != null) {
-                    fold.accept(lineNumber, payload);
+                int payload = unframer.payloadStart(line.bytes, line.length, lineNumber, fold);
+                if (payload >= 0) {
+                    fold.accept(lineNumber, new String(line.bytes, payload, line.length - payload,
+                            StandardCharsets.UTF_8));
                 }
             }
             if (lineNumber == 0 && fold.problems.isEmpty()) {
@@ -361,22 +373,20 @@ public final class ProjectionCheckpoint implements AutoCloseable {
     }
 
     /** Line number of the last well-framed COVER before the first framing defect or torn line (0 when none). */
-    private static long lastCoverLine(Path file, ScopeId scope) throws IOException {
+    static long lastCoverLine(Path file, ScopeId scope) throws IOException {
         Fold scratch = new Fold(scope, 0);
+        Unframer unframer = new Unframer();
         long lastCover = 0;
-        try (InputStream in = new BufferedInputStream(Files.newInputStream(file), 65_536)) {
+        try (InputStream in = Files.newInputStream(file)) {
+            LineReader line = new LineReader(in);
             long lineNumber = 0;
-            while (true) {
-                Line line = nextLine(in);
-                if (line == null || !line.terminated() || line.oversized()) {
-                    break;
-                }
+            while (line.next() && line.terminated && !line.oversized) {
                 lineNumber++;
-                String payload = unframe(line.bytes(), lineNumber, scratch);
-                if (payload == null) {
+                int payload = unframer.payloadStart(line.bytes, line.length, lineNumber, scratch);
+                if (payload < 0) {
                     break;
                 }
-                if (payload.startsWith("COVER|")) {
+                if (startsWith(line.bytes, payload, line.length, COVER_PREFIX)) {
                     lastCover = lineNumber;
                 }
             }
@@ -384,33 +394,159 @@ public final class ProjectionCheckpoint implements AutoCloseable {
         return lastCover;
     }
 
-    private static String unframe(byte[] bytes, long lineNumber, Fold fold) {
-        String text;
-        try {
-            text = LedgerPaths.decodeStrict(bytes);
-        } catch (CharacterCodingException e) {
-            fold.problem(lineNumber, "line is not valid UTF-8");
-            return null;
+    /**
+     * Checks one line's framing on its bytes: strict UTF-8, {@code MAGIC}, line number, payload length and
+     * payload digest, in that order and with the same problems as splitting the decoded line on its first four
+     * tabs. A tab byte never occurs inside a multi-byte UTF-8 sequence, and valid UTF-8 re-encodes to the same
+     * bytes, so byte offsets give exactly the decoded fields. One decoder and one digest serve a whole pass.
+     */
+    private static final class Unframer {
+        private final CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT);
+        private final CharBuffer chars = CharBuffer.allocate(MAX_LINE_BYTES);
+        private final MessageDigest sha256 = RecordLine.newSha256();
+        private final int[] tabs = new int[4];
+
+        /** Offset of the payload in {@code b}, or -1 after reporting the first framing problem to {@code fold}. */
+        int payloadStart(byte[] b, int len, long lineNumber, Fold fold) {
+            if (!isStrictUtf8(b, len)) {
+                fold.problem(lineNumber, "line is not valid UTF-8");
+                return -1;
+            }
+            int found = 0;
+            for (int i = 0; i < len && found < tabs.length; i++) {
+                if (b[i] == '\t') {
+                    tabs[found++] = i;
+                }
+            }
+            if (found < tabs.length || !asciiEquals(b, 0, tabs[0], MAGIC)) {
+                fold.problem(lineNumber, "unknown line framing");
+                return -1;
+            }
+            if (!asciiEquals(b, tabs[0] + 1, tabs[1], Long.toString(lineNumber))) {
+                fold.problem(lineNumber, "line number " + new String(b, tabs[0] + 1, tabs[1] - tabs[0] - 1,
+                        StandardCharsets.UTF_8) + " out of order");
+                return -1;
+            }
+            int payload = tabs[3] + 1;
+            if (!asciiEquals(b, tabs[1] + 1, tabs[2], Integer.toString(len - payload))) {
+                fold.problem(lineNumber, "payload length mismatch");
+                return -1;
+            }
+            if (!RecordLine.sha256HexEquals(sha256, b, payload, len - payload, b, tabs[2] + 1, tabs[3])) {
+                fold.problem(lineNumber, "payload digest mismatch");
+                return -1;
+            }
+            return payload;
         }
-        String[] parts = text.split("\t", 5);
-        if (parts.length != 5 || !parts[0].equals(MAGIC)) {
-            fold.problem(lineNumber, "unknown line framing");
-            return null;
+
+        private boolean isStrictUtf8(byte[] b, int len) {
+            int i = 0;
+            while (i < len && b[i] >= 0) {
+                i++;
+            }
+            if (i == len) {
+                return true; // ASCII
+            }
+            decoder.reset();
+            chars.clear();
+            ByteBuffer in = ByteBuffer.wrap(b, 0, len);
+            CoderResult result = decoder.decode(in, chars, true);
+            if (result.isUnderflow()) {
+                result = decoder.flush(chars);
+            }
+            if (result.isOverflow()) {
+                throw new IllegalStateException("UTF-8 never decodes to more chars than bytes");
+            }
+            return !result.isError();
         }
-        if (!parts[1].equals(Long.toString(lineNumber))) {
-            fold.problem(lineNumber, "line number " + parts[1] + " out of order");
-            return null;
+    }
+
+    private static boolean asciiEquals(byte[] b, int from, int to, String ascii) {
+        if (to - from != ascii.length()) {
+            return false;
         }
-        byte[] payload = parts[4].getBytes(StandardCharsets.UTF_8);
-        if (!parts[2].equals(Integer.toString(payload.length))) {
-            fold.problem(lineNumber, "payload length mismatch");
-            return null;
+        for (int i = 0; i < ascii.length(); i++) {
+            if (b[from + i] != ascii.charAt(i)) {
+                return false;
+            }
         }
-        if (!parts[3].equals(RecordLine.sha256Hex(payload))) {
-            fold.problem(lineNumber, "payload digest mismatch");
-            return null;
+        return true;
+    }
+
+    private static boolean startsWith(byte[] b, int from, int to, byte[] prefix) {
+        if (to - from < prefix.length) {
+            return false;
         }
-        return parts[4];
+        for (int i = 0; i < prefix.length; i++) {
+            if (b[from + i] != prefix[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Streams LF-terminated lines through one reusable read window and one reusable line buffer. A line keeps at
+     * most {@link #MAX_LINE_BYTES} bytes; longer ones are scanned to their LF and flagged {@code oversized}. A last
+     * line without LF is returned with {@code terminated == false}.
+     */
+    static final class LineReader {
+        private final InputStream in;
+        private final byte[] window = new byte[STREAM_BUFFER_BYTES];
+        private int pos;
+        private int limit;
+        private boolean eof;
+        final byte[] bytes = new byte[MAX_LINE_BYTES];
+        int length;
+        boolean terminated;
+        boolean oversized;
+
+        LineReader(InputStream in) {
+            this.in = in;
+        }
+
+        /** Reads the next line into {@code bytes}; false at end of input. */
+        boolean next() throws IOException {
+            length = 0;
+            terminated = false;
+            oversized = false;
+            boolean any = false;
+            while (true) {
+                if (pos == limit) {
+                    if (eof) {
+                        return any;
+                    }
+                    int n = in.read(window, 0, window.length);
+                    if (n < 0) {
+                        eof = true;
+                        return any;
+                    }
+                    pos = 0;
+                    limit = n;
+                    continue;
+                }
+                any = true;
+                int lf = pos;
+                while (lf < limit && window[lf] != '\n') {
+                    lf++;
+                }
+                int available = lf - pos;
+                int take = Math.min(available, MAX_LINE_BYTES - length);
+                System.arraycopy(window, pos, bytes, length, take);
+                length += take;
+                if (take < available) {
+                    oversized = true;
+                }
+                if (lf < limit) {
+                    pos = lf + 1;
+                    terminated = true;
+                    return true;
+                }
+                pos = limit;
+            }
+        }
     }
 
     private static final class Fold {
@@ -436,7 +572,7 @@ public final class ProjectionCheckpoint implements AutoCloseable {
         }
 
         void accept(long line, String payload) {
-            String[] t = payload.split("\\|", -1);
+            String[] t = splitFields(payload);
             if (!header) {
                 if (t.length < 3 || !t[0].equals("HEADER")) {
                     problem(line, "first line is not a projection header");
@@ -459,12 +595,13 @@ public final class ProjectionCheckpoint implements AutoCloseable {
             switch (t[0]) {
                 case "PROJECT", "RETIRE" -> {
                     if (t.length != 3 + ExperienceRefCodec.TOKENS || !t[1].equals(Long.toString(next))
-                            || !ATOM_ID.matcher(t[2]).matches()) {
+                            || !isAtomId(t[2])) {
                         problem(line, "malformed " + t[0] + " entry for ledger sequence " + next);
                         return;
                     }
+                    ExperienceRef ref;
                     try {
-                        ExperienceRef ref = ExperienceRefCodec.fromTokens(t, 3);
+                        ref = ExperienceRefCodec.fromTokens(t, 3);
                         if (!ref.scope().equals(scope)) {
                             problem(line, "entry ref belongs to another scope");
                             return;
@@ -474,14 +611,14 @@ public final class ProjectionCheckpoint implements AutoCloseable {
                         return;
                     }
                     if (line < lastCover) {
-                        apply(line, t); // covered: applied at once; a problem stops the read
+                        apply(line, t[0], t[2], ref); // covered: applied at once; a problem stops the read
                     } else {
                         uncoveredTail = true; // an interrupted batch: checked, never applied
                     }
                 }
                 case "COVER" -> {
-                    if (t.length != 3 || !SEQUENCE.matcher(t[1]).matches() || !t[1].equals(Long.toString(next))
-                            || !DIGEST.matcher(t[2]).matches()) {
+                    if (t.length != 3 || !isSequence(t[1]) || !t[1].equals(Long.toString(next))
+                            || !isDigest(t[2])) {
                         problem(line, "malformed or out-of-order COVER, expected ledger sequence " + next);
                         return;
                     }
@@ -495,11 +632,9 @@ public final class ProjectionCheckpoint implements AutoCloseable {
             }
         }
 
-        private boolean apply(long line, String[] t) {
-            String atom = t[2];
-            ExperienceRef ref = ExperienceRefCodec.fromTokens(t, 3);
+        private boolean apply(long line, String kind, String atom, ExperienceRef ref) {
             String key = ExperienceRefCodec.canonical(ref);
-            if (t[0].equals("PROJECT")) {
+            if (kind.equals("PROJECT")) {
                 TreeMap<String, ExperienceRef> refs = live.computeIfAbsent(atom, k -> new TreeMap<>());
                 if (refs.putIfAbsent(key, ref) != null) {
                     problem(line, "duplicate projection of " + key);
@@ -530,6 +665,67 @@ public final class ProjectionCheckpoint implements AutoCloseable {
         }
     }
 
+    /** {@code payload.split("\\|", -1)}: every field, empty ones included. */
+    static String[] splitFields(String payload) {
+        int count = 1;
+        for (int i = payload.indexOf('|'); i >= 0; i = payload.indexOf('|', i + 1)) {
+            count++;
+        }
+        String[] fields = new String[count];
+        int start = 0;
+        for (int f = 0; f < count - 1; f++) {
+            int end = payload.indexOf('|', start);
+            fields[f] = payload.substring(start, end);
+            start = end + 1;
+        }
+        fields[count - 1] = payload.substring(start);
+        return fields;
+    }
+
+    /** {@code ATOM_ID.matcher(s).matches()}. */
+    static boolean isAtomId(String s) {
+        if (s.length() != 36) {
+            return false;
+        }
+        for (int i = 0; i < 36; i++) {
+            char c = s.charAt(i);
+            if (i == 8 || i == 13 || i == 18 || i == 23 ? c != '-' : !isLowerHex(c)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** {@code DIGEST.matcher(s).matches()}. */
+    static boolean isDigest(String s) {
+        if (s.length() != 64) {
+            return false;
+        }
+        for (int i = 0; i < 64; i++) {
+            if (!isLowerHex(s.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Matches {@code [1-9][0-9]{0,18}}: 1 to 19 digits without a leading zero. */
+    static boolean isSequence(String s) {
+        if (s.isEmpty() || s.length() > 19 || s.charAt(0) < '1' || s.charAt(0) > '9') {
+            return false;
+        }
+        for (int i = 1; i < s.length(); i++) {
+            if (s.charAt(i) < '0' || s.charAt(i) > '9') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isLowerHex(char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+    }
+
     // ------------------------------------------------------------------ framing helpers
 
     private static String header(ScopeId scope, int dimensions) {
@@ -549,29 +745,6 @@ public final class ProjectionCheckpoint implements AutoCloseable {
         System.arraycopy(body, 0, out, head.length, body.length);
         out[out.length - 1] = '\n';
         return out;
-    }
-
-    private record Line(byte[] bytes, boolean terminated, boolean oversized) {
-    }
-
-    /** Next line without its LF, or null at end of input; never buffers more than the line limit. */
-    private static Line nextLine(InputStream in) throws IOException {
-        ByteArrayOutputStream buf = new ByteArrayOutputStream();
-        boolean oversized = false;
-        int b;
-        boolean any = false;
-        while ((b = in.read()) != -1) {
-            any = true;
-            if (b == '\n') {
-                return new Line(buf.toByteArray(), true, oversized);
-            }
-            if (buf.size() < MAX_LINE_BYTES) {
-                buf.write(b);
-            } else {
-                oversized = true;
-            }
-        }
-        return any ? new Line(buf.toByteArray(), false, oversized) : null;
     }
 
     private static void writeFully(FileChannel channel, byte[] bytes) throws IOException {
