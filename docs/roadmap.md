@@ -562,8 +562,8 @@ Three hard checks decide the exit code at every size (decision `OPEN_COST_CHARAC
 - `B2`: both storage layers and every facade open of both roots replay exactly the recorded events in order,
   healthy and without a torn tail; sampled events load identically on both roots; opening the copy creates no
   projection;
-- `B3`: no open changes the ledger bytes or digest, the projection generation fingerprint (pointer, file names and
-  sizes) or the content digest of the current projection generation of the full root.
+- `B3`: no open changes the ledger bytes or digest of either root, or the projection generation fingerprint (pointer,
+  file names and sizes) or the content digest of the current projection generation of the full root.
 
 The deterministic report holds the corpus shape, ledger bytes and digest, and the projection generation. The
 projection's bytes on disk are printed with the timings, because its memory files are not byte-stable across JVMs (a

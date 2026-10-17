@@ -129,9 +129,9 @@ public final class OpenCostBreakdownEvaluator {
                                 + "load identically on both roots; opening the copy creates no projection",
                         v.fidelity, List.of("replays compared: " + v.replays + "; exact loads: " + v.loads)),
                 ForgeGate.of(OpenCostBreakdownReport.OPENS_DO_NOT_WRITE,
-                        "after every round the ledger segment bytes and digest, the projection generation "
-                                + "fingerprint (pointer, file names and sizes) and the content digest of the current "
-                                + "projection generation of the full root are unchanged",
+                        "after all rounds the ledger segment bytes and digest of both roots, and the "
+                                + "projection generation fingerprint (pointer, file names and sizes) and the content "
+                                + "digest of the current projection generation of the full root, are unchanged",
                         v.writes, List.of("sizes checked: " + config.sizes().size())));
         Map<String, String> environment = new LinkedHashMap<>(ExecutionScaleSweepReport.currentEnvironment());
         environment.put("work dir file store", LedgerGrowthBenchmarkEvaluator.fileStore(workDir));
@@ -256,6 +256,10 @@ public final class OpenCostBreakdownEvaluator {
             if (LedgerGrowthBenchmarkEvaluator.ledgerBytes(root, scope) != segmentBytes
                     || !LedgerGrowthBenchmarkEvaluator.ledgerDigest(root, scope).equals(segmentDigest)) {
                 v.writes.add(label + ": the ledger segment of the full root changed during the opens");
+            }
+            if (LedgerGrowthBenchmarkEvaluator.ledgerBytes(copy, scope) != segmentBytes
+                    || !LedgerGrowthBenchmarkEvaluator.ledgerDigest(copy, scope).equals(segmentDigest)) {
+                v.writes.add(label + ": the ledger segment of the projection-less copy changed during the opens");
             }
             if (!generation(root).equals(generation)) {
                 v.writes.add(label + ": the projection generation of the full root changed during the opens");
