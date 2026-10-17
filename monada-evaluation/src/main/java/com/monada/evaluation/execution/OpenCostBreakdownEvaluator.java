@@ -1,10 +1,7 @@
 package com.monada.evaluation.execution;
 
 import com.monada.api.execution.ExecutionMemory;
-import com.monada.api.execution.ExecutionMemoryConfig;
-import com.monada.api.execution.HistoryCursor;
 import com.monada.api.execution.HistoryEntry;
-import com.monada.api.execution.HistoryPage;
 import com.monada.api.execution.ProjectionStatus;
 import com.monada.api.execution.RecordResult;
 import com.monada.core.execution.EventKind;
@@ -20,19 +17,15 @@ import com.monada.storage.execution.LedgerRecord;
 import com.monada.storage.execution.ProjectionLayout;
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.EnumMap;
-import java.util.HashSet;
-import java.util.HexFormat;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -53,6 +46,7 @@ import java.util.Set;
  *       the projection load stops after the layout lookup) minus the ledger scan;</li>
  *   <li>projection: the facade open of the full root (state {@code CURRENT}) minus the copy.</li>
  * </ul>
+ * The two roots are opened in alternating order from round to round, so neither median systematically runs first.
  *
  * <p>As in #126, three hard checks (both roots open in the expected projection state over the same ledger bytes,
  * replay fidelity and exact loads on both roots, and no open writes anything) are deterministic and decide the exit
@@ -74,21 +68,14 @@ public final class OpenCostBreakdownEvaluator {
     static final String WRITABLE_FULL = "writable open (ExecutionMemory.open)";
     static final String READ_ONLY_FULL = "read-only open (ExecutionMemory.openReadOnly)";
 
+    /** Keys of the projection states observed per root and open mode, in report order. */
+    static final List<String> STATE_KEYS = List.of("full root writable", "full root read-only", "copy writable",
+            "copy read-only");
+
     /** What one breakdown measures; every field is printed in the deterministic report. */
     public record Config(long seed, List<Integer> sizes, int warmup, int iterations) {
         public Config {
-            List<Integer> copy = List.copyOf(sizes);
-            if (copy.isEmpty() || new HashSet<>(copy).size() != copy.size()) {
-                throw new IllegalArgumentException("sizes must be non-empty and distinct, got: " + copy);
-            }
-            for (int n : copy) {
-                if (n < LedgerGrowthBenchmarkEvaluator.MIN_EVENTS || n > LedgerGrowthBenchmarkEvaluator.MAX_EVENTS) {
-                    throw new IllegalArgumentException("every size must be in "
-                            + LedgerGrowthBenchmarkEvaluator.MIN_EVENTS + ".."
-                            + LedgerGrowthBenchmarkEvaluator.MAX_EVENTS + " events, got: " + n);
-                }
-            }
-            sizes = copy.stream().sorted().toList();
+            sizes = LedgerGrowthBenchmarkEvaluator.Config.eventSizes(sizes);
             if (warmup < 0) {
                 throw new IllegalArgumentException("warmup must be >= 0, got: " + warmup);
             }
@@ -100,6 +87,27 @@ public final class OpenCostBreakdownEvaluator {
         public static Config defaults() {
             return new Config(ExecutionScaleCorpusGenerator.DEFAULT_SEED, DEFAULT_SIZES, DEFAULT_WARMUP,
                     DEFAULT_ITERATIONS);
+        }
+    }
+
+    /**
+     * What an open must not change on a root: ledger segment bytes and digest, the projection generation
+     * fingerprint (pointer, file names and sizes), the content digest of the current generation, and whether a
+     * projection (pointer or any generation) exists at all.
+     */
+    record RootFingerprint(long ledgerBytes, String ledgerDigest, String generation, String projectionContent,
+                           boolean hasProjection) {
+        static RootFingerprint of(Path root, ScopeId scope) {
+            try {
+                ProjectionLayout layout = ProjectionLayout.of(root, scope);
+                Optional<Path> current = layout.currentDir();
+                return new RootFingerprint(LedgerGrowthBenchmarkEvaluator.ledgerBytes(root, scope),
+                        LedgerGrowthBenchmarkEvaluator.ledgerDigest(root, scope), layout.generation(),
+                        current.map(LedgerGrowthBenchmarkEvaluator::treeDigest).orElse("<none>"),
+                        current.isPresent() || !layout.generationDirs().isEmpty());
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
         }
     }
 
@@ -124,9 +132,11 @@ public final class OpenCostBreakdownEvaluator {
                                 + "in every round; the copy holds byte-identical ledger segments",
                         v.states, List.of("opens checked: " + v.opens)),
                 ForgeGate.of(OpenCostBreakdownReport.REPLAY_FIDELITY,
-                        "ExecutionLedger, ExecutionLedgerReader and every facade open of both roots replay exactly "
-                                + "the recorded events in order, healthy and without a torn tail; sampled events "
-                                + "load identically on both roots; opening the copy creates no projection",
+                        "ExecutionLedger and ExecutionLedgerReader replay exactly the recorded events in order in "
+                                + "every round, healthy and without a torn tail; every facade open of both roots "
+                                + "has the recorded high watermark and no torn tail, and its whole history equals the "
+                                + "recorded events in the first and last round; sampled events load identically on "
+                                + "both roots; opening the copy creates no projection",
                         v.fidelity, List.of("replays compared: " + v.replays + "; exact loads: " + v.loads)),
                 ForgeGate.of(OpenCostBreakdownReport.OPENS_DO_NOT_WRITE,
                         "after all rounds the ledger segment bytes and digest of both roots, and the "
@@ -142,25 +152,28 @@ public final class OpenCostBreakdownEvaluator {
      * Copies {@code root} into {@code copy} without the scope's projection: every entry directly below the scope
      * directory whose name starts with {@code projection} (pointer, temporary pointer, generations) is skipped.
      * Everything else is copied, the writer lock file included, so no timed open of the copy pays for creating it
-     * (the lock is an OS lock on an existing regular file). The source is only read.
+     * (the lock is an OS lock on an existing regular file). The source is only read. Relative or unnormalized roots
+     * are walked in absolute normalized form, the form the layout's scope directory has.
      */
     static void copyWithoutProjection(Path root, ScopeId scope, Path copy) {
         try {
-            Path scopeDir = ProjectionLayout.of(root, scope).scopeDir();
-            Files.walkFileTree(root, new SimpleFileVisitor<>() {
+            Path source = root.toAbsolutePath().normalize();
+            Path scopeDir = ProjectionLayout.of(source, scope).scopeDir();
+            Files.walkFileTree(source, new SimpleFileVisitor<>() {
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
                     if (skipped(dir)) {
                         return FileVisitResult.SKIP_SUBTREE;
                     }
-                    Files.createDirectories(copy.resolve(root.relativize(dir).toString()));
+                    Files.createDirectories(copy.resolve(source.relativize(dir).toString()));
                     return FileVisitResult.CONTINUE;
                 }
 
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                     if (!skipped(file)) {
-                        Files.copy(file, copy.resolve(root.relativize(file).toString()), LinkOption.NOFOLLOW_LINKS);
+                        Files.copy(file, copy.resolve(source.relativize(file).toString()),
+                                LinkOption.NOFOLLOW_LINKS);
                     }
                     return FileVisitResult.CONTINUE;
                 }
@@ -172,6 +185,34 @@ public final class OpenCostBreakdownEvaluator {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    /** B1 before any open: the copy must hold the full root's ledger and no projection. */
+    static List<String> copyViolations(String label, RootFingerprint full, RootFingerprint copy) {
+        List<String> out = new ArrayList<>();
+        if (copy.ledgerBytes() != full.ledgerBytes() || !copy.ledgerDigest().equals(full.ledgerDigest())) {
+            out.add(label + ": the projection-less copy holds a different ledger (" + copy.ledgerDigest() + " vs "
+                    + full.ledgerDigest() + ")");
+        }
+        if (copy.hasProjection()) {
+            out.add(label + ": the copy still holds a projection");
+        }
+        return out;
+    }
+
+    /** B3 after every open: {@code after} must equal {@code before} on the ledger, and on the projection if full. */
+    static List<String> writeViolations(String where, RootFingerprint before, RootFingerprint after, boolean full) {
+        List<String> out = new ArrayList<>();
+        if (after.ledgerBytes() != before.ledgerBytes() || !after.ledgerDigest().equals(before.ledgerDigest())) {
+            out.add(where + ": the ledger segment changed during the opens");
+        }
+        if (full && !after.generation().equals(before.generation())) {
+            out.add(where + ": the projection generation changed during the opens");
+        }
+        if (full && !after.projectionContent().equals(before.projectionContent())) {
+            out.add(where + ": the content of the current projection generation changed during the opens");
+        }
+        return out;
     }
 
     /** Violations collected across every size, one list per hard check. */
@@ -194,6 +235,7 @@ public final class OpenCostBreakdownEvaluator {
         private final ScopeId scope;
         private final List<HistoryEntry> expected;
         private final Map<String, List<Long>> samples = new LinkedHashMap<>();
+        private final Map<String, Set<ProjectionStatus.State>> states = new LinkedHashMap<>();
         private long segmentBytes;
         private String segmentDigest = "";
         private long projectionBytes;
@@ -213,36 +255,34 @@ public final class OpenCostBreakdownEvaluator {
                     READER_SCAN, WRITABLE_NO_PROJECTION, READ_ONLY_NO_PROJECTION, WRITABLE_FULL, READ_ONLY_FULL)) {
                 samples.put(name, new ArrayList<>());
             }
+            STATE_KEYS.forEach(k -> states.put(k, EnumSet.noneOf(ProjectionStatus.State.class)));
         }
 
         void execute() {
             Path root = RecallStressEvaluator.fresh(workDir, "open-n" + corpus.size() + "-");
             record(root);
-            segmentBytes = LedgerGrowthBenchmarkEvaluator.ledgerBytes(root, scope);
-            segmentDigest = LedgerGrowthBenchmarkEvaluator.ledgerDigest(root, scope);
-            String generation = generation(root);
+            RootFingerprint full = RootFingerprint.of(root, scope);
+            segmentBytes = full.ledgerBytes();
+            segmentDigest = full.ledgerDigest();
             Optional<Path> current = currentDir(root);
-            String projectionContent = current.map(OpenCostBreakdownEvaluator::treeDigest).orElse("<none>");
             projectionGeneration = current.map(p -> p.getFileName().toString()).orElse("<none>");
             projectionBytes = current.map(OpenCostBreakdownEvaluator::bytes).orElse(-1L);
 
             Path copy = RecallStressEvaluator.fresh(workDir, "open-noproj-n" + corpus.size() + "-");
             copyWithoutProjection(root, scope, copy);
-            if (!LedgerGrowthBenchmarkEvaluator.ledgerDigest(copy, scope).equals(segmentDigest)) {
-                v.states.add(label + ": the projection-less copy holds a different ledger ("
-                        + LedgerGrowthBenchmarkEvaluator.ledgerDigest(copy, scope) + " vs " + segmentDigest + ")");
-            }
-            if (currentDir(copy).isPresent() || generations(copy) != 0) {
-                v.states.add(label + ": the copy still holds a projection");
-            }
+            RootFingerprint bare = RootFingerprint.of(copy, scope);
+            v.states.addAll(copyViolations(label, full, bare));
 
             int rounds = config.warmup() + config.iterations();
             for (int round = 0; round < rounds; round++) {
                 boolean timed = round >= config.warmup();
+                boolean compareHistory = round == 0 || round == rounds - 1;
                 ledger(root, round, timed);
                 reader(root, round, timed);
-                facade(copy, round, timed, false);
-                facade(root, round, timed, true);
+                // alternate which root goes first, so neither median always pays for running first
+                boolean fullFirst = round % 2 == 1;
+                facade(fullFirst ? root : copy, round, timed, fullFirst, compareHistory);
+                facade(fullFirst ? copy : root, round, timed, !fullFirst, compareHistory);
                 if (round == config.warmup()) {
                     heapFull = heapAfterReadOnlyOpen(root);
                     heapNoProjection = heapAfterReadOnlyOpen(copy);
@@ -250,24 +290,12 @@ public final class OpenCostBreakdownEvaluator {
             }
             loads(root, copy);
 
-            if (currentDir(copy).isPresent() || generations(copy) != 0) {
+            RootFingerprint bareAfter = RootFingerprint.of(copy, scope);
+            if (bareAfter.hasProjection()) {
                 v.fidelity.add(label + ": opening the projection-less copy created a projection");
             }
-            if (LedgerGrowthBenchmarkEvaluator.ledgerBytes(root, scope) != segmentBytes
-                    || !LedgerGrowthBenchmarkEvaluator.ledgerDigest(root, scope).equals(segmentDigest)) {
-                v.writes.add(label + ": the ledger segment of the full root changed during the opens");
-            }
-            if (LedgerGrowthBenchmarkEvaluator.ledgerBytes(copy, scope) != segmentBytes
-                    || !LedgerGrowthBenchmarkEvaluator.ledgerDigest(copy, scope).equals(segmentDigest)) {
-                v.writes.add(label + ": the ledger segment of the projection-less copy changed during the opens");
-            }
-            if (!generation(root).equals(generation)) {
-                v.writes.add(label + ": the projection generation of the full root changed during the opens");
-            }
-            if (!currentDir(root).map(OpenCostBreakdownEvaluator::treeDigest).orElse("<none>")
-                    .equals(projectionContent)) {
-                v.writes.add(label + ": the content of the current projection generation changed during the opens");
-            }
+            v.writes.addAll(writeViolations(label + " full root", full, RootFingerprint.of(root, scope), true));
+            v.writes.addAll(writeViolations(label + " projection-less copy", bare, bareAfter, false));
         }
 
         private void record(Path root) {
@@ -321,46 +349,54 @@ public final class OpenCostBreakdownEvaluator {
             }
         }
 
-        private void facade(Path root, int round, boolean timed, boolean full) {
+        private void facade(Path root, int round, boolean timed, boolean full, boolean compareHistory) {
             ProjectionStatus.State want = full ? ProjectionStatus.State.CURRENT : ProjectionStatus.State.MISSING;
-            String what = full ? "full root" : "projection-less copy";
+            String what = full ? "full root" : "copy";
             long t = System.nanoTime();
             try (ExecutionMemory memory = ExecutionMemory.open(root, scope)) {
                 keep(timed, full ? WRITABLE_FULL : WRITABLE_NO_PROJECTION, System.nanoTime() - t);
-                check("writable open of the " + what + " round " + round, memory, want);
+                check(what + " writable", round, memory, want, compareHistory);
             }
             t = System.nanoTime();
             try (ExecutionMemory memory = ExecutionMemory.openReadOnly(root, scope)) {
                 keep(timed, full ? READ_ONLY_FULL : READ_ONLY_NO_PROJECTION, System.nanoTime() - t);
-                check("read-only open of the " + what + " round " + round, memory, want);
+                check(what + " read-only", round, memory, want, compareHistory);
             }
         }
 
-        private void check(String where, ExecutionMemory memory, ProjectionStatus.State want) {
+        /**
+         * State, torn tail and high watermark after every open; the whole history only when {@code compareHistory},
+         * so the untimed checks between timed opens stay small.
+         */
+        private void check(String key, int round, ExecutionMemory memory, ProjectionStatus.State want,
+                           boolean compareHistory) {
+            String where = key + " open round " + round;
             v.opens++;
             ProjectionStatus.State state = memory.projectionStatus(scope).state();
+            states.get(key).add(state);
             if (state != want) {
                 v.states.add(label + " " + where + ": projection " + state + ", expected " + want);
             }
             if (memory.hasTornTail()) {
                 v.fidelity.add(label + " " + where + ": torn tail");
             }
-            List<HistoryEntry> entries = new ArrayList<>(expected.size());
-            HistoryCursor cursor = null;
-            do {
-                HistoryPage page = memory.history(scope, cursor, ExecutionMemoryConfig.MAX_PAGE_SIZE_LIMIT);
-                entries.addAll(page.entries());
-                cursor = page.next().orElse(null);
-            } while (cursor != null);
-            v.replays++;
-            v.fidelity.addAll(LedgerGrowthBenchmarkEvaluator.historyViolations(label + " " + where, expected,
-                    entries));
+            long watermark = memory.history(scope).highWatermark();
+            if (watermark != expected.size()) {
+                v.fidelity.add(label + " " + where + ": high watermark " + watermark + ", recorded "
+                        + expected.size());
+                return;
+            }
+            if (compareHistory) {
+                v.replays++;
+                v.fidelity.addAll(LedgerGrowthBenchmarkEvaluator.historyViolations(label + " " + where, expected,
+                        LedgerGrowthBenchmarkEvaluator.facadeHistory(memory, scope)));
+            }
         }
 
         private void replay(String where, List<LedgerRecord> records) {
             v.replays++;
-            List<HistoryEntry> got = records.stream().map(r -> new HistoryEntry(r.sequence(), r.event())).toList();
-            v.fidelity.addAll(LedgerGrowthBenchmarkEvaluator.historyViolations(label + " " + where, expected, got));
+            v.fidelity.addAll(LedgerGrowthBenchmarkEvaluator.historyViolations(label + " " + where, expected,
+                    LedgerGrowthBenchmarkEvaluator.entries(records)));
         }
 
         /** The sampled events load by exact id and revision, identically on both roots. */
@@ -396,25 +432,9 @@ public final class OpenCostBreakdownEvaluator {
             LedgerGrowthBenchmarkEvaluator.keep(timed, samples.get(operation), nanos);
         }
 
-        private String generation(Path root) {
-            try {
-                return ProjectionLayout.of(root, scope).generation();
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
-        }
-
         private Optional<Path> currentDir(Path root) {
             try {
                 return ProjectionLayout.of(root, scope).currentDir();
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
-        }
-
-        private int generations(Path root) {
-            try {
-                return ProjectionLayout.of(root, scope).generationDirs().size();
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
@@ -428,7 +448,7 @@ public final class OpenCostBreakdownEvaluator {
             corpus.events().forEach(e -> kinds.merge(e.kind(), 1, Integer::sum));
             return new SizeResult(corpus.size(), corpus.sourceExperiences(),
                     LedgerGrowthBenchmarkEvaluator.executions(corpus.events()), kinds, segmentBytes, segmentDigest,
-                    projectionGeneration);
+                    projectionGeneration, states);
         }
 
         SizeTiming timing() {
@@ -436,27 +456,6 @@ public final class OpenCostBreakdownEvaluator {
             samples.forEach((name, list) -> operations.put(name, ScaleTimingStatistics.from(list, List.of(),
                     corpus.size(), config.iterations())));
             return new SizeTiming(corpus.size(), operations, projectionBytes, heapFull, heapNoProjection);
-        }
-    }
-
-    /** SHA-256 (first 16 hex digits) over the relative names and contents of every file below {@code dir}. */
-    static String treeDigest(Path dir) {
-        try {
-            List<Path> files;
-            try (var walk = Files.walk(dir)) {
-                files = walk.filter(p -> Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS)).sorted().toList();
-            }
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            for (Path file : files) {
-                digest.update(dir.relativize(file).toString().getBytes(StandardCharsets.UTF_8));
-                digest.update((byte) 0);
-                digest.update(Files.readAllBytes(file));
-            }
-            return HexFormat.of().formatHex(digest.digest()).substring(0, 16);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
         }
     }
 

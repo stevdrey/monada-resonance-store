@@ -33,6 +33,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -91,15 +92,9 @@ public final class LedgerGrowthBenchmarkEvaluator {
     public record Config(long seed, List<Integer> sizes, List<Integer> exportPageSizes,
                          List<Integer> historyPageSizes, int warmup, int iterations) {
         public Config {
-            sizes = sortedDistinct("sizes", sizes);
+            sizes = eventSizes(sizes);
             exportPageSizes = sortedDistinct("export page sizes", exportPageSizes);
             historyPageSizes = sortedDistinct("history page sizes", historyPageSizes);
-            for (int n : sizes) {
-                if (n < MIN_EVENTS || n > MAX_EVENTS) {
-                    throw new IllegalArgumentException("every size must be in " + MIN_EVENTS + ".." + MAX_EVENTS
-                            + " events, got: " + n);
-                }
-            }
             pageSizes("export page sizes", exportPageSizes);
             pageSizes("history page sizes", historyPageSizes);
             if (warmup < 0) {
@@ -115,7 +110,19 @@ public final class LedgerGrowthBenchmarkEvaluator {
                     DEFAULT_HISTORY_PAGE_SIZES, DEFAULT_WARMUP, DEFAULT_ITERATIONS);
         }
 
-        private static List<Integer> sortedDistinct(String what, List<Integer> values) {
+        /** Ledger sizes in events: non-empty, distinct, each in {@code MIN_EVENTS..MAX_EVENTS}, sorted. */
+        static List<Integer> eventSizes(List<Integer> values) {
+            List<Integer> sizes = sortedDistinct("sizes", values);
+            for (int n : sizes) {
+                if (n < MIN_EVENTS || n > MAX_EVENTS) {
+                    throw new IllegalArgumentException("every size must be in " + MIN_EVENTS + ".." + MAX_EVENTS
+                            + " events, got: " + n);
+                }
+            }
+            return sizes;
+        }
+
+        static List<Integer> sortedDistinct(String what, List<Integer> values) {
             List<Integer> copy = List.copyOf(values);
             if (copy.isEmpty() || new HashSet<>(copy).size() != copy.size()) {
                 throw new IllegalArgumentException(what + " must be non-empty and distinct, got: " + copy);
@@ -470,26 +477,19 @@ public final class LedgerGrowthBenchmarkEvaluator {
             if (memory.hasTornTail()) {
                 v.fidelity.add(label + " " + where + ": torn tail");
             }
-            List<HistoryEntry> entries = new ArrayList<>(expected.size());
-            HistoryCursor cursor = null;
-            do {
-                HistoryPage page = memory.history(scope, cursor, ExecutionMemoryConfig.MAX_PAGE_SIZE_LIMIT);
-                if (page.highWatermark() != expected.size()) {
-                    v.fidelity.add(label + " " + where + ": high watermark " + page.highWatermark() + ", recorded "
-                            + expected.size());
-                    return;
-                }
-                entries.addAll(page.entries());
-                cursor = page.next().orElse(null);
-            } while (cursor != null);
+            long watermark = memory.history(scope).highWatermark();
+            if (watermark != expected.size()) {
+                v.fidelity.add(label + " " + where + ": high watermark " + watermark + ", recorded "
+                        + expected.size());
+                return;
+            }
             v.replays++;
-            v.fidelity.addAll(historyViolations(label + " " + where, expected, entries));
+            v.fidelity.addAll(historyViolations(label + " " + where, expected, facadeHistory(memory, scope)));
         }
 
         private void replay(String where, List<LedgerRecord> records) {
             v.replays++;
-            List<HistoryEntry> got = records.stream().map(r -> new HistoryEntry(r.sequence(), r.event())).toList();
-            v.fidelity.addAll(historyViolations(label + " " + where, expected, got));
+            v.fidelity.addAll(historyViolations(label + " " + where, expected, entries(records)));
         }
 
         // --- reads on a read-only snapshot and on the writer ---------------------------------------------------
@@ -852,6 +852,23 @@ public final class LedgerGrowthBenchmarkEvaluator {
         return ids.size();
     }
 
+    /** The whole facade history of {@code scope}, paged at the maximum page size. */
+    static List<HistoryEntry> facadeHistory(ExecutionMemory memory, ScopeId scope) {
+        List<HistoryEntry> entries = new ArrayList<>();
+        HistoryCursor cursor = null;
+        do {
+            HistoryPage page = memory.history(scope, cursor, ExecutionMemoryConfig.MAX_PAGE_SIZE_LIMIT);
+            entries.addAll(page.entries());
+            cursor = page.next().orElse(null);
+        } while (cursor != null);
+        return entries;
+    }
+
+    /** Storage-level records as the history entries a facade replay must return. */
+    static List<HistoryEntry> entries(List<LedgerRecord> records) {
+        return records.stream().map(r -> new HistoryEntry(r.sequence(), r.event())).toList();
+    }
+
     /** A replay must hold exactly the expected entries in order; reports the size and the first mismatch. */
     static List<String> historyViolations(String where, List<HistoryEntry> expected, List<HistoryEntry> got) {
         List<String> violations = new ArrayList<>();
@@ -980,10 +997,21 @@ public final class LedgerGrowthBenchmarkEvaluator {
     /** SHA-256 (first 16 hex digits) over the names and contents of the scope's ledger files, in name order. */
     static String ledgerDigest(Path root, ScopeId scope) {
         try {
-            Path dir = ledgerDir(root, scope);
+            return treeDigest(ledgerDir(root, scope));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
+     * SHA-256 (first 16 hex digits) over the relative names and contents of every regular file below {@code dir}
+     * (links not followed), in name order.
+     */
+    static String treeDigest(Path dir) {
+        try {
             List<Path> files;
             try (var walk = Files.walk(dir)) {
-                files = walk.filter(Files::isRegularFile).sorted().toList();
+                files = walk.filter(p -> Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS)).sorted().toList();
             }
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             for (Path file : files) {

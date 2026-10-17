@@ -2,10 +2,9 @@ package com.monada.evaluation.execution;
 
 import static com.monada.evaluation.execution.ForgeEvaluationReport.fmt;
 
+import com.monada.api.execution.ProjectionStatus;
 import com.monada.core.execution.EventKind;
 import com.monada.evaluation.ScaleTimingStatistics;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,9 +31,13 @@ public record OpenCostBreakdownReport(OpenCostBreakdownEvaluator.Config config, 
 
     /** Deterministic shape and fingerprints of one ledger size. */
     public record SizeResult(int events, int sourceExperiences, int executions, Map<EventKind, Integer> kinds,
-                             long segmentBytes, String segmentDigest, String projectionGeneration) {
+                             long segmentBytes, String segmentDigest, String projectionGeneration,
+                             Map<String, Set<ProjectionStatus.State>> projectionStates) {
         public SizeResult {
             kinds = new LinkedHashMap<>(kinds);
+            Map<String, Set<ProjectionStatus.State>> copy = new LinkedHashMap<>();
+            projectionStates.forEach((k, v) -> copy.put(k, Set.copyOf(v)));
+            projectionStates = copy;
         }
     }
 
@@ -128,7 +131,10 @@ public record OpenCostBreakdownReport(OpenCostBreakdownEvaluator.Config config, 
                     .collect(Collectors.joining(" "))).append('\n');
             out.append(fmt("  ledger segment bytes=%d sha256=%s (identical in the projection-less copy)\n",
                     s.segmentBytes(), s.segmentDigest()));
-            out.append("  projection ").append(s.projectionGeneration()).append(" (CURRENT on the full root)\n");
+            out.append("  projection ").append(s.projectionGeneration()).append("; observed states ")
+                    .append(s.projectionStates().entrySet().stream().map(e -> e.getKey() + "="
+                            + e.getValue().stream().sorted().map(Enum::name).collect(Collectors.joining("+")))
+                            .collect(Collectors.joining(", "))).append('\n');
         }
 
         out.append("\n== Hard correctness checks (every size; any failure blocks the decision) ==\n");
@@ -189,44 +195,12 @@ public record OpenCostBreakdownReport(OpenCostBreakdownEvaluator.Config config, 
     }
 
     /**
-     * Growth of each median (and of each split component) as an exponent of the event ratio: about 0 is flat, about
-     * 1 linear in N. Sizes run in ascending order in one JVM, so the last step (the two largest sizes) is the less
-     * biased one and orders the list.
+     * Growth of each median (and of each split component) as an exponent of the event ratio, in the same table as
+     * #126: about 0 is flat, about 1 linear in N; the last step orders the list.
      */
     private String growth() {
-        if (timings.size() < 2) {
-            return "";
-        }
-        SizeTiming first = timings.get(0);
-        SizeTiming previous = timings.get(timings.size() - 2);
-        SizeTiming last = timings.get(timings.size() - 1);
-        Map<String, Double> overall = exponents(first, last);
-        Map<String, Double> lastStep = exponents(previous, last);
-        List<String> names = new ArrayList<>(lastStep.keySet());
-        names.sort(Comparator.comparing((String n) -> lastStep.get(n), Comparator.reverseOrder())
-                .thenComparing(Comparator.naturalOrder()));
-        StringBuilder out = new StringBuilder(fmt("\nGrowth exponent log(median ratio)/log(event ratio); "
-                + "informational, sorted by the last step\n  %-50s %14s %14s\n", "operation",
-                "N=" + previous.events() + "->" + last.events(), "N=" + first.events() + "->" + last.events()));
-        for (String name : names) {
-            out.append(fmt("  %-50s %14.2f %14s\n", name, lastStep.get(name),
-                    overall.containsKey(name) ? fmt("%.2f", overall.get(name)) : "-"));
-        }
-        return out.toString();
-    }
-
-    private static Map<String, Double> exponents(SizeTiming small, SizeTiming large) {
-        Map<String, Long> a = medians(small);
-        Map<String, Long> b = medians(large);
-        double sizeRatio = Math.log((double) large.events() / small.events());
-        Map<String, Double> out = new LinkedHashMap<>();
-        a.forEach((name, m) -> {
-            Long other = b.get(name);
-            if (other != null && m > 0 && other > 0) {
-                out.put(name, Math.log((double) other / m) / sizeRatio);
-            }
-        });
-        return out;
+        return LedgerGrowthBenchmarkReport.growthTable(timings.stream().map(SizeTiming::events).toList(),
+                timings.stream().map(OpenCostBreakdownReport::medians).toList(), 50, 14);
     }
 
     private static Map<String, Long> medians(SizeTiming t) {

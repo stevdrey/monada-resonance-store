@@ -61,7 +61,7 @@ public final class LedgerGrowthBenchmarkMain {
                 iterations);
     }
 
-    private static List<Integer> ints(String csv) {
+    static List<Integer> ints(String csv) {
         if (csv.isBlank()) {
             return List.of();
         }

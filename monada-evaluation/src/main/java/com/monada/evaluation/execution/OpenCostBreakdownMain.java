@@ -1,7 +1,6 @@
 package com.monada.evaluation.execution;
 
 import java.io.PrintStream;
-import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -46,19 +45,12 @@ public final class OpenCostBreakdownMain {
             String value = arg.substring(eq + 1);
             switch (arg.substring(2, eq)) {
                 case "seed" -> seed = Long.parseLong(value);
-                case "sizes" -> sizes = ints(value);
+                case "sizes" -> sizes = LedgerGrowthBenchmarkMain.ints(value);
                 case "warmup" -> warmup = Integer.parseInt(value);
                 case "iterations" -> iterations = Integer.parseInt(value);
                 default -> throw new IllegalArgumentException("unknown option: " + arg);
             }
         }
         return new OpenCostBreakdownEvaluator.Config(seed, sizes, warmup, iterations);
-    }
-
-    private static List<Integer> ints(String csv) {
-        if (csv.isBlank()) {
-            return List.of();
-        }
-        return Arrays.stream(csv.split(",")).map(String::trim).map(Integer::parseInt).toList();
     }
 }
