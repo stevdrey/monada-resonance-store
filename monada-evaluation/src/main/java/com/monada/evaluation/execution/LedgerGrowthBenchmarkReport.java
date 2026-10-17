@@ -108,7 +108,8 @@ public record LedgerGrowthBenchmarkReport(LedgerGrowthBenchmarkEvaluator.Config 
                         + "page sizes=%s\n", config.exportPageSizes(), ExportView.ADAPTER_READY,
                 config.historyPageSizes()));
         out.append(fmt("  rounds: warmup=%d untimed + iterations=%d timed; one fresh instance per open round; "
-                        + "idempotency probes: %d evenly spaced events plus every correction\n", config.warmup(),
+                        + "idempotency probes: up to %d evenly spaced events (every event when N is smaller) plus "
+                        + "every correction\n", config.warmup(),
                 config.iterations(), LedgerGrowthBenchmarkEvaluator.IDEMPOTENCY_PROBES));
         out.append("  corpus: the first N + tail events of scope ").append(LedgerGrowthBenchmarkEvaluator.SCOPE)
                 .append(" of the #125 generator (single, repair, unfinished repair, corrected r1->r2 and duplicate "

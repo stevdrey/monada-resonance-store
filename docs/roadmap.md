@@ -482,16 +482,18 @@ with the cutoff pinned at N at page sizes 1/50/100 (2 untimed warmup + 5 timed r
 round). It then appends the tail and re-reads the pinned export and pre-append cursors.
 
 Five hard checks decide the exit code at every size (decision `LEDGER_GROWTH_CHARACTERIZED`): `L1` every event
-`APPENDED` at the next sequence through both layers with byte-identical ledger segments, and re-records (50 evenly
-spaced events plus every correction) `IDEMPOTENT` at the original sequence without changing the watermark or the
-segment; `L2` writable reopen, read-only open, `ExecutionLedger.replay()` and `ExecutionLedgerReader.replay()` return
-exactly the recorded events in order at every history page size, healthy and without a torn tail, with the expected
-execution count; `L3` every event loads exactly by id and revision, and every ref a sample carries (execution,
+`APPENDED` at the next sequence through both layers with byte-identical ledger segments, and re-records (up to 50
+evenly spaced events, every event below 50, plus every correction) `IDEMPOTENT` at the original sequence without
+changing the watermark or the segment; `L2` every writable reopen and read-only open (paged entry by entry in every
+round), `ExecutionLedger.replay()` and `ExecutionLedgerReader.replay()` return exactly the recorded events in order,
+as does a read-only snapshot at every history page size, healthy and without a torn tail, with the expected execution
+count; `L3` every event loads exactly by id and revision, and every ref a sample carries (execution,
 outcome, gates, attempt start/finish, stages, evidence, revisions) loads at or before the cutoff with matching
 coordinates and sequence; `L4` the same samples in the same order at every export page size, on writable and
 read-only instances and in every round, one per execution, with the expected page counts; `L5` after the tail is
 appended, pinned pages, every resumed pre-append export cursor and a resumed pre-append history cursor return
-byte-identical pages on the writer and on a new read-only snapshot, while a `latest()` export sees the tail. The
+byte-identical pages, each checked both on the writer and on a new read-only snapshot, while a `latest()` export sees
+the tail. The
 deterministic report prints event kinds, segment bytes and digest, history and export page counts, the samples digest
 (independent of paging), the ledger prefix digest and per-page-size export digests. Timings, throughput, p50/p95,
 the heap proxy, growth exponents and the file system of the work directory are printed separately and never gate.
@@ -510,9 +512,10 @@ fsync is nearly free), medians:
 
 On tmpfs at N=5000: record p50 51 / 6.3 µs, append 0.44 s, writable open 95 / 28 ms, read-only open 97 / 28 ms.
 
-- **Correctness held at every size.** Idempotent re-records, exact replay at every page size, 18 648 distinct sample
-  refs resolved exactly, identical samples across page sizes and instances, and pinned pages and cursors unchanged
-  after later appends.
+- **Correctness held at every size.** Idempotent re-records, exact replay of every reopened facade and at every page
+  size, 18 648 sample ref resolutions (N distinct refs at each size: the samples reference every ledger event),
+  identical samples across page sizes and instances, and pinned pages and all 2 278 pre-append cursors unchanged after later
+  appends on the writer and on a new snapshot.
 - **Append cost is durability, not growth.** Per-event cost is flat from 1000 to 5000 events (growth exponent about 0);
   on disk it is the per-append force (about 1.3 ms per ledger append, about 2.4 ms per `ExecutionMemory.record`, that
   is roughly 370 events/s through the facade), on tmpfs it drops to 6 / 51 µs. Total append time is linear in N only

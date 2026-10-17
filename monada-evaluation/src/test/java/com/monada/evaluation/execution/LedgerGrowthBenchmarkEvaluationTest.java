@@ -132,8 +132,52 @@ class LedgerGrowthBenchmarkEvaluationTest {
         assertTrue(report.sizes().stream().anyMatch(s -> s.kinds().get(EventKind.ATTEMPT_STARTED)
                 > s.executions()), "multi-attempt executions are part of the measured shapes");
         assertTrue(report.gates().stream().filter(g -> g.id().equals(LedgerGrowthBenchmarkReport.EXACT_REFERENCES))
-                .findFirst().orElseThrow().details().get(0).matches("exact loads: \\d+; distinct sample refs "
-                        + "resolved: \\d+"));
+                .findFirst().orElseThrow().details().get(0).matches("exact loads: \\d+; sample ref resolutions "
+                        + "checked: \\d+; distinct sample refs per size: N=20:\\d+ N=60:\\d+ N=150:\\d+"));
+    }
+
+    @Test
+    void theEvidenceCountsEveryReopenedFacadeAndEveryResumeOnTheNewSnapshot() {
+        int rounds = SMALL.warmup() + SMALL.iterations();
+        // per size and round: writable reopen, read-only open, ExecutionLedger and ExecutionLedgerReader replays
+        assertEquals("replays compared: " + 4 * rounds * SMALL.sizes().size() + "; history traversals compared: "
+                        + rounds * SMALL.sizes().size() * SMALL.historyPageSizes().size(),
+                gate(LedgerGrowthBenchmarkReport.REPLAY_FIDELITY).details().get(0));
+        // every pre-tail export cursor and the pre-tail history cursor, on the writer and on the new snapshot
+        int resumed = 0;
+        for (SizeResult s : report.sizes()) {
+            resumed += 2 * (s.exportPages().values().stream().mapToInt(p -> p - 1).sum() + 1);
+        }
+        assertTrue(gate(LedgerGrowthBenchmarkReport.CUTOFF_STABILITY).details().get(0)
+                .endsWith("; resumed cursors: " + resumed));
+    }
+
+    @Test
+    void idempotencyProbesAreCappedEvenlySpacedAndIncludeEveryCorrection() {
+        for (int n : List.of(20, 60, 99, 1000)) {
+            List<ExecutionEvent> events = LedgerGrowthBenchmarkEvaluator.corpus(42, n).events();
+            Set<Integer> probes = LedgerGrowthBenchmarkEvaluator.idempotencyProbes(events);
+            Set<Integer> corrections = new HashSet<>();
+            for (int i = 0; i < events.size(); i++) {
+                if (events.get(i).kind() == EventKind.CORRECTION) {
+                    corrections.add(i);
+                }
+            }
+            int spaced = Math.min(LedgerGrowthBenchmarkEvaluator.IDEMPOTENCY_PROBES, n);
+            Set<Integer> regular = new HashSet<>();
+            for (int k = 0; k < spaced; k++) {
+                regular.add((k + 1) * n / spaced - 1);
+            }
+            assertEquals(spaced, regular.size(), "N=" + n + ": the spaced probes are distinct");
+            Set<Integer> expected = new HashSet<>(regular);
+            expected.addAll(corrections);
+            assertEquals(expected, probes, "N=" + n);
+            assertTrue(probes.contains(n - 1), "the last event is always probed at N=" + n);
+        }
+    }
+
+    private static ForgeGate gate(String id) {
+        return report.gates().stream().filter(g -> g.id().equals(id)).findFirst().orElseThrow();
     }
 
     @Test
