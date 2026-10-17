@@ -805,9 +805,11 @@ Inside the ledger scan:
 - **Instant parsing is no longer a cost.** It was the largest single part removed: about a fifth of the scan.
 - **The re-encode check got cheaper but stays.** It is still about a fifth of the scan, because a whole event is
   re-encoded per line.
-- **The rest of the decode is now the largest part of the scan.** Its code did not change; the move from 380 to 453
-  samples is sampling noise between runs. Most of it is `EventPayloadCodec.In.split` (one `substring` per token),
-  followed by identifier validation in `monada-core` and enum lookups.
+- **The rest of the decode is now the largest part of the scan.** Its code did not change, yet its samples rose from
+  380 to 453 while the facade-open total fell 17 %. The cause was not established: it may be samples reattributed
+  to these frames once `Instant.parse` was gone (for example through different JIT inlining) rather than more work.
+  Do not use this bucket's before/after delta to size follow-up work. Most of it is `EventPayloadCodec.In.split`
+  (one `substring` per token), followed by identifier validation in `monada-core` and enum lookups.
 
 Follow-up decision: #158 is complete. The ledger scan is about 30 % of an open by difference of medians, and 44 % of
 the facade-open CPU samples. The decode left in it is mostly token splitting and the domain constructors'

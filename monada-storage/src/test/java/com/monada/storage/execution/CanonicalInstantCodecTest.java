@@ -163,6 +163,33 @@ class CanonicalInstantCodecTest {
         return events;
     }
 
+    /**
+     * {@code escape} also writes the identifiers of projection checkpoint entries ({@code ExperienceRefCodec}), so its
+     * no-escape early return must give exactly the legacy output for every character class, not only event payloads.
+     */
+    @Test
+    void escapeMatchesTheLegacyCodecForEveryCharacterClass() {
+        List<String> values = new ArrayList<>(List.of("", "plain", "|", "\\", "~", "\\p", "a|b\\c", "😀",
+                "\ud83d", "\ude00", "x\ud83dy", "﻿  ", "ünï", " ", "ÿ"));
+        for (int c = 0; c <= 0xA0; c++) {
+            values.add(String.valueOf((char) c));
+            values.add("a" + (char) c + "b");
+        }
+        char[] alphabet = ("aZ09~|\\ .\t\n\r\u0000\u0001\u001f\u007f\u0080\u0085\u009f ü ﻿"
+                + "😀𐏿").toCharArray();
+        Random random = new Random(1584);
+        for (int n = 0; n < 20_000; n++) {
+            char[] chars = new char[random.nextInt(12)];
+            for (int i = 0; i < chars.length; i++) {
+                chars[i] = alphabet[random.nextInt(alphabet.length)];
+            }
+            values.add(new String(chars));
+        }
+        for (String value : values) {
+            assertEquals(LegacyEventPayloadCodec.escape(value), EventPayloadCodec.escape(value), value);
+        }
+    }
+
     @Test
     void encodeIsByteIdenticalToTheLegacyCodec() throws Exception {
         for (ExecutionEvent event : sampleEvents()) {
