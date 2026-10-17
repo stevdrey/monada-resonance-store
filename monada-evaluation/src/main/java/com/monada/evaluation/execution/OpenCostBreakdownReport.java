@@ -115,8 +115,8 @@ public record OpenCostBreakdownReport(OpenCostBreakdownEvaluator.Config config, 
                 + "open (and replay where named) is timed\n", config.warmup(), config.iterations()));
         out.append("  corpus: the first N events of scope ").append(LedgerGrowthBenchmarkEvaluator.SCOPE)
                 .append(" of the #125 generator, recorded through ExecutionMemory (incremental projection); a "
-                        + "copy of the root without projection.current, projection-* generations and the writer "
-                        + "lock opens with projection MISSING\n");
+                        + "copy of the root without projection.current and projection-* generations (writer lock "
+                        + "file copied) opens with projection MISSING\n");
         out.append("  split by difference of medians: ledger = storage open + replay; history index = facade open "
                 + "of the copy - ledger; projection = facade open of the full root - copy\n");
 

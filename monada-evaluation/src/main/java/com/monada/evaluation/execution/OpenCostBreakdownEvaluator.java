@@ -20,15 +20,19 @@ import com.monada.storage.execution.LedgerRecord;
 import com.monada.storage.execution.ProjectionLayout;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -125,8 +129,9 @@ public final class OpenCostBreakdownEvaluator {
                                 + "load identically on both roots; opening the copy creates no projection",
                         v.fidelity, List.of("replays compared: " + v.replays + "; exact loads: " + v.loads)),
                 ForgeGate.of(OpenCostBreakdownReport.OPENS_DO_NOT_WRITE,
-                        "after every round the ledger segment bytes and digest and the projection generation "
-                                + "fingerprint of the full root are unchanged",
+                        "after every round the ledger segment bytes and digest, the projection generation "
+                                + "fingerprint (pointer, file names and sizes) and the content digest of the current "
+                                + "projection generation of the full root are unchanged",
                         v.writes, List.of("sizes checked: " + config.sizes().size())));
         Map<String, String> environment = new LinkedHashMap<>(ExecutionScaleSweepReport.currentEnvironment());
         environment.put("work dir file store", LedgerGrowthBenchmarkEvaluator.fileStore(workDir));
@@ -135,13 +140,13 @@ public final class OpenCostBreakdownEvaluator {
 
     /**
      * Copies {@code root} into {@code copy} without the scope's projection: every entry directly below the scope
-     * directory whose name starts with {@code projection} (pointer, temporary pointer, generations) is skipped, and
-     * so is the writer lock. The source is only read.
+     * directory whose name starts with {@code projection} (pointer, temporary pointer, generations) is skipped.
+     * Everything else is copied, the writer lock file included, so no timed open of the copy pays for creating it
+     * (the lock is an OS lock on an existing regular file). The source is only read.
      */
     static void copyWithoutProjection(Path root, ScopeId scope, Path copy) {
         try {
             Path scopeDir = ProjectionLayout.of(root, scope).scopeDir();
-            Path lock = root.resolve("write.lock");
             Files.walkFileTree(root, new SimpleFileVisitor<>() {
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
@@ -154,7 +159,7 @@ public final class OpenCostBreakdownEvaluator {
 
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                    if (!skipped(file) && !file.equals(lock)) {
+                    if (!skipped(file)) {
                         Files.copy(file, copy.resolve(root.relativize(file).toString()), LinkOption.NOFOLLOW_LINKS);
                     }
                     return FileVisitResult.CONTINUE;
@@ -217,6 +222,7 @@ public final class OpenCostBreakdownEvaluator {
             segmentDigest = LedgerGrowthBenchmarkEvaluator.ledgerDigest(root, scope);
             String generation = generation(root);
             Optional<Path> current = currentDir(root);
+            String projectionContent = current.map(OpenCostBreakdownEvaluator::treeDigest).orElse("<none>");
             projectionGeneration = current.map(p -> p.getFileName().toString()).orElse("<none>");
             projectionBytes = current.map(OpenCostBreakdownEvaluator::bytes).orElse(-1L);
 
@@ -253,6 +259,10 @@ public final class OpenCostBreakdownEvaluator {
             }
             if (!generation(root).equals(generation)) {
                 v.writes.add(label + ": the projection generation of the full root changed during the opens");
+            }
+            if (!currentDir(root).map(OpenCostBreakdownEvaluator::treeDigest).orElse("<none>")
+                    .equals(projectionContent)) {
+                v.writes.add(label + ": the content of the current projection generation changed during the opens");
             }
         }
 
@@ -422,6 +432,27 @@ public final class OpenCostBreakdownEvaluator {
             samples.forEach((name, list) -> operations.put(name, ScaleTimingStatistics.from(list, List.of(),
                     corpus.size(), config.iterations())));
             return new SizeTiming(corpus.size(), operations, projectionBytes, heapFull, heapNoProjection);
+        }
+    }
+
+    /** SHA-256 (first 16 hex digits) over the relative names and contents of every file below {@code dir}. */
+    static String treeDigest(Path dir) {
+        try {
+            List<Path> files;
+            try (var walk = Files.walk(dir)) {
+                files = walk.filter(p -> Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS)).sorted().toList();
+            }
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            for (Path file : files) {
+                digest.update(dir.relativize(file).toString().getBytes(StandardCharsets.UTF_8));
+                digest.update((byte) 0);
+                digest.update(Files.readAllBytes(file));
+            }
+            return HexFormat.of().formatHex(digest.digest()).substring(0, 16);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
         }
     }
 

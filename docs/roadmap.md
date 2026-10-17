@@ -545,8 +545,8 @@ Splits the scope open that #126 ranked as the main growth cost, still without ch
 `./gradlew :monada-evaluation:runOpenCostBreakdownBenchmark -q` (options via `--args`, e.g.
 `--args="--sizes=1000,5000,20000,50000 --iterations=10"`) records exactly N = 1000/5000/20000/50000 events of the #126
 corpus (scope `scale-alpha` of the #125 generator, seed 42) through `ExecutionMemory`, so the projection is built
-incrementally and is `CURRENT`. It then copies the root without `projection.current`, the `projection-*` generations
-and the writer lock. That copy has byte-identical ledger segments and opens with projection `MISSING`: the projection
+incrementally and is `CURRENT`. It then copies the root without `projection.current` and the `projection-*`
+generations; the writer lock file is copied, so no timed open of the copy pays for creating it. That copy has byte-identical ledger segments and opens with projection `MISSING`: the projection
 load stops right after the layout lookup and never builds anything. `HistoryIndex` and `ExperienceProjection` are
 internal to `monada-api`, so each open is split by difference of medians (one fresh instance per round, 2 untimed
 warmup + N timed rounds):
@@ -562,7 +562,8 @@ Three hard checks decide the exit code at every size (decision `OPEN_COST_CHARAC
 - `B2`: both storage layers and every facade open of both roots replay exactly the recorded events in order,
   healthy and without a torn tail; sampled events load identically on both roots; opening the copy creates no
   projection;
-- `B3`: no open changes the ledger bytes or digest, or the projection generation fingerprint of the full root.
+- `B3`: no open changes the ledger bytes or digest, the projection generation fingerprint (pointer, file names and
+  sizes) or the content digest of the current projection generation of the full root.
 
 The deterministic report holds the corpus shape, ledger bytes and digest, and the projection generation. The
 projection's bytes on disk are printed with the timings, because its memory files are not byte-stable across JVMs (a

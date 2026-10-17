@@ -2,6 +2,7 @@ package com.monada.evaluation.execution;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -95,7 +96,8 @@ class OpenCostBreakdownEvaluationTest {
         ProjectionLayout copied = ProjectionLayout.of(copy, corpus.scope());
         assertTrue(copied.currentDir().isEmpty());
         assertEquals(List.of(), copied.generationDirs());
-        assertFalse(Files.exists(copy.resolve("write.lock")));
+        assertTrue(Files.isRegularFile(copy.resolve("write.lock")), "the lock file is copied, never created by a "
+                + "timed open");
         try (ExecutionMemory memory = ExecutionMemory.open(copy, corpus.scope())) {
             assertEquals(ProjectionStatus.State.MISSING, memory.projectionStatus(corpus.scope()).state());
             assertEquals(corpus.size(), memory.history(corpus.scope()).highWatermark());
@@ -106,6 +108,28 @@ class OpenCostBreakdownEvaluationTest {
         assertTrue(ProjectionLayout.of(copy, corpus.scope()).generationDirs().isEmpty(),
                 "a writable open of a non-empty ledger never builds a projection");
         assertEquals(generation, ProjectionLayout.of(root, corpus.scope()).generation(), "the source is only read");
+    }
+
+    @Test
+    void theContentDigestSeesASameSizeRewrite() throws IOException {
+        LedgerCorpus corpus = LedgerGrowthBenchmarkEvaluator.corpus(42, 30);
+        Path root = Files.createDirectories(work.resolve("digest-source"));
+        try (ExecutionMemory memory = ExecutionMemory.open(root, corpus.scope())) {
+            corpus.events().forEach(memory::record);
+        }
+        ProjectionLayout layout = ProjectionLayout.of(root, corpus.scope());
+        Path dir = layout.currentDir().orElseThrow();
+        String generation = layout.generation();
+        String before = OpenCostBreakdownEvaluator.treeDigest(dir);
+        assertEquals(before, OpenCostBreakdownEvaluator.treeDigest(dir));
+
+        Path checkpoint = layout.checkpoint(dir);
+        byte[] bytes = Files.readAllBytes(checkpoint);
+        bytes[bytes.length / 2] ^= 1;
+        Files.write(checkpoint, bytes);
+
+        assertEquals(generation, layout.generation(), "the size fingerprint alone misses a same-size rewrite");
+        assertNotEquals(before, OpenCostBreakdownEvaluator.treeDigest(dir));
     }
 
     @Test
