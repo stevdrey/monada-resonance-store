@@ -6,16 +6,17 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.OptionalLong;
-import java.util.regex.Pattern;
 
 /**
  * Streams one scope segment line by line, validating framing, digest, sequence, schema, scope, canonical
@@ -25,8 +26,6 @@ import java.util.regex.Pattern;
  * diagnostics are as complete as possible.
  */
 final class LedgerScanner {
-    private static final Pattern HEX64 = Pattern.compile("[0-9a-f]{64}");
-
     record Result(List<LedgerRecord> records, List<LedgerDiagnostic> diagnostics, LedgerState state,
                   boolean tornTail) {
         boolean hasErrors() {
@@ -96,6 +95,10 @@ final class LedgerScanner {
         final List<LedgerRecord> records = new ArrayList<>();
         final List<LedgerDiagnostic> diagnostics = new ArrayList<>();
         final LedgerState state = new LedgerState();
+        // One digest and one strict decoder per scan; both are reset by each use.
+        final MessageDigest sha256 = RecordLine.newSha256();
+        final CharsetDecoder utf8 = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT);
         long lineNo = 1;
         long expected = 1;
         boolean expectedKnown = true;
@@ -162,14 +165,15 @@ final class LedgerScanner {
                 error(LedgerDiagnosticCategory.MALFORMED_RECORD, sequence,
                         "payload length field does not match the payload (" + payload.length + " bytes present)");
             }
-            String digest = ascii(fields.get(3));
-            if (!HEX64.matcher(digest).matches() || !digest.equals(RecordLine.sha256Hex(payload))) {
+            byte[] digest = fields.get(3);
+            // Exactly 64 lowercase hex characters equal to the payload's SHA-256, as the former regex plus equals.
+            if (!RecordLine.sha256HexEquals(sha256, payload, 0, payload.length, digest, 0, digest.length)) {
                 error(LedgerDiagnosticCategory.DIGEST_MISMATCH, sequence, "payload SHA-256 does not match the record");
             }
             String text;
             try {
-                text = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
-                        .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(payload)).toString();
+                text = isAscii(payload) ? new String(payload, StandardCharsets.ISO_8859_1)
+                        : utf8.decode(ByteBuffer.wrap(payload)).toString();
             } catch (CharacterCodingException e) {
                 error(LedgerDiagnosticCategory.MALFORMED_RECORD, sequence, "payload is not valid UTF-8");
                 return;
@@ -240,6 +244,15 @@ final class LedgerScanner {
         }
         parts.add(Arrays.copyOfRange(content, start, content.length));
         return parts;
+    }
+
+    private static boolean isAscii(byte[] bytes) {
+        for (byte b : bytes) {
+            if (b < 0) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static String ascii(byte[] bytes) {
