@@ -35,6 +35,9 @@ import com.monada.core.execution.UsageKind;
 import com.monada.core.execution.UsageProvenance;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.Month;
+import java.time.Year;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -84,8 +87,8 @@ final class EventPayloadCodec {
         out.opt(env.attemptId().map(AttemptId::value));
         out.raw(Integer.toString(env.revision()));
         out.opt(env.supersedes().map(EventId::value));
-        out.raw(env.occurredAt().toString());
-        out.raw(env.recordedAt().toString());
+        out.instant(env.occurredAt());
+        out.instant(env.recordedAt());
         body(out, event);
         return out.build().getBytes(StandardCharsets.UTF_8);
     }
@@ -113,8 +116,8 @@ final class EventPayloadCodec {
             Optional<AttemptId> attempt = in.opt().map(AttemptId::of);
             int revision = in.integer();
             Optional<EventId> supersedes = in.opt().map(EventId::of);
-            Instant occurredAt = Instant.parse(in.raw());
-            Instant recordedAt = Instant.parse(in.raw());
+            Instant occurredAt = parseInstant(in.raw());
+            Instant recordedAt = parseInstant(in.raw());
             EventEnvelope envelope = new EventEnvelope(eventId, scope, task, execution, attempt, revision,
                     supersedes, occurredAt, recordedAt);
             ExecutionEvent event;
@@ -173,8 +176,8 @@ final class EventPayloadCodec {
                 out.opt(e.route().model());
                 out.opt(e.route().effort());
                 out.raw(e.route().billingMode().name());
-                out.raw(e.startedAt().toString());
-                out.raw(e.endedAt().toString());
+                out.instant(e.startedAt());
+                out.instant(e.endedAt());
                 out.raw(e.usageDeclaration().name());
                 out.opt(e.justification());
                 out.raw(Integer.toString(e.usage().size()));
@@ -249,8 +252,8 @@ final class EventPayloadCodec {
                 String stage = in.text();
                 RouteDescriptor route = new RouteDescriptor(in.text(), in.opt(), in.opt(), in.opt(),
                         in.enumValue(BillingMode.class));
-                Instant startedAt = Instant.parse(in.raw());
-                Instant endedAt = Instant.parse(in.raw());
+                Instant startedAt = parseInstant(in.raw());
+                Instant endedAt = parseInstant(in.raw());
                 UsageDeclaration declaration = in.enumValue(UsageDeclaration.class);
                 Optional<String> justification = in.opt();
                 int count = in.count();
@@ -317,9 +320,106 @@ final class EventPayloadCodec {
         return escape(shown);
     }
 
+    // ------------------------------------------------------------------ instants
+
+    private static final long SECONDS_PER_DAY = 86_400;
+    /** Epoch seconds of 0000-01-01T00:00:00Z and of 10000-01-01T00:00:00Z: the four-digit-year range. */
+    private static final long FIRST_FOUR_DIGIT_SECOND = LocalDate.of(0, 1, 1).toEpochDay() * SECONDS_PER_DAY;
+    private static final long END_FOUR_DIGIT_SECOND = LocalDate.of(10_000, 1, 1).toEpochDay() * SECONDS_PER_DAY;
+
+    /**
+     * {@link Instant#parse} with a fast path for the shape {@link Instant#toString()} gives in years 0000-9999
+     * ({@code yyyy-MM-ddTHH:mm:ssZ} with no, 3, 6 or 9 fraction digits) and in-range fields. Anything else, including
+     * out-of-range fields, a leap second, lowercase letters or an offset, goes to {@link Instant#parse}, so the
+     * result and every exception are exactly those of {@link Instant#parse}. Whether the token is canonical is
+     * still decided by the re-encode check.
+     */
+    static Instant parseInstant(String text) {
+        int length = text.length();
+        if ((length != 20 && length != 24 && length != 27 && length != 30)
+                || text.charAt(4) != '-' || text.charAt(7) != '-' || text.charAt(10) != 'T'
+                || text.charAt(13) != ':' || text.charAt(16) != ':' || text.charAt(length - 1) != 'Z'
+                || (length > 20 && text.charAt(19) != '.')) {
+            return Instant.parse(text);
+        }
+        int year = digits(text, 0, 4);
+        int month = digits(text, 5, 7);
+        int day = digits(text, 8, 10);
+        int hour = digits(text, 11, 13);
+        int minute = digits(text, 14, 16);
+        int second = digits(text, 17, 19);
+        int fraction = length > 20 ? digits(text, 20, length - 1) : 0;
+        if (year < 0 || month < 1 || month > 12 || day < 1 || hour < 0 || hour > 23 || minute < 0 || minute > 59
+                || second < 0 || second > 59 || fraction < 0
+                || day > Month.of(month).length(Year.isLeap(year))) {
+            return Instant.parse(text);
+        }
+        int nano = fraction;
+        for (int scale = length - 21; scale < 9; scale++) {
+            nano *= 10;
+        }
+        long epochSecond = LocalDate.of(year, month, day).toEpochDay() * SECONDS_PER_DAY
+                + hour * 3600L + minute * 60L + second;
+        return Instant.ofEpochSecond(epochSecond, nano);
+    }
+
+    /** The decimal value of {@code text[from, to)}, or -1 when it holds anything but ASCII digits. */
+    private static int digits(String text, int from, int to) {
+        int value = 0;
+        for (int i = from; i < to; i++) {
+            char c = text.charAt(i);
+            if (c < '0' || c > '9') {
+                return -1;
+            }
+            value = value * 10 + (c - '0');
+        }
+        return value;
+    }
+
+    /** Appends exactly {@code instant.toString()}, without the formatter in years 0000-9999. */
+    static void appendInstant(StringBuilder sb, Instant instant) {
+        long seconds = instant.getEpochSecond();
+        if (seconds < FIRST_FOUR_DIGIT_SECOND || seconds >= END_FOUR_DIGIT_SECOND) {
+            sb.append(instant);
+            return;
+        }
+        LocalDate date = LocalDate.ofEpochDay(Math.floorDiv(seconds, SECONDS_PER_DAY));
+        int secondOfDay = (int) Math.floorMod(seconds, SECONDS_PER_DAY);
+        pad(sb, date.getYear(), 4).append('-');
+        pad(sb, date.getMonthValue(), 2).append('-');
+        pad(sb, date.getDayOfMonth(), 2).append('T');
+        pad(sb, secondOfDay / 3600, 2).append(':');
+        pad(sb, secondOfDay / 60 % 60, 2).append(':');
+        pad(sb, secondOfDay % 60, 2);
+        int nano = instant.getNano();
+        if (nano != 0) {
+            sb.append('.');
+            if (nano % 1_000_000 == 0) {
+                pad(sb, nano / 1_000_000, 3);
+            } else if (nano % 1_000 == 0) {
+                pad(sb, nano / 1_000, 6);
+            } else {
+                pad(sb, nano, 9);
+            }
+        }
+        sb.append('Z');
+    }
+
+    private static StringBuilder pad(StringBuilder sb, int value, int width) {
+        for (int bound = 10, w = 1; w < width; w++, bound *= 10) {
+            if (value < bound) {
+                sb.append('0');
+            }
+        }
+        return sb.append(value);
+    }
+
     // ------------------------------------------------------------------ escaping
 
     static String escape(String value) {
+        if (!needsEscape(value)) {
+            return value;
+        }
         StringBuilder sb = new StringBuilder(value.length() + 8);
         for (int i = 0; i < value.length(); ) {
             int cp = value.codePointAt(i);
@@ -340,6 +440,17 @@ final class EventPayloadCodec {
             }
         }
         return sb.toString();
+    }
+
+    /** Whether {@link #escape} would change {@code value}: it holds a backslash, a {@code |} or an ISO control. */
+    private static boolean needsEscape(String value) {
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '\\' || c == '|' || Character.isISOControl(c)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     static String unescape(String token) {
@@ -387,23 +498,40 @@ final class EventPayloadCodec {
         return sb.toString();
     }
 
+    /** Writes tokens straight into one buffer, each after a {@code |} separator except the first. */
     private static final class Out {
-        private final List<String> tokens = new ArrayList<>();
+        private final StringBuilder sb = new StringBuilder(256);
+        private boolean first = true;
+
+        private StringBuilder next() {
+            if (!first) {
+                sb.append('|');
+            }
+            first = false;
+            return sb;
+        }
 
         void raw(String token) {
-            tokens.add(token);
+            next().append(token);
         }
 
         void text(String value) {
-            tokens.add(escape(value));
+            next().append(escape(value));
         }
 
         void opt(Optional<String> value) {
-            tokens.add(value.map(v -> "~" + escape(v)).orElse(""));
+            StringBuilder out = next();
+            if (value.isPresent()) {
+                out.append('~').append(escape(value.get()));
+            }
+        }
+
+        void instant(Instant instant) {
+            appendInstant(next(), instant);
         }
 
         String build() {
-            return String.join("|", tokens);
+            return sb.toString();
         }
     }
 

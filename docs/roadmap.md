@@ -706,6 +706,115 @@ the codec's re-encode check). Phase 2 of #158 (ledger line decode) is the next c
 and the ledger corruption and hardening tests. Encoder-level verification cost and deferred or cached verification
 each need their own design Issue. They are not worth pursuing before phase 2 is measured.
 
+#### Cheaper ledger line decode (#158, phase 2)
+
+Cuts the CPU cost of the ledger scan. It changes no format, diagnostic, ledger state, public signature or default.
+Every line is still checked the same way: framing, digest, sequence, strict UTF-8, decode, scope, and the re-encode
+equality check that makes only the canonical encoding acceptable.
+
+- `EventPayloadCodec.parseInstant` parses the shape `Instant.toString()` prints for years 0000-9999 directly:
+  `yyyy-MM-ddTHH:mm:ssZ` with no, 3, 6 or 9 fraction digits and in-range fields. Every other token goes to
+  `Instant.parse`. That covers offsets, lowercase letters, leap seconds, hour 24, invalid dates, other fraction
+  lengths and years outside 0000-9999. The result and every exception message stay those of `Instant.parse`.
+  Whether a token is canonical is still decided only by the re-encode check.
+- `EventPayloadCodec.encode` writes tokens straight into one `StringBuilder` instead of a token list and
+  `String.join`. Text that needs no escaping is appended as is. Instants in years 0000-9999 are printed without the
+  `DateTimeFormatter`; other years still use `Instant.toString()`. The bytes are unchanged.
+- `LedgerScanner` compares the digest field byte by byte with the payload's SHA-256, using one `MessageDigest` per
+  scan, instead of the `[0-9a-f]{64}` regex plus a hex string. This accepts exactly the same fields: 64 lowercase hex
+  characters equal to the digest. It reuses one strict UTF-8 decoder per scan and skips decoding for ASCII payloads.
+
+New tests pin the equivalence. Existing tests are unchanged and pass. `LegacyEventPayloadCodec` and
+`LegacyLedgerScanner` are test-only copies of the old code.
+`CanonicalInstantCodecTest` compares `parseInstant` with `Instant.parse` (same instant or same exception and message)
+on these inputs:
+
+- a list of canonical, non-canonical, offset, leap-second, out-of-range, out-of-year-range and malformed forms;
+- every one-character change, insertion and deletion of four canonical forms;
+- 20 000 seeded field combinations.
+
+It compares `appendInstant` with `Instant.toString()` on boundaries and 20 000 seeded instants, and `encode` with the
+legacy codec byte for byte. It also checks that decoding every listed instant form in envelope and stage positions
+gives the same event or the same category and message, and the same re-encode verdict. Only `toString()` forms pass
+that check. `LedgerScannerEquivalenceTest` compares every scan result with the legacy scanner: accepted records,
+diagnostics (category, line, sequence, message), torn-tail flag and ledger state. Its inputs:
+
+- a valid ledger, an empty file and every truncation of the valid ledger;
+- digest, magic, sequence and length field variants;
+- re-framed payloads with instant variants or invalid UTF-8;
+- lines at, and one byte over, the limit;
+- 3 000 seeded byte mutations and 4 000 seeded payload mutations with correct framing;
+- the expected scope, another scope and no scope.
+
+The deterministic reports of `runOpenCostBreakdownBenchmark` (btrfs and tmpfs) and `runLedgerGrowthBenchmark`
+(default) are byte-identical before and after; `B1`-`B3` pass at every size.
+
+Observed on 2026-10-17 (same machine, JVM 27 and arguments as phase 1; `--iterations=10`, medians in ms, components
+by difference of medians). Baseline is the phase-1 commit 10c978b. Merged phase 1 (498ea76) differs from it only
+by review fixes in the projection checkpoint and verifier, not in ledger code. Baseline and candidate ran
+alternately: one full run at every size on btrfs, then two more btrfs pairs and two tmpfs pairs at 20 000 and 50 000. In the full-run pair the
+candidate's 20 000 row was taken during a load spike from other processes on the machine. Its writable/read-only
+totals of 691/780 ms are 2.4 times the candidate's other 20 000 runs, so that row is left out. Ledger scan,
+baseline -> candidate:
+
+| N | FS | mode | ledger scan, pair 1 / 2 | total open, pair 1 / 2 |
+| --- | --- | --- | --- | --- |
+| 1000 | btrfs | writable / read-only | 20.6 -> 6.6 / 22.5 -> 6.1 | 54.0 -> 28.8 / 62.8 -> 30.7 |
+| 5000 | btrfs | writable / read-only | 30.6 -> 18.1 / 31.9 -> 17.1 | 90.0 -> 74.1 / 86.7 -> 69.3 |
+| 20000 | btrfs | writable | 113.6 -> 74.9 (-34 %) / 106.4 -> 69.5 (-35 %) | 314.1 -> 252.3 / 284.4 -> 232.6 |
+| 20000 | btrfs | read-only | 112.1 -> 73.8 (-34 %) / 106.1 -> 69.6 (-34 %) | 321.3 -> 272.7 / 289.2 -> 248.0 |
+| 50000 | btrfs | writable | 303.2 -> 196.3 (-35 %) / 266.4 -> 172.9 (-35 %) | 777.8 -> 638.7 / 684.1 -> 559.8 |
+| 50000 | btrfs | read-only | 287.5 -> 193.2 (-33 %) / 267.6 -> 173.9 (-35 %) | 791.1 -> 662.9 / 711.4 -> 574.5 |
+| 20000 | tmpfs | writable | 119.0 -> 74.5 (-37 %) / 111.8 -> 72.3 (-35 %) | 334.3 -> 264.6 / 294.8 -> 241.7 |
+| 20000 | tmpfs | read-only | 117.1 -> 75.1 (-36 %) / 111.5 -> 71.9 (-36 %) | 350.1 -> 252.5 / 302.9 -> 246.1 |
+| 50000 | tmpfs | writable | 299.9 -> 194.1 (-35 %) / 282.7 -> 177.7 (-37 %) | 800.0 -> 641.7 / 721.4 -> 570.9 |
+| 50000 | tmpfs | read-only | 308.8 -> 196.4 (-36 %) / 281.8 -> 179.1 (-36 %) | 825.1 -> 676.1 / 736.2 -> 602.4 |
+
+The 1000 and 5000 rows come from a single run, so their columns are writable / read-only. The full-run pair at 50 000
+on btrfs agrees with the table: ledger 311.4 -> 183.5 and 300.9 -> 165.3 ms.
+
+The projection component also fell by 2-13 % in the btrfs and tmpfs pairs at 20 000 and 50 000 (up to 24 % in one
+tmpfs pair). Its per-covered-event ledger digest calls `EventPayloadCodec.encode`, which is now cheaper. The history
+index moved within noise in both directions.
+
+JFR CPU profile (`-XX:StartFlightRecording=settings=profile`, N=50000, 1 warmup + 3 rounds, three runs per side
+alternated, samples inside the facade opens summed), before -> after:
+
+| code path | before (phase 1) | after |
+| --- | --- | --- |
+| ledger scan | 1931 (54 %) | 1317 (44 %) |
+| `ProjectionVerifier` | 502 (14 %) | 543 (18 %) |
+| ledger digest per covered event | 384 (11 %) | 277 (9 %) |
+| `ProjectionCheckpoint.read` | 324 (9 %) | 345 (12 %) |
+| history index | 209 (6 %) | 250 (8 %) |
+| `Projector` replay | 174 (5 %) | 172 (6 %) |
+| total | 3604 | 2980 (-17 %) |
+
+Inside the ledger scan:
+
+| part | before | after |
+| --- | --- | --- |
+| instant parsing | 396 | 28 |
+| re-encode check (`encode`) | 418 | 253 |
+| framing, line copy, other | 402 | 268 |
+| decode, other (token split, ids, records) | 380 | 453 |
+| ordering rules (`LedgerState`) | 235 | 227 |
+| payload SHA-256 | 78 | 67 |
+| UTF-8 decode | 22 | 21 |
+
+- **Instant parsing is no longer a cost.** It was the largest single part removed: about a fifth of the scan.
+- **The re-encode check got cheaper but stays.** It is still about a fifth of the scan, because a whole event is
+  re-encoded per line.
+- **The rest of the decode is now the largest part of the scan.** Its code did not change; the move from 380 to 453
+  samples is sampling noise between runs. Most of it is `EventPayloadCodec.In.split` (one `substring` per token),
+  followed by identifier validation in `monada-core` and enum lookups.
+
+Follow-up decision: #158 is complete. The ledger scan is about 30 % of an open by difference of medians, and 44 % of
+the facade-open CPU samples. The decode left in it is mostly token splitting and the domain constructors'
+validation. `ProjectionVerifier` (encoder-bound) and the ledger scan are now the two largest costs. A cheaper
+encoder, a lazy token reader or dropping the per-covered-event re-encode (option 3(b)) would each need their own
+Issue.
+
 
 Numbering is roadmap order; independent items (for example #94 and #95) may proceed in parallel.
 
