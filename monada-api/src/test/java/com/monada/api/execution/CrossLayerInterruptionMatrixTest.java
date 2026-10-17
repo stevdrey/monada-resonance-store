@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.monada.core.execution.EventId;
 import com.monada.core.execution.ScopeId;
@@ -29,10 +30,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -51,7 +55,8 @@ import org.junit.jupiter.api.io.TempDir;
  *   <li>W4 publication: {@link #crashBetweenTemporaryPointerAndMoveKeepsTheOldGeneration}.</li>
  *   <li>W5 reader against writer: {@link #snapshotOpenedBetweenLedgerAppendAndCoverIsStaleAndFrozen}.</li>
  * </ul>
- * Scope isolation and the absence of read-only mutations are checked inside these cells.
+ * Every cell runs next to a projected sibling scope, which must stay byte-identical with unchanged recall;
+ * read-only opens are checked for mutations inside the cells.
  */
 class CrossLayerInterruptionMatrixTest {
     static final ScopeId ALPHA = ScopeId.of("project-alpha");
@@ -59,6 +64,33 @@ class CrossLayerInterruptionMatrixTest {
 
     @TempDir
     Path root;
+
+    private List<String> siblingRecall;
+    private Map<String, String> siblingFiles;
+
+    /** Every cell runs next to a projected sibling scope in the same store. */
+    @BeforeEach
+    void recordSibling() throws IOException {
+        Path store = root.resolve("store");
+        try (ExecutionMemory beta = ExecutionMemory.open(store, BETA)) {
+            experience(beta, BETA, "y-1", "Repair the flaky upload test", "Raised the socket timeout", null);
+            siblingRecall = render(beta.recall(BETA, "flaky upload test", 10));
+        }
+        siblingFiles = digests(scopeDir(store, BETA));
+    }
+
+    /** No interruption or recovery in alpha touches beta's files, and beta never sees alpha's refs. */
+    @AfterEach
+    void siblingIsUntouched() throws IOException {
+        Path store = root.resolve("store");
+        assertEquals(siblingFiles, digests(scopeDir(store, BETA)), "the sibling scope is byte-identical");
+        try (ExecutionMemory beta = ExecutionMemory.openReadOnly(store, BETA)) {
+            assertEquals(ProjectionStatus.State.CURRENT, beta.projectionStatus(BETA).state());
+            ExperienceRecall recall = beta.recall(BETA, "flaky upload test", 10);
+            assertEquals(siblingRecall, render(recall));
+            recall.hits().forEach(h -> assertEquals(BETA, h.ref().scope()));
+        }
+    }
 
     private static void two(ExecutionMemory m, ScopeId scope) {
         experience(m, scope, "x-1", "Repair the flaky login test", "Waited for the session cookie", null);
@@ -143,6 +175,9 @@ class CrossLayerInterruptionMatrixTest {
             byte[] checkpoint = checkpointBytes(store, ALPHA);
             // Same bytes, new file: the held channel no longer writes to the file readers see.
             Path segment = segment(store, ALPHA);
+            // Replacement is only detected where the file system reports file keys (contract §18.6, W1b).
+            assumeTrue(Files.readAttributes(segment, BasicFileAttributes.class).fileKey() != null,
+                    "no file keys: the segment identity check is skipped on this file system");
             Path copy = segment.resolveSibling("copy.tmp");
             Files.copy(segment, copy);
             Files.move(copy, segment, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
@@ -204,13 +239,6 @@ class CrossLayerInterruptionMatrixTest {
     @Test
     void retryAfterAFailedProjectionWriteIsIdempotentAndStaysStale() throws IOException {
         Path store = root.resolve("store");
-        List<String> betaRecall;
-        try (ExecutionMemory beta = ExecutionMemory.open(store, BETA)) {
-            experience(beta, BETA, "y-1", "Repair the flaky upload test", "Raised the socket timeout", null);
-            betaRecall = render(beta.recall(BETA, "flaky upload test", 10));
-        }
-        Map<String, String> betaFiles = digests(scopeDir(store, BETA));
-
         Faults faults = new Faults();
         staleStore(faults);
         try (ExecutionMemory m = ExecutionMemory.open(store, ALPHA, ExecutionMemoryConfig.defaults(), faults)) {
@@ -245,12 +273,6 @@ class CrossLayerInterruptionMatrixTest {
         assertArrayEquals(checkpointBytes(reference, ALPHA), checkpointBytes(store, ALPHA),
                 "reconciliation equals an uninterrupted run");
         assertTrue(new ExecutionLedgerAuditor().audit(store).isHealthy());
-
-        assertEquals(betaFiles, digests(scopeDir(store, BETA)), "the other scope is untouched");
-        try (ExecutionMemory beta = ExecutionMemory.openReadOnly(store, BETA)) {
-            assertEquals(ProjectionStatus.State.CURRENT, beta.projectionStatus(BETA).state());
-            assertEquals(betaRecall, render(beta.recall(BETA, "flaky upload test", 10)));
-        }
     }
 
     @Test
