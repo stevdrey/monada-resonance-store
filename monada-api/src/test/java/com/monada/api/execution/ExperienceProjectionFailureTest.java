@@ -9,6 +9,7 @@ import static com.monada.api.execution.Experiences.finish;
 import static com.monada.api.execution.Experiences.projectionDir;
 import static com.monada.api.execution.Experiences.render;
 import static com.monada.api.execution.Experiences.start;
+import static com.monada.api.execution.Experiences.treeDigests;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -24,7 +25,6 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -52,19 +52,6 @@ class ExperienceProjectionFailureTest {
             third(m);
             return render(m.recall(SCOPE, query, 10));
         }
-    }
-
-    private static Map<String, String> digests(Path dir) throws IOException {
-        Map<String, String> out = new TreeMap<>();
-        try (Stream<Path> files = Files.walk(dir)) {
-            for (Path f : files.filter(Files::isRegularFile).toList()) {
-                out.put(dir.relativize(f).toString(), java.util.HexFormat.of().formatHex(
-                        java.security.MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(f))));
-            }
-        } catch (java.security.NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
-        return out;
     }
 
     @Test
@@ -195,7 +182,7 @@ class ExperienceProjectionFailureTest {
         Path file = checkpoint(store, SCOPE);
         String text = Files.readString(file, StandardCharsets.UTF_8);
         Files.writeString(file, text.replace("|x-2-a1-fin|", "|x-2-a1-fiN|"), StandardCharsets.UTF_8);
-        Map<String, String> before = digests(projectionDir(store, SCOPE));
+        Map<String, String> before = treeDigests(projectionDir(store, SCOPE));
         try (ExecutionMemory m = ExecutionMemory.open(store, SCOPE)) {
             ProjectionStatus status = m.projectionStatus(SCOPE);
             assertEquals(ProjectionStatus.State.INCOMPATIBLE, status.state());
@@ -203,7 +190,7 @@ class ExperienceProjectionFailureTest {
             assertEquals(List.of(), m.recall(SCOPE, "gradle cache", 10).hits());
             appended(m, start(SCOPE, "x-3", "Fix the flaky upload test"));
             assertEquals(ProjectionStatus.State.INCOMPATIBLE, m.projectionStatus(SCOPE).state());
-            assertEquals(before, digests(projectionDir(store, SCOPE)), "nothing repaired in place");
+            assertEquals(before, treeDigests(projectionDir(store, SCOPE)), "nothing repaired in place");
             assertEquals(ProjectionStatus.State.CURRENT, m.rebuildProjection(SCOPE).state());
             assertEquals(expected, render(m.recall(SCOPE, "gradle cache", 10)));
         }
@@ -249,7 +236,7 @@ class ExperienceProjectionFailureTest {
             two(m);
         }
         Experiences.removeProjection(store, SCOPE);
-        Map<String, String> before = digests(store);
+        Map<String, String> before = treeDigests(store);
         try (ExecutionMemory m = ExecutionMemory.openReadOnly(store, SCOPE)) {
             assertEquals(ProjectionStatus.State.MISSING, m.projectionStatus(SCOPE).state());
             assertEquals(List.of(), m.recall(SCOPE, "gradle", 5).hits());
@@ -260,7 +247,7 @@ class ExperienceProjectionFailureTest {
             assertEquals(ProjectionStatus.State.MISSING, m.projectionStatus(unknown).state());
             assertEquals(List.of(), m.recall(unknown, "gradle", 5).hits());
         }
-        assertEquals(before, digests(store));
+        assertEquals(before, treeDigests(store));
         assertFalse(Files.exists(Experiences.scopeDir(store, unknown)));
     }
 
@@ -276,7 +263,7 @@ class ExperienceProjectionFailureTest {
         Files.move(feedback.resolve("feedback-000001.log"), outside.resolve("feedback-000001.log"));
         Files.delete(feedback);
         Files.createSymbolicLink(feedback, outside);
-        Map<String, String> outsideBefore = digests(outside);
+        Map<String, String> outsideBefore = treeDigests(outside);
         try (ExecutionMemory m = ExecutionMemory.openReadOnly(store, SCOPE)) {
             ProjectionStatus status = m.projectionStatus(SCOPE);
             assertEquals(ProjectionStatus.State.INCOMPATIBLE, status.state());
@@ -285,10 +272,10 @@ class ExperienceProjectionFailureTest {
         try (ExecutionMemory m = ExecutionMemory.open(store, SCOPE)) {
             assertEquals(ProjectionStatus.State.INCOMPATIBLE, m.projectionStatus(SCOPE).state());
             appended(m, start(SCOPE, "x-3", "Fix the flaky upload test"));
-            assertEquals(outsideBefore, digests(outside), "nothing written through the link");
+            assertEquals(outsideBefore, treeDigests(outside), "nothing written through the link");
             assertEquals(ProjectionStatus.State.CURRENT, m.rebuildProjection(SCOPE).state());
         }
-        assertEquals(outsideBefore, digests(outside), "rebuild removes the link, never its target");
+        assertEquals(outsideBefore, treeDigests(outside), "rebuild removes the link, never its target");
         assertFalse(Files.isSymbolicLink(feedback));
     }
 
@@ -301,7 +288,7 @@ class ExperienceProjectionFailureTest {
             }
             Path file = projectionDir(store, SCOPE).resolve("memory").resolve(damaged);
             Files.delete(file);
-            Map<String, String> before = digests(projectionDir(store, SCOPE));
+            Map<String, String> before = treeDigests(projectionDir(store, SCOPE));
             try (ExecutionMemory m = ExecutionMemory.openReadOnly(store, SCOPE)) {
                 ProjectionStatus status = m.projectionStatus(SCOPE);
                 assertEquals(ProjectionStatus.State.INCOMPATIBLE, status.state(), damaged);
@@ -311,7 +298,7 @@ class ExperienceProjectionFailureTest {
                 assertEquals(ProjectionStatus.State.INCOMPATIBLE, m.projectionStatus(SCOPE).state(), damaged);
             }
             assertFalse(Files.exists(file), "verification never recreates " + damaged);
-            assertEquals(before, digests(projectionDir(store, SCOPE)));
+            assertEquals(before, treeDigests(projectionDir(store, SCOPE)));
         }
     }
 

@@ -826,7 +826,7 @@ state and recovery for each window
 ([contract section 18.6](specs/execution-memory-contract-v1.md#186-interruption-windows-and-recovery-issue-127)).
 It then adds `CrossLayerInterruptionMatrixTest` for the cells no existing test covered:
 
-- an append refused by I/O;
+- an append refused by I/O, with the segment replaced or vanished;
 - a torn ledger tail seen through the facade;
 - an idempotent or conflicting retry after a failed projection write;
 - a read-only open of a `STALE` scope;
@@ -838,7 +838,7 @@ Each cell checks the following:
 
 - accepted facts keep their sequence and are never duplicated;
 - the published generation stays valid;
-- read-only opens change no file;
+- read-only opens change no file, in the cells where a reader opens;
 - other scopes are untouched;
 - recovery happens only through an explicit `rebuildProjection` or `pruneProjection`, or by reopening.
 

@@ -24,10 +24,16 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.stream.Stream;
 
 /**
  * Scope-parametric experience fixtures for projection and recall tests. Event IDs are derived from the
@@ -134,6 +140,26 @@ final class Experiences {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    /**
+     * Every entry under {@code dir}, keyed by relative path: directories as {@code "dir"}, the writer lock as
+     * {@code "lock"} (its presence matters, and a held lock may not be readable on every platform), files as
+     * their SHA-256. Used to assert that nothing was created, deleted or changed.
+     */
+    static Map<String, String> treeDigests(Path dir) throws IOException {
+        Map<String, String> out = new TreeMap<>();
+        try (Stream<Path> entries = Files.walk(dir)) {
+            for (Path p : entries.toList()) {
+                String value = Files.isDirectory(p) ? "dir"
+                        : p.getFileName().toString().equals("write.lock") ? "lock"
+                        : HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(p)));
+                out.put(dir.relativize(p).toString(), value);
+            }
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+        return out;
     }
 
     static Path checkpoint(Path root, ScopeId scope) {

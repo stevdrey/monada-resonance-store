@@ -9,9 +9,11 @@ import static com.monada.api.execution.Experiences.projectionDir;
 import static com.monada.api.execution.Experiences.render;
 import static com.monada.api.execution.Experiences.scopeDir;
 import static com.monada.api.execution.Experiences.start;
+import static com.monada.api.execution.Experiences.treeDigests;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -22,6 +24,7 @@ import com.monada.storage.execution.ExecutionLedgerAuditReport;
 import com.monada.storage.execution.ExecutionLedgerAuditor;
 import com.monada.storage.execution.LedgerDiagnostic;
 import com.monada.storage.execution.LedgerDiagnosticCategory;
+import com.monada.storage.execution.LedgerException;
 import com.monada.storage.execution.ProjectionLayout;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -48,6 +51,7 @@ import org.junit.jupiter.api.io.TempDir;
  *
  * <ul>
  *   <li>W1 before the ledger append: {@link #refusedLedgerAppendLeavesNoFactAndTheProjectionCurrent},
+ *       {@link #vanishedLedgerSegmentIsRefusedAndNeverRecreated},
  *       {@link #tornLedgerTailIsRefusedByTheWriterAndReportedButNeverRepaired}.</li>
  *   <li>W2 after the durable append, before COVER: {@link #retryAfterAFailedProjectionWriteIsIdempotentAndStaysStale},
  *       {@link #readOnlySnapshotOfAStaleProjectionAnswersFromTheCoveredPrefixOnly}.</li>
@@ -76,14 +80,14 @@ class CrossLayerInterruptionMatrixTest {
             experience(beta, BETA, "y-1", "Repair the flaky upload test", "Raised the socket timeout", null);
             siblingRecall = render(beta.recall(BETA, "flaky upload test", 10));
         }
-        siblingFiles = digests(scopeDir(store, BETA));
+        siblingFiles = treeDigests(scopeDir(store, BETA));
     }
 
     /** No interruption or recovery in alpha touches beta's files, and beta never sees alpha's refs. */
     @AfterEach
     void siblingIsUntouched() throws IOException {
         Path store = root.resolve("store");
-        assertEquals(siblingFiles, digests(scopeDir(store, BETA)), "the sibling scope is byte-identical");
+        assertEquals(siblingFiles, treeDigests(scopeDir(store, BETA)), "the sibling scope is byte-identical");
         try (ExecutionMemory beta = ExecutionMemory.openReadOnly(store, BETA)) {
             assertEquals(ProjectionStatus.State.CURRENT, beta.projectionStatus(BETA).state());
             ExperienceRecall recall = beta.recall(BETA, "flaky upload test", 10);
@@ -101,20 +105,6 @@ class CrossLayerInterruptionMatrixTest {
         return scopeDir(store, scope).resolve("ledger/events-000001.log");
     }
 
-    private static Map<String, String> digests(Path dir) throws IOException {
-        Map<String, String> out = new TreeMap<>();
-        try (Stream<Path> files = Files.walk(dir)) {
-            for (Path f : files.toList()) {
-                String name = dir.relativize(f).toString();
-                out.put(name, Files.isDirectory(f) ? "dir" : java.util.HexFormat.of().formatHex(
-                        java.security.MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(f))));
-            }
-        } catch (java.security.NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
-        return out;
-    }
-
     private static List<String> generations(Path store, ScopeId scope) throws IOException {
         return ProjectionLayout.of(store, scope).generationDirs().stream()
                 .map(p -> p.getFileName().toString()).toList();
@@ -124,19 +114,26 @@ class CrossLayerInterruptionMatrixTest {
         return Files.readString(ProjectionLayout.of(store, scope).pointer(), StandardCharsets.UTF_8);
     }
 
+    /** Recall of the 6 events every STALE cell has covered, projected without any interruption. */
+    private List<String> coveredPrefix() {
+        try (ExecutionMemory m = ExecutionMemory.open(root.resolve("reference-prefix"), ALPHA)) {
+            two(m, ALPHA);
+            return render(m.recall(ALPHA, "flaky upload test", 10));
+        }
+    }
+
     private static boolean mentions(ExperienceRecall recall, String execution) {
         return recall.hits().stream().anyMatch(h -> h.ref().execution().value().equals(execution));
     }
 
-    /** Faults that fail the incremental write of one sequence and, when armed, every rebuild COVER. */
+    /** Faults that fail the COVER of one ledger sequence, or of every sequence (a rebuild covers them all). */
     private static final class Faults implements ProjectionFaults {
-        long failIncrementalAt = -1;
-        boolean failRebuild;
-        boolean rebuilding;
+        long failAt = -1;
+        boolean failEveryCover;
 
         @Override
         public void beforeCommit(long ledgerSequence) throws IOException {
-            if (rebuilding ? failRebuild : ledgerSequence == failIncrementalAt) {
+            if (failEveryCover || ledgerSequence == failAt) {
                 throw new IOException("injected interruption before COVER " + ledgerSequence);
             }
         }
@@ -155,10 +152,10 @@ class CrossLayerInterruptionMatrixTest {
         Path store = root.resolve("store");
         try (ExecutionMemory m = ExecutionMemory.open(store, ALPHA, ExecutionMemoryConfig.defaults(), faults)) {
             two(m, ALPHA);
-            faults.failIncrementalAt = 7;
+            faults.failAt = 7;
             assertEquals(RecordResult.Status.APPENDED,
                     m.record(start(ALPHA, "x-3", "Fix the flaky upload test")).status());
-            faults.failIncrementalAt = -1;
+            faults.failAt = -1;
             third(m);
             assertEquals(ProjectionStatus.State.STALE, m.projectionStatus(ALPHA).state());
         }
@@ -206,6 +203,33 @@ class CrossLayerInterruptionMatrixTest {
     }
 
     @Test
+    void vanishedLedgerSegmentIsRefusedAndNeverRecreated() throws IOException {
+        Path store = root.resolve("store");
+        Path segment = segment(store, ALPHA);
+        try (ExecutionMemory m = ExecutionMemory.open(store, ALPHA)) {
+            two(m, ALPHA);
+            byte[] checkpoint = checkpointBytes(store, ALPHA);
+            Files.delete(segment);
+
+            assertThrows(UncheckedIOException.class, () -> m.record(start(ALPHA, "x-3", "Fix the flaky upload test")));
+            assertFalse(Files.exists(segment), "the segment is never recreated");
+            ProjectionStatus status = m.projectionStatus(ALPHA);
+            assertEquals(ProjectionStatus.State.CURRENT, status.state(), "the projection never saw the event");
+            assertEquals(6, status.coveredSequence());
+            assertEquals(6, status.ledgerSequence());
+            assertArrayEquals(checkpoint, checkpointBytes(store, ALPHA));
+            assertThrows(IllegalStateException.class, () -> m.record(start(ALPHA, "x-4", "Another task")));
+        }
+        Map<String, String> before = treeDigests(store);
+        // Reopening does not recover: the missing history is refused as possible data loss.
+        assertThrows(UncheckedIOException.class, () -> ExecutionMemory.open(store, ALPHA));
+        assertThrows(UncheckedIOException.class, () -> ExecutionMemory.openReadOnly(store, ALPHA));
+        ExecutionLedgerAuditReport audit = new ExecutionLedgerAuditor().audit(store);
+        assertFalse(audit.isHealthy(), audit.render());
+        assertEquals(before, treeDigests(store), "no layer starts a new history over the lost one");
+    }
+
+    @Test
     void tornLedgerTailIsRefusedByTheWriterAndReportedButNeverRepaired() throws IOException {
         Path store = root.resolve("store");
         List<String> expected;
@@ -215,11 +239,12 @@ class CrossLayerInterruptionMatrixTest {
         }
         // A crash in the middle of writing record 7: the ledger ends in a partial line.
         Files.writeString(segment(store, ALPHA), "MXL1\t7\t99\tpartial", StandardOpenOption.APPEND);
-        Map<String, String> before = digests(store);
+        Map<String, String> before = treeDigests(store);
 
         UncheckedIOException refused = assertThrows(UncheckedIOException.class, () -> ExecutionMemory.open(store, ALPHA));
-        String reason = refused.getCause().getMessage();
-        assertTrue(reason.contains("no automatic repair") && reason.contains("incomplete final record"), reason);
+        LedgerException cause = assertInstanceOf(LedgerException.class, refused.getCause());
+        assertEquals(List.of(LedgerDiagnosticCategory.TORN_TAIL),
+                cause.diagnostics().stream().map(LedgerDiagnostic::category).toList(), cause.getMessage());
         try (ExecutionMemory reader = ExecutionMemory.openReadOnly(store, ALPHA)) {
             assertTrue(reader.hasTornTail(), "the torn tail is reported, not hidden");
             assertEquals(6, reader.history(ALPHA).entries().size());
@@ -231,7 +256,11 @@ class CrossLayerInterruptionMatrixTest {
         ExecutionLedgerAuditReport audit = new ExecutionLedgerAuditor().audit(store);
         assertTrue(audit.diagnostics().stream().anyMatch(d -> d.category() == LedgerDiagnosticCategory.TORN_TAIL
                 && d.severity() == LedgerDiagnostic.Severity.WARNING), audit.render());
-        assertEquals(before, digests(store), "neither layer repairs or truncates anything");
+        // A torn tail is an interrupted write, not corruption: the audit stays healthy (no ERROR) and the
+        // warning, like hasTornTail(), is what a host must check (contract §18.6, W1c).
+        assertTrue(audit.isHealthy(), audit.render());
+        assertEquals(1, audit.count(LedgerDiagnostic.Severity.WARNING), audit.render());
+        assertEquals(before, treeDigests(store), "neither layer repairs or truncates anything");
     }
 
     // ---- W2: after the durable append, before COVER ----------------------------------------------------
@@ -239,9 +268,8 @@ class CrossLayerInterruptionMatrixTest {
     @Test
     void retryAfterAFailedProjectionWriteIsIdempotentAndStaysStale() throws IOException {
         Path store = root.resolve("store");
-        Faults faults = new Faults();
-        staleStore(faults);
-        try (ExecutionMemory m = ExecutionMemory.open(store, ALPHA, ExecutionMemoryConfig.defaults(), faults)) {
+        staleStore(new Faults());
+        try (ExecutionMemory m = ExecutionMemory.open(store, ALPHA)) {
             byte[] ledger = Files.readAllBytes(segment(store, ALPHA));
             byte[] checkpoint = checkpointBytes(store, ALPHA);
             RecordResult same = m.record(start(ALPHA, "x-3", "Fix the flaky upload test"));
@@ -278,7 +306,7 @@ class CrossLayerInterruptionMatrixTest {
     @Test
     void readOnlySnapshotOfAStaleProjectionAnswersFromTheCoveredPrefixOnly() throws IOException {
         Path store = staleStore(new Faults());
-        Map<String, String> before = digests(store);
+        Map<String, String> before = treeDigests(store);
         try (ExecutionMemory reader = ExecutionMemory.openReadOnly(store, ALPHA)) {
             ProjectionStatus status = reader.projectionStatus(ALPHA);
             assertEquals(ProjectionStatus.State.STALE, status.state());
@@ -287,11 +315,11 @@ class CrossLayerInterruptionMatrixTest {
             ExperienceRecall recall = reader.recall(ALPHA, "flaky upload test", 10);
             assertEquals(ProjectionStatus.State.STALE, recall.status().state());
             assertFalse(recall.hits().isEmpty());
-            assertFalse(mentions(recall, "x-3"), "the uncovered fact is never served");
+            assertEquals(coveredPrefix(), render(recall), "exactly the covered prefix, nothing uncovered");
             recall.hits().forEach(h -> assertEquals(6, h.coveredSequence()));
             assertThrows(UnsupportedOperationException.class, () -> reader.rebuildProjection(ALPHA));
         }
-        assertEquals(before, digests(store), "a read-only open neither repairs nor creates anything");
+        assertEquals(before, treeDigests(store), "a read-only open neither repairs nor creates anything");
         try (ExecutionMemory m = ExecutionMemory.open(store, ALPHA)) {
             assertEquals(ProjectionStatus.State.CURRENT, m.rebuildProjection(ALPHA).state());
         }
@@ -314,8 +342,7 @@ class CrossLayerInterruptionMatrixTest {
             byte[] checkpoint = checkpointBytes(store, ALPHA);
             List<String> stale = render(m.recall(ALPHA, "flaky test", 10));
 
-            faults.rebuilding = true;
-            faults.failRebuild = true;
+            faults.failEveryCover = true;
             assertThrows(UncheckedIOException.class, () -> m.rebuildProjection(ALPHA));
             ProjectionStatus status = m.projectionStatus(ALPHA);
             assertEquals(ProjectionStatus.State.STALE, status.state(), "the published generation still answers");
@@ -327,7 +354,7 @@ class CrossLayerInterruptionMatrixTest {
             assertArrayEquals(ledger, Files.readAllBytes(segment(store, ALPHA)), "the ledger is never rolled back");
             assertEquals(stale, render(m.recall(ALPHA, "flaky test", 10)));
 
-            faults.failRebuild = false;
+            faults.failEveryCover = false;
             ProjectionStatus rebuilt = m.rebuildProjection(ALPHA);
             assertEquals(ProjectionStatus.State.CURRENT, rebuilt.state());
             assertEquals(9, rebuilt.coveredSequence());
@@ -354,13 +381,13 @@ class CrossLayerInterruptionMatrixTest {
             }
         }
         Files.writeString(layout.pointerTemp(), "projection-000002\n", StandardCharsets.UTF_8);
-        Map<String, String> before = digests(store);
+        Map<String, String> before = treeDigests(store);
 
         try (ExecutionMemory reader = ExecutionMemory.openReadOnly(store, ALPHA)) {
             assertEquals(ProjectionStatus.State.CURRENT, reader.projectionStatus(ALPHA).state());
             assertEquals(expected, render(reader.recall(ALPHA, "flaky test", 10)));
         }
-        assertEquals(before, digests(store), "a reader never completes or reclaims an interrupted publication");
+        assertEquals(before, treeDigests(store), "a reader never completes or reclaims an interrupted publication");
         try (ExecutionMemory m = ExecutionMemory.open(store, ALPHA)) {
             assertEquals(ProjectionStatus.State.CURRENT, m.projectionStatus(ALPHA).state());
             assertEquals(old, projectionDir(store, ALPHA), "the temporary pointer is never promoted");
@@ -379,12 +406,18 @@ class CrossLayerInterruptionMatrixTest {
     void snapshotOpenedBetweenLedgerAppendAndCoverIsStaleAndFrozen() throws IOException {
         Path store = root.resolve("store");
         ExecutionMemory[] snapshot = new ExecutionMemory[1];
+        RuntimeException[] readerFailure = new RuntimeException[1];
         Map<String, Map<String, String>> around = new TreeMap<>();
         ProjectionFaults openReaderBeforeCover = seq -> {
             if (seq == 9) {
-                around.put("before", digests(store));
-                snapshot[0] = ExecutionMemory.openReadOnly(store, ALPHA);
-                around.put("after", digests(store));
+                // Kept out of the writer: onAppended would report any exception as its own STALE projection.
+                try {
+                    around.put("before", treeDigests(store));
+                    snapshot[0] = ExecutionMemory.openReadOnly(store, ALPHA);
+                    around.put("after", treeDigests(store));
+                } catch (IOException | RuntimeException e) {
+                    readerFailure[0] = new IllegalStateException("snapshot open failed inside the writer", e);
+                }
             }
         };
         try (ExecutionMemory m = ExecutionMemory.open(store, ALPHA, ExecutionMemoryConfig.defaults(),
@@ -395,6 +428,21 @@ class CrossLayerInterruptionMatrixTest {
             ProjectionStatus written = m.projectionStatus(ALPHA);
             assertEquals(ProjectionStatus.State.CURRENT, written.state(), "the writer finishes its COVER");
             assertEquals(9, written.coveredSequence());
+        } finally {
+            if (readerFailure[0] != null) {
+                if (snapshot[0] != null) {
+                    snapshot[0].close();
+                }
+                throw readerFailure[0];
+            }
+        }
+        List<String> prefix; // recall of the 8 covered events, projected without any interruption
+        Path reference = root.resolve("reference");
+        try (ExecutionMemory m = ExecutionMemory.open(reference, ALPHA)) {
+            two(m, ALPHA);
+            appended(m, start(ALPHA, "x-3", "Fix the flaky upload test"));
+            appended(m, attempt(ALPHA, "x-3", "a1", 1, null));
+            prefix = render(m.recall(ALPHA, "flaky upload test", 10));
         }
         try (ExecutionMemory reader = snapshot[0]) {
             assertEquals(around.get("before"), around.get("after"), "the reader mutated nothing");
@@ -402,8 +450,8 @@ class CrossLayerInterruptionMatrixTest {
             assertEquals(ProjectionStatus.State.STALE, status.state(), status.diagnostics().toString());
             assertEquals(8, status.coveredSequence());
             assertEquals(9, status.ledgerSequence(), "the durable fact is in the snapshot's ledger");
-            assertFalse(mentions(reader.recall(ALPHA, "flaky upload test", 10), "x-3"),
-                    "no hit from an uncovered fact, even after the writer covered it");
+            assertEquals(prefix, render(reader.recall(ALPHA, "flaky upload test", 10)),
+                    "answers exactly from the covered prefix, even after the writer covered the last fact");
         }
         try (ExecutionMemory fresh = ExecutionMemory.openReadOnly(store, ALPHA)) {
             ProjectionStatus status = fresh.projectionStatus(ALPHA);
