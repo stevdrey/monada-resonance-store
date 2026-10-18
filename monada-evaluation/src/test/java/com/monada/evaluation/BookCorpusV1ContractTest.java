@@ -1,5 +1,6 @@
 package com.monada.evaluation;
 
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -8,25 +9,27 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Contract checks for the {@code book-corpus-v1} input (issue #163). Runs the real offline verifier
- * ({@code docs/experiments/book-corpus-v1/VerifyBookCorpus.java}) through the JDK source launcher
- * against a tiny original fixture. No network access; the book itself is only checked when the
+ * ({@code docs/experiments/book-corpus-v1/VerifyBookCorpus.java}), compiled once per class, against a
+ * tiny original fixture; one test also runs the documented source-launcher command. No network access; the book itself is only checked when the
  * caller opts in with {@code MONADA_BOOK_CORPUS_V1_FILE}.
  */
 class BookCorpusV1ContractTest {
@@ -38,10 +41,17 @@ class BookCorpusV1ContractTest {
 
             Café lights blinked across the harbour at dusk.
             """;
+    private static final char BOM = 0xFEFF;
     private static final long MAX_TRACKED_FILE_BYTES = 64 * 1024;
-    // The v1 contract directory is immutable; any extra file (e.g. a book excerpt) must fail review here.
+    // Both directories are immutable for v1; any extra tracked file (e.g. a book excerpt) must fail here.
+    private static final String CONTRACT_DIR = "docs/experiments/book-corpus-v1";
     private static final Set<String> CONTRACT_FILES = Set.of(
             "README.md", "RIGHTS.md", "manifest.properties", "VerifyBookCorpus.java");
+    private static final String FIXTURE_DIR = "monada-evaluation/src/test/resources/book-corpus-fixture-v1";
+    private static final Set<String> FIXTURE_FILES = Set.of(".gitattributes", "manifest.properties", "sample.txt");
+
+    @TempDir
+    static Path compiledVerifier;
 
     private record Result(int exitCode, String stdout, String stderr) {
     }
@@ -53,17 +63,44 @@ class BookCorpusV1ContractTest {
         return dir;
     }
 
+    private static Path repoRoot() {
+        return corpusDir().resolve("../../..").normalize();
+    }
+
+    private static String javaExecutable() {
+        return Path.of(System.getProperty("java.home"), "bin", "java").toString();
+    }
+
+    @BeforeAll
+    static void compileVerifierOnce() {
+        // Compiling once keeps real-CLI coverage without a source-launcher compile per test.
+        var compiler = javax.tools.ToolProvider.getSystemJavaCompiler();
+        assertNotNull(compiler, "a JDK (not a JRE) is required to compile the verifier");
+        int status = compiler.run(null, null, null, "-d", compiledVerifier.toString(),
+                corpusDir().resolve("VerifyBookCorpus.java").toString());
+        assertEquals(0, status, "VerifyBookCorpus.java failed to compile");
+    }
+
     private static Result verify(String... args) throws IOException, InterruptedException {
-        List<String> command = new ArrayList<>();
-        command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
-        command.add(corpusDir().resolve("VerifyBookCorpus.java").toString());
+        List<String> command = new ArrayList<>(List.of(javaExecutable(), "-cp", compiledVerifier.toString(),
+                "VerifyBookCorpus"));
         command.addAll(List.of(args));
+        return execute(command);
+    }
+
+    private static Result verifyWithSourceLauncher(String... args) throws IOException, InterruptedException {
+        List<String> command = new ArrayList<>(List.of(javaExecutable(), CONTRACT_DIR + "/VerifyBookCorpus.java"));
+        command.addAll(List.of(args));
+        return execute(command);
+    }
+
+    private static Result execute(List<String> command) throws IOException, InterruptedException {
         // Redirect to files so a stalled child cannot block the timeout below on a pipe read.
         Path out = Files.createTempFile("verify-book-corpus", ".out");
         Path err = Files.createTempFile("verify-book-corpus", ".err");
         try {
             Process process = new ProcessBuilder(command)
-                    .directory(corpusDir().resolve("../../..").normalize().toFile())
+                    .directory(repoRoot().toFile())
                     .redirectOutput(out.toFile())
                     .redirectError(err.toFile())
                     .start();
@@ -118,8 +155,9 @@ class BookCorpusV1ContractTest {
     @Test
     void missingInputFailsWithAcquisitionPointer(@TempDir Path dir) throws Exception {
         Path missing = dir.resolve("pg11.txt");
-        var result = verify("--manifest", fixtureManifest(dir).toString(), missing.toString());
-        assertEquals(2, result.exitCode());
+        // Runs the exact command the README documents (JDK source launcher from the repository root).
+        var result = verifyWithSourceLauncher("--manifest", fixtureManifest(dir).toString(), missing.toString());
+        assertEquals(2, result.exitCode(), result.stderr());
         assertTrue(result.stderr().contains("input not found: " + missing.toAbsolutePath()), result.stderr());
         assertTrue(result.stderr().contains("Offline acquisition"), result.stderr());
     }
@@ -149,7 +187,7 @@ class BookCorpusV1ContractTest {
     @Test
     void byteOrderMarkIsRejected(@TempDir Path dir) throws Exception {
         var result = verify("--manifest", fixtureManifest(dir).toString(),
-                input(dir, ("﻿" + sample()).getBytes(StandardCharsets.UTF_8)).toString());
+                input(dir, (BOM + sample()).getBytes(StandardCharsets.UTF_8)).toString());
         assertEquals(1, result.exitCode());
         assertTrue(result.stderr().contains("byte order mark"), result.stderr());
     }
@@ -204,18 +242,56 @@ class BookCorpusV1ContractTest {
     }
 
     @Test
-    void contractDirectoryDoesNotRedistributeBookBytes() throws IOException {
-        Path dir = corpusDir();
-        try (Stream<Path> entries = Files.walk(dir)) {
-            Set<String> found = new TreeSet<>();
-            for (Path entry : entries.filter(p -> !p.equals(dir)).toList()) {
-                assertTrue(Files.isRegularFile(entry), "unexpected directory in contract: " + entry);
-                assertTrue(Files.size(entry) <= MAX_TRACKED_FILE_BYTES, "file too large to be contract-only: " + entry);
-                found.add(dir.relativize(entry).toString());
-            }
-            assertEquals(new TreeSet<>(CONTRACT_FILES), found,
-                    "book-corpus-v1 may contain only its contract files; book bytes are never committed");
+    void gitTracksNoBookBytes() throws Exception {
+        assertEquals(CONTRACT_FILES, trackedSmallFiles(CONTRACT_DIR),
+                CONTRACT_DIR + " may track only its contract files; book bytes are never committed");
+        assertEquals(FIXTURE_FILES, trackedSmallFiles(FIXTURE_DIR),
+                FIXTURE_DIR + " may track only the original fixture files");
+
+        var manifest = new Properties();
+        try (InputStream in = Files.newInputStream(corpusDir().resolve("manifest.properties"))) {
+            manifest.load(in);
         }
+        Set<String> pinnedDigests = Set.of(manifest.getProperty("raw.sha256"), manifest.getProperty("normalized.sha256"));
+        Set<Long> pinnedSizes = Set.of(Long.parseLong(manifest.getProperty("raw.sizeBytes")),
+                Long.parseLong(manifest.getProperty("normalized.sizeBytes")));
+        for (String tracked : gitLsFiles(".")) {
+            Path file = repoRoot().resolve(tracked);
+            // Only files of exactly a pinned size can be the book; hash just those.
+            if (Files.isRegularFile(file) && pinnedSizes.contains(Files.size(file))) {
+                String digest = HexFormat.of().formatHex(
+                        MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(file)));
+                assertFalse(pinnedDigests.contains(digest), "pinned book bytes are tracked in Git: " + tracked);
+            }
+        }
+    }
+
+    /** Tracked files directly under {@code dir}, each checked to be small and not nested. */
+    private static Set<String> trackedSmallFiles(String dir) throws Exception {
+        Set<String> names = new TreeSet<>();
+        for (String tracked : gitLsFiles(dir)) {
+            String name = tracked.substring(dir.length() + 1);
+            assertFalse(name.contains("/"), "unexpected nested tracked file: " + tracked);
+            assertTrue(Files.size(repoRoot().resolve(tracked)) <= MAX_TRACKED_FILE_BYTES,
+                    "tracked file too large to be contract-only: " + tracked);
+            names.add(name);
+        }
+        return names;
+    }
+
+    private static List<String> gitLsFiles(String pathspec) throws Exception {
+        Result result;
+        try {
+            result = execute(List.of("git", "-C", repoRoot().toString(), "ls-files", "-z", "--", pathspec));
+        } catch (IOException e) {
+            assumeTrue(false, "git is not available; the tracked-file guard runs in CI checkouts");
+            throw e;
+        }
+        assumeTrue(result.exitCode() == 0, "not a git checkout; the tracked-file guard runs in CI checkouts");
+        if (result.stdout().isEmpty()) {
+            fail("git tracks nothing under " + pathspec);
+        }
+        return List.of(result.stdout().split("\0"));
     }
 
     @Test
@@ -244,6 +320,57 @@ class BookCorpusV1ContractTest {
         var result = verify("--manifest", manifest.toString(), input(dir, resource("sample.txt")).toString());
         assertEquals(2, result.exitCode(), result.stderr());
         assertTrue(result.stderr().contains("cannot read manifest"), result.stderr());
+    }
+
+    @Test
+    void bootstrapManifestPrintsDigestsWithoutPinnedValues(@TempDir Path dir) throws Exception {
+        Path manifest = dir.resolve("bootstrap.properties");
+        Files.writeString(manifest, """
+                corpus=book-corpus-fixture
+                corpusVersion=2
+                normalize.policy=v1
+                normalize.startMarkerPrefix=*** BEGIN FIXTURE TEXT
+                normalize.endMarkerPrefix=*** FINISH FIXTURE TEXT
+                """);
+        var result = verify("--manifest", manifest.toString(), "--print-digests",
+                input(dir, resource("sample.txt")).toString());
+        assertEquals(0, result.exitCode(), result.stderr());
+        assertTrue(result.stdout().contains("raw.sha256=dc516fe5ef20e4b137d1ba287f86e8e93d1a8d16e1cfc9740dd4aa15ebde2b84"),
+                result.stdout());
+        assertTrue(result.stdout().contains("raw.eol=CRLF"), result.stdout());
+        assertTrue(result.stdout().contains("normalized.lineCount=3"), result.stdout());
+    }
+
+    @Test
+    void declaredRawLineEndingsAreEnforced(@TempDir Path dir) throws Exception {
+        Path manifest = fixtureManifest(dir);
+        Files.writeString(manifest, Files.readString(manifest).replace("raw.eol=CRLF", "raw.eol=LF"));
+        var result = verify("--manifest", manifest.toString(), input(dir, resource("sample.txt")).toString());
+        assertEquals(1, result.exitCode(), result.stderr());
+        assertTrue(result.stderr().contains("eol=LF"), result.stderr());
+        assertTrue(result.stderr().contains("eol=CRLF"), result.stderr());
+    }
+
+    @Test
+    void declaredValuesThePolicyCannotGuaranteeAreABadManifest(@TempDir Path dir) throws Exception {
+        Path manifest = fixtureManifest(dir);
+        Files.writeString(manifest, Files.readString(manifest) + "normalized.unicodeForm=NFD\n");
+        var result = verify("--manifest", manifest.toString(), input(dir, resource("sample.txt")).toString());
+        assertEquals(2, result.exitCode(), result.stderr());
+        assertTrue(result.stderr().contains("normalized.unicodeForm=NFD is not guaranteed"), result.stderr());
+    }
+
+    @Test
+    void normalizedOutputReplacesAnExistingFileAtomically(@TempDir Path dir) throws Exception {
+        Path out = dir.resolve("normalized.txt");
+        Files.writeString(out, "stale previous output");
+        var result = verify("--manifest", fixtureManifest(dir).toString(), "--write-normalized", out.toString(),
+                input(dir, resource("sample.txt")).toString());
+        assertEquals(0, result.exitCode(), result.stderr());
+        assertArrayEquals(FIXTURE_NORMALIZED.getBytes(StandardCharsets.UTF_8), Files.readAllBytes(out));
+        try (var entries = Files.list(dir)) {
+            assertTrue(entries.noneMatch(p -> p.getFileName().toString().endsWith(".tmp")), "temp file left behind");
+        }
     }
 
     @Test

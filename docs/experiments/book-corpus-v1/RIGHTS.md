@@ -60,5 +60,5 @@ site is not allowed (robots must use mirrors or the official harvest endpoint). 
 | Test snapshots / fixtures | Only original, hand-written fixtures (`monada-evaluation/src/test/resources/book-corpus-fixture-v1/`). No book bytes. |
 | Short quotations in reports | Allowed sparingly (public domain), but keep reports focused on metrics and IDs. |
 
-The contract test `BookCorpusV1ContractTest.contractDirectoryDoesNotRedistributeBookBytes` guards
-the "no book bytes in this directory" decision.
+The contract test `BookCorpusV1ContractTest.gitTracksNoBookBytes` guards
+the "no book bytes in Git" decision: it checks the tracked file set, not just this directory.

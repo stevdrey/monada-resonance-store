@@ -9,13 +9,16 @@ import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 
 /**
  * Offline verifier for the {@code book-corpus-v1} input contract (issue #163).
@@ -25,9 +28,17 @@ import java.util.Properties;
  * java docs/experiments/book-corpus-v1/VerifyBookCorpus.java [--manifest FILE] [--write-normalized OUT] [--print-digests] INPUT
  * </pre>
  *
- * <p>Exit codes: {@code 0} the input matches the pinned edition, {@code 1} the bytes are missing a
- * requirement or do not match, {@code 2} usage error, missing input or unreadable manifest.
- * Diagnostics go to stderr. {@code --write-normalized} writes only after every check passed.
+ * <p>Exit codes:
+ * <ul>
+ *   <li>{@code 0}: the input matches the pinned edition (or, with {@code --print-digests} on a manifest
+ *       that pins nothing yet, the digests were printed);</li>
+ *   <li>{@code 1}: the input bytes are invalid under the normalization policy or do not match the pinned
+ *       values;</li>
+ *   <li>{@code 2}: usage error, missing or unreadable input, missing or invalid manifest (missing keys,
+ *       malformed values or escapes, unsupported policy), {@code --write-normalized} naming the input, or
+ *       the normalized output could not be written.</li>
+ * </ul>
+ * Diagnostics go to stderr. {@code --write-normalized} writes only after every check passed, atomically.
  */
 public final class VerifyBookCorpus {
 
@@ -38,12 +49,26 @@ public final class VerifyBookCorpus {
     static final Path DEFAULT_MANIFEST = Path.of("docs", "experiments", "book-corpus-v1", "manifest.properties");
     static final String SUPPORTED_POLICY = "v1";
     static final String README = "docs/experiments/book-corpus-v1/README.md";
+    static final char BOM = 0xFEFF;
 
     static final List<String> REQUIRED_KEYS = List.of(
-            "corpus", "corpusVersion", "raw.sizeBytes", "raw.sha256",
-            "normalize.policy", "normalize.startMarkerPrefix", "normalize.endMarkerPrefix");
-    static final List<String> NORMALIZED_KEYS = List.of(
+            "corpus", "corpusVersion", "normalize.policy", "normalize.startMarkerPrefix", "normalize.endMarkerPrefix");
+    /** Pinned values; optional only with {@code --print-digests}, to bootstrap a new contract. */
+    static final List<String> PINNED_RAW_KEYS = List.of("raw.sizeBytes", "raw.sha256");
+    static final List<String> PINNED_NORMALIZED_KEYS = List.of(
             "normalized.sizeBytes", "normalized.sha256", "normalized.lineCount");
+    static final List<String> INTEGER_KEYS = List.of(
+            "corpusVersion", "raw.sizeBytes", "raw.lineCount", "normalized.sizeBytes", "normalized.lineCount");
+    static final List<String> SHA256_KEYS = List.of("raw.sha256", "normalized.sha256");
+    /** Declarative keys and the only values normalization policy v1 can guarantee for them. */
+    static final Map<String, Set<String>> DECLARED_VALUES = Map.of(
+            "raw.encoding", Set.of("UTF-8"),
+            "raw.bom", Set.of("ABSENT"),
+            "raw.eol", Set.of("CRLF", "LF"),
+            "normalized.encoding", Set.of("UTF-8"),
+            "normalized.bom", Set.of("ABSENT"),
+            "normalized.eol", Set.of("LF"),
+            "normalized.unicodeForm", Set.of("NFC"));
 
     private VerifyBookCorpus() {
     }
@@ -100,38 +125,14 @@ public final class VerifyBookCorpus {
             err.println("ERROR cannot read manifest " + manifestPath + ": " + e.getMessage());
             return USAGE;
         }
-        List<String> required = new ArrayList<>(REQUIRED_KEYS);
-        if (!printDigests) {
-            required.addAll(NORMALIZED_KEYS);
-        }
-        for (String key : required) {
-            if (manifest.getProperty(key, "").isBlank()) {
-                err.println("ERROR manifest " + manifestPath + " is missing required key: " + key);
-                return USAGE;
-            }
-        }
-        for (String key : List.of("raw.sizeBytes", "normalized.sizeBytes", "normalized.lineCount")) {
-            String value = manifest.getProperty(key, "").trim();
-            if (!value.isEmpty() && !value.matches("[0-9]{1,18}")) {
-                err.println("ERROR manifest key " + key + " must be a non-negative integer, was: " + value);
-                return USAGE;
-            }
-        }
-        for (String key : List.of("raw.sha256", "normalized.sha256")) {
-            String value = manifest.getProperty(key, "").trim();
-            if (!value.isEmpty() && !value.matches("[0-9a-f]{64}")) {
-                err.println("ERROR manifest key " + key + " must be 64 lowercase hex digits, was: " + value);
-                return USAGE;
-            }
-        }
-        String policy = manifest.getProperty("normalize.policy").trim();
-        if (!SUPPORTED_POLICY.equals(policy)) {
-            err.println("ERROR manifest normalize.policy=" + policy + " is not implemented; this verifier supports only "
-                    + SUPPORTED_POLICY);
+        String problem = validateManifest(manifest, printDigests);
+        if (problem != null) {
+            err.println("ERROR manifest " + manifestPath + ": " + problem);
             return USAGE;
         }
-        boolean bootstrap = NORMALIZED_KEYS.stream().anyMatch(k -> manifest.getProperty(k, "").isBlank());
-        String corpus = manifest.getProperty("corpus");
+        boolean rawPinned = PINNED_RAW_KEYS.stream().noneMatch(k -> value(manifest, k).isEmpty());
+        boolean normalizedPinned = PINNED_NORMALIZED_KEYS.stream().noneMatch(k -> value(manifest, k).isEmpty());
+        String corpus = value(manifest, "corpus");
 
         if (!Files.exists(input)) {
             err.println("ERROR input not found: " + input.toAbsolutePath());
@@ -164,21 +165,18 @@ public final class VerifyBookCorpus {
             return USAGE;
         }
 
-        long expectedRawSize = Long.parseLong(manifest.getProperty("raw.sizeBytes").trim());
-        String expectedRawSha = manifest.getProperty("raw.sha256").trim();
-        String rawSha = sha256(raw);
-        boolean rawMatches = raw.length == expectedRawSize && rawSha.equals(expectedRawSha);
+        RawFacts actualRaw = RawFacts.of(raw);
+        boolean rawMatches = rawPinned && actualRaw.matches(manifest);
 
         String normalized;
         try {
-            normalized = normalize(raw, manifest.getProperty("normalize.startMarkerPrefix"),
-                    manifest.getProperty("normalize.endMarkerPrefix"));
+            normalized = normalize(raw, value(manifest, "normalize.startMarkerPrefix"),
+                    value(manifest, "normalize.endMarkerPrefix"));
         } catch (NormalizationException e) {
-            if (!rawMatches) {
-                reportRawMismatch(err, expectedRawSize, expectedRawSha, raw.length, rawSha);
+            if (rawPinned && !rawMatches) {
+                reportRawMismatch(err, manifest, actualRaw);
             }
-            err.println("ERROR normalization policy " + manifest.getProperty("normalize.policy")
-                    + " rejected the input: " + e.getMessage());
+            err.println("ERROR normalization policy " + SUPPORTED_POLICY + " rejected the input: " + e.getMessage());
             return MISMATCH;
         }
         byte[] normalizedBytes = normalized.getBytes(StandardCharsets.UTF_8);
@@ -186,28 +184,31 @@ public final class VerifyBookCorpus {
         long lineCount = normalized.chars().filter(c -> c == '\n').count();
 
         if (printDigests) {
-            out.println("raw.sizeBytes=" + raw.length);
-            out.println("raw.sha256=" + rawSha);
+            out.println("raw.sizeBytes=" + actualRaw.size());
+            out.println("raw.sha256=" + actualRaw.sha256());
+            out.println("raw.lineCount=" + actualRaw.lineCount());
+            out.println("raw.eol=" + actualRaw.eol());
             out.println("normalized.sizeBytes=" + normalizedBytes.length);
             out.println("normalized.sha256=" + normalizedSha);
             out.println("normalized.lineCount=" + lineCount);
-            if (bootstrap) {
-                // Only reachable with --print-digests: pinning a new contract, nothing to compare yet.
-                if (!rawMatches) {
-                    reportRawMismatch(err, expectedRawSize, expectedRawSha, raw.length, rawSha);
+            if (!rawPinned || !normalizedPinned) {
+                // Bootstrapping a new contract: check what is already pinned, compare nothing else.
+                if (rawPinned && !rawMatches) {
+                    reportRawMismatch(err, manifest, actualRaw);
                     return MISMATCH;
                 }
-                err.println("INFO manifest has no normalized.* expectations yet; digests printed, nothing compared");
+                err.println("INFO manifest does not pin every raw.* and normalized.* value yet;"
+                        + " digests printed, unpinned values not compared");
                 return OK;
             }
         }
 
-        boolean normalizedMatches = matches(manifest, "normalized.sizeBytes", normalizedBytes.length)
-                && normalizedSha.equals(manifest.getProperty("normalized.sha256", "").trim())
-                && matches(manifest, "normalized.lineCount", lineCount);
+        boolean normalizedMatches = Long.parseLong(value(manifest, "normalized.sizeBytes")) == normalizedBytes.length
+                && normalizedSha.equals(value(manifest, "normalized.sha256"))
+                && Long.parseLong(value(manifest, "normalized.lineCount")) == lineCount;
 
         if (!rawMatches) {
-            reportRawMismatch(err, expectedRawSize, expectedRawSha, raw.length, rawSha);
+            reportRawMismatch(err, manifest, actualRaw);
             if (normalizedMatches) {
                 err.println("  the normalized body still matches the pinned body: upstream boilerplate drift");
                 err.println("  (header/footer changed). Still rejected: raw bytes are pinned on purpose.");
@@ -221,9 +222,9 @@ public final class VerifyBookCorpus {
         }
         if (!normalizedMatches) {
             err.println("ERROR raw bytes match but the normalized body does not match the manifest");
-            err.println("  expected normalized size=" + manifest.getProperty("normalized.sizeBytes")
-                    + " sha256=" + manifest.getProperty("normalized.sha256")
-                    + " lines=" + manifest.getProperty("normalized.lineCount"));
+            err.println("  expected normalized size=" + value(manifest, "normalized.sizeBytes")
+                    + " sha256=" + value(manifest, "normalized.sha256")
+                    + " lines=" + value(manifest, "normalized.lineCount"));
             err.println("  actual   normalized size=" + normalizedBytes.length + " sha256=" + normalizedSha
                     + " lines=" + lineCount);
             err.println("  the manifest or the normalization policy is inconsistent; fix the contract, not the input.");
@@ -232,16 +233,54 @@ public final class VerifyBookCorpus {
 
         if (writeNormalized != null) {
             try {
-                Files.write(writeNormalized, normalizedBytes);
+                writeAtomically(writeNormalized, normalizedBytes);
             } catch (IOException e) {
                 err.println("ERROR cannot write normalized text to " + writeNormalized + ": " + e.getMessage());
                 return USAGE;
             }
         }
-        out.println("OK " + corpus + " v" + manifest.getProperty("corpusVersion")
-                + " raw sha256=" + rawSha + " normalized sha256=" + normalizedSha
+        out.println("OK " + corpus + " v" + value(manifest, "corpusVersion")
+                + " raw sha256=" + actualRaw.sha256() + " normalized sha256=" + normalizedSha
                 + " lines=" + lineCount);
         return OK;
+    }
+
+    /** Returns a description of the first manifest problem, or {@code null} when the manifest is usable. */
+    static String validateManifest(Properties manifest, boolean printDigests) {
+        List<String> required = new ArrayList<>(REQUIRED_KEYS);
+        if (!printDigests) {
+            required.addAll(PINNED_RAW_KEYS);
+            required.addAll(PINNED_NORMALIZED_KEYS);
+        }
+        for (String key : required) {
+            if (value(manifest, key).isEmpty()) {
+                return "missing required key: " + key;
+            }
+        }
+        for (String key : INTEGER_KEYS) {
+            String value = value(manifest, key);
+            if (!value.isEmpty() && !value.matches("[0-9]{1,18}")) {
+                return "key " + key + " must be a non-negative integer, was: " + value;
+            }
+        }
+        for (String key : SHA256_KEYS) {
+            String value = value(manifest, key);
+            if (!value.isEmpty() && !value.matches("[0-9a-f]{64}")) {
+                return "key " + key + " must be 64 lowercase hex digits, was: " + value;
+            }
+        }
+        String policy = value(manifest, "normalize.policy");
+        if (!SUPPORTED_POLICY.equals(policy)) {
+            return "normalize.policy=" + policy + " is not implemented; this verifier supports only " + SUPPORTED_POLICY;
+        }
+        for (var entry : DECLARED_VALUES.entrySet()) {
+            String value = value(manifest, entry.getKey());
+            if (!value.isEmpty() && !entry.getValue().contains(value)) {
+                return "key " + entry.getKey() + "=" + value + " is not guaranteed by normalization policy "
+                        + SUPPORTED_POLICY + "; allowed: " + entry.getValue();
+            }
+        }
+        return null;
     }
 
     /**
@@ -251,7 +290,7 @@ public final class VerifyBookCorpus {
      */
     static String normalize(byte[] raw, String startPrefix, String endPrefix) throws NormalizationException {
         String text = decodeStrictUtf8(raw);
-        if (text.startsWith("﻿")) {
+        if (!text.isEmpty() && text.charAt(0) == BOM) {
             throw new NormalizationException("byte order mark (U+FEFF) at offset 0; the pinned edition has none");
         }
         String[] lines = text.replace("\r\n", "\n").split("\n", -1);
@@ -326,16 +365,74 @@ public final class VerifyBookCorpus {
         return out.flip().toString();
     }
 
-    private static boolean matches(Properties manifest, String key, long actual) {
-        String value = manifest.getProperty(key, "").trim();
-        return !value.isEmpty() && Long.parseLong(value) == actual;
+    /** Size, digest and line-end facts of the raw bytes, compared with the manifest's pinned raw.* values. */
+    record RawFacts(long size, String sha256, long lineCount, String eol) {
+
+        static RawFacts of(byte[] raw) {
+            long lf = 0;
+            long cr = 0;
+            long crlf = 0;
+            for (int i = 0; i < raw.length; i++) {
+                if (raw[i] == '\n') {
+                    lf++;
+                    if (i > 0 && raw[i - 1] == '\r') {
+                        crlf++;
+                    }
+                } else if (raw[i] == '\r') {
+                    cr++;
+                }
+            }
+            String eol;
+            if (lf == 0 && cr == 0) {
+                eol = "NONE";
+            } else if (cr == 0) {
+                eol = "LF";
+            } else if (crlf == lf && crlf == cr) {
+                eol = "CRLF";
+            } else {
+                eol = "MIXED";
+            }
+            return new RawFacts(raw.length, VerifyBookCorpus.sha256(raw), lf, eol);
+        }
+
+        /** Size and SHA-256 must match; line count and line ends must match when the manifest declares them. */
+        boolean matches(Properties manifest) {
+            String lines = value(manifest, "raw.lineCount");
+            String declaredEol = value(manifest, "raw.eol");
+            return Long.parseLong(value(manifest, "raw.sizeBytes")) == size
+                    && sha256.equals(value(manifest, "raw.sha256"))
+                    && (lines.isEmpty() || Long.parseLong(lines) == lineCount)
+                    && (declaredEol.isEmpty() || declaredEol.equals(eol));
+        }
     }
 
-    private static void reportRawMismatch(PrintStream err, long expectedSize, String expectedSha,
-                                          long actualSize, String actualSha) {
+    private static void reportRawMismatch(PrintStream err, Properties manifest, RawFacts actual) {
         err.println("ERROR raw bytes do not match the pinned edition");
-        err.println("  expected size=" + expectedSize + " sha256=" + expectedSha);
-        err.println("  actual   size=" + actualSize + " sha256=" + actualSha);
+        err.println("  expected size=" + value(manifest, "raw.sizeBytes") + " sha256=" + value(manifest, "raw.sha256")
+                + " lines=" + orUndeclared(value(manifest, "raw.lineCount"))
+                + " eol=" + orUndeclared(value(manifest, "raw.eol")));
+        err.println("  actual   size=" + actual.size() + " sha256=" + actual.sha256()
+                + " lines=" + actual.lineCount() + " eol=" + actual.eol());
+    }
+
+    private static String orUndeclared(String value) {
+        return value.isEmpty() ? "(undeclared)" : value;
+    }
+
+    /** Writes through a sibling temporary file so a crash never leaves a truncated output behind. */
+    static void writeAtomically(Path target, byte[] bytes) throws IOException {
+        Path parent = target.toAbsolutePath().getParent();
+        Path temp = Files.createTempFile(parent, ".normalized-", ".tmp");
+        try {
+            Files.write(temp, bytes);
+            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } finally {
+            Files.deleteIfExists(temp);
+        }
+    }
+
+    static String value(Properties manifest, String key) {
+        return manifest.getProperty(key, "").trim();
     }
 
     static String sha256(byte[] bytes) {

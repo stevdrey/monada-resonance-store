@@ -51,14 +51,16 @@ Do this once, manually, outside CI and outside tests. Keep the file **outside th
 
 ## Verification
 
-Run from the repository root. Exit `0` = matches, `1` = bytes invalid or different, `2` = usage,
-missing input or unreadable manifest. Diagnostics go to stderr.
+Run from the repository root. Exit `0` = matches, `1` = bytes invalid or different from the pinned
+values, `2` = usage error, missing input, bad manifest, `--write-normalized` naming the input, or a
+failed output write. Diagnostics go to stderr.
 
 ```bash
 java docs/experiments/book-corpus-v1/VerifyBookCorpus.java ~/monada-corpora/book-corpus-v1/pg11.txt
 ```
 
-Write the normalized body (only written after every check passes):
+Write the normalized body (only after every check passes, via a temporary file and an atomic move,
+so an interrupted run never leaves a truncated body behind):
 
 ```bash
 java docs/experiments/book-corpus-v1/VerifyBookCorpus.java --write-normalized ~/monada-corpora/book-corpus-v1/body.txt ~/monada-corpora/book-corpus-v1/pg11.txt
@@ -82,16 +84,19 @@ Without the variable that single test is skipped (JUnit assumption), so CI stays
 Diagnostics are actionable:
 
 - missing input → path plus a pointer to "Offline acquisition";
-- raw mismatch → expected vs. actual size and SHA-256, plus whether the normalized body still
+- raw mismatch → expected vs. actual size, SHA-256, line count and line ends, plus whether the normalized body still
   matches (*upstream boilerplate drift*) or differs too (*different edition or corrupted
   download*). Both cases fail;
 - invalid UTF-8 (byte offset), BOM, lone CR, missing/duplicate/out-of-order markers, non-NFC text.
-- bad manifest (exit 2): missing keys, malformed values or escapes, a `normalize.policy` other than `v1`;
+- bad manifest (exit 2): missing keys, malformed values or escapes, a `normalize.policy` other than
+  `v1`, or a declared `*.encoding`/`*.bom`/`*.eol`/`normalized.unicodeForm` value policy v1 cannot
+  guarantee;
 - `--write-normalized` pointing at the input file (exit 2), so the pinned raw bytes are never overwritten.
 
 ## Normalization policy v1
 
-Deterministic; the verifier implements it and the manifest pins its output.
+Deterministic; the verifier implements it and the manifest pins its output. Besides size and
+SHA-256, the verifier also enforces `raw.lineCount` and `raw.eol` whenever a manifest declares them.
 
 1. Decode strict UTF-8; malformed or unmappable bytes fail with their byte offset.
 2. A leading BOM (U+FEFF) fails; the pinned edition has none.
@@ -112,13 +117,24 @@ experiments derive chunks from the normalized body only.
 `book-corpus-v1` is immutable. Never edit its checksums to accept a newer upstream file: the
 verifier deliberately rejects later upstream changes even when only the boilerplate moved.
 
-To adopt a new edition, open an Issue, create `docs/experiments/book-corpus-v2/` with a new
-manifest (`--print-digests` against a manifest without `normalized.*` keys prints the values),
-redo the rights assessment, and state whether experiment results remain comparable with v1.
+To adopt a new edition, open an Issue and create `docs/experiments/book-corpus-v2/`. Start its
+manifest with only `corpus`, `corpusVersion` and the `normalize.*` keys, no `raw.*` or `normalized.*`
+values, then run:
+
+```bash
+java docs/experiments/book-corpus-v1/VerifyBookCorpus.java --manifest docs/experiments/book-corpus-v2/manifest.properties --print-digests <new-file>
+```
+
+It prints every value to pin (`raw.sizeBytes`, `raw.sha256`, `raw.lineCount`, `raw.eol`,
+`normalized.*`) and exits `0` without comparing anything that is not pinned yet. Cross-check the
+digests with an independent tool, redo the rights assessment, and state whether experiment results
+remain comparable with v1.
 
 ## Non-goals respected
 
 - No scraper, crawler, website fetcher or downloader in code, Gradle or CI.
-- No book text in Git: the contract test fails if this directory holds anything besides its four
-  contract files or any file exceeds 64 KiB.
+- No book text in Git: `BookCorpusV1ContractTest.gitTracksNoBookBytes` lists Git-tracked files.
+  It fails if this directory or the fixture directory tracks anything besides its known files, if
+  any of them exceeds 64 KiB, or if any tracked file anywhere has the pinned raw or normalized
+  SHA-256. Untracked local files are ignored.
 - No chunking, storage ingestion, ranking or summarization; no production module changes.
