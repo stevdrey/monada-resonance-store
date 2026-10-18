@@ -11,6 +11,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
@@ -37,6 +39,9 @@ class BookCorpusV1ContractTest {
             Café lights blinked across the harbour at dusk.
             """;
     private static final long MAX_TRACKED_FILE_BYTES = 64 * 1024;
+    // The v1 contract directory is immutable; any extra file (e.g. a book excerpt) must fail review here.
+    private static final Set<String> CONTRACT_FILES = Set.of(
+            "README.md", "RIGHTS.md", "manifest.properties", "VerifyBookCorpus.java");
 
     private record Result(int exitCode, String stdout, String stderr) {
     }
@@ -53,15 +58,27 @@ class BookCorpusV1ContractTest {
         command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
         command.add(corpusDir().resolve("VerifyBookCorpus.java").toString());
         command.addAll(List.of(args));
-        Process process = new ProcessBuilder(command).directory(corpusDir().resolve("../../..").normalize().toFile())
-                .start();
-        process.getOutputStream().close();
-        // Outputs are small; read both streams fully before waiting.
-        byte[] out = process.getInputStream().readAllBytes();
-        byte[] err = process.getErrorStream().readAllBytes();
-        assertTrue(process.waitFor(2, TimeUnit.MINUTES), "verifier did not finish");
-        return new Result(process.exitValue(), new String(out, StandardCharsets.UTF_8),
-                new String(err, StandardCharsets.UTF_8));
+        // Redirect to files so a stalled child cannot block the timeout below on a pipe read.
+        Path out = Files.createTempFile("verify-book-corpus", ".out");
+        Path err = Files.createTempFile("verify-book-corpus", ".err");
+        try {
+            Process process = new ProcessBuilder(command)
+                    .directory(corpusDir().resolve("../../..").normalize().toFile())
+                    .redirectOutput(out.toFile())
+                    .redirectError(err.toFile())
+                    .start();
+            process.getOutputStream().close();
+            if (!process.waitFor(2, TimeUnit.MINUTES)) {
+                process.destroyForcibly().waitFor();
+                throw new AssertionError("verifier did not finish within 2 minutes; stderr: "
+                        + Files.readString(err, StandardCharsets.UTF_8));
+            }
+            return new Result(process.exitValue(), Files.readString(out, StandardCharsets.UTF_8),
+                    Files.readString(err, StandardCharsets.UTF_8));
+        } finally {
+            Files.deleteIfExists(out);
+            Files.deleteIfExists(err);
+        }
     }
 
     private static byte[] resource(String name) throws IOException {
@@ -188,13 +205,45 @@ class BookCorpusV1ContractTest {
 
     @Test
     void contractDirectoryDoesNotRedistributeBookBytes() throws IOException {
-        try (Stream<Path> files = Files.walk(corpusDir())) {
-            for (Path file : files.filter(Files::isRegularFile).toList()) {
-                assertTrue(Files.size(file) <= MAX_TRACKED_FILE_BYTES, "file too large to be contract-only: " + file);
-                String text = Files.readString(file, StandardCharsets.UTF_8);
-                assertFalse(text.contains("Down the Rabbit-Hole"), "book text found in tracked file: " + file);
+        Path dir = corpusDir();
+        try (Stream<Path> entries = Files.walk(dir)) {
+            Set<String> found = new TreeSet<>();
+            for (Path entry : entries.filter(p -> !p.equals(dir)).toList()) {
+                assertTrue(Files.isRegularFile(entry), "unexpected directory in contract: " + entry);
+                assertTrue(Files.size(entry) <= MAX_TRACKED_FILE_BYTES, "file too large to be contract-only: " + entry);
+                found.add(dir.relativize(entry).toString());
             }
+            assertEquals(new TreeSet<>(CONTRACT_FILES), found,
+                    "book-corpus-v1 may contain only its contract files; book bytes are never committed");
         }
+    }
+
+    @Test
+    void writingNormalizedOverTheInputIsRejected(@TempDir Path dir) throws Exception {
+        Path input = input(dir, resource("sample.txt"));
+        var result = verify("--manifest", fixtureManifest(dir).toString(), "--write-normalized",
+                dir.resolve(".").resolve("input.txt").toString(), input.toString());
+        assertEquals(2, result.exitCode());
+        assertTrue(result.stderr().contains("must not name the input file"), result.stderr());
+        assertArrayEquals(resource("sample.txt"), Files.readAllBytes(input), "raw input must stay untouched");
+    }
+
+    @Test
+    void unsupportedNormalizationPolicyIsABadManifest(@TempDir Path dir) throws Exception {
+        Path manifest = fixtureManifest(dir);
+        Files.writeString(manifest, Files.readString(manifest).replace("normalize.policy=v1", "normalize.policy=v2"));
+        var result = verify("--manifest", manifest.toString(), input(dir, resource("sample.txt")).toString());
+        assertEquals(2, result.exitCode());
+        assertTrue(result.stderr().contains("normalize.policy=v2 is not implemented"), result.stderr());
+    }
+
+    @Test
+    void malformedManifestEscapeIsABadManifest(@TempDir Path dir) throws Exception {
+        Path manifest = fixtureManifest(dir);
+        Files.writeString(manifest, Files.readString(manifest) + "broken=\\u12G4\n");
+        var result = verify("--manifest", manifest.toString(), input(dir, resource("sample.txt")).toString());
+        assertEquals(2, result.exitCode(), result.stderr());
+        assertTrue(result.stderr().contains("cannot read manifest"), result.stderr());
     }
 
     @Test

@@ -36,6 +36,7 @@ public final class VerifyBookCorpus {
     static final int USAGE = 2;
 
     static final Path DEFAULT_MANIFEST = Path.of("docs", "experiments", "book-corpus-v1", "manifest.properties");
+    static final String SUPPORTED_POLICY = "v1";
     static final String README = "docs/experiments/book-corpus-v1/README.md";
 
     static final List<String> REQUIRED_KEYS = List.of(
@@ -94,7 +95,8 @@ public final class VerifyBookCorpus {
         }
         try (InputStream in = Files.newInputStream(manifestPath)) {
             manifest.load(in);
-        } catch (IOException e) {
+        } catch (IOException | IllegalArgumentException e) {
+            // IllegalArgumentException: malformed Unicode escape in the properties file.
             err.println("ERROR cannot read manifest " + manifestPath + ": " + e.getMessage());
             return USAGE;
         }
@@ -122,6 +124,12 @@ public final class VerifyBookCorpus {
                 return USAGE;
             }
         }
+        String policy = manifest.getProperty("normalize.policy").trim();
+        if (!SUPPORTED_POLICY.equals(policy)) {
+            err.println("ERROR manifest normalize.policy=" + policy + " is not implemented; this verifier supports only "
+                    + SUPPORTED_POLICY);
+            return USAGE;
+        }
         boolean bootstrap = NORMALIZED_KEYS.stream().anyMatch(k -> manifest.getProperty(k, "").isBlank());
         String corpus = manifest.getProperty("corpus");
 
@@ -134,6 +142,18 @@ public final class VerifyBookCorpus {
         if (!Files.isRegularFile(input) || !Files.isReadable(input)) {
             err.println("ERROR input is not a readable regular file: " + input.toAbsolutePath());
             return USAGE;
+        }
+        if (writeNormalized != null && Files.exists(writeNormalized)) {
+            try {
+                if (Files.isSameFile(input, writeNormalized)) {
+                    err.println("ERROR --write-normalized must not name the input file: " + writeNormalized.toAbsolutePath());
+                    err.println("  writing there would replace the pinned raw bytes; choose another output path");
+                    return USAGE;
+                }
+            } catch (IOException e) {
+                err.println("ERROR cannot compare --write-normalized with the input: " + e.getMessage());
+                return USAGE;
+            }
         }
 
         byte[] raw;

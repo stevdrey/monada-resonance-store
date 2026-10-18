@@ -86,6 +86,8 @@ Diagnostics are actionable:
   matches (*upstream boilerplate drift*) or differs too (*different edition or corrupted
   download*). Both cases fail;
 - invalid UTF-8 (byte offset), BOM, lone CR, missing/duplicate/out-of-order markers, non-NFC text.
+- bad manifest (exit 2): missing keys, malformed values or escapes, a `normalize.policy` other than `v1`;
+- `--write-normalized` pointing at the input file (exit 2), so the pinned raw bytes are never overwritten.
 
 ## Normalization policy v1
 
@@ -117,6 +119,6 @@ redo the rights assessment, and state whether experiment results remain comparab
 ## Non-goals respected
 
 - No scraper, crawler, website fetcher or downloader in code, Gradle or CI.
-- No book text in Git: the contract test fails if any file here exceeds 64 KiB or contains book
-  text.
+- No book text in Git: the contract test fails if this directory holds anything besides its four
+  contract files or any file exceeds 64 KiB.
 - No chunking, storage ingestion, ranking or summarization; no production module changes.
