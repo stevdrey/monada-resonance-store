@@ -490,6 +490,32 @@ unavailable while the other control remains correct. Aggregate improvements cann
 per-case or grouped regressions. This does not change any production behavior and does not justify a
 protected hybrid benchmark or public hybrid retrieval path.
 
+### Missing-Modality Policy Study
+
+The same `runSpeechHybridRobustness` command then prints a second, evaluation-only report that
+compares three missing-modality policies declared before any case was run, all at the frozen
+`0.50/0.50` weights:
+
+- `BOTH_REQUIRED` — the reference arm above; partial candidates are excluded.
+- `AVAILABLE_MODALITY_ONLY` — the weights are renormalized over the modalities a candidate has; a
+  candidate with one modality is ranked by that normalized component alone.
+- `ABSTAIN_ON_PARTIAL` — fuse only when every scoreable candidate has both modalities; otherwise defer
+  to the modality that covers every candidate, or abstain with an empty ranking.
+
+No policy ever assigns a zero or imputed score to a missing modality, and candidates missing both are
+never ranked. The study runs on the eight development cases above and on a separate eight-case holdout
+corpus (`generated-speech-hybrid-robustness-holdout-v1`) with new samples covering missing transcript,
+missing acoustic, missing both, agreement, direct conflicts, and *partial distractors*: direct conflicts
+where the wrong top result is the candidate that lacks a modality. For every query and policy the report
+lists modality presence, normalized components used, final score, rank, and comparisons with the
+stronger control and with `BOTH_REQUIRED`.
+
+A policy can reach `FURTHER_STUDY` only with zero regressions of every kind on both splits and at least
+one recovery; otherwise it is `RISK_REMAINS`. The study has no "promote" outcome. Current evidence: both
+alternative policies recover the two development missing-modality regressions, but both lose the two
+holdout partial-distractor cases that `BOTH_REQUIRED` gets right, so the decision is `RISK_REMAINS`.
+`HYBRID_CANDIDATE_RISKY` remains binding, and no protected baseline or runtime ranking changes.
+
 ## Latency Profiling
 
 The `runLatency` task reports recall latency and scan diagnostics for the `ExpandedTechnologyDataset`. It records corpus size, query count, topK, scanned candidates, returned candidates, and best-effort elapsed time per query. Use this baseline to determine whether a bounded top-K or scan optimization is justified; do not optimize the scan path until the diagnostics expose a measurable bottleneck.

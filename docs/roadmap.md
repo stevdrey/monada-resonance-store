@@ -40,6 +40,10 @@ The project follows a measurement-first path: improve retrieval quality only aft
   conflict recoveries but regresses when a relevant candidate lacks one modality, so the evidence
   concludes `HYBRID_CANDIDATE_RISKY`. No protected hybrid baseline, production retrieval path, or
   default behavior is justified from this result.
+- Missing-modality policy study (#128) on the robustness development cases plus a separate holdout
+  corpus: `AVAILABLE_MODALITY_ONLY` and `ABSTAIN_ON_PARTIAL` recover the development missing-modality
+  regressions but regress holdout partial-distractor conflicts, so the decision is `RISK_REMAINS`.
+  Fusion stays evaluation-only; any further work needs new, independent evidence.
 - Storage compatibility hardening: manifest `0.4` now separates encoding metadata from an explicit
   physical vector profile (`FLOAT32`, big-endian, framing, dimensions, and index version). Current
   and supported legacy layouts are validated before opening, while incompatible stores are rejected

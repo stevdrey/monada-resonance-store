@@ -26,6 +26,15 @@ final class SpeechHybridRobustnessRunner {
 
     static final SpeechFusionWeights FIXED_CANDIDATE = new SpeechFusionWeights(0.50, 0.50);
 
+    /** The six conflict categories the #79 fixed-candidate study must cover; later categories are optional. */
+    static final List<SpeechHybridConflictCategory> REQUIRED_CONFLICT_COVERAGE = List.of(
+            SpeechHybridConflictCategory.AGREEMENT_RELEVANT,
+            SpeechHybridConflictCategory.TRANSCRIPT_CORRECT_ACOUSTIC_CONFLICT,
+            SpeechHybridConflictCategory.ACOUSTIC_CORRECT_TRANSCRIPT_CONFLICT,
+            SpeechHybridConflictCategory.BOTH_AMBIGUOUS,
+            SpeechHybridConflictCategory.TRANSCRIPT_MISSING,
+            SpeechHybridConflictCategory.ACOUSTIC_MISSING);
+
     private final SpeechPairedRankingCollector rankingCollector = new SpeechPairedRankingCollector();
     private final SpeechHybridProfileEvaluator profileEvaluator = new SpeechHybridProfileEvaluator();
 
@@ -41,9 +50,25 @@ final class SpeechHybridRobustnessRunner {
     ) throws IOException {
         Objects.requireNonNull(evidence, "evidence");
         Objects.requireNonNull(label, "label");
-        Objects.requireNonNull(cases, "cases");
-        if (label.isBlank() || cases.isEmpty() || k <= 0) {
+        if (label.isBlank()) {
             throw new IllegalArgumentException("label, cases, and k must be non-empty/positive");
+        }
+        return report(evidence, label, prepare(cases, k, acousticRetriever, sampleStore, featureStore,
+                transcriptMemoryPath));
+    }
+
+    /** Collects, masks, normalizes and validates every case once; reused by the missing-modality policy study. */
+    SpeechHybridPreparedCases prepare(
+            List<SpeechHybridRobustnessCase> cases,
+            int k,
+            SpeechSampleRetriever acousticRetriever,
+            SpeechSampleStore sampleStore,
+            SpeechFeatureStore featureStore,
+            Path transcriptMemoryPath
+    ) throws IOException {
+        Objects.requireNonNull(cases, "cases");
+        if (cases.isEmpty() || k <= 0) {
+            throw new IllegalArgumentException("cases and k must be non-empty/positive");
         }
         Map<String, SpeechHybridRobustnessCase> casesById = indexCases(cases);
         SpeechPairedRankingSet collected = rankingCollector.collect(
@@ -53,21 +78,34 @@ final class SpeechHybridRobustnessRunner {
         Map<String, SpeechSample> samplesById = sampleStore.findAll().stream()
                 .collect(Collectors.toMap(SpeechSample::id, sample -> sample));
 
-        List<SpeechHybridRobustnessQueryResult> results = new ArrayList<>();
+        List<SpeechHybridPreparedCase> prepared = new ArrayList<>();
         for (SpeechPairedRanking collectedRanking : collected.queryRankings()) {
             SpeechHybridRobustnessCase stressCase = casesById.get(collectedRanking.query().queryId());
             SpeechPairedRanking masked = applyAvailabilityMask(collectedRanking, stressCase, corpusSampleIdSet);
             SpeechHybridQueryContext context = profileEvaluator.createContext(masked, collected.corpusSampleIds(), k);
             validateExpectedConflict(stressCase, context);
-            SpeechHybridProfileQueryResult hybrid = profileEvaluator.evaluateProfileQuery(FIXED_CANDIDATE, context);
-            SpeechHybridBetterControl stronger = strongerControl(context);
-            SpeechHybridComparison vsStronger = profileEvaluator.compare(hybrid.result().metrics(), strongerMetrics(context, stronger));
-            results.add(new SpeechHybridRobustnessQueryResult(
-                    stressCase, context, hybrid, speakerRelation(stressCase, samplesById), stronger, vsStronger));
+            prepared.add(new SpeechHybridPreparedCase(stressCase, context, speakerRelation(stressCase, samplesById)));
         }
-        List<SpeechHybridRobustnessQueryResult> ordered = results.stream()
-                .sorted(Comparator.comparing(result -> result.stressCase().query().queryId()))
-                .toList();
+        return new SpeechHybridPreparedCases(collected.corpusSize(), k, prepared.stream()
+                .sorted(Comparator.comparing(preparedCase -> preparedCase.stressCase().query().queryId()))
+                .toList());
+    }
+
+    SpeechHybridRobustnessReport report(
+            SpeechModalityEvidence evidence,
+            String label,
+            SpeechHybridPreparedCases prepared
+    ) {
+        List<SpeechHybridRobustnessQueryResult> ordered = new ArrayList<>();
+        for (SpeechHybridPreparedCase preparedCase : prepared.cases()) {
+            SpeechHybridQueryContext context = preparedCase.context();
+            SpeechHybridProfileQueryResult hybrid = profileEvaluator.evaluateProfileQuery(FIXED_CANDIDATE, context);
+            SpeechHybridBetterControl stronger = SpeechHybridControlComparison.strongerControl(context);
+            SpeechHybridComparison vsStronger = profileEvaluator.compare(hybrid.result().metrics(),
+                    SpeechHybridControlComparison.strongerMetrics(context, stronger));
+            ordered.add(new SpeechHybridRobustnessQueryResult(
+                    preparedCase.stressCase(), context, hybrid, preparedCase.speakerRelation(), stronger, vsStronger));
+        }
         SpeechHybridRobustnessSummary aggregate = summarize(ordered);
         Map<String, SpeechHybridRobustnessSummary> byCondition = summarizeBy(ordered,
                 result -> result.stressCase().query().condition().name());
@@ -79,7 +117,7 @@ final class SpeechHybridRobustnessRunner {
                 result -> result.stressCase().expectedConflictCategory().name());
         SpeechHybridRobustnessQueryResult worst = worstRegression(ordered);
         boolean groupRegression = hasGroupRegression(aggregate, byCondition, byTask, bySpeaker, byConflict);
-        return new SpeechHybridRobustnessReport(evidence, label, collected.corpusSize(), k, FIXED_CANDIDATE,
+        return new SpeechHybridRobustnessReport(evidence, label, prepared.corpusSize(), prepared.k(), FIXED_CANDIDATE,
                 ordered, aggregate, byCondition, byTask, bySpeaker, byConflict, worst,
                 decide(ordered, groupRegression));
     }
@@ -153,6 +191,55 @@ final class SpeechHybridRobustnessRunner {
     }
 
     private SpeechHybridConflictCategory classify(SpeechHybridQueryContext context, SpeechHybridRobustnessCase stressCase) {
+        Set<String> relevantIds = context.query().relevantSampleIds();
+        String queryId = context.query().queryId();
+        switch (stressCase.expectedConflictCategory()) {
+            case BOTH_MISSING -> {
+                requireMissingRelevant(context.transcriptRanking(), relevantIds, "transcript");
+                requireMissingRelevant(context.acousticRanking(), relevantIds, "acoustic");
+                return SpeechHybridConflictCategory.BOTH_MISSING;
+            }
+            case TRANSCRIPT_CORRECT_PARTIAL_DISTRACTOR -> {
+                requireRelevantPresent(context, "transcript-correct partial distractor");
+                requireHit(context.transcriptControl().metrics().hitAtK(), "transcript", queryId);
+                requireStrictWrongTop(context.acousticRanking(), relevantIds, "acoustic");
+                requireMaskedTop(context.acousticRanking(), stressCase.transcriptUnavailableSampleIds(), "acoustic", queryId);
+                return SpeechHybridConflictCategory.TRANSCRIPT_CORRECT_PARTIAL_DISTRACTOR;
+            }
+            case ACOUSTIC_CORRECT_PARTIAL_DISTRACTOR -> {
+                requireRelevantPresent(context, "acoustic-correct partial distractor");
+                requireHit(context.acousticControl().metrics().hitAtK(), "acoustic", queryId);
+                requireStrictWrongTop(context.transcriptRanking(), relevantIds, "transcript");
+                requireMaskedTop(context.transcriptRanking(), stressCase.acousticUnavailableSampleIds(), "transcript", queryId);
+                return SpeechHybridConflictCategory.ACOUSTIC_CORRECT_PARTIAL_DISTRACTOR;
+            }
+            default -> {
+                return classifySingleMaskOrConflict(context, stressCase);
+            }
+        }
+    }
+
+    private void requireRelevantPresent(SpeechHybridQueryContext context, String description) {
+        Set<String> relevantIds = context.query().relevantSampleIds();
+        boolean complete = context.candidates().stream()
+                .filter(candidate -> relevantIds.contains(candidate.sampleId()))
+                .allMatch(candidate -> candidate.availability() == SpeechHybridCandidateAvailability.BOTH_AVAILABLE);
+        if (!complete) {
+            throw new IllegalArgumentException(description + " requires complete relevant candidates: "
+                    + context.query().queryId());
+        }
+    }
+
+    private void requireMaskedTop(List<SpeechModalityRankedResult> ranking, Set<String> maskedIds, String modality, String queryId) {
+        if (!maskedIds.contains(ranking.getFirst().sampleId())) {
+            throw new IllegalArgumentException(modality + " top result must be the partial distractor for case: " + queryId);
+        }
+    }
+
+    private SpeechHybridConflictCategory classifySingleMaskOrConflict(
+            SpeechHybridQueryContext context,
+            SpeechHybridRobustnessCase stressCase
+    ) {
         if (!stressCase.transcriptUnavailableSampleIds().isEmpty()) {
             requireMissingRelevant(context.transcriptRanking(), context.query().relevantSampleIds(), "transcript");
             requireHit(context.acousticControl().metrics().hitAtK(), "acoustic", context.query().queryId());
@@ -209,59 +296,24 @@ final class SpeechHybridRobustnessRunner {
                 : SpeechSpeakerRelation.MIXED_SPEAKERS;
     }
 
-    private SpeechHybridBetterControl strongerControl(SpeechHybridQueryContext context) {
-        SpeechHybridComparison comparison = profileEvaluator.compare(
-                context.transcriptControl().metrics(), context.acousticControl().metrics());
-        return switch (comparison) {
-            case WIN -> SpeechHybridBetterControl.TRANSCRIPT;
-            case REGRESS -> SpeechHybridBetterControl.ACOUSTIC;
-            case MAINTAIN -> SpeechHybridBetterControl.TIED;
-        };
-    }
-
-    private SpeechModalityQueryMetrics strongerMetrics(SpeechHybridQueryContext context, SpeechHybridBetterControl control) {
-        return control == SpeechHybridBetterControl.ACOUSTIC ? context.acousticControl().metrics()
-                : context.transcriptControl().metrics();
-    }
-
     SpeechHybridRobustnessSummary summarize(List<SpeechHybridRobustnessQueryResult> results) {
         if (results.isEmpty()) return SpeechHybridRobustnessSummary.empty();
-        double[] transcript = new double[4], acoustic = new double[4], hybrid = new double[4];
+        SpeechHybridControlComparison.MeanMetrics transcript = new SpeechHybridControlComparison.MeanMetrics();
+        SpeechHybridControlComparison.MeanMetrics acoustic = new SpeechHybridControlComparison.MeanMetrics();
+        SpeechHybridControlComparison.MeanMetrics hybrid = new SpeechHybridControlComparison.MeanMetrics();
         Map<SpeechHybridComparison, Integer> comparisons = new EnumMap<>(SpeechHybridComparison.class);
         for (SpeechHybridComparison value : SpeechHybridComparison.values()) comparisons.put(value, 0);
         for (SpeechHybridRobustnessQueryResult result : results) {
-            add(transcript, result.context().transcriptControl().metrics());
-            add(acoustic, result.context().acousticControl().metrics());
-            add(hybrid, result.hybrid().result().metrics());
+            transcript.add(result.context().transcriptControl().metrics());
+            acoustic.add(result.context().acousticControl().metrics());
+            hybrid.add(result.hybrid().result().metrics());
             comparisons.merge(result.vsStrongerControl(), 1, Integer::sum);
         }
-        int count = results.size();
-        SpeechEvaluationMetrics transcriptMetrics = metrics(transcript, count);
-        SpeechEvaluationMetrics acousticMetrics = metrics(acoustic, count);
-        SpeechEvaluationMetrics hybridMetrics = metrics(hybrid, count);
+        SpeechEvaluationMetrics transcriptMetrics = transcript.mean();
+        SpeechEvaluationMetrics acousticMetrics = acoustic.mean();
+        SpeechEvaluationMetrics hybridMetrics = hybrid.mean();
         return new SpeechHybridRobustnessSummary(transcriptMetrics, acousticMetrics, hybridMetrics, comparisons,
-                belowStrongerGroupControl(hybridMetrics, transcriptMetrics, acousticMetrics));
-    }
-
-    private void add(double[] totals, SpeechModalityQueryMetrics metrics) {
-        totals[0] += metrics.precisionAtK(); totals[1] += metrics.recallAtK();
-        totals[2] += metrics.hitAtK() ? 1.0 : 0.0; totals[3] += metrics.reciprocalRank();
-    }
-
-    private SpeechEvaluationMetrics metrics(double[] totals, int count) {
-        return new SpeechEvaluationMetrics(totals[0] / count, totals[1] / count, totals[2] / count, totals[3] / count, count);
-    }
-
-    private boolean belowStrongerGroupControl(
-            SpeechEvaluationMetrics hybrid,
-            SpeechEvaluationMetrics transcript,
-            SpeechEvaluationMetrics acoustic
-    ) {
-        double tolerance = SpeechHybridProfileEvaluator.COMPARISON_TOLERANCE;
-        return hybrid.precisionAtK() + tolerance < Math.max(transcript.precisionAtK(), acoustic.precisionAtK())
-                || hybrid.recallAtK() + tolerance < Math.max(transcript.recallAtK(), acoustic.recallAtK())
-                || hybrid.hitRateAtK() + tolerance < Math.max(transcript.hitRateAtK(), acoustic.hitRateAtK())
-                || hybrid.mrr() + tolerance < Math.max(transcript.mrr(), acoustic.mrr());
+                SpeechHybridControlComparison.belowStrongerGroupControl(hybridMetrics, transcriptMetrics, acousticMetrics));
     }
 
     Map<String, SpeechHybridRobustnessSummary> summarizeBy(
@@ -281,9 +333,9 @@ final class SpeechHybridRobustnessRunner {
     private SpeechHybridRobustnessQueryResult worstRegression(List<SpeechHybridRobustnessQueryResult> results) {
         return results.stream().filter(result -> result.vsStrongerControl() == SpeechHybridComparison.REGRESS)
                 .min(Comparator.comparingDouble((SpeechHybridRobustnessQueryResult result) ->
-                        result.hybrid().result().metrics().recallAtK() - strongerMetrics(result.context(), result.strongerControl()).recallAtK())
+                        result.hybrid().result().metrics().recallAtK() - SpeechHybridControlComparison.strongerMetrics(result.context(), result.strongerControl()).recallAtK())
                         .thenComparingDouble(result -> result.hybrid().result().metrics().reciprocalRank()
-                                - strongerMetrics(result.context(), result.strongerControl()).reciprocalRank())
+                                - SpeechHybridControlComparison.strongerMetrics(result.context(), result.strongerControl()).reciprocalRank())
                         .thenComparing(result -> result.stressCase().query().queryId()))
                 .orElse(null);
     }
@@ -312,10 +364,32 @@ final class SpeechHybridRobustnessRunner {
         Set<String> conditions = results.stream().map(result -> result.stressCase().query().condition().name()).collect(Collectors.toSet());
         Set<String> tasks = results.stream().map(result -> result.stressCase().query().taskType().name()).collect(Collectors.toSet());
         Set<SpeechSpeakerRelation> speakers = results.stream().map(SpeechHybridRobustnessQueryResult::speakerRelation).collect(Collectors.toSet());
-        return conflicts.containsAll(Set.of(SpeechHybridConflictCategory.values()))
+        return conflicts.containsAll(REQUIRED_CONFLICT_COVERAGE)
                 && conditions.containsAll(Set.of("CONTROL", "DYSARTHRIC"))
                 && tasks.containsAll(Set.of("WORD", "SENTENCE", "COMMAND"))
                 && speakers.containsAll(Set.of(SpeechSpeakerRelation.SAME_SPEAKER, SpeechSpeakerRelation.CROSS_SPEAKER));
+    }
+}
+
+record SpeechHybridPreparedCase(
+        SpeechHybridRobustnessCase stressCase,
+        SpeechHybridQueryContext context,
+        SpeechSpeakerRelation speakerRelation
+) {
+    SpeechHybridPreparedCase {
+        Objects.requireNonNull(stressCase, "stressCase");
+        Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(speakerRelation, "speakerRelation");
+    }
+}
+
+record SpeechHybridPreparedCases(int corpusSize, int k, List<SpeechHybridPreparedCase> cases) {
+    SpeechHybridPreparedCases {
+        Objects.requireNonNull(cases, "cases");
+        cases = List.copyOf(cases);
+        if (corpusSize <= 0 || k <= 0 || cases.isEmpty()) {
+            throw new IllegalArgumentException("prepared cases require a positive corpus size, k, and cases");
+        }
     }
 }
 

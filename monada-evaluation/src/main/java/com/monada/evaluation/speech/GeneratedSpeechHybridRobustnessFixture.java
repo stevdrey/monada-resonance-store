@@ -24,6 +24,7 @@ import java.util.Set;
 final class GeneratedSpeechHybridRobustnessFixture {
 
     static final String LABEL = "generated-speech-hybrid-robustness-v1";
+    static final String HOLDOUT_LABEL = "generated-speech-hybrid-robustness-holdout-v1";
     private static final int SAMPLE_RATE = 16_000;
     private static final int DIMENSIONS = 64;
     private static final int K = 1;
@@ -72,6 +73,59 @@ final class GeneratedSpeechHybridRobustnessFixture {
                 copy(transcriptConflict, "robust_acoustic_missing_cross", "C01", SpeechHybridConflictCategory.ACOUSTIC_MISSING, Set.of(), Set.of("c_text_target_1320")),
                 copy(agreement, "robust_agreement_cross", "D01", SpeechHybridConflictCategory.AGREEMENT_RELEVANT, Set.of(), Set.of()),
                 copy(ambiguous, "robust_ambiguous_same", "D05", SpeechHybridConflictCategory.BOTH_AMBIGUOUS, Set.of(), Set.of())));
+    }
+
+    /**
+     * Separate holdout corpus for the #128 missing-modality policy study. Its samples, IDs and queries
+     * never appear in {@link #create(Path)}, so the development rankings cannot shift.
+     */
+    static Fixture createHoldout(Path root) throws IOException {
+        Path audioRoot = Files.createDirectories(root.resolve("audio"));
+        Path queryRoot = Files.createDirectories(root.resolve("queries"));
+        Path storeRoot = root.resolve("speech-store");
+        SpeechSampleStore sampleStore = new FileSpeechSampleStore(storeRoot);
+        SpeechFeatureStore featureStore = new FileSpeechFeatureStore(storeRoot);
+        BasicAcousticFeatureEncoder encoder = new BasicAcousticFeatureEncoder(DIMENSIONS);
+        List<SampleSpec> specs = List.of(
+                new SampleSpec("h_c_archive_target_1100", "C11", "archive weekly report", 1100.0f, SpeechCondition.CONTROL, SpeechTaskType.SENTENCE),
+                new SampleSpec("h_c_archive_wrong_520", "C12", "archive monthly report", 520.0f, SpeechCondition.CONTROL, SpeechTaskType.SENTENCE),
+                new SampleSpec("h_d_mute_target_600", "D11", "mute alarm", 600.0f, SpeechCondition.DYSARTHRIC, SpeechTaskType.WORD),
+                new SampleSpec("h_d_audio_wrong_1880", "D12", "pause music", 1880.0f, SpeechCondition.DYSARTHRIC, SpeechTaskType.WORD),
+                new SampleSpec("h_c_gate_target_1540", "C13", "open front gate", 1540.0f, SpeechCondition.CONTROL, SpeechTaskType.COMMAND),
+                new SampleSpec("h_d_backup_target_1980", "D13", "schedule backup tonight", 1980.0f, SpeechCondition.DYSARTHRIC, SpeechTaskType.COMMAND),
+                new SampleSpec("h_c_backup_distractor_480", "C14", "cancel backup tonight", 480.0f, SpeechCondition.CONTROL, SpeechTaskType.COMMAND),
+                new SampleSpec("h_c_console_target_1210", "C15", "lock the console", 1210.0f, SpeechCondition.CONTROL, SpeechTaskType.COMMAND),
+                new SampleSpec("h_d_invoice_distractor_720", "D14", "print the invoice", 720.0f, SpeechCondition.DYSARTHRIC, SpeechTaskType.COMMAND),
+                new SampleSpec("h_d_certificate_target_1650", "D15", "renew tls certificate", 1650.0f, SpeechCondition.DYSARTHRIC, SpeechTaskType.SENTENCE));
+        for (SampleSpec spec : specs.stream().sorted(Comparator.comparing(SampleSpec::id)).toList()) {
+            Path audio = GeneratedSpeechModalityFixture.writeSineWav(audioRoot, spec.id(), spec.frequencyHz());
+            SpeechSample sample = new SpeechSample(spec.id(), spec.speakerId(), SpeechDatasetSource.CUSTOM, audio,
+                    spec.transcript(), List.of(), spec.condition(), spec.taskType(), "en-US",
+                    new AudioMetadata(SAMPLE_RATE, 1, 500, "generated-" + spec.id()), Instant.EPOCH);
+            sampleStore.save(sample);
+            featureStore.save(sample.id(), encoder.encode(audio));
+        }
+        PairedSpeechQuery archive = query(queryRoot, "holdout-archive", 1100.0f, "archive weekly report",
+                "h_c_archive_target_1100", SpeechCondition.CONTROL, SpeechTaskType.SENTENCE);
+        PairedSpeechQuery mute = query(queryRoot, "holdout-mute", 1880.0f, "mute alarm",
+                "h_d_mute_target_600", SpeechCondition.DYSARTHRIC, SpeechTaskType.WORD);
+        PairedSpeechQuery gate = query(queryRoot, "holdout-gate", 1540.0f, "open front gate",
+                "h_c_gate_target_1540", SpeechCondition.CONTROL, SpeechTaskType.COMMAND);
+        PairedSpeechQuery backup = query(queryRoot, "holdout-backup", 1980.0f, "cancel backup tonight",
+                "h_d_backup_target_1980", SpeechCondition.DYSARTHRIC, SpeechTaskType.COMMAND);
+        PairedSpeechQuery console = query(queryRoot, "holdout-console", 720.0f, "lock the console",
+                "h_c_console_target_1210", SpeechCondition.CONTROL, SpeechTaskType.COMMAND);
+        PairedSpeechQuery certificate = query(queryRoot, "holdout-certificate", 1650.0f, "renew tls certificate",
+                "h_d_certificate_target_1650", SpeechCondition.DYSARTHRIC, SpeechTaskType.SENTENCE);
+        return new Fixture(sampleStore, featureStore, encoder, List.of(
+                copy(archive, "holdout_transcript_missing_same", "C11", SpeechHybridConflictCategory.TRANSCRIPT_MISSING, Set.of("h_c_archive_target_1100"), Set.of()),
+                copy(mute, "holdout_acoustic_missing_cross", "D12", SpeechHybridConflictCategory.ACOUSTIC_MISSING, Set.of(), Set.of("h_d_mute_target_600")),
+                copy(gate, "holdout_both_missing_same", "C13", SpeechHybridConflictCategory.BOTH_MISSING, Set.of("h_c_gate_target_1540"), Set.of("h_c_gate_target_1540")),
+                copy(backup, "holdout_acoustic_conflict_same", "D13", SpeechHybridConflictCategory.ACOUSTIC_CORRECT_TRANSCRIPT_CONFLICT, Set.of(), Set.of()),
+                copy(backup, "holdout_acoustic_partial_distractor_cross", "C14", SpeechHybridConflictCategory.ACOUSTIC_CORRECT_PARTIAL_DISTRACTOR, Set.of(), Set.of("h_c_backup_distractor_480")),
+                copy(console, "holdout_transcript_conflict_same", "C15", SpeechHybridConflictCategory.TRANSCRIPT_CORRECT_ACOUSTIC_CONFLICT, Set.of(), Set.of()),
+                copy(console, "holdout_transcript_partial_distractor_cross", "D14", SpeechHybridConflictCategory.TRANSCRIPT_CORRECT_PARTIAL_DISTRACTOR, Set.of("h_d_invoice_distractor_720"), Set.of()),
+                copy(certificate, "holdout_agreement_cross", "C11", SpeechHybridConflictCategory.AGREEMENT_RELEVANT, Set.of(), Set.of())));
     }
 
     private static PairedSpeechQuery query(Path root, String id, float frequency, String transcript, String relevant,
