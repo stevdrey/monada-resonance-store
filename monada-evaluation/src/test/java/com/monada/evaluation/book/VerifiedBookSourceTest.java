@@ -87,6 +87,9 @@ class VerifiedBookSourceTest {
         assertTrue(reject("﻿text\n").getMessage().contains("BOM"));
         assertTrue(reject("line\r\nline\n").getMessage().contains("CR"));
         assertTrue(reject("bell\u0007\n").getMessage().contains("U+0007"));
+        assertTrue(reject("del\u007F\n").getMessage().contains("U+007F"));
+        assertTrue(reject("\u0085\n").getMessage().contains("U+0085"));
+        assertTrue(reject("csi\u009B\n").getMessage().contains("U+009B"));
         assertTrue(reject("no final newline").getMessage().contains("LF"));
         assertTrue(reject(" \n\t\n \n").getMessage().contains("whitespace"));
         assertTrue(reject("Café\n").getMessage().contains("NFC"));

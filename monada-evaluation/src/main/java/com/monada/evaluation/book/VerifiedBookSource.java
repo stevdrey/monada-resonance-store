@@ -115,7 +115,7 @@ public final class VerifiedBookSource {
                 throw new BookInputException(Reason.INVALID_INPUT, "body contains CR at char index " + i
                         + "; only LF line ends are accepted");
             }
-            if ((c < 0x20 && c != '\n' && c != '\t') || c == 0x7F) {
+            if (Character.isISOControl(c) && c != '\n' && c != '\t') {
                 throw new BookInputException(Reason.INVALID_INPUT, String.format(Locale.ROOT,
                         "body contains control character U+%04X at char index %d", (int) c, i));
             }

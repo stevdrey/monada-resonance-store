@@ -163,6 +163,24 @@ class BookChunkingGoldenTest {
         assertArrayEquals(Files.readAllBytes(body), Files.readAllBytes(clash));
     }
 
+    @Test
+    void inputsNamedLikeOldTemporaryFilesAreNeverOverwritten() throws Exception {
+        Path manifest = copyFixture("manifest.properties");
+        Path out = Files.createDirectories(dir.resolve("out"));
+        for (String file : new String[] {BookChunkOutputWriter.CHUNKS_FILE, BookChunkOutputWriter.SIDECAR_FILE}) {
+            Path input = out.resolve(file + ".tmp");
+            Files.write(input, resource("body.txt"));
+            assertEquals(0, runMain("--manifest", manifest.toString(), "--input", input.toString(), "--out",
+                    out.toString()).exit());
+            assertArrayEquals(resource("body.txt"), Files.readAllBytes(input), file);
+            Files.delete(input);
+        }
+        try (var files = Files.list(out)) {
+            assertEquals(List.of(BookChunkOutputWriter.CHUNKS_FILE, BookChunkOutputWriter.SIDECAR_FILE),
+                    files.map(p -> p.getFileName().toString()).sorted().toList(), "no temporary files left");
+        }
+    }
+
     /**
      * Runs the command in {@value #JVMS} concurrent JVMs on the module's runtime classpath and requires byte-identical
      * files and reports, which an in-JVM comparison cannot prove for hash-seeded orders.

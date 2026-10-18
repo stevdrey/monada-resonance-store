@@ -95,9 +95,15 @@ public final class BookChunkOutputWriter {
     }
 
     private static void writeAtomically(Path target, byte[] bytes) throws IOException {
-        Path temp = target.resolveSibling(target.getFileName() + ".tmp");
-        Files.write(temp, bytes);
-        Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        // A fresh, uniquely named temporary file (created exclusively, never an existing path or symlink), so no
+        // input file, unrelated file or concurrent writer can be overwritten through a fixed temporary name.
+        Path temp = Files.createTempFile(target.getParent(), "." + target.getFileName() + ".", ".tmp");
+        try {
+            Files.write(temp, bytes);
+            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } finally {
+            Files.deleteIfExists(temp);
+        }
     }
 
     static String string(String value) {

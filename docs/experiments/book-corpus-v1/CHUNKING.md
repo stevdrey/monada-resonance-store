@@ -57,7 +57,8 @@ Algorithm (pure function of body bytes and policy; no clock, randomness, locale 
 ## Outputs
 
 Both files are JSON Lines, UTF-8, LF, fixed field order, minimal escaping (non-ASCII is raw UTF-8),
-written through a temporary file and an atomic move (chunks first).
+written through a uniquely named, exclusively created temporary file and an atomic move
+(chunks first).
 
 `chunks.jsonl` — one object per chunk:
 
