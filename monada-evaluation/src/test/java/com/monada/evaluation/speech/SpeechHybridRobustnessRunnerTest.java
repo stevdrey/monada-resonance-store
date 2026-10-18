@@ -12,6 +12,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SpeechHybridRobustnessRunnerTest {
@@ -72,11 +73,34 @@ class SpeechHybridRobustnessRunnerTest {
         assertEquals(SpeechHybridRobustnessDecision.HYBRID_CANDIDATE_RISKY, runner.decide(results, groupRegression));
     }
 
+    @Test
+    void missingModalityStudyCategoriesValidateTheirMasks() {
+        PairedSpeechQuery query = new PairedSpeechQuery("masks", Path.of("masks.wav"), "synthetic",
+                Set.of("target"), SpeechCondition.CONTROL, SpeechTaskType.COMMAND);
+
+        assertThrows(IllegalArgumentException.class, () -> new SpeechHybridRobustnessCase(query, "speaker",
+                SpeechHybridConflictCategory.BOTH_MISSING, Set.of("target"), Set.of()));
+        assertThrows(IllegalArgumentException.class, () -> new SpeechHybridRobustnessCase(query, "speaker",
+                SpeechHybridConflictCategory.TRANSCRIPT_MISSING, Set.of("target"), Set.of("target")));
+        assertThrows(IllegalArgumentException.class, () -> new SpeechHybridRobustnessCase(query, "speaker",
+                SpeechHybridConflictCategory.ACOUSTIC_CORRECT_PARTIAL_DISTRACTOR, Set.of(), Set.of("target")));
+        assertThrows(IllegalArgumentException.class, () -> new SpeechHybridRobustnessCase(query, "speaker",
+                SpeechHybridConflictCategory.ACOUSTIC_CORRECT_PARTIAL_DISTRACTOR, Set.of("distractor"), Set.of()));
+        assertThrows(IllegalArgumentException.class, () -> new SpeechHybridRobustnessCase(query, "speaker",
+                SpeechHybridConflictCategory.AGREEMENT_RELEVANT, Set.of(), Set.of("distractor")));
+
+        assertEquals(SpeechHybridConflictCategory.BOTH_MISSING, new SpeechHybridRobustnessCase(query, "speaker",
+                SpeechHybridConflictCategory.BOTH_MISSING, Set.of("target"), Set.of("target")).expectedConflictCategory());
+        assertEquals(Set.of("distractor"), new SpeechHybridRobustnessCase(query, "speaker",
+                SpeechHybridConflictCategory.TRANSCRIPT_CORRECT_PARTIAL_DISTRACTOR, Set.of("distractor"), Set.of())
+                .transcriptUnavailableSampleIds());
+    }
+
     private List<SpeechHybridRobustnessQueryResult> completeCoverage() {
         List<SpeechHybridRobustnessQueryResult> results = new ArrayList<>();
-        SpeechHybridConflictCategory[] categories = SpeechHybridConflictCategory.values();
-        for (int index = 0; index < categories.length; index++) {
-            results.add(result(categories[index], SpeechHybridComparison.MAINTAIN,
+        List<SpeechHybridConflictCategory> categories = SpeechHybridRobustnessRunner.REQUIRED_CONFLICT_COVERAGE;
+        for (int index = 0; index < categories.size(); index++) {
+            results.add(result(categories.get(index), SpeechHybridComparison.MAINTAIN,
                     index % 2 == 0 ? SpeechSpeakerRelation.SAME_SPEAKER : SpeechSpeakerRelation.CROSS_SPEAKER,
                     index % 2 == 0 ? SpeechCondition.CONTROL : SpeechCondition.DYSARTHRIC,
                     switch (index % 3) {

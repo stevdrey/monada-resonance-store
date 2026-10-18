@@ -8,8 +8,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.List;
 
-/** Command-line entrypoint for the generated fixed-profile hybrid robustness study. */
+/** Command-line entrypoint for the generated fixed-profile hybrid robustness and missing-modality policy studies. */
 public final class SpeechHybridRobustnessMain {
 
     private SpeechHybridRobustnessMain() {
@@ -18,17 +19,34 @@ public final class SpeechHybridRobustnessMain {
     public static void main(String[] args) throws IOException {
         Path root = Files.createTempDirectory("monada-speech-hybrid-robustness-");
         try {
-            GeneratedSpeechHybridRobustnessFixture.Fixture fixture = GeneratedSpeechHybridRobustnessFixture.create(root);
-            var report = new SpeechHybridRobustnessRunner().run(
-                    SpeechModalityEvidence.GENERATED_CI,
-                    GeneratedSpeechHybridRobustnessFixture.LABEL,
+            SpeechHybridRobustnessRunner runner = new SpeechHybridRobustnessRunner();
+            Path developmentRoot = root.resolve("development");
+            GeneratedSpeechHybridRobustnessFixture.Fixture fixture = GeneratedSpeechHybridRobustnessFixture.create(developmentRoot);
+            SpeechHybridPreparedCases development = runner.prepare(
                     fixture.cases(),
                     fixture.k(),
                     new SpeechSampleRetriever(fixture.encoder()),
                     fixture.sampleStore(),
                     fixture.featureStore(),
-                    root.resolve("transcript-memory"));
-            System.out.print(report.render());
+                    developmentRoot.resolve("transcript-memory"));
+            System.out.print(runner.report(SpeechModalityEvidence.GENERATED_CI,
+                    GeneratedSpeechHybridRobustnessFixture.LABEL, development).render());
+
+            Path holdoutRoot = root.resolve("holdout");
+            GeneratedSpeechHybridRobustnessFixture.Fixture holdoutFixture =
+                    GeneratedSpeechHybridRobustnessFixture.createHoldout(holdoutRoot);
+            SpeechHybridPreparedCases holdout = runner.prepare(
+                    holdoutFixture.cases(),
+                    holdoutFixture.k(),
+                    new SpeechSampleRetriever(holdoutFixture.encoder()),
+                    holdoutFixture.sampleStore(),
+                    holdoutFixture.featureStore(),
+                    holdoutRoot.resolve("transcript-memory"));
+            System.out.println();
+            System.out.print(new SpeechMissingModalityPolicyRunner().run(SpeechModalityEvidence.GENERATED_CI, List.of(
+                    new SpeechMissingModalityStudySplit("development", GeneratedSpeechHybridRobustnessFixture.LABEL, development),
+                    new SpeechMissingModalityStudySplit("holdout", GeneratedSpeechHybridRobustnessFixture.HOLDOUT_LABEL, holdout)))
+                    .render());
         } finally {
             deleteRecursively(root);
         }
