@@ -170,13 +170,36 @@ class GeneratedSpeechHybridRobustnessIntegrationTest {
                 runPolicyStudy(tempDir.resolve("second-study")).render());
     }
 
+    @Test
+    void policyStudyRejectsReusedOrOverlappingSplits() throws IOException {
+        SpeechHybridRobustnessRunner runner = new SpeechHybridRobustnessRunner();
+        Path root = tempDir.resolve("reused");
+        SpeechHybridPreparedCases development = prepare(runner,
+                GeneratedSpeechHybridRobustnessFixture.create(root.resolve("development")), root.resolve("development"));
+        SpeechHybridPreparedCases copy = prepare(runner,
+                GeneratedSpeechHybridRobustnessFixture.create(root.resolve("copy")), root.resolve("copy"));
+        SpeechMissingModalityPolicyRunner policyRunner = new SpeechMissingModalityPolicyRunner();
+        SpeechMissingModalityStudySplit developmentSplit = new SpeechMissingModalityStudySplit(
+                SpeechMissingModalityPolicyRunner.DEVELOPMENT_SPLIT, GeneratedSpeechHybridRobustnessFixture.LABEL, development);
+
+        assertThrows(IllegalArgumentException.class, () -> policyRunner.run(SpeechModalityEvidence.GENERATED_CI,
+                List.of(developmentSplit, developmentSplit)));
+        assertThrows(IllegalArgumentException.class, () -> policyRunner.run(SpeechModalityEvidence.GENERATED_CI,
+                List.of(developmentSplit, new SpeechMissingModalityStudySplit(SpeechMissingModalityPolicyRunner.HOLDOUT_SPLIT,
+                        GeneratedSpeechHybridRobustnessFixture.LABEL, copy))));
+        IllegalArgumentException overlap = assertThrows(IllegalArgumentException.class, () -> policyRunner.run(
+                SpeechModalityEvidence.GENERATED_CI, List.of(developmentSplit, new SpeechMissingModalityStudySplit(
+                        SpeechMissingModalityPolicyRunner.HOLDOUT_SPLIT, "relabelled-development", copy))));
+        assertTrue(overlap.getMessage().contains("holdout split shares corpus samples with development"));
+    }
+
     private SpeechMissingModalityPolicyReport runPolicyStudy(Path root) throws IOException {
         SpeechHybridRobustnessRunner runner = new SpeechHybridRobustnessRunner();
         return new SpeechMissingModalityPolicyRunner().run(SpeechModalityEvidence.GENERATED_CI, List.of(
-                new SpeechMissingModalityStudySplit("development", GeneratedSpeechHybridRobustnessFixture.LABEL,
+                new SpeechMissingModalityStudySplit(SpeechMissingModalityPolicyRunner.DEVELOPMENT_SPLIT, GeneratedSpeechHybridRobustnessFixture.LABEL,
                         prepare(runner, GeneratedSpeechHybridRobustnessFixture.create(root.resolve("development")),
                                 root.resolve("development"))),
-                new SpeechMissingModalityStudySplit("holdout", GeneratedSpeechHybridRobustnessFixture.HOLDOUT_LABEL,
+                new SpeechMissingModalityStudySplit(SpeechMissingModalityPolicyRunner.HOLDOUT_SPLIT, GeneratedSpeechHybridRobustnessFixture.HOLDOUT_LABEL,
                         prepare(runner, GeneratedSpeechHybridRobustnessFixture.createHoldout(root.resolve("holdout")),
                                 root.resolve("holdout")))));
     }

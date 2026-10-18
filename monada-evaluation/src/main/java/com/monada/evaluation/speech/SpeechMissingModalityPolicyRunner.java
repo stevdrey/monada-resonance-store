@@ -4,11 +4,13 @@ import com.monada.speech.evaluation.SpeechEvaluationMetrics;
 
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -26,6 +28,9 @@ final class SpeechMissingModalityPolicyRunner {
             SpeechHybridConflictCategory.TRANSCRIPT_CORRECT_PARTIAL_DISTRACTOR,
             SpeechHybridConflictCategory.ACOUSTIC_CORRECT_PARTIAL_DISTRACTOR);
 
+    static final String DEVELOPMENT_SPLIT = "development";
+    static final String HOLDOUT_SPLIT = "holdout";
+
     private final SpeechMissingModalityPolicyEvaluator policyEvaluator = new SpeechMissingModalityPolicyEvaluator();
     private final SpeechRankingEvaluator rankingEvaluator = new SpeechRankingEvaluator();
     private final SpeechHybridProfileEvaluator profileEvaluator = new SpeechHybridProfileEvaluator();
@@ -37,6 +42,7 @@ final class SpeechMissingModalityPolicyRunner {
         if (splits.isEmpty()) {
             throw new IllegalArgumentException("at least one split is required");
         }
+        validateDistinctSplits(splits);
         List<SpeechMissingModalityPolicySplitResult> results = new ArrayList<>();
         for (SpeechMissingModalityStudySplit split : splits) {
             for (SpeechMissingModalityPolicy policy : SpeechMissingModalityPolicy.values()) {
@@ -60,8 +66,8 @@ final class SpeechMissingModalityPolicyRunner {
             reasons.add("reference arm inherits HYBRID_CANDIDATE_RISKY from #79");
             return new SpeechMissingModalityPolicyVerdict(policy, SpeechMissingModalityPolicyDecision.RISK_REMAINS, reasons);
         }
-        if (splitResults.size() < 2) {
-            reasons.add("requires both a development and an untouched holdout split");
+        if (count(splitResults, DEVELOPMENT_SPLIT) != 1 || count(splitResults, HOLDOUT_SPLIT) != 1) {
+            reasons.add("requires exactly one " + DEVELOPMENT_SPLIT + " and one untouched " + HOLDOUT_SPLIT + " split");
         }
         int recoveries = 0;
         for (SpeechMissingModalityPolicySplitResult result : splitResults) {
@@ -93,6 +99,42 @@ final class SpeechMissingModalityPolicyRunner {
                 && verdict.decision() == SpeechMissingModalityPolicyDecision.FURTHER_STUDY)
                 ? SpeechMissingModalityPolicyDecision.FURTHER_STUDY
                 : SpeechMissingModalityPolicyDecision.RISK_REMAINS;
+    }
+
+    private void validateDistinctSplits(List<SpeechMissingModalityStudySplit> splits) {
+        Set<String> names = new HashSet<>();
+        Set<String> labels = new HashSet<>();
+        for (SpeechMissingModalityStudySplit split : splits) {
+            Objects.requireNonNull(split, "split");
+            if (!names.add(split.name())) {
+                throw new IllegalArgumentException("duplicate split name: " + split.name());
+            }
+            if (!labels.add(split.label())) {
+                throw new IllegalArgumentException("split fixture label reused across splits: " + split.label());
+            }
+        }
+        Map<String, SpeechMissingModalityStudySplit> byName = new LinkedHashMap<>();
+        splits.forEach(split -> byName.put(split.name(), split));
+        SpeechMissingModalityStudySplit development = byName.get(DEVELOPMENT_SPLIT);
+        SpeechMissingModalityStudySplit holdout = byName.get(HOLDOUT_SPLIT);
+        if (development != null && holdout != null) {
+            Set<String> shared = new TreeSet<>(sampleIds(development));
+            shared.retainAll(sampleIds(holdout));
+            if (!shared.isEmpty()) {
+                throw new IllegalArgumentException("holdout split shares corpus samples with development: " + shared);
+            }
+        }
+    }
+
+    private Set<String> sampleIds(SpeechMissingModalityStudySplit split) {
+        Set<String> ids = new HashSet<>();
+        split.prepared().cases().forEach(preparedCase -> preparedCase.context().candidates()
+                .forEach(candidate -> ids.add(candidate.sampleId())));
+        return ids;
+    }
+
+    private long count(List<SpeechMissingModalityPolicySplitResult> results, String split) {
+        return results.stream().filter(result -> result.split().equals(split)).count();
     }
 
     private SpeechMissingModalityPolicySplitResult evaluateSplit(

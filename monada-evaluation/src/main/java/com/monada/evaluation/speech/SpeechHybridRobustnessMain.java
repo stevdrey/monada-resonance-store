@@ -44,8 +44,8 @@ public final class SpeechHybridRobustnessMain {
                     holdoutRoot.resolve("transcript-memory"));
             System.out.println();
             System.out.print(new SpeechMissingModalityPolicyRunner().run(SpeechModalityEvidence.GENERATED_CI, List.of(
-                    new SpeechMissingModalityStudySplit("development", GeneratedSpeechHybridRobustnessFixture.LABEL, development),
-                    new SpeechMissingModalityStudySplit("holdout", GeneratedSpeechHybridRobustnessFixture.HOLDOUT_LABEL, holdout)))
+                    new SpeechMissingModalityStudySplit(SpeechMissingModalityPolicyRunner.DEVELOPMENT_SPLIT, GeneratedSpeechHybridRobustnessFixture.LABEL, development),
+                    new SpeechMissingModalityStudySplit(SpeechMissingModalityPolicyRunner.HOLDOUT_SPLIT, GeneratedSpeechHybridRobustnessFixture.HOLDOUT_LABEL, holdout)))
                     .render());
         } finally {
             deleteRecursively(root);

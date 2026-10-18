@@ -64,6 +64,19 @@ class SpeechMissingModalityPolicyRunnerTest {
     }
 
     @Test
+    void verdictRequiresDistinctDevelopmentAndHoldoutSplitsRatherThanAnyTwoResults() {
+        SpeechMissingModalityPolicy policy = SpeechMissingModalityPolicy.AVAILABLE_MODALITY_ONLY;
+
+        SpeechMissingModalityPolicyVerdict duplicated = runner.decide(policy,
+                List.of(clean("development", 2), clean("development", 2)));
+        SpeechMissingModalityPolicyVerdict arbitrary = runner.decide(policy, List.of(clean("a", 2), clean("b", 2)));
+
+        assertEquals(SpeechMissingModalityPolicyDecision.RISK_REMAINS, duplicated.decision());
+        assertTrue(duplicated.reasons().contains("requires exactly one development and one untouched holdout split"));
+        assertEquals(SpeechMissingModalityPolicyDecision.RISK_REMAINS, arbitrary.decision());
+    }
+
+    @Test
     void overallDecisionStaysRiskRemainsWhenOnlyTheReferenceArmIsListed() {
         assertEquals(SpeechMissingModalityPolicyDecision.RISK_REMAINS, runner.overall(List.of(
                 new SpeechMissingModalityPolicyVerdict(SpeechMissingModalityPolicy.BOTH_REQUIRED,
