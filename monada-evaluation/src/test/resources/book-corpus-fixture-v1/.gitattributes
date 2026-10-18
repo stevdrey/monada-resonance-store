@@ -1,0 +1,2 @@
+# Byte-exact fixture: checksums in manifest.properties pin CRLF line ends. Never convert EOLs.
+sample.txt -text
