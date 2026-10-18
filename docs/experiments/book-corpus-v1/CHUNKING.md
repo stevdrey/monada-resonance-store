@@ -44,6 +44,7 @@ Algorithm (pure function of body bytes and policy; no clock, randomness, locale 
    the last paragraph end fits `maxChunkBytes - overlapBytes`. Chunks never cross sections.
 4. **Oversized paragraphs** are split at the last whitespace within the budget; without whitespace,
    at the last code point boundary not followed by a combining mark, never inside a surrogate pair.
+   A combining sequence longer than the budget cannot be split that way and is rejected (exit 1).
 5. **Overlap** (only when `overlapBytes > 0`): a chunk after the first of its section starts at the
    earliest word start within `overlapBytes` before its core, never before the previous chunk's core
    start and never in another section.

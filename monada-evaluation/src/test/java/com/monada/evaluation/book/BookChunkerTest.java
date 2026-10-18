@@ -134,6 +134,15 @@ class BookChunkerTest {
     }
 
     @Test
+    void combiningSequenceLongerThanTheBudgetIsRejectedNotDetached() {
+        // "q" plus nine U+0307 marks is 19 bytes, NFC-stable, and cannot fit a 16-byte piece in one sequence.
+        String body = "q" + "\u0307".repeat(9) + "\n";
+        BookInputException e = assertThrows(BookInputException.class, () -> chunk(body, policy(16, 0)));
+        assertEquals(BookInputException.Reason.INVALID_INPUT, e.reason());
+        assertTrue(e.getMessage().contains("byte offset 0"), e.getMessage());
+    }
+
+    @Test
     void multiByteTextReportsDistinctByteAndCodePointOffsets() throws Exception {
         String body = "Café — déjà vu.\n\nCHAPTER I.\nÜber.\n";
         BookChunker.Result result = chunk(body, policy(2048, 0));

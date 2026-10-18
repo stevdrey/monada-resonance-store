@@ -220,6 +220,29 @@ class BookChunkingGoldenTest {
                 Files.readAllBytes(dir.resolve("jvm0").resolve(BookChunkOutputWriter.SIDECAR_FILE)));
     }
 
+    /** {@code --out ""} names the working directory; it must write there rather than fail on a parentless path. */
+    @Test
+    void emptyOutputPathWritesIntoTheWorkingDirectory() throws Exception {
+        String classpath = System.getProperty("forge.runtime.classpath");
+        org.junit.jupiter.api.Assumptions.assumeTrue(classpath != null && !classpath.isBlank(),
+                "forge.runtime.classpath is set by the Gradle test task");
+        Path manifest = copyFixture("manifest.properties");
+        Path body = copyFixture("body.txt");
+        Path cwd = Files.createDirectories(dir.resolve("cwd"));
+        Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-cp", classpath, BookChunkingMain.class.getName(), "--manifest", manifest.toString(), "--input",
+                body.toString(), "--out", "")
+                .directory(cwd.toFile())
+                .redirectOutput(dir.resolve("empty-out.out").toFile())
+                .redirectError(dir.resolve("empty-out.err").toFile())
+                .start();
+        assertTrue(process.waitFor(2, TimeUnit.MINUTES), "child JVM timed out");
+        assertEquals(0, process.exitValue(), Files.readString(dir.resolve("empty-out.err")));
+        BookChunkOutputWriter.Output expected = BookChunkOutputWriter.render(fixtureResult(BookChunkingPolicy.V1));
+        assertArrayEquals(expected.chunks(), Files.readAllBytes(cwd.resolve(BookChunkOutputWriter.CHUNKS_FILE)));
+        assertArrayEquals(expected.sidecar(), Files.readAllBytes(cwd.resolve(BookChunkOutputWriter.SIDECAR_FILE)));
+    }
+
     private static long number(String json, String name) {
         Matcher m = Pattern.compile("\"" + name + "\":(\\d+)").matcher(json);
         assertTrue(m.find(), name);

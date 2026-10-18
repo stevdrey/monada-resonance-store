@@ -23,7 +23,8 @@ import java.util.regex.Pattern;
  *   <li>Packing: whole paragraphs are packed greedily while the span from the first paragraph start to the last
  *   paragraph end fits the core budget. Chunks never cross sections.</li>
  *   <li>Oversized paragraphs are split at the last whitespace within the budget; if there is none, at the last code
- *   point boundary that is not followed by a combining mark (never inside a surrogate pair).</li>
+ *   point boundary that is not followed by a combining mark (never inside a surrogate pair). A combining sequence
+ *   longer than the budget is rejected as invalid input.</li>
  *   <li>Overlap (when the policy has any): a chunk after the first of its section starts earlier, at the earliest
  *   word start within {@code overlapBytes} that is not before the previous chunk's core start.</li>
  * </ol>
@@ -62,7 +63,11 @@ public final class BookChunker {
                 || type == Character.COMBINING_SPACING_MARK;
     }
 
-    public static Result chunk(VerifiedBookSource source, BookChunkingPolicy policy) {
+    /**
+     * @throws BookInputException if a combining character sequence alone exceeds the chunk budget, so it cannot be
+     *                            split without detaching a combining mark
+     */
+    public static Result chunk(VerifiedBookSource source, BookChunkingPolicy policy) throws BookInputException {
         return new Chunking(source, policy).run();
     }
 
@@ -120,7 +125,7 @@ public final class BookChunker {
             }
         }
 
-        Result run() {
+        Result run() throws BookInputException {
             List<Section> sections = sections();
             for (Section section : sections) {
                 chunkSection(section);
@@ -158,7 +163,7 @@ public final class BookChunker {
             return text.substring(start, end < 0 ? text.length() : end);
         }
 
-        private void chunkSection(Section section) {
+        private void chunkSection(Section section) throws BookInputException {
             int limit = policy.coreLimitBytes();
             List<Span> cores = new ArrayList<>();
             Span current = null;
@@ -223,7 +228,7 @@ public final class BookChunker {
             return s < e ? new Span(s, e) : null;
         }
 
-        private List<Span> split(Span paragraph, int limit) {
+        private List<Span> split(Span paragraph, int limit) throws BookInputException {
             List<Span> pieces = new ArrayList<>();
             int pos = paragraph.start();
             while (pos < paragraph.end()) {
@@ -270,8 +275,12 @@ public final class BookChunker {
             return lo;
         }
 
-        /** A cut at or before {@code fit}: never inside a surrogate pair, and not before a combining mark if avoidable. */
-        private int hardCut(int from, int fit) {
+        /**
+         * A cut at or before {@code fit}: never inside a surrogate pair and never before a combining mark. A base
+         * character whose combining sequence alone exceeds the budget cannot be split that way, so the input is
+         * rejected rather than emitting a chunk that starts with a detached mark.
+         */
+        private int hardCut(int from, int fit) throws BookInputException {
             int cut = boundaryAtOrBefore(fit);
             int preferred = cut;
             while (preferred > from && isCombiningMark(text.codePointAt(preferred))) {
@@ -280,10 +289,9 @@ public final class BookChunker {
             if (preferred > from) {
                 return preferred;
             }
-            if (cut > from) {
-                return cut;
-            }
-            throw new IllegalStateException("no code point fits the chunk budget at char " + from);
+            throw new BookInputException(BookInputException.Reason.INVALID_INPUT, "combining character sequence at"
+                    + " byte offset " + byteAt[from] + " is longer than the chunk budget of " + policy.coreLimitBytes()
+                    + " bytes and cannot be split without detaching a combining mark");
         }
 
         private int boundaryAtOrBefore(int index) {

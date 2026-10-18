@@ -88,6 +88,8 @@ public final class BookChunkOutputWriter {
      */
     public static Output write(BookChunker.Result result, Path directory) throws IOException {
         Output output = render(result);
+        // Absolute, so that an empty path (the working directory) still gives every target a parent directory.
+        directory = directory.toAbsolutePath();
         Files.createDirectories(directory);
         writeAtomically(directory.resolve(CHUNKS_FILE), output.chunks());
         writeAtomically(directory.resolve(SIDECAR_FILE), output.sidecar());
