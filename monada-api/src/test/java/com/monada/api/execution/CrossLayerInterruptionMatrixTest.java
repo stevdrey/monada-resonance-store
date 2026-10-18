@@ -1,0 +1,463 @@
+package com.monada.api.execution;
+
+import static com.monada.api.execution.Experiences.appended;
+import static com.monada.api.execution.Experiences.attempt;
+import static com.monada.api.execution.Experiences.checkpointBytes;
+import static com.monada.api.execution.Experiences.experience;
+import static com.monada.api.execution.Experiences.finish;
+import static com.monada.api.execution.Experiences.projectionDir;
+import static com.monada.api.execution.Experiences.render;
+import static com.monada.api.execution.Experiences.scopeDir;
+import static com.monada.api.execution.Experiences.start;
+import static com.monada.api.execution.Experiences.treeDigests;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+
+import com.monada.core.execution.EventId;
+import com.monada.core.execution.ScopeId;
+import com.monada.storage.execution.ExecutionLedgerAuditReport;
+import com.monada.storage.execution.ExecutionLedgerAuditor;
+import com.monada.storage.execution.LedgerDiagnostic;
+import com.monada.storage.execution.LedgerDiagnosticCategory;
+import com.monada.storage.execution.LedgerException;
+import com.monada.storage.execution.ProjectionLayout;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.stream.Stream;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+/**
+ * Cross-layer interruption matrix (issue #127): what an interruption between the authoritative ledger and the
+ * derived projection leaves behind, which status reports it and which explicit call reconciles it. Only the
+ * cells no other test covers live here; the full matrix, with the tests of the covered cells, is in
+ * {@code docs/specs/execution-memory-contract-v1.md} §18.6.
+ *
+ * <ul>
+ *   <li>W1 before the ledger append: {@link #refusedLedgerAppendLeavesNoFactAndTheProjectionCurrent},
+ *       {@link #vanishedLedgerSegmentIsRefusedAndNeverRecreated},
+ *       {@link #tornLedgerTailIsRefusedByTheWriterAndReportedButNeverRepaired}.</li>
+ *   <li>W2 after the durable append, before COVER: {@link #retryAfterAFailedProjectionWriteIsIdempotentAndStaysStale},
+ *       {@link #readOnlySnapshotOfAStaleProjectionAnswersFromTheCoveredPrefixOnly}.</li>
+ *   <li>W3 during generation construction: {@link #rebuildInterruptedBeforeACoverKeepsThePublishedGeneration}.</li>
+ *   <li>W4 publication: {@link #crashBetweenTemporaryPointerAndMoveKeepsTheOldGeneration}.</li>
+ *   <li>W5 reader against writer: {@link #snapshotOpenedBetweenLedgerAppendAndCoverIsStaleAndFrozen}.</li>
+ * </ul>
+ * Every cell runs next to a projected sibling scope, which must stay byte-identical with unchanged recall;
+ * read-only opens are checked for mutations inside the cells.
+ */
+class CrossLayerInterruptionMatrixTest {
+    static final ScopeId ALPHA = ScopeId.of("project-alpha");
+    static final ScopeId BETA = ScopeId.of("project-beta");
+
+    @TempDir
+    Path root;
+
+    private List<String> siblingRecall;
+    private Map<String, String> siblingFiles;
+
+    /** Every cell runs next to a projected sibling scope in the same store. */
+    @BeforeEach
+    void recordSibling() throws IOException {
+        Path store = root.resolve("store");
+        try (ExecutionMemory beta = ExecutionMemory.open(store, BETA)) {
+            experience(beta, BETA, "y-1", "Repair the flaky upload test", "Raised the socket timeout", null);
+            siblingRecall = render(beta.recall(BETA, "flaky upload test", 10));
+        }
+        siblingFiles = treeDigests(scopeDir(store, BETA));
+    }
+
+    /** No interruption or recovery in alpha touches beta's files, and beta never sees alpha's refs. */
+    @AfterEach
+    void siblingIsUntouched() throws IOException {
+        Path store = root.resolve("store");
+        assertEquals(siblingFiles, treeDigests(scopeDir(store, BETA)), "the sibling scope is byte-identical");
+        try (ExecutionMemory beta = ExecutionMemory.openReadOnly(store, BETA)) {
+            assertEquals(ProjectionStatus.State.CURRENT, beta.projectionStatus(BETA).state());
+            ExperienceRecall recall = beta.recall(BETA, "flaky upload test", 10);
+            assertEquals(siblingRecall, render(recall));
+            recall.hits().forEach(h -> assertEquals(BETA, h.ref().scope()));
+        }
+    }
+
+    private static void two(ExecutionMemory m, ScopeId scope) {
+        experience(m, scope, "x-1", "Repair the flaky login test", "Waited for the session cookie", null);
+        experience(m, scope, "x-2", "Speed up the gradle build", "Enabled the configuration cache", null);
+    }
+
+    private static Path segment(Path store, ScopeId scope) {
+        return scopeDir(store, scope).resolve("ledger/events-000001.log");
+    }
+
+    private static List<String> generations(Path store, ScopeId scope) throws IOException {
+        return ProjectionLayout.of(store, scope).generationDirs().stream()
+                .map(p -> p.getFileName().toString()).toList();
+    }
+
+    private static String pointer(Path store, ScopeId scope) throws IOException {
+        return Files.readString(ProjectionLayout.of(store, scope).pointer(), StandardCharsets.UTF_8);
+    }
+
+    /** Recall of the 6 events every STALE cell has covered, projected without any interruption. */
+    private List<String> coveredPrefix() {
+        try (ExecutionMemory m = ExecutionMemory.open(root.resolve("reference-prefix"), ALPHA)) {
+            two(m, ALPHA);
+            return render(m.recall(ALPHA, "flaky upload test", 10));
+        }
+    }
+
+    private static boolean mentions(ExperienceRecall recall, String execution) {
+        return recall.hits().stream().anyMatch(h -> h.ref().execution().value().equals(execution));
+    }
+
+    /** Faults that fail the COVER of one ledger sequence, or of every sequence (a rebuild covers them all). */
+    private static final class Faults implements ProjectionFaults {
+        long failAt = -1;
+        boolean failEveryCover;
+
+        @Override
+        public void beforeCommit(long ledgerSequence) throws IOException {
+            if (failEveryCover || ledgerSequence == failAt) {
+                throw new IOException("injected interruption before COVER " + ledgerSequence);
+            }
+        }
+    }
+
+    private static void third(ExecutionMemory m) {
+        appended(m, attempt(ALPHA, "x-3", "a1", 1, null));
+        appended(m, finish(ALPHA, "x-3", "a1", "Retried the upload on timeouts", null));
+    }
+
+    /**
+     * STALE alpha store: x-1, x-2 projected (sequence 6); the projection of x-3's start (7) failed, so its
+     * attempt and finish (8, 9) are appended but never projected.
+     */
+    private Path staleStore(Faults faults) {
+        Path store = root.resolve("store");
+        try (ExecutionMemory m = ExecutionMemory.open(store, ALPHA, ExecutionMemoryConfig.defaults(), faults)) {
+            two(m, ALPHA);
+            faults.failAt = 7;
+            assertEquals(RecordResult.Status.APPENDED,
+                    m.record(start(ALPHA, "x-3", "Fix the flaky upload test")).status());
+            faults.failAt = -1;
+            third(m);
+            assertEquals(ProjectionStatus.State.STALE, m.projectionStatus(ALPHA).state());
+        }
+        return store;
+    }
+
+    // ---- W1: interrupted before the ledger append ------------------------------------------------------
+
+    @Test
+    void refusedLedgerAppendLeavesNoFactAndTheProjectionCurrent() throws IOException {
+        Path store = root.resolve("store");
+        try (ExecutionMemory m = ExecutionMemory.open(store, ALPHA)) {
+            two(m, ALPHA);
+            byte[] checkpoint = checkpointBytes(store, ALPHA);
+            // Same bytes, new file: the held channel no longer writes to the file readers see.
+            Path segment = segment(store, ALPHA);
+            // Replacement is only detected where the file system reports file keys (contract §18.6, W1b).
+            assumeTrue(Files.readAttributes(segment, BasicFileAttributes.class).fileKey() != null,
+                    "no file keys: the segment identity check is skipped on this file system");
+            Path copy = segment.resolveSibling("copy.tmp");
+            Files.copy(segment, copy);
+            Files.move(copy, segment, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            byte[] ledger = Files.readAllBytes(segment);
+
+            assertThrows(UncheckedIOException.class, () -> m.record(start(ALPHA, "x-3", "Fix the flaky upload test")));
+            ProjectionStatus status = m.projectionStatus(ALPHA);
+            assertEquals(ProjectionStatus.State.CURRENT, status.state(), "nothing was appended, nothing is stale");
+            assertEquals(6, status.coveredSequence());
+            assertEquals(6, status.ledgerSequence());
+            assertArrayEquals(checkpoint, checkpointBytes(store, ALPHA), "the projection never saw the event");
+            assertArrayEquals(ledger, Files.readAllBytes(segment));
+            assertThrows(IllegalStateException.class, () -> m.record(start(ALPHA, "x-4", "Another task")),
+                    "the ledger stays unusable until reopened, no automatic retry");
+        }
+        assertTrue(new ExecutionLedgerAuditor().audit(store).isHealthy());
+        try (ExecutionMemory m = ExecutionMemory.open(store, ALPHA)) {
+            assertEquals(6, m.history(ALPHA).entries().size());
+            assertTrue(m.loadEvent(ALPHA, EventId.of("x-3-start")).isEmpty(), "no ghost fact");
+            assertEquals(ProjectionStatus.State.CURRENT, m.projectionStatus(ALPHA).state());
+            RecordResult retried = m.record(start(ALPHA, "x-3", "Fix the flaky upload test"));
+            assertEquals(RecordResult.Status.APPENDED, retried.status(), "the caller's retry is a new append");
+            assertEquals(7, retried.sequence());
+            assertEquals(7, m.projectionStatus(ALPHA).coveredSequence());
+        }
+    }
+
+    @Test
+    void vanishedLedgerSegmentIsRefusedAndNeverRecreated() throws IOException {
+        Path store = root.resolve("store");
+        Path segment = segment(store, ALPHA);
+        try (ExecutionMemory m = ExecutionMemory.open(store, ALPHA)) {
+            two(m, ALPHA);
+            byte[] checkpoint = checkpointBytes(store, ALPHA);
+            Files.delete(segment);
+
+            assertThrows(UncheckedIOException.class, () -> m.record(start(ALPHA, "x-3", "Fix the flaky upload test")));
+            assertFalse(Files.exists(segment), "the segment is never recreated");
+            ProjectionStatus status = m.projectionStatus(ALPHA);
+            assertEquals(ProjectionStatus.State.CURRENT, status.state(), "the projection never saw the event");
+            assertEquals(6, status.coveredSequence());
+            assertEquals(6, status.ledgerSequence());
+            assertArrayEquals(checkpoint, checkpointBytes(store, ALPHA));
+            assertThrows(IllegalStateException.class, () -> m.record(start(ALPHA, "x-4", "Another task")));
+        }
+        Map<String, String> before = treeDigests(store);
+        // Reopening does not recover: the missing history is refused as possible data loss.
+        assertThrows(UncheckedIOException.class, () -> ExecutionMemory.open(store, ALPHA));
+        assertThrows(UncheckedIOException.class, () -> ExecutionMemory.openReadOnly(store, ALPHA));
+        ExecutionLedgerAuditReport audit = new ExecutionLedgerAuditor().audit(store);
+        assertFalse(audit.isHealthy(), audit.render());
+        assertEquals(before, treeDigests(store), "no layer starts a new history over the lost one");
+    }
+
+    @Test
+    void tornLedgerTailIsRefusedByTheWriterAndReportedButNeverRepaired() throws IOException {
+        Path store = root.resolve("store");
+        List<String> expected;
+        try (ExecutionMemory m = ExecutionMemory.open(store, ALPHA)) {
+            two(m, ALPHA);
+            expected = render(m.recall(ALPHA, "flaky test", 10));
+        }
+        // A crash in the middle of writing record 7: the ledger ends in a partial line.
+        Files.writeString(segment(store, ALPHA), "MXL1\t7\t99\tpartial", StandardOpenOption.APPEND);
+        Map<String, String> before = treeDigests(store);
+
+        UncheckedIOException refused = assertThrows(UncheckedIOException.class, () -> ExecutionMemory.open(store, ALPHA));
+        LedgerException cause = assertInstanceOf(LedgerException.class, refused.getCause());
+        assertEquals(List.of(LedgerDiagnosticCategory.TORN_TAIL),
+                cause.diagnostics().stream().map(LedgerDiagnostic::category).toList(), cause.getMessage());
+        try (ExecutionMemory reader = ExecutionMemory.openReadOnly(store, ALPHA)) {
+            assertTrue(reader.hasTornTail(), "the torn tail is reported, not hidden");
+            assertEquals(6, reader.history(ALPHA).entries().size());
+            ProjectionStatus status = reader.projectionStatus(ALPHA);
+            assertEquals(ProjectionStatus.State.CURRENT, status.state(), "the projection covers the valid prefix");
+            assertEquals(6, status.ledgerSequence());
+            assertEquals(expected, render(reader.recall(ALPHA, "flaky test", 10)));
+        }
+        ExecutionLedgerAuditReport audit = new ExecutionLedgerAuditor().audit(store);
+        assertTrue(audit.diagnostics().stream().anyMatch(d -> d.category() == LedgerDiagnosticCategory.TORN_TAIL
+                && d.severity() == LedgerDiagnostic.Severity.WARNING), audit.render());
+        // A torn tail is an interrupted write, not corruption: the audit stays healthy (no ERROR) and the
+        // warning, like hasTornTail(), is what a host must check (contract §18.6, W1c).
+        assertTrue(audit.isHealthy(), audit.render());
+        assertEquals(1, audit.count(LedgerDiagnostic.Severity.WARNING), audit.render());
+        assertEquals(before, treeDigests(store), "neither layer repairs or truncates anything");
+    }
+
+    // ---- W2: after the durable append, before COVER ----------------------------------------------------
+
+    @Test
+    void retryAfterAFailedProjectionWriteIsIdempotentAndStaysStale() throws IOException {
+        Path store = root.resolve("store");
+        staleStore(new Faults());
+        try (ExecutionMemory m = ExecutionMemory.open(store, ALPHA)) {
+            byte[] ledger = Files.readAllBytes(segment(store, ALPHA));
+            byte[] checkpoint = checkpointBytes(store, ALPHA);
+            RecordResult same = m.record(start(ALPHA, "x-3", "Fix the flaky upload test"));
+            assertEquals(RecordResult.Status.IDEMPOTENT, same.status());
+            assertEquals(7, same.sequence(), "the accepted fact keeps its sequence");
+            RecordResult changed = m.record(start(ALPHA, "x-3", "Fix the upload test differently"));
+            assertEquals(RecordResult.Status.CONFLICT, changed.status());
+            assertArrayEquals(ledger, Files.readAllBytes(segment(store, ALPHA)), "no duplicate fact");
+            assertArrayEquals(checkpoint, checkpointBytes(store, ALPHA), "a retry never repairs the projection");
+            ProjectionStatus status = m.projectionStatus(ALPHA);
+            assertEquals(ProjectionStatus.State.STALE, status.state());
+            assertEquals(6, status.coveredSequence());
+            assertEquals(9, status.ledgerSequence());
+
+            ProjectionStatus rebuilt = m.rebuildProjection(ALPHA);
+            assertEquals(ProjectionStatus.State.CURRENT, rebuilt.state());
+            assertEquals(9, rebuilt.coveredSequence());
+            ExperienceRecall recall = m.recall(ALPHA, "flaky upload test", 10);
+            assertEquals(1, recall.hits().stream().filter(h -> h.ref().execution().value().equals("x-3")).count(),
+                    "the retried fact is projected once");
+            recall.hits().forEach(h -> assertEquals(ALPHA, h.ref().scope()));
+        }
+        Path reference = root.resolve("reference");
+        try (ExecutionMemory m = ExecutionMemory.open(reference, ALPHA)) {
+            two(m, ALPHA);
+            appended(m, start(ALPHA, "x-3", "Fix the flaky upload test"));
+            third(m);
+        }
+        assertArrayEquals(checkpointBytes(reference, ALPHA), checkpointBytes(store, ALPHA),
+                "reconciliation equals an uninterrupted run");
+        assertTrue(new ExecutionLedgerAuditor().audit(store).isHealthy());
+    }
+
+    @Test
+    void readOnlySnapshotOfAStaleProjectionAnswersFromTheCoveredPrefixOnly() throws IOException {
+        Path store = staleStore(new Faults());
+        Map<String, String> before = treeDigests(store);
+        try (ExecutionMemory reader = ExecutionMemory.openReadOnly(store, ALPHA)) {
+            ProjectionStatus status = reader.projectionStatus(ALPHA);
+            assertEquals(ProjectionStatus.State.STALE, status.state());
+            assertEquals(6, status.coveredSequence());
+            assertEquals(9, status.ledgerSequence());
+            ExperienceRecall recall = reader.recall(ALPHA, "flaky upload test", 10);
+            assertEquals(ProjectionStatus.State.STALE, recall.status().state());
+            assertFalse(recall.hits().isEmpty());
+            assertEquals(coveredPrefix(), render(recall), "exactly the covered prefix, nothing uncovered");
+            recall.hits().forEach(h -> assertEquals(6, h.coveredSequence()));
+            assertThrows(UnsupportedOperationException.class, () -> reader.rebuildProjection(ALPHA));
+        }
+        assertEquals(before, treeDigests(store), "a read-only open neither repairs nor creates anything");
+        try (ExecutionMemory m = ExecutionMemory.open(store, ALPHA)) {
+            assertEquals(ProjectionStatus.State.CURRENT, m.rebuildProjection(ALPHA).state());
+        }
+        try (ExecutionMemory reader = ExecutionMemory.openReadOnly(store, ALPHA)) {
+            assertEquals(ProjectionStatus.State.CURRENT, reader.projectionStatus(ALPHA).state());
+            assertTrue(mentions(reader.recall(ALPHA, "flaky upload test", 10), "x-3"));
+        }
+    }
+
+    // ---- W3: interrupted while a generation is built -------------------------------------------------
+
+    @Test
+    void rebuildInterruptedBeforeACoverKeepsThePublishedGeneration() throws IOException {
+        Faults faults = new Faults();
+        Path store = staleStore(faults);
+        try (ExecutionMemory m = ExecutionMemory.open(store, ALPHA, ExecutionMemoryConfig.defaults(), faults)) {
+            String published = pointer(store, ALPHA);
+            List<String> generations = generations(store, ALPHA);
+            byte[] ledger = Files.readAllBytes(segment(store, ALPHA));
+            byte[] checkpoint = checkpointBytes(store, ALPHA);
+            List<String> stale = render(m.recall(ALPHA, "flaky test", 10));
+
+            faults.failEveryCover = true;
+            assertThrows(UncheckedIOException.class, () -> m.rebuildProjection(ALPHA));
+            ProjectionStatus status = m.projectionStatus(ALPHA);
+            assertEquals(ProjectionStatus.State.STALE, status.state(), "the published generation still answers");
+            assertEquals(6, status.coveredSequence());
+            assertEquals(9, status.ledgerSequence());
+            assertEquals(published, pointer(store, ALPHA));
+            assertEquals(generations, generations(store, ALPHA), "the half-built generation is deleted");
+            assertArrayEquals(checkpoint, checkpointBytes(store, ALPHA));
+            assertArrayEquals(ledger, Files.readAllBytes(segment(store, ALPHA)), "the ledger is never rolled back");
+            assertEquals(stale, render(m.recall(ALPHA, "flaky test", 10)));
+
+            faults.failEveryCover = false;
+            ProjectionStatus rebuilt = m.rebuildProjection(ALPHA);
+            assertEquals(ProjectionStatus.State.CURRENT, rebuilt.state());
+            assertEquals(9, rebuilt.coveredSequence());
+        }
+    }
+
+    // ---- W4: interrupted while the pointer is published ----------------------------------------------
+
+    @Test
+    void crashBetweenTemporaryPointerAndMoveKeepsTheOldGeneration() throws IOException {
+        Path store = root.resolve("store");
+        List<String> expected;
+        try (ExecutionMemory m = ExecutionMemory.open(store, ALPHA)) {
+            two(m, ALPHA);
+            expected = render(m.recall(ALPHA, "flaky test", 10));
+        }
+        // The crash left a complete but unpublished generation and the temporary pointer naming it.
+        ProjectionLayout layout = ProjectionLayout.of(store, ALPHA);
+        Path old = projectionDir(store, ALPHA);
+        Path orphan = layout.scopeDir().resolve("projection-000002");
+        try (Stream<Path> walk = Files.walk(old)) {
+            for (Path p : walk.toList()) {
+                Files.copy(p, orphan.resolve(old.relativize(p).toString()));
+            }
+        }
+        Files.writeString(layout.pointerTemp(), "projection-000002\n", StandardCharsets.UTF_8);
+        Map<String, String> before = treeDigests(store);
+
+        try (ExecutionMemory reader = ExecutionMemory.openReadOnly(store, ALPHA)) {
+            assertEquals(ProjectionStatus.State.CURRENT, reader.projectionStatus(ALPHA).state());
+            assertEquals(expected, render(reader.recall(ALPHA, "flaky test", 10)));
+        }
+        assertEquals(before, treeDigests(store), "a reader never completes or reclaims an interrupted publication");
+        try (ExecutionMemory m = ExecutionMemory.open(store, ALPHA)) {
+            assertEquals(ProjectionStatus.State.CURRENT, m.projectionStatus(ALPHA).state());
+            assertEquals(old, projectionDir(store, ALPHA), "the temporary pointer is never promoted");
+            ProjectionStatus rebuilt = m.rebuildProjection(ALPHA);
+            assertEquals(ProjectionStatus.State.CURRENT, rebuilt.state());
+            assertEquals("projection-000003\n", pointer(store, ALPHA));
+            assertEquals(List.of("projection-000003"), generations(store, ALPHA), "the orphan is reclaimed");
+            assertFalse(Files.exists(layout.pointerTemp(), java.nio.file.LinkOption.NOFOLLOW_LINKS));
+            assertEquals(expected, render(m.recall(ALPHA, "flaky test", 10)));
+        }
+    }
+
+    // ---- W5: a reader opens while the writer is mid-record ------------------------------------------
+
+    @Test
+    void snapshotOpenedBetweenLedgerAppendAndCoverIsStaleAndFrozen() throws IOException {
+        Path store = root.resolve("store");
+        ExecutionMemory[] snapshot = new ExecutionMemory[1];
+        RuntimeException[] readerFailure = new RuntimeException[1];
+        Map<String, Map<String, String>> around = new TreeMap<>();
+        ProjectionFaults openReaderBeforeCover = seq -> {
+            if (seq == 9) {
+                // Kept out of the writer: onAppended would report any exception as its own STALE projection.
+                try {
+                    around.put("before", treeDigests(store));
+                    snapshot[0] = ExecutionMemory.openReadOnly(store, ALPHA);
+                    around.put("after", treeDigests(store));
+                } catch (IOException | RuntimeException e) {
+                    readerFailure[0] = new IllegalStateException("snapshot open failed inside the writer", e);
+                }
+            }
+        };
+        try (ExecutionMemory m = ExecutionMemory.open(store, ALPHA, ExecutionMemoryConfig.defaults(),
+                openReaderBeforeCover)) {
+            two(m, ALPHA);
+            appended(m, start(ALPHA, "x-3", "Fix the flaky upload test"));
+            third(m);
+            ProjectionStatus written = m.projectionStatus(ALPHA);
+            assertEquals(ProjectionStatus.State.CURRENT, written.state(), "the writer finishes its COVER");
+            assertEquals(9, written.coveredSequence());
+        } finally {
+            if (readerFailure[0] != null) {
+                if (snapshot[0] != null) {
+                    snapshot[0].close();
+                }
+                throw readerFailure[0];
+            }
+        }
+        List<String> prefix; // recall of the 8 covered events, projected without any interruption
+        Path reference = root.resolve("reference");
+        try (ExecutionMemory m = ExecutionMemory.open(reference, ALPHA)) {
+            two(m, ALPHA);
+            appended(m, start(ALPHA, "x-3", "Fix the flaky upload test"));
+            appended(m, attempt(ALPHA, "x-3", "a1", 1, null));
+            prefix = render(m.recall(ALPHA, "flaky upload test", 10));
+        }
+        try (ExecutionMemory reader = snapshot[0]) {
+            assertEquals(around.get("before"), around.get("after"), "the reader mutated nothing");
+            ProjectionStatus status = reader.projectionStatus(ALPHA);
+            assertEquals(ProjectionStatus.State.STALE, status.state(), status.diagnostics().toString());
+            assertEquals(8, status.coveredSequence());
+            assertEquals(9, status.ledgerSequence(), "the durable fact is in the snapshot's ledger");
+            assertEquals(prefix, render(reader.recall(ALPHA, "flaky upload test", 10)),
+                    "answers exactly from the covered prefix, even after the writer covered the last fact");
+        }
+        try (ExecutionMemory fresh = ExecutionMemory.openReadOnly(store, ALPHA)) {
+            ProjectionStatus status = fresh.projectionStatus(ALPHA);
+            assertEquals(ProjectionStatus.State.CURRENT, status.state());
+            assertEquals(9, status.coveredSequence());
+            assertTrue(mentions(fresh.recall(ALPHA, "flaky upload test", 10), "x-3"));
+        }
+    }
+}

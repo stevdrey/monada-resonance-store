@@ -818,6 +818,33 @@ encoder, a lazy token reader or dropping the per-covered-event re-encode (option
 Issue.
 
 
+#### Cross-layer interruption matrix (#127)
+
+Correctness evidence, not a quality or timing claim. The ledger is the authority and the projection is
+derived from it. #127 lists every window in which an operation can be interrupted between the two, and the
+state and recovery for each window
+([contract section 18.6](specs/execution-memory-contract-v1.md#186-interruption-windows-and-recovery-issue-127)).
+It then adds `CrossLayerInterruptionMatrixTest` for the cells no existing test covered:
+
+- an append refused by I/O, with the segment replaced or vanished;
+- a torn ledger tail seen through the facade;
+- an idempotent or conflicting retry after a failed projection write;
+- a read-only open of a `STALE` scope;
+- a rebuild interrupted before a COVER;
+- a crash between the temporary pointer and the atomic move;
+- a reader opened between a writer's durable append and its COVER.
+
+Each cell checks the following:
+
+- accepted facts keep their sequence and are never duplicated;
+- the published generation stays valid;
+- read-only opens change no file, in the cells where a reader opens;
+- other scopes are untouched;
+- recovery happens only through an explicit `rebuildProjection` or `pruneProjection`, or by reopening.
+
+No cell needed a production change. Repairing a torn or corrupt ledger stays outside v1, and no follow-up is
+opened.
+
 Numbering is roadmap order; independent items (for example #94 and #95) may proceed in parallel.
 
 Non-goals:

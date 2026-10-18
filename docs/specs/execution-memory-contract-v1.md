@@ -1020,6 +1020,35 @@ recall regression gate: it compares every query's top-K refs and similarities wi
 baseline, prints a baseline-vs-candidate table and fails on any reordering, changed similarity, cross-scope hit
 or drop in the protected aggregate metrics (Hit@1, MRR, Recall@3 over annotated queries).
 
+### 18.6 Interruption windows and recovery (issue #127)
+
+Clarification only: this section restates the behavior of sections 16–18 for each window in which an
+operation can be interrupted between the ledger and its projection. It changes no format, status or default.
+In every window the ledger is the authority. A fact the ledger accepted keeps its sequence. A projection
+failure never rolls back or duplicates that fact. A published generation stays valid until a rebuild
+replaces it. Nothing is repaired, retried or rebuilt implicitly.
+
+| Window | Observed state | Exact recovery | Tests |
+| --- | --- | --- | --- |
+| W1a: append rejected before I/O (validation, conflict, foreign scope) | no write. `CONFLICT`, or an exception for an invalid event. Projection unchanged | none: the caller fixes the event | `ExecutionMemoryRecordOutcomesTest`, `ExecutionLedgerTest` |
+| W1b: append refused by I/O because the segment was replaced (same contents, new file) on a file system that reports file keys | `record` throws `UncheckedIOException`. No fact is added. The projection stays `CURRENT` at the previous sequence. The instance refuses further records (`IllegalStateException`) | close and reopen. A retry is then a normal `APPENDED`. Where `fileKey()` is `null` the replacement check is skipped, so a replaced segment is not detected there (and the test is skipped) | `LedgerHardeningTest`, `CrossLayerInterruptionMatrixTest` |
+| W1b′: append refused because the segment vanished while open | `record` throws. No fact is added, and the segment is never recreated. Reopening is refused as possible data loss: the writable open fails and read-only opens report `MANIFEST_INVALID` | operator action outside v1: restore the segment from a backup. Reopening alone does not recover | `LedgerHardeningTest`, `LedgerRound5Test`, `CrossLayerInterruptionMatrixTest` |
+| W1c: crash during the ledger write (torn final line) | the writable open refuses (`no automatic repair`). Read-only opens report `hasTornTail()` and serve the valid prefix, with the projection `CURRENT` for that prefix. The auditor reports a `TORN_TAIL` **warning**, so `ExecutionLedgerAuditReport.isHealthy()` (no errors) stays `true`: a torn tail is an interrupted write, not corruption, and hosts must check `hasTornTail()` or the audit warnings to detect it. No file is modified | operator action outside v1: no API truncates the ledger | `ExecutionLedgerTest`, `ExecutionMemoryReadOnlyTest`, `CrossLayerInterruptionMatrixTest` |
+| W1d: interior ledger corruption | writer, read-only open and auditor refuse it or report it as an error. It is never served as healthy | operator action outside v1 | `LedgerCorruptionTest`, `ExecutionMemoryReadOnlyTest` |
+| W2a: projection write fails after the durable append | `APPENDED` and `STALE` (covered < ledger). Later appends stay unprojected. Recall answers from the covered prefix | `rebuildProjection` | `ExperienceProjectionFailureTest` |
+| W2b: crash in the middle of a checkpoint batch (no COVER, or a torn line) | `STALE`, with the diagnostic "interrupted". Uncovered atoms are never served and take no top-K slot | `rebuildProjection` | `ExperienceProjectionFailureTest` |
+| W2c: retry of an event whose projection failed | same event: `IDEMPOTENT` with the original sequence. Changed payload: `CONFLICT`. Ledger and checkpoint bytes are unchanged and the state stays `STALE`. After a rebuild the fact is projected once, and the checkpoint is byte-identical to an uninterrupted run | `rebuildProjection` | `CrossLayerInterruptionMatrixTest` |
+| W2d: read-only open of a `STALE` scope | `STALE` with the same covered and ledger sequences. Hits come from the covered prefix only. Nothing is created or changed | a writer calls `rebuildProjection`, then the reader reopens | `CrossLayerInterruptionMatrixTest` |
+| W3a: rebuild fails before publication (`beforePublish`, or a COVER of the new generation) | the rebuild throws. The previous state and pointer are kept, the half-built generation is deleted, and the ledger is untouched | retry `rebuildProjection` | `ExperienceProjectionGenerationTest`, `CrossLayerInterruptionMatrixTest` |
+| W3b: crash during construction (orphan generation) | the published generation answers and the orphan is ignored | the next `rebuildProjection` or `pruneProjection` reclaims it | `ExperienceProjectionGenerationTest` |
+| W4a: crash between the temporary pointer and the atomic move | the old pointer and generation stay `CURRENT` in both modes. The temporary pointer is never promoted. Readers delete nothing | `rebuildProjection` publishes the next generation and reclaims the orphan and the temporary pointer (or `pruneProjection`) | `ProjectionCheckpointTest`, `CrossLayerInterruptionMatrixTest` |
+| W4b: cleanup of old generations fails after publication | the rebuild is committed. The status is `CURRENT`, with a diagnostic naming the generation that could not be deleted | `pruneProjection` | `ExperienceProjectionGenerationTest` |
+| W5a: reader opens while a writer changes the scope's files and the loaded projection looks `INCOMPATIBLE` or `MISSING` | the whole snapshot is retried (at most `READ_ONLY_ATTEMPTS`, no waiting). If every attempt is inconsistent it is `INCOMPATIBLE` with "reopen to retry". A coherent `CURRENT` or `STALE` snapshot is returned on the first attempt and does not wait for or include the writer's later append (see W5b). An open snapshot never changes | reopen | `ExperienceProjectionFailureTest`, `ExperienceProjectionGenerationTest`, `ExperienceRecallReadOnlySnapshotTest` |
+| W5b: reader opens between the writer's durable append and its COVER | the snapshot is `STALE` (covered = ledger − 1). The uncovered fact is never served, even after the writer covers it. The reader mutates nothing. A fresh snapshot is `CURRENT` | reopen | `CrossLayerInterruptionMatrixTest` |
+| Any window, other scopes | interruptions, retries and rebuilds in one scope leave another scope's files byte-identical. Its snapshots never return foreign refs | none | `CrossLayerInterruptionMatrixTest` (a sibling scope is checked after every cell), `ExperienceRecallIsolationReportTest` (normal recall) |
+
+The behavior was already in the code: issue #127 adds tests only, and no window needed a production change.
+
 ## 19. Usage and Cost Calculators (issue #99)
 
 Implements the usage and cost rules of section 8 in `com.monada.evaluation.execution` (`monada-evaluation`
