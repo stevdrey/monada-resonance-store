@@ -1,0 +1,12 @@
+Fixture Header: original text written for issue #163 tests.
+Nothing here is copied from any book.
+
+*** BEGIN FIXTURE TEXT ***
+
+
+The lighthouse keeper counted the gulls — eleven, then twelve.
+
+Café lights blinked across the harbour at dusk.
+
+*** FINISH FIXTURE TEXT ***
+Fixture footer line.
