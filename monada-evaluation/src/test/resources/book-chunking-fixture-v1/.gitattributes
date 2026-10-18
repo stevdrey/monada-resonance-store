@@ -1,0 +1,3 @@
+body.txt -text
+manifest.properties -text
+expected-*.jsonl -text
