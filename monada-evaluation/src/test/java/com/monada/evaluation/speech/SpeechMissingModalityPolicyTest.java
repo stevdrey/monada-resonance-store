@@ -93,6 +93,9 @@ class SpeechMissingModalityPolicyTest {
         assertEquals(acousticComplete.acousticRanking(), toAcoustic.ranking());
         assertEquals(SpeechMissingModalityComponents.ACOUSTIC_ONLY,
                 toAcoustic.componentsBySampleId().get("a").componentsUsed());
+        for (SpeechMissingModalityComponentScore score : toTranscript.componentsBySampleId().values()) {
+            assertEquals(score.normalizedTranscriptScore(), score.policyScore(), score.sampleId());
+        }
     }
 
     @Test

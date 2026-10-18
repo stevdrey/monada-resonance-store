@@ -171,6 +171,24 @@ class GeneratedSpeechHybridRobustnessIntegrationTest {
     }
 
     @Test
+    void partialDistractorCasesRequireTheMaskedCandidateToBeTheWrongTopResult() throws IOException {
+        Path root = tempDir.resolve("distractor-guard");
+        GeneratedSpeechHybridRobustnessFixture.Fixture fixture = GeneratedSpeechHybridRobustnessFixture.createHoldout(root);
+        List<SpeechHybridRobustnessCase> cases = new ArrayList<>(fixture.cases());
+        int index = cases.stream().map(SpeechHybridRobustnessCase::expectedConflictCategory).toList()
+                .indexOf(SpeechHybridConflictCategory.ACOUSTIC_CORRECT_PARTIAL_DISTRACTOR);
+        SpeechHybridRobustnessCase original = cases.get(index);
+        cases.set(index, new SpeechHybridRobustnessCase(original.query(), original.querySpeakerId(),
+                original.expectedConflictCategory(), Set.of(), Set.of("h_d_certificate_target_1650")));
+
+        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class, () -> prepare(
+                new SpeechHybridRobustnessRunner(), new GeneratedSpeechHybridRobustnessFixture.Fixture(
+                        fixture.sampleStore(), fixture.featureStore(), fixture.encoder(), cases), root));
+
+        assertTrue(failure.getMessage().contains("transcript top result must be the partial distractor"));
+    }
+
+    @Test
     void policyStudyRejectsReusedOrOverlappingSplits() throws IOException {
         SpeechHybridRobustnessRunner runner = new SpeechHybridRobustnessRunner();
         Path root = tempDir.resolve("reused");

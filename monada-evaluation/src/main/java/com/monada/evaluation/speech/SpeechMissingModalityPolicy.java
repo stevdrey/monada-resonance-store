@@ -89,13 +89,17 @@ final class SpeechMissingModalityPolicyEvaluator {
             List<SpeechModalityRankedResult> ranking,
             SpeechHybridQueryContext context
     ) {
+        boolean transcript = route == SpeechMissingModalityRoute.DEFERRED_TO_TRANSCRIPT;
+        // The ranking keeps the control's raw order; the breakdown reports the same normalized scale as fusion.
+        Map<String, Double> normalized = (transcript ? context.transcriptNormalization() : context.acousticNormalization())
+                .normalizedScoresBySampleId();
         Map<String, Double> scores = new LinkedHashMap<>();
         Map<String, Integer> ranks = new LinkedHashMap<>();
         for (SpeechModalityRankedResult result : ranking) {
-            scores.put(result.sampleId(), result.score());
+            scores.put(result.sampleId(), normalized.get(result.sampleId()));
             ranks.put(result.sampleId(), result.rank());
         }
-        SpeechMissingModalityComponents used = route == SpeechMissingModalityRoute.DEFERRED_TO_TRANSCRIPT
+        SpeechMissingModalityComponents used = transcript
                 ? SpeechMissingModalityComponents.TRANSCRIPT_ONLY : SpeechMissingModalityComponents.ACOUSTIC_ONLY;
         Map<String, SpeechMissingModalityComponentScore> components = new LinkedHashMap<>();
         for (SpeechHybridCandidate candidate : context.candidates()) {

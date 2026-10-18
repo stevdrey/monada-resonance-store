@@ -77,6 +77,22 @@ class SpeechMissingModalityPolicyRunnerTest {
     }
 
     @Test
+    void cleanPolicyCannotReachFurtherStudyOnAHoldoutWithoutMissingModalityOrDistractorCases() {
+        SpeechMissingModalityPolicySplitResult conflictsOnly = new SpeechMissingModalityPolicySplitResult(
+                "holdout", SpeechMissingModalityPolicy.AVAILABLE_MODALITY_ONLY, List.of(), List.of(), 0, 0, 0,
+                List.of(), 0, 0, Set.of(SpeechHybridConflictCategory.AGREEMENT_RELEVANT,
+                SpeechHybridConflictCategory.TRANSCRIPT_CORRECT_ACOUSTIC_CONFLICT,
+                SpeechHybridConflictCategory.ACOUSTIC_CORRECT_TRANSCRIPT_CONFLICT));
+
+        SpeechMissingModalityPolicyVerdict verdict = runner.decide(SpeechMissingModalityPolicy.AVAILABLE_MODALITY_ONLY,
+                List.of(clean("development", 2), conflictsOnly));
+
+        assertEquals(SpeechMissingModalityPolicyDecision.RISK_REMAINS, verdict.decision());
+        assertTrue(verdict.reasons().stream().anyMatch(reason -> reason.startsWith("holdout: lacks required categories")
+                && reason.contains("BOTH_MISSING") && reason.contains("PARTIAL_DISTRACTOR")));
+    }
+
+    @Test
     void overallDecisionStaysRiskRemainsWhenOnlyTheReferenceArmIsListed() {
         assertEquals(SpeechMissingModalityPolicyDecision.RISK_REMAINS, runner.overall(List.of(
                 new SpeechMissingModalityPolicyVerdict(SpeechMissingModalityPolicy.BOTH_REQUIRED,
@@ -97,6 +113,6 @@ class SpeechMissingModalityPolicyRunnerTest {
     ) {
         return new SpeechMissingModalityPolicySplitResult(split, SpeechMissingModalityPolicy.AVAILABLE_MODALITY_ONLY,
                 List.of(), List.of(), regressionsVsStronger, regressionsVsBothRequired, conflictRegressions,
-                regressedGroups, recoveries, 0);
+                regressedGroups, recoveries, 0, SpeechMissingModalityPolicyRunner.REQUIRED_HOLDOUT_COVERAGE);
     }
 }

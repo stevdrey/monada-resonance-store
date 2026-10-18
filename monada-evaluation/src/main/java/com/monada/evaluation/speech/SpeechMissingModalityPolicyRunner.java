@@ -3,6 +3,7 @@ package com.monada.evaluation.speech;
 import com.monada.speech.evaluation.SpeechEvaluationMetrics;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -28,13 +29,22 @@ final class SpeechMissingModalityPolicyRunner {
             SpeechHybridConflictCategory.TRANSCRIPT_CORRECT_PARTIAL_DISTRACTOR,
             SpeechHybridConflictCategory.ACOUSTIC_CORRECT_PARTIAL_DISTRACTOR);
 
+    /** Categories the untouched holdout must contain before any policy may reach FURTHER_STUDY. */
+    static final Set<SpeechHybridConflictCategory> REQUIRED_HOLDOUT_COVERAGE = Collections.unmodifiableSet(EnumSet.of(
+            SpeechHybridConflictCategory.TRANSCRIPT_MISSING,
+            SpeechHybridConflictCategory.ACOUSTIC_MISSING,
+            SpeechHybridConflictCategory.BOTH_MISSING,
+            SpeechHybridConflictCategory.TRANSCRIPT_CORRECT_ACOUSTIC_CONFLICT,
+            SpeechHybridConflictCategory.ACOUSTIC_CORRECT_TRANSCRIPT_CONFLICT,
+            SpeechHybridConflictCategory.TRANSCRIPT_CORRECT_PARTIAL_DISTRACTOR,
+            SpeechHybridConflictCategory.ACOUSTIC_CORRECT_PARTIAL_DISTRACTOR));
+
     static final String DEVELOPMENT_SPLIT = "development";
     static final String HOLDOUT_SPLIT = "holdout";
 
     private final SpeechMissingModalityPolicyEvaluator policyEvaluator = new SpeechMissingModalityPolicyEvaluator();
     private final SpeechRankingEvaluator rankingEvaluator = new SpeechRankingEvaluator();
     private final SpeechHybridProfileEvaluator profileEvaluator = new SpeechHybridProfileEvaluator();
-    private final SpeechHybridRobustnessRunner robustnessRunner = new SpeechHybridRobustnessRunner();
 
     SpeechMissingModalityPolicyReport run(SpeechModalityEvidence evidence, List<SpeechMissingModalityStudySplit> splits) {
         Objects.requireNonNull(evidence, "evidence");
@@ -45,8 +55,9 @@ final class SpeechMissingModalityPolicyRunner {
         validateDistinctSplits(splits);
         List<SpeechMissingModalityPolicySplitResult> results = new ArrayList<>();
         for (SpeechMissingModalityStudySplit split : splits) {
+            Map<String, SpeechModalityQueryResult> reference = referenceResults(split);
             for (SpeechMissingModalityPolicy policy : SpeechMissingModalityPolicy.values()) {
-                results.add(evaluateSplit(split, policy));
+                results.add(evaluateSplit(split, policy, reference));
             }
         }
         List<SpeechMissingModalityPolicyVerdict> verdicts = new ArrayList<>();
@@ -72,6 +83,14 @@ final class SpeechMissingModalityPolicyRunner {
         int recoveries = 0;
         for (SpeechMissingModalityPolicySplitResult result : splitResults) {
             String split = result.split();
+            if (split.equals(HOLDOUT_SPLIT)) {
+                Set<SpeechHybridConflictCategory> missing = EnumSet.noneOf(SpeechHybridConflictCategory.class);
+                missing.addAll(REQUIRED_HOLDOUT_COVERAGE);
+                missing.removeAll(result.coveredCategories());
+                if (!missing.isEmpty()) {
+                    reasons.add(split + ": lacks required categories " + missing);
+                }
+            }
             if (result.regressionsVsStronger() > 0) {
                 reasons.add(split + ": " + result.regressionsVsStronger() + " regression(s) vs stronger control");
             }
@@ -102,35 +121,43 @@ final class SpeechMissingModalityPolicyRunner {
     }
 
     private void validateDistinctSplits(List<SpeechMissingModalityStudySplit> splits) {
-        Set<String> names = new HashSet<>();
+        Map<String, SpeechMissingModalityStudySplit> byName = new LinkedHashMap<>();
         Set<String> labels = new HashSet<>();
         for (SpeechMissingModalityStudySplit split : splits) {
             Objects.requireNonNull(split, "split");
-            if (!names.add(split.name())) {
+            if (byName.putIfAbsent(split.name(), split) != null) {
                 throw new IllegalArgumentException("duplicate split name: " + split.name());
             }
             if (!labels.add(split.label())) {
                 throw new IllegalArgumentException("split fixture label reused across splits: " + split.label());
             }
         }
-        Map<String, SpeechMissingModalityStudySplit> byName = new LinkedHashMap<>();
-        splits.forEach(split -> byName.put(split.name(), split));
         SpeechMissingModalityStudySplit development = byName.get(DEVELOPMENT_SPLIT);
         SpeechMissingModalityStudySplit holdout = byName.get(HOLDOUT_SPLIT);
         if (development != null && holdout != null) {
-            Set<String> shared = new TreeSet<>(sampleIds(development));
-            shared.retainAll(sampleIds(holdout));
+            Set<String> shared = new TreeSet<>(corpusSampleIds(development));
+            shared.retainAll(corpusSampleIds(holdout));
             if (!shared.isEmpty()) {
                 throw new IllegalArgumentException("holdout split shares corpus samples with development: " + shared);
             }
         }
     }
 
-    private Set<String> sampleIds(SpeechMissingModalityStudySplit split) {
-        Set<String> ids = new HashSet<>();
-        split.prepared().cases().forEach(preparedCase -> preparedCase.context().candidates()
-                .forEach(candidate -> ids.add(candidate.sampleId())));
-        return ids;
+    /** Every prepared case carries the whole corpus as candidates, so the first case is enough. */
+    private List<String> corpusSampleIds(SpeechMissingModalityStudySplit split) {
+        return split.prepared().cases().getFirst().context().candidates().stream()
+                .map(SpeechHybridCandidate::sampleId).toList();
+    }
+
+    private Map<String, SpeechModalityQueryResult> referenceResults(SpeechMissingModalityStudySplit split) {
+        Map<String, SpeechModalityQueryResult> reference = new LinkedHashMap<>();
+        for (SpeechHybridPreparedCase preparedCase : split.prepared().cases()) {
+            SpeechHybridQueryContext context = preparedCase.context();
+            reference.put(context.query().queryId(), rankingEvaluator.evaluate(policyEvaluator.rank(
+                    SpeechMissingModalityPolicy.BOTH_REQUIRED, SpeechHybridRobustnessRunner.FIXED_CANDIDATE, context)
+                    .ranking(), context.query().relevantSampleIds(), context.k()));
+        }
+        return reference;
     }
 
     private long count(List<SpeechMissingModalityPolicySplitResult> results, String split) {
@@ -139,11 +166,15 @@ final class SpeechMissingModalityPolicyRunner {
 
     private SpeechMissingModalityPolicySplitResult evaluateSplit(
             SpeechMissingModalityStudySplit split,
-            SpeechMissingModalityPolicy policy
+            SpeechMissingModalityPolicy policy,
+            Map<String, SpeechModalityQueryResult> reference
     ) {
         List<SpeechMissingModalityPolicyQueryResult> queries = new ArrayList<>();
+        Set<SpeechHybridConflictCategory> covered = EnumSet.noneOf(SpeechHybridConflictCategory.class);
         for (SpeechHybridPreparedCase preparedCase : split.prepared().cases()) {
-            queries.add(evaluateQuery(policy, preparedCase));
+            queries.add(evaluateQuery(policy, preparedCase,
+                    reference.get(preparedCase.stressCase().query().queryId())));
+            covered.add(preparedCase.stressCase().expectedConflictCategory());
         }
         List<SpeechMissingModalityGroupSummary> groups = new ArrayList<>();
         groups.add(summarize("aggregate", queries));
@@ -159,24 +190,23 @@ final class SpeechMissingModalityPolicyRunner {
                 groups.stream().filter(SpeechMissingModalityGroupSummary::regression)
                         .map(SpeechMissingModalityGroupSummary::group).toList(),
                 count(queries, query -> query.vsBothRequired() == SpeechHybridComparison.WIN),
-                count(queries, query -> query.ranking().route() == SpeechMissingModalityRoute.ABSTAINED));
+                count(queries, query -> query.ranking().route() == SpeechMissingModalityRoute.ABSTAINED),
+                covered);
     }
 
     private SpeechMissingModalityPolicyQueryResult evaluateQuery(
             SpeechMissingModalityPolicy policy,
-            SpeechHybridPreparedCase preparedCase
+            SpeechHybridPreparedCase preparedCase,
+            SpeechModalityQueryResult reference
     ) {
         SpeechHybridQueryContext context = preparedCase.context();
-        SpeechFusionWeights weights = SpeechHybridRobustnessRunner.FIXED_CANDIDATE;
-        SpeechMissingModalityPolicyRanking ranking = policyEvaluator.rank(policy, weights, context);
+        SpeechMissingModalityPolicyRanking ranking = policyEvaluator.rank(
+                policy, SpeechHybridRobustnessRunner.FIXED_CANDIDATE, context);
         SpeechModalityQueryResult result = rankingEvaluator.evaluate(
                 ranking.ranking(), context.query().relevantSampleIds(), context.k());
-        SpeechModalityQueryResult reference = policy == SpeechMissingModalityPolicy.BOTH_REQUIRED ? result
-                : rankingEvaluator.evaluate(policyEvaluator.rank(SpeechMissingModalityPolicy.BOTH_REQUIRED, weights, context)
-                .ranking(), context.query().relevantSampleIds(), context.k());
-        SpeechHybridBetterControl stronger = robustnessRunner.strongerControl(context);
+        SpeechHybridBetterControl stronger = SpeechHybridControlComparison.strongerControl(context);
         return new SpeechMissingModalityPolicyQueryResult(policy, preparedCase, ranking, result, stronger,
-                profileEvaluator.compare(result.metrics(), robustnessRunner.strongerMetrics(context, stronger)),
+                profileEvaluator.compare(result.metrics(), SpeechHybridControlComparison.strongerMetrics(context, stronger)),
                 profileEvaluator.compare(result.metrics(), reference.metrics()));
     }
 
@@ -195,27 +225,19 @@ final class SpeechMissingModalityPolicyRunner {
     }
 
     private SpeechMissingModalityGroupSummary summarize(String group, List<SpeechMissingModalityPolicyQueryResult> queries) {
-        double[] transcript = new double[4], acoustic = new double[4], policy = new double[4];
+        SpeechHybridControlComparison.MeanMetrics transcript = new SpeechHybridControlComparison.MeanMetrics();
+        SpeechHybridControlComparison.MeanMetrics acoustic = new SpeechHybridControlComparison.MeanMetrics();
+        SpeechHybridControlComparison.MeanMetrics policy = new SpeechHybridControlComparison.MeanMetrics();
         for (SpeechMissingModalityPolicyQueryResult query : queries) {
-            add(transcript, query.preparedCase().context().transcriptControl().metrics());
-            add(acoustic, query.preparedCase().context().acousticControl().metrics());
-            add(policy, query.result().metrics());
+            transcript.add(query.preparedCase().context().transcriptControl().metrics());
+            acoustic.add(query.preparedCase().context().acousticControl().metrics());
+            policy.add(query.result().metrics());
         }
-        int count = queries.size();
-        SpeechEvaluationMetrics transcriptMetrics = metrics(transcript, count);
-        SpeechEvaluationMetrics acousticMetrics = metrics(acoustic, count);
-        SpeechEvaluationMetrics policyMetrics = metrics(policy, count);
+        SpeechEvaluationMetrics transcriptMetrics = transcript.mean();
+        SpeechEvaluationMetrics acousticMetrics = acoustic.mean();
+        SpeechEvaluationMetrics policyMetrics = policy.mean();
         return new SpeechMissingModalityGroupSummary(group, transcriptMetrics, acousticMetrics, policyMetrics,
-                robustnessRunner.belowStrongerGroupControl(policyMetrics, transcriptMetrics, acousticMetrics));
-    }
-
-    private void add(double[] totals, SpeechModalityQueryMetrics metrics) {
-        totals[0] += metrics.precisionAtK(); totals[1] += metrics.recallAtK();
-        totals[2] += metrics.hitAtK() ? 1.0 : 0.0; totals[3] += metrics.reciprocalRank();
-    }
-
-    private SpeechEvaluationMetrics metrics(double[] totals, int count) {
-        return new SpeechEvaluationMetrics(totals[0] / count, totals[1] / count, totals[2] / count, totals[3] / count, count);
+                SpeechHybridControlComparison.belowStrongerGroupControl(policyMetrics, transcriptMetrics, acousticMetrics));
     }
 
     private int count(
@@ -294,7 +316,8 @@ record SpeechMissingModalityPolicySplitResult(
         int conflictRegressions,
         List<String> regressedGroups,
         int recoveriesVsBothRequired,
-        int abstentions
+        int abstentions,
+        Set<SpeechHybridConflictCategory> coveredCategories
 ) {
     SpeechMissingModalityPolicySplitResult {
         Objects.requireNonNull(split, "split");
@@ -302,6 +325,9 @@ record SpeechMissingModalityPolicySplitResult(
         queries = List.copyOf(Objects.requireNonNull(queries, "queries"));
         groups = List.copyOf(Objects.requireNonNull(groups, "groups"));
         regressedGroups = List.copyOf(Objects.requireNonNull(regressedGroups, "regressedGroups"));
+        Set<SpeechHybridConflictCategory> covered = EnumSet.noneOf(SpeechHybridConflictCategory.class);
+        covered.addAll(Objects.requireNonNull(coveredCategories, "coveredCategories"));
+        coveredCategories = Collections.unmodifiableSet(covered);
         if (regressionsVsStronger < 0 || regressionsVsBothRequired < 0 || conflictRegressions < 0
                 || recoveriesVsBothRequired < 0 || abstentions < 0) {
             throw new IllegalArgumentException("split counts must be non-negative");
