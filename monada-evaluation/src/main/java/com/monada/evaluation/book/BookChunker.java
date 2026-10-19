@@ -26,7 +26,8 @@ import java.util.regex.Pattern;
  *   point boundary that is not followed by a combining mark (never inside a surrogate pair). A combining sequence
  *   longer than the budget is rejected as invalid input.</li>
  *   <li>Overlap (when the policy has any): a chunk after the first of its section starts earlier, at the earliest
- *   word start within {@code overlapBytes} that is not before the previous chunk's core start.</li>
+ *   word start within {@code overlapBytes} that is not before the previous chunk's core start (the previous core
+ *   start itself is eligible, so a short previous core can be repeated whole).</li>
  * </ol>
  *
  * <p>Every chunk text is exactly a substring of the body that starts and ends with non-whitespace. After chunking,
@@ -306,9 +307,12 @@ public final class BookChunker {
             if (policy.overlapBytes() == 0) {
                 return coreStart;
             }
-            for (int s = previousCoreStart + 1; s < coreStart; s++) {
-                if (bytes(s, coreStart) <= policy.overlapBytes() && !isSpace(text.charAt(s))
-                        && isSpace(text.charAt(s - 1))) {
+            // The previous core start is itself a word start (cores begin with non-whitespace), so a short previous
+            // core that fits the budget is repeated whole.
+            for (int s = previousCoreStart; s < coreStart; s++) {
+                boolean wordStart = s == previousCoreStart
+                        || (!isSpace(text.charAt(s)) && isSpace(text.charAt(s - 1)));
+                if (wordStart && bytes(s, coreStart) <= policy.overlapBytes()) {
                     return s;
                 }
             }
@@ -340,6 +344,7 @@ public final class BookChunker {
         private void verify(List<Section> sections) {
             boolean[] covered = new boolean[text.length()];
             long previousStart = -1;
+            long previousEnd = -1;
             for (BookChunk chunk : chunks) {
                 int start = indexOfByte(chunk.byteStart());
                 int end = indexOfByte(chunk.byteEnd());
@@ -348,7 +353,8 @@ public final class BookChunker {
                 if (start < section.start() || end > section.end() || start >= end) {
                     throw new IllegalStateException("chunk " + chunk.key() + " escapes its section");
                 }
-                if (chunk.byteStart() <= previousStart) {
+                // Overlap may repeat a whole previous chunk (equal starts), but every chunk must end further on.
+                if (chunk.byteStart() < previousStart || chunk.byteEnd() <= previousEnd) {
                     throw new IllegalStateException("chunk " + chunk.key() + " is out of source order");
                 }
                 if (chunk.utf8Bytes() > policy.maxChunkBytes()) {
@@ -358,6 +364,7 @@ public final class BookChunker {
                     throw new IllegalStateException("chunk " + chunk.key() + " has untrimmed whitespace");
                 }
                 previousStart = chunk.byteStart();
+                previousEnd = chunk.byteEnd();
                 Arrays.fill(covered, start, end, true);
             }
             for (int i = 0; i < text.length(); i++) {

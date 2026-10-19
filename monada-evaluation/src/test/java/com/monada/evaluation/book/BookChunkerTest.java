@@ -185,6 +185,15 @@ class BookChunkerTest {
     }
 
     @Test
+    void overlapMayRepeatAWholeShortPreviousCore() throws Exception {
+        // "short" (5 bytes) plus the blank line fits the 8-byte overlap; the 16-byte core cannot join it in one core.
+        String body = "short\n\nabcdefghijklmnop\n";
+        BookChunker.Result result = chunk(body, policy(24, 8));
+        assertEquals(List.of("short", "short\n\nabcdefghijklmnop"), texts(result));
+        assertResolvable(body, result);
+    }
+
+    @Test
     void overlapNeverCrossesAChapterBoundary() throws Exception {
         String body = "CHAPTER I.\nend of one\n\nCHAPTER II.\nstart of two\n";
         BookChunker.Result result = chunk(body, policy(24, 8));

@@ -129,7 +129,9 @@ class BookChunkingGoldenTest {
         assertTrue(run.out().contains("repeated content: groups="));
         assertFalse(run.out().contains(dir.toString()), "report must not depend on paths");
         try (var files = Files.list(out)) {
-            assertEquals(2, files.count(), "no temporary files are left behind");
+            assertEquals(List.of(BookChunkOutputWriter.LOCK_FILE, BookChunkOutputWriter.CHUNKS_FILE,
+                    BookChunkOutputWriter.SIDECAR_FILE), files.map(p -> p.getFileName().toString()).sorted().toList(),
+                    "no temporary files are left behind");
         }
     }
 
@@ -176,8 +178,9 @@ class BookChunkingGoldenTest {
             Files.delete(input);
         }
         try (var files = Files.list(out)) {
-            assertEquals(List.of(BookChunkOutputWriter.CHUNKS_FILE, BookChunkOutputWriter.SIDECAR_FILE),
-                    files.map(p -> p.getFileName().toString()).sorted().toList(), "no temporary files left");
+            assertEquals(List.of(BookChunkOutputWriter.LOCK_FILE, BookChunkOutputWriter.CHUNKS_FILE,
+                    BookChunkOutputWriter.SIDECAR_FILE), files.map(p -> p.getFileName().toString()).sorted().toList(),
+                    "no temporary files left");
         }
     }
 
@@ -218,6 +221,25 @@ class BookChunkingGoldenTest {
         BookChunkOutputWriter.Output inProcess = BookChunkOutputWriter.render(fixtureResult(BookChunkingPolicy.V1));
         assertArrayEquals(inProcess.sidecar(),
                 Files.readAllBytes(dir.resolve("jvm0").resolve(BookChunkOutputWriter.SIDECAR_FILE)));
+    }
+
+    @Test
+    void rewritingAnOutputDirectoryLeavesAMatchingPairAndRemovesAStaleSidecarFirst() throws Exception {
+        Path out = Files.createDirectories(dir.resolve("regen"));
+        BookChunker.Result fixture = fixtureResult(FIXTURE_POLICY);
+        BookChunker.Result v1 = fixtureResult(BookChunkingPolicy.V1);
+        BookChunkOutputWriter.write(fixture, out);
+        BookChunkOutputWriter.Output second = BookChunkOutputWriter.write(v1, out);
+        assertArrayEquals(second.chunks(), Files.readAllBytes(out.resolve(BookChunkOutputWriter.CHUNKS_FILE)));
+        assertArrayEquals(second.sidecar(), Files.readAllBytes(out.resolve(BookChunkOutputWriter.SIDECAR_FILE)));
+
+        // A sidecar that cannot be removed (a non-empty directory in its place) stops the run before the chunks
+        // file is replaced, so no new chunks ever sit next to an old sidecar.
+        Files.delete(out.resolve(BookChunkOutputWriter.SIDECAR_FILE));
+        Files.createDirectories(out.resolve(BookChunkOutputWriter.SIDECAR_FILE).resolve("blocker"));
+        org.junit.jupiter.api.Assertions.assertThrows(IOException.class,
+                () -> BookChunkOutputWriter.write(fixture, out));
+        assertArrayEquals(second.chunks(), Files.readAllBytes(out.resolve(BookChunkOutputWriter.CHUNKS_FILE)));
     }
 
     /** {@code --out ""} names the working directory; it must write there rather than fail on a parentless path. */

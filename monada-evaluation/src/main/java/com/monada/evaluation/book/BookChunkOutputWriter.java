@@ -1,10 +1,13 @@
 package com.monada.evaluation.book;
 
 import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.Locale;
 
 /**
@@ -22,6 +25,8 @@ public final class BookChunkOutputWriter {
     public static final String SIDECAR_FILE = "sidecar.jsonl";
     public static final String SIDECAR_FORMAT = "monada-book-chunk-sidecar";
     public static final int SIDECAR_FORMAT_VERSION = 1;
+    /** Empty lock file that serializes writers to one output directory; it is left in place on purpose. */
+    public static final String LOCK_FILE = ".book-chunking.lock";
 
     private BookChunkOutputWriter() {
     }
@@ -82,17 +87,29 @@ public final class BookChunkOutputWriter {
     }
 
     /**
-     * Writes both files into {@code directory} (created if needed). Each file goes through a sibling temporary file
-     * and an atomic move, the chunks file first, so a reader never sees a truncated file and a sidecar always refers
-     * to a complete chunks file by digest.
+     * Writes both files into {@code directory} (created if needed) as one coherent generation:
+     *
+     * <ol>
+     *   <li>writers to the same directory are serialized by an exclusive lock on {@value #LOCK_FILE};</li>
+     *   <li>the old sidecar is removed before the chunks file is replaced, so an interrupted run leaves chunks
+     *   without a sidecar (visibly incomplete), never new chunks beside an old sidecar;</li>
+     *   <li>each file goes through a uniquely named temporary file and an atomic move, the sidecar last, so a
+     *   present sidecar always describes the chunks file next to it by digest.</li>
+     * </ol>
      */
     public static Output write(BookChunker.Result result, Path directory) throws IOException {
         Output output = render(result);
         // Absolute, so that an empty path (the working directory) still gives every target a parent directory.
         directory = directory.toAbsolutePath();
         Files.createDirectories(directory);
-        writeAtomically(directory.resolve(CHUNKS_FILE), output.chunks());
-        writeAtomically(directory.resolve(SIDECAR_FILE), output.sidecar());
+        // CREATE without TRUNCATE_EXISTING: opening the lock never changes an existing file's bytes.
+        try (FileChannel lock = FileChannel.open(directory.resolve(LOCK_FILE), StandardOpenOption.CREATE,
+                StandardOpenOption.WRITE);
+             FileLock ignored = lock.lock()) {
+            Files.deleteIfExists(directory.resolve(SIDECAR_FILE));
+            writeAtomically(directory.resolve(CHUNKS_FILE), output.chunks());
+            writeAtomically(directory.resolve(SIDECAR_FILE), output.sidecar());
+        }
         return output;
     }
 

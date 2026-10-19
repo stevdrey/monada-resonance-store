@@ -47,9 +47,10 @@ Algorithm (pure function of body bytes and policy; no clock, randomness, locale 
    A combining sequence longer than the budget cannot be split that way and is rejected (exit 1).
 5. **Overlap** (only when `overlapBytes > 0`): a chunk after the first of its section starts at the
    earliest word start within `overlapBytes` before its core, never before the previous chunk's core
-   start and never in another section.
+   start (which is itself eligible, so a short previous core may be repeated whole) and never in
+   another section.
 6. **Invariants**, re-checked after every run: each chunk is exactly a body substring that starts
-   and ends with non-whitespace, is non-empty, within its section, in source order and within
+   and ends with non-whitespace, is non-empty, within its section, in source order (starts never decrease, ends strictly increase) and within
    `maxChunkBytes`; every non-whitespace code point of the body is inside at least one chunk. A
    violation is a bug (`IllegalStateException`), never silently dropped text.
 
@@ -58,8 +59,10 @@ Algorithm (pure function of body bytes and policy; no clock, randomness, locale 
 ## Outputs
 
 Both files are JSON Lines, UTF-8, LF, fixed field order, minimal escaping (non-ASCII is raw UTF-8),
-written through a uniquely named, exclusively created temporary file and an atomic move
-(chunks first).
+published as one generation: writers to a directory are serialized by a lock on
+`.book-chunking.lock`, the old sidecar is removed before the chunks file is replaced, and each file
+goes through a uniquely named temporary file and an atomic move, sidecar last. A present sidecar
+therefore always matches the chunks file beside it; chunks without a sidecar mean an interrupted run.
 
 `chunks.jsonl` — one object per chunk:
 
@@ -122,7 +125,10 @@ no paths or timing, so it is comparable across machines.
 
 ## Reproducibility
 
-- Same body SHA-256 + same policy ⇒ byte-identical `chunks.jsonl`, `sidecar.jsonl` and report.
+- Same body SHA-256 + same policy + same manifest bytes ⇒ byte-identical `chunks.jsonl`,
+  `sidecar.jsonl` and report. The manifest matters too: its `corpus` is part of every chunk key, and
+  `corpusVersion` plus the digest of the whole manifest file (comments included) are in the sidecar
+  and report. Compare runs that used the same checked-out manifest.
   `BookChunkingGoldenTest` pins the fixture output byte for byte and runs the command in three
   concurrent child JVMs, requiring identical bytes.
 - Real corpus (opt-in, never in CI):
