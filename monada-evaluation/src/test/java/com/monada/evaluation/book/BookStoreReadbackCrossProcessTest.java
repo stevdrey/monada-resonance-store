@@ -3,6 +3,7 @@ package com.monada.evaluation.book;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -51,7 +52,10 @@ class BookStoreReadbackCrossProcessTest {
                 .redirectOutput(dir.resolve("verify.out").toFile())
                 .redirectError(dir.resolve("verify.err").toFile())
                 .start();
-        assertTrue(process.waitFor(2, TimeUnit.MINUTES), "child JVM timed out");
+        if (!process.waitFor(2, TimeUnit.MINUTES)) {
+            process.destroyForcibly().waitFor(30, TimeUnit.SECONDS);
+            fail("child JVM timed out");
+        }
         String err = Files.readString(dir.resolve("verify.err"), StandardCharsets.UTF_8);
         assertEquals(0, process.exitValue(), err);
 

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -95,6 +96,24 @@ class ExperimentDirectoryGuardTest {
         var e = assertThrows(ExperimentDirectoryGuard.UnsafeDirectoryException.class,
                 () -> ExperimentDirectoryGuard.prepareForSeed(work, List.of()));
         assertTrue(e.getMessage().contains("hard-linked"), e.getMessage());
+    }
+
+    @Test
+    void specialFileBelowTheStoreIsRefused() throws Exception {
+        Path work = ExperimentDirectoryGuard.prepareForSeed(dir.resolve("work"), List.of());
+        Path store = Files.createDirectory(work.resolve(ExperimentDirectoryGuard.STORE_DIR));
+        Path fifo = store.resolve("unused.pipe");
+        Process mkfifo;
+        try {
+            mkfifo = new ProcessBuilder("mkfifo", fifo.toString()).start();
+        } catch (IOException e) {
+            Assumptions.abort("mkfifo is not available here");
+            return;
+        }
+        Assumptions.assumeTrue(mkfifo.waitFor() == 0 && Files.exists(fifo), "mkfifo failed");
+        var e = assertThrows(ExperimentDirectoryGuard.UnsafeDirectoryException.class,
+                () -> ExperimentDirectoryGuard.requireSeeded(work));
+        assertTrue(e.getMessage().contains("special file"), e.getMessage());
     }
 
     @Test

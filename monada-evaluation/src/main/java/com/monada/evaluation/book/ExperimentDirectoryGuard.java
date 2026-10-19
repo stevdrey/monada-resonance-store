@@ -17,7 +17,8 @@ import java.util.stream.Stream;
  * <p>A work directory is accepted when it is either absent (its parent must already exist; only the directory itself
  * is created, together with the {@value #MARKER_FILE} marker) or an existing directory that already carries the
  * marker and holds nothing but the marker and the experiment children {@value #STORE_DIR} and {@value #CHUNKS_DIR}.
- * Symbolic links and hard-linked files are refused anywhere the runner writes to (the work directory and
+ * Only directories and ordinary single-linked files are allowed: symbolic links, hard-linked files and special
+ * files (FIFOs, sockets, devices) are refused anywhere the runner writes to (the work directory and
  * everything below it), and no input file may live inside the work
  * directory. Every check runs before anything is written.
  */
@@ -120,8 +121,15 @@ public final class ExperimentDirectoryGuard {
                 if (Files.isSymbolicLink(entry)) {
                     throw new UnsafeDirectoryException("work directory contains a symbolic link: " + entry);
                 }
+                if (Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS)) {
+                    continue;
+                }
+                // FIFOs, sockets and devices can block or misbehave on read (the tree digest reads every file).
+                if (!Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS)) {
+                    throw new UnsafeDirectoryException("work directory contains a special file: " + entry);
+                }
                 // A hard link shares its inode with a file elsewhere, so appending through it writes outside work.
-                if (Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS) && linkCount(entry) > 1) {
+                if (linkCount(entry) > 1) {
                     throw new UnsafeDirectoryException("work directory contains a hard-linked file: " + entry);
                 }
             }

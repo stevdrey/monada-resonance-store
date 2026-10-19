@@ -48,13 +48,14 @@ The runner never writes into an arbitrary path. `--work` is accepted only in two
 - It is **absent**. Its parent must already exist. Only the directory itself is created, together with the
   `.monada-book-store-experiment` marker.
 - It is an **existing directory carrying that marker**. It may contain only the marker, `store/` and `chunks/`, and
-  no symbolic link or hard-linked file may appear anywhere below `store/` or `chunks/`. Where the file system does not report hard-link counts, an existing
+  only directories and ordinary single-linked files may appear below `store/` or `chunks/` (no symbolic
+  links, hard-linked files, FIFOs, sockets or devices). Where the file system does not report hard-link counts, an existing
   work directory with files is refused (fail closed); a new one still works.
 
 The runner refuses:
 - an unmarked directory, including an empty one, a home directory or a repository;
 - unexpected entries such as `.git`;
-- symbolic links or hard-linked files;
+- symbolic links, hard-linked files or special files;
 - input files located inside the work directory.
 
 All of these checks run before anything is written. `seed` verifies the body against the manifest *before* creating
@@ -76,7 +77,7 @@ Layout:
 | Chunk files | `BookChunkFiles` re-reads `chunks.jsonl` and `sidecar.jsonl` from disk. It checks: the header's `chunksFileSha256` and `chunkCount`; key, ordinal and `sha256` on every sidecar line against its chunk; `duplicateOf` names the first earlier equal chunk. | Yes (source mapping) |
 | Exact inventory | Published lower-level read API: the manifest as parsed by the read-only `StorageIntegrityAuditor` (not `FileManifestStore.load()`, which recreates missing directories), then `FileAtomStore.findAll()` (last-wins). Always uses fresh instances; never `MonadaMemory` and never the seeding instance. An unreadable manifest or atom log is reported as `inventory: UNREADABLE`, next to the audit status, not as a crash. | Yes |
 | Structure | Read-only `StorageIntegrityAuditor`, run first. Status is strict `HEALTHY`: no WARNING, ERROR or FATAL finding. If the auditor itself throws on malformed data, the report shows `AUDIT FAILED (...)` and the run fails instead of crashing. | Yes |
-| Log termination | The atom segment and `indexes/vector-map.idx` must each end with a line feed. The auditor accepts an unterminated last record, but it marks an interrupted write. | Yes |
+| Log termination | The atom segment and `indexes/vector-map.idx` must each end with a line feed. The auditor accepts an unterminated last record, but it marks an interrupted write. A log path that is not a readable regular file also fails this check. | Yes |
 | No hidden writes | SHA-256 tree digest of `store/` before and after verification. | Yes |
 | Self-recall@1 | Public API: `resonate(chunkText).topK(1)` on a reopened instance of a **throwaway copy** of the Store, because opening `MonadaMemory` may recreate missing directories or segment files. Runs only when the inventory is complete and the audit is `HEALTHY`; otherwise, or when the copy cannot be opened (for example a non-default encoding profile), the report says `SKIPPED` and the readback result is unaffected. | **No.** Exploratory ranking only |
 

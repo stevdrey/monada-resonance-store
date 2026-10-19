@@ -384,6 +384,21 @@ class BookStoreReadbackTest {
     }
 
     @Test
+    void logReplacedByADirectoryFailsVerificationWithAReport() throws Exception {
+        Path work = work("index-dir");
+        BookStoreReadback.seed(fixtureResult(), work);
+        Path index = work.resolve("store/indexes/vector-map.idx");
+        Files.delete(index);
+        Files.createDirectory(index);
+
+        BookStoreReadback.Verification v = BookStoreReadback.verify(work);
+
+        assertFalse(v.logsTerminated());
+        assertFalse(v.passed());
+        assertEquals(1, runMain("verify", "--work", work.toString()).exit());
+    }
+
+    @Test
     void alteredPersistedContentIsAFailedHash() throws Exception {
         Path work = work("altered");
         BookChunker.Result result = fixtureResult();

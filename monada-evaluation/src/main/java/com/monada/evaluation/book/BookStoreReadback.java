@@ -297,17 +297,23 @@ public final class BookStoreReadback {
     }
 
     /** Whether the line-oriented logs an import appends to (atom segment, vector index) end with a line feed. */
-    private static boolean logsTerminated(Path store, Manifest manifest) throws IOException {
+    private static boolean logsTerminated(Path store, Manifest manifest) {
         Path root = store.toAbsolutePath().normalize();
         Path segment = manifest == null ? null : root.resolve(manifest.atomSegment()).normalize();
         return (segment == null || !segment.startsWith(root) || !unterminated(segment))
                 && !unterminated(FileFrequencyStore.resolveVectorMapPath(store));
     }
 
-    /** A non-empty file whose last byte is not a line feed; an absent file is not unterminated. */
-    private static boolean unterminated(Path file) throws IOException {
+    /**
+     * A non-empty file whose last byte is not a line feed, or a path that is not a readable regular file; an absent
+     * file is not unterminated.
+     */
+    private static boolean unterminated(Path file) {
         if (Files.notExists(file, LinkOption.NOFOLLOW_LINKS)) {
             return false;
+        }
+        if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
+            return true; // a directory or special file where a log belongs: the audit reports it as corruption
         }
         try (FileChannel channel = FileChannel.open(file, StandardOpenOption.READ)) {
             if (channel.size() == 0) {
@@ -316,6 +322,8 @@ public final class BookStoreReadback {
             ByteBuffer last = ByteBuffer.allocate(1);
             channel.read(last, channel.size() - 1);
             return last.get(0) != '\n';
+        } catch (IOException e) {
+            return true; // unreadable: never certified, and the audit result is still reported
         }
     }
 
