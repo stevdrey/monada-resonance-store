@@ -63,6 +63,8 @@ public final class VerifiedBookSource {
         }
         String corpus = required(props, "corpus");
         String corpusVersion = required(props, "corpusVersion");
+        // Metadata first, so a bad manifest is reported as such even when the body does not match its pins.
+        validateMetadata(corpus, corpusVersion);
         String expectedSha = required(props, "normalized.sha256");
         String expectedSize = required(props, "normalized.sizeBytes");
         if (!expectedSha.matches("[0-9a-f]{64}")) {
@@ -96,12 +98,7 @@ public final class VerifiedBookSource {
     public static VerifiedBookSource ofBytes(String corpus, String corpusVersion, String manifestSha256, byte[] body)
             throws BookInputException {
         Objects.requireNonNull(manifestSha256, "manifestSha256");
-        if (corpus == null || !corpus.matches("[a-z0-9][a-z0-9.-]*")) {
-            throw new BookInputException(Reason.BAD_MANIFEST, "corpus must match [a-z0-9][a-z0-9.-]*: " + corpus);
-        }
-        if (corpusVersion == null || !corpusVersion.matches("[0-9A-Za-z.-]+")) {
-            throw new BookInputException(Reason.BAD_MANIFEST, "corpusVersion is malformed: " + corpusVersion);
-        }
+        validateMetadata(corpus, corpusVersion);
         if (body.length == 0) {
             throw new BookInputException(Reason.INVALID_INPUT, "body is empty");
         }
@@ -130,6 +127,15 @@ public final class VerifiedBookSource {
             throw new BookInputException(Reason.INVALID_INPUT, "body is not Unicode NFC");
         }
         return new VerifiedBookSource(corpus, corpusVersion, manifestSha256, body.length, sha256(body), text);
+    }
+
+    private static void validateMetadata(String corpus, String corpusVersion) throws BookInputException {
+        if (corpus == null || !corpus.matches("[a-z0-9][a-z0-9.-]*")) {
+            throw new BookInputException(Reason.BAD_MANIFEST, "corpus must match [a-z0-9][a-z0-9.-]*: " + corpus);
+        }
+        if (corpusVersion == null || !corpusVersion.matches("[0-9A-Za-z.-]+")) {
+            throw new BookInputException(Reason.BAD_MANIFEST, "corpusVersion is malformed: " + corpusVersion);
+        }
     }
 
     private static String required(Properties props, String key) throws BookInputException {

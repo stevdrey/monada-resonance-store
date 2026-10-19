@@ -9,6 +9,8 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * Serializes a {@link BookChunker.Result} as two JSON Lines files with a fixed field order, minimal RFC 8259 escaping
@@ -27,6 +29,8 @@ public final class BookChunkOutputWriter {
     public static final int SIDECAR_FORMAT_VERSION = 1;
     /** Empty lock file that serializes writers to one output directory; it is left in place on purpose. */
     public static final String LOCK_FILE = ".book-chunking.lock";
+
+    private static final ConcurrentMap<Path, Object> IN_PROCESS_LOCKS = new ConcurrentHashMap<>();
 
     private BookChunkOutputWriter() {
     }
@@ -90,7 +94,8 @@ public final class BookChunkOutputWriter {
      * Writes both files into {@code directory} (created if needed) as one coherent generation:
      *
      * <ol>
-     *   <li>writers to the same directory are serialized by an exclusive lock on {@value #LOCK_FILE};</li>
+     *   <li>writers to the same directory are serialized: threads of one JVM on a monitor per directory, processes
+     *   by an exclusive lock on {@value #LOCK_FILE};</li>
      *   <li>the old sidecar is removed before the chunks file is replaced, so an interrupted run leaves chunks
      *   without a sidecar (visibly incomplete), never new chunks beside an old sidecar;</li>
      *   <li>each file goes through a uniquely named temporary file and an atomic move, the sidecar last, so a
@@ -102,13 +107,17 @@ public final class BookChunkOutputWriter {
         // Absolute, so that an empty path (the working directory) still gives every target a parent directory.
         directory = directory.toAbsolutePath();
         Files.createDirectories(directory);
-        // CREATE without TRUNCATE_EXISTING: opening the lock never changes an existing file's bytes.
-        try (FileChannel lock = FileChannel.open(directory.resolve(LOCK_FILE), StandardOpenOption.CREATE,
-                StandardOpenOption.WRITE);
-             FileLock ignored = lock.lock()) {
-            Files.deleteIfExists(directory.resolve(SIDECAR_FILE));
-            writeAtomically(directory.resolve(CHUNKS_FILE), output.chunks());
-            writeAtomically(directory.resolve(SIDECAR_FILE), output.sidecar());
+        // A file lock is held per JVM, so a second thread would get OverlappingFileLockException instead of waiting:
+        // threads queue on a monitor per real directory first, then take the cross-process file lock.
+        synchronized (IN_PROCESS_LOCKS.computeIfAbsent(directory.toRealPath(), d -> new Object())) {
+            // CREATE without TRUNCATE_EXISTING: opening the lock never changes an existing file's bytes.
+            try (FileChannel lock = FileChannel.open(directory.resolve(LOCK_FILE), StandardOpenOption.CREATE,
+                    StandardOpenOption.WRITE);
+                 FileLock ignored = lock.lock()) {
+                Files.deleteIfExists(directory.resolve(SIDECAR_FILE));
+                writeAtomically(directory.resolve(CHUNKS_FILE), output.chunks());
+                writeAtomically(directory.resolve(SIDECAR_FILE), output.sidecar());
+            }
         }
         return output;
     }

@@ -75,6 +75,18 @@ class VerifiedBookSourceTest {
     }
 
     @Test
+    void badMetadataIsReportedAsABadManifestEvenWhenTheBodyAlsoMismatches() throws Exception {
+        Path file = dir.resolve("body.txt");
+        Files.writeString(file, "Text.\n");
+        Path manifest = dir.resolve("manifest.properties");
+        Files.writeString(manifest, "corpus=Bad Corpus\ncorpusVersion=1\nnormalized.sizeBytes=99\nnormalized.sha256="
+                + "a".repeat(64) + "\n");
+        BookInputException e = assertThrows(BookInputException.class, () -> VerifiedBookSource.load(manifest, file));
+        assertEquals(Reason.BAD_MANIFEST, e.reason());
+        assertTrue(e.getMessage().contains("corpus"), e.getMessage());
+    }
+
+    @Test
     void rejectsInvalidUtf8WithItsByteOffset() {
         BookInputException e = rejectBytes(new byte[] {'a', 'b', (byte) 0xC3, '(', '\n'});
         assertEquals(Reason.INVALID_INPUT, e.reason());

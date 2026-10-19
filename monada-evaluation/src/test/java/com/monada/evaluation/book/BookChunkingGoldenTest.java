@@ -146,6 +146,10 @@ class BookChunkingGoldenTest {
         assertEquals(2, runMain("--manifest", manifest.toString(), "--input", dir.resolve("absent.txt").toString(),
                 "--out", dir.resolve("o").toString()).exit());
 
+        // A NUL is rejected by every platform's path parser: a usage error, not an uncaught exception.
+        assertEquals(2, runMain("--manifest", manifest.toString(), "--input", body.toString(), "--out", "o\0ut")
+                .exit());
+
         Path badManifest = dir.resolve("bad.properties");
         Files.writeString(badManifest, "corpus=c\n");
         assertEquals(2, runMain("--manifest", badManifest.toString(), "--input", body.toString(), "--out",
@@ -240,6 +244,27 @@ class BookChunkingGoldenTest {
         org.junit.jupiter.api.Assertions.assertThrows(IOException.class,
                 () -> BookChunkOutputWriter.write(fixture, out));
         assertArrayEquals(second.chunks(), Files.readAllBytes(out.resolve(BookChunkOutputWriter.CHUNKS_FILE)));
+    }
+
+    @Test
+    void concurrentWritersInOneJvmAreSerializedNotRejected() throws Exception {
+        Path out = Files.createDirectories(dir.resolve("threads"));
+        BookChunker.Result result = fixtureResult(FIXTURE_POLICY);
+        BookChunkOutputWriter.Output expected = BookChunkOutputWriter.render(result);
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(4);
+        try {
+            List<java.util.concurrent.Future<BookChunkOutputWriter.Output>> futures = new ArrayList<>();
+            for (int i = 0; i < 8; i++) {
+                futures.add(pool.submit(() -> BookChunkOutputWriter.write(result, out)));
+            }
+            for (var future : futures) {
+                future.get(2, TimeUnit.MINUTES);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        assertArrayEquals(expected.chunks(), Files.readAllBytes(out.resolve(BookChunkOutputWriter.CHUNKS_FILE)));
+        assertArrayEquals(expected.sidecar(), Files.readAllBytes(out.resolve(BookChunkOutputWriter.SIDECAR_FILE)));
     }
 
     /** {@code --out ""} names the working directory; it must write there rather than fail on a parentless path. */

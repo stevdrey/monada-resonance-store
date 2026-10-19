@@ -3,6 +3,7 @@ package com.monada.evaluation.book;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -50,10 +51,10 @@ public final class BookChunkingMain {
             err.println(USAGE);
             return 2;
         }
-        Path input = Path.of(options.get("--input"));
-        Path manifest = Path.of(options.getOrDefault("--manifest", DEFAULT_MANIFEST));
-        Path outDir = Path.of(options.get("--out"));
         try {
+            Path input = Path.of(options.get("--input"));
+            Path manifest = Path.of(options.getOrDefault("--manifest", DEFAULT_MANIFEST));
+            Path outDir = Path.of(options.get("--out"));
             for (String file : new String[] {BookChunkOutputWriter.CHUNKS_FILE, BookChunkOutputWriter.SIDECAR_FILE}) {
                 Path target = outDir.resolve(file);
                 if (sameFile(target, input) || sameFile(target, manifest)) {
@@ -66,6 +67,9 @@ public final class BookChunkingMain {
             BookChunkOutputWriter.Output output = BookChunkOutputWriter.write(result, outDir);
             out.print(BookChunkingReport.of(result, output).render());
             return 0;
+        } catch (InvalidPathException e) {
+            err.println("invalid path: " + e.getMessage() + "\n" + USAGE);
+            return 2;
         } catch (NoSuchFileException e) {
             err.println("file not found: " + e.getFile() + " (see docs/experiments/book-corpus-v1/README.md,"
                     + " \"Offline acquisition\" and --write-normalized)");
