@@ -16,6 +16,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -143,6 +144,59 @@ class BookStoreReadbackTest {
         BookStoreReadback.Seed again = BookStoreReadback.seed(fixtureResult(), work);
         assertEquals(BookStoreReadback.ImportKind.FOREIGN, again.importKind());
         assertFalse(again.passed());
+    }
+
+    @Test
+    void foreignStoreIsRejectedBeforeAnythingIsAppended() throws Exception {
+        Path work = work("foreign-partial");
+        BookChunker.Result result = fixtureResult();
+        MonadaMemory memory = MonadaMemory.open(work.resolve("store"));
+        memory.remember("an atom that is no chunk of this book");
+        memory.remember(result.chunks().getFirst().text());
+        String digest = BookStoreInventory.treeDigest(work.resolve("store"));
+
+        BookStoreReadback.Seed seed = BookStoreReadback.seed(result, work);
+
+        assertEquals(BookStoreReadback.ImportKind.FOREIGN, seed.importKind());
+        assertEquals(0, seed.acceptedNewAtoms());
+        assertEquals(digest, BookStoreInventory.treeDigest(work.resolve("store")), "a FOREIGN Store is not touched");
+        assertFalse(seed.passed());
+    }
+
+    @Test
+    void corruptManifestIsReportedWithoutCrashingOrWriting() throws Exception {
+        Path work = work("corrupt");
+        BookStoreReadback.seed(fixtureResult(), work);
+        Files.writeString(work.resolve("store/manifest.json"), "{", StandardCharsets.UTF_8);
+        String digest = BookStoreInventory.treeDigest(work.resolve("store"));
+
+        BookStoreReadback.Verification v = BookStoreReadback.verify(work);
+
+        assertNotNull(v.inventoryError());
+        assertFalse(v.audit().healthy());
+        assertFalse(v.passed());
+        assertEquals(9, v.failedHashes().size());
+        assertTrue(BookStoreReadbackReport.render(v).contains("inventory:                     UNREADABLE"));
+        assertEquals(digest, BookStoreInventory.treeDigest(work.resolve("store")));
+        Run cli = runMain("verify", "--work", work.toString());
+        assertEquals(1, cli.exit(), cli.err());
+    }
+
+    @Test
+    void verifyDoesNotRecreateMissingStoreDirectories() throws Exception {
+        Path work = work("missing-dirs");
+        BookStoreReadback.seed(fixtureResult(), work);
+        try (var walk = Files.walk(work.resolve("store/feedback"))) {
+            for (Path p : walk.sorted(Comparator.reverseOrder()).toList()) {
+                Files.delete(p);
+            }
+        }
+
+        BookStoreReadback.Verification v = BookStoreReadback.verify(work);
+
+        assertFalse(Files.exists(work.resolve("store/feedback")), "verify must not recreate directories");
+        assertTrue(v.storeUnchanged());
+        assertEquals(0, v.selfRecallHits(), "recall is skipped on a Store that opening would modify");
     }
 
     @Test

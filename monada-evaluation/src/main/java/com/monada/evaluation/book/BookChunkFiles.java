@@ -77,7 +77,8 @@ public final class BookChunkFiles {
             require(sha256.equals(provenance.get("sha256")), "chunk " + key + " text digest " + sha256
                     + " does not match the sidecar " + provenance.get("sha256"));
             // parseFlat yields the bare token "null" for a JSON null; chunk keys are never the string "null".
-            String duplicateOf = "null".equals(provenance.get("duplicateOf")) ? null : provenance.get("duplicateOf");
+            String rawDuplicateOf = required(provenance, "duplicateOf");
+            String duplicateOf = "null".equals(rawDuplicateOf) ? null : rawDuplicateOf;
             require(Objects.equals(duplicateOf, firstKeyBySha.get(sha256)), "chunk " + key + " duplicateOf "
                     + duplicateOf + " does not name the first earlier chunk with the same text ("
                     + firstKeyBySha.get(sha256) + ")");

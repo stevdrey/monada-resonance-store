@@ -69,6 +69,19 @@ class ExperimentDirectoryGuardTest {
     }
 
     @Test
+    void symbolicLinkBelowTheStoreIsRefused() throws Exception {
+        Path work = ExperimentDirectoryGuard.prepareForSeed(dir.resolve("work"), List.of());
+        Path store = Files.createDirectory(work.resolve(ExperimentDirectoryGuard.STORE_DIR));
+        Path elsewhere = Files.createDirectory(dir.resolve("elsewhere"));
+        Files.createSymbolicLink(store.resolve("atoms"), elsewhere);
+        var e = assertThrows(ExperimentDirectoryGuard.UnsafeDirectoryException.class,
+                () -> ExperimentDirectoryGuard.prepareForSeed(work, List.of()));
+        assertTrue(e.getMessage().contains("atoms"), e.getMessage());
+        assertThrows(ExperimentDirectoryGuard.UnsafeDirectoryException.class,
+                () -> ExperimentDirectoryGuard.requireSeeded(work));
+    }
+
+    @Test
     void inputInsideTheWorkDirectoryIsRefused() throws Exception {
         Path work = ExperimentDirectoryGuard.prepareForSeed(dir.resolve("work"), List.of());
         Path chunks = Files.createDirectory(work.resolve(ExperimentDirectoryGuard.CHUNKS_DIR));

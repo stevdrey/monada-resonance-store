@@ -2,8 +2,8 @@ package com.monada.evaluation.book;
 
 import com.monada.core.KnowledgeAtom;
 import com.monada.storage.FileAtomStore;
-import com.monada.storage.FileManifestStore;
 import com.monada.storage.Manifest;
+import com.monada.storage.audit.StorageIntegrityAuditor;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -20,12 +20,12 @@ import java.util.stream.Stream;
 
 /**
  * An exhaustive, exact-content inventory of the atoms persisted in a Store, read straight from disk through the
- * published lower-level storage API ({@link FileManifestStore} for the atom segment, then
- * {@link FileAtomStore#findAll()}, last-wins per id). It never goes through {@code MonadaMemory}, so no in-memory
+ * published lower-level storage API (the manifest as parsed by the read-only {@link StorageIntegrityAuditor},
+ * then {@link FileAtomStore#findAll()}, last-wins per id). It never goes through {@code MonadaMemory}, so no in-memory
  * cache of the seeding instance can stand in for the persisted bytes.
  *
- * <p>Reading never creates anything: both storage classes create missing directories or files, so the manifest and
- * the atom segment must already exist before either is constructed. {@link #treeDigest(Path)} lets callers prove it.
+ * <p>Reading never creates anything: {@code FileManifestStore.load()} recreates missing directories, so it is not
+ * used, and {@link FileAtomStore} is constructed only once its segment exists. {@link #treeDigest(Path)} lets callers prove it.
  *
  * @param contents         atom id to exact original content, ordered by id
  * @param physicalRecords  atom log records parsed (history duplicates included)
@@ -43,28 +43,43 @@ public record BookStoreInventory(Map<String, String> contents, long physicalReco
         return of(Map.of(), 0);
     }
 
-    /** Reads every atom of the existing Store at {@code storeRoot}; an absent Store directory is {@link #empty()}. */
+    /**
+     * Reads every atom of the existing Store at {@code storeRoot}; an absent Store directory is {@link #empty()}.
+     * The manifest comes from the read-only {@link StorageIntegrityAuditor}, because
+     * {@code FileManifestStore.load()} recreates missing standard directories.
+     */
     public static BookStoreInventory read(Path storeRoot) throws IOException {
         if (Files.notExists(storeRoot, LinkOption.NOFOLLOW_LINKS)) {
             return empty();
         }
-        if (!Files.isRegularFile(storeRoot.resolve("manifest.json"), LinkOption.NOFOLLOW_LINKS)) {
-            throw new IOException("not a Store (no manifest.json): " + storeRoot);
+        return read(storeRoot, new StorageIntegrityAuditor().audit(storeRoot).manifest());
+    }
+
+    /**
+     * Reads every atom of the Store at {@code storeRoot} through the atom segment of {@code manifest} (as parsed by
+     * a read-only audit). A missing manifest or segment, or an unparseable atom log, is an {@link IOException}.
+     */
+    public static BookStoreInventory read(Path storeRoot, Manifest manifest) throws IOException {
+        if (manifest == null) {
+            throw new IOException("store has no readable manifest.json");
         }
-        Manifest manifest = new FileManifestStore(storeRoot).load()
-                .orElseThrow(() -> new IOException("manifest.json disappeared: " + storeRoot));
         Path root = storeRoot.toAbsolutePath().normalize();
         Path segment = root.resolve(manifest.atomSegment()).normalize();
         if (!segment.startsWith(root) || !Files.isRegularFile(segment, LinkOption.NOFOLLOW_LINKS)) {
             throw new IOException("atom segment is missing or outside the Store: " + manifest.atomSegment());
         }
-        FileAtomStore atoms = new FileAtomStore(storeRoot, manifest.atomSegment());
-        List<KnowledgeAtom> all = atoms.findAll();
-        Map<String, String> contents = new TreeMap<>();
-        for (KnowledgeAtom atom : all) {
-            contents.put(atom.id(), atom.content());
+        try {
+            // The segment and its parent exist, so constructing the store creates nothing.
+            FileAtomStore atoms = new FileAtomStore(storeRoot, manifest.atomSegment());
+            List<KnowledgeAtom> all = atoms.findAll();
+            Map<String, String> contents = new TreeMap<>();
+            for (KnowledgeAtom atom : all) {
+                contents.put(atom.id(), atom.content());
+            }
+            return of(contents, atoms.parsedRecordCount());
+        } catch (RuntimeException e) {
+            throw new IOException("atom log is unreadable: " + e.getMessage(), e);
         }
-        return of(contents, atoms.parsedRecordCount());
     }
 
     private static BookStoreInventory of(Map<String, String> contents, long physicalRecords) {

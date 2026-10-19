@@ -17,7 +17,7 @@ import java.util.stream.Stream;
  * <p>A work directory is accepted when it is either absent (its parent must already exist; only the directory itself
  * is created, together with the {@value #MARKER_FILE} marker) or an existing directory that already carries the
  * marker and holds nothing but the marker and the experiment children {@value #STORE_DIR} and {@value #CHUNKS_DIR}.
- * Symbolic links are refused at every level the runner writes to, and no input file may live inside the work
+ * Symbolic links are refused anywhere the runner writes to (the work directory and everything below it), and no input file may live inside the work
  * directory. Every check runs before anything is written.
  */
 public final class ExperimentDirectoryGuard {
@@ -104,6 +104,19 @@ public final class ExperimentDirectoryGuard {
         }
         if (!unexpected.isEmpty()) {
             throw new UnsafeDirectoryException("work directory holds unexpected entries " + unexpected + ": " + work);
+        }
+        // Writes land below store/ and chunks/, so a link anywhere beneath them could redirect a write outside work.
+        for (String child : List.of(STORE_DIR, CHUNKS_DIR)) {
+            Path dir = work.resolve(child);
+            if (Files.notExists(dir, LinkOption.NOFOLLOW_LINKS)) {
+                continue;
+            }
+            try (Stream<Path> walk = Files.walk(dir)) {
+                Path link = walk.filter(Files::isSymbolicLink).findFirst().orElse(null);
+                if (link != null) {
+                    throw new UnsafeDirectoryException("work directory contains a symbolic link: " + link);
+                }
+            }
         }
     }
 

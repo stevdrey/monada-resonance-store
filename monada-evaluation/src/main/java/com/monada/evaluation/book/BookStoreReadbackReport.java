@@ -51,6 +51,9 @@ public final class BookStoreReadbackReport {
         out.append("  attempted chunks:              ").append(v.attemptedChunks()).append('\n');
         out.append("  duplicate-content chunks:      ").append(v.duplicateContentChunks()).append('\n');
         out.append("  expected unique atoms:         ").append(v.expectedUniqueAtoms()).append('\n');
+        if (v.inventoryError() != null) {
+            out.append("  inventory:                     UNREADABLE (").append(v.inventoryError()).append(")\n");
+        }
         out.append("  persisted unique atoms:        ").append(v.inventory().uniqueAtoms()).append('\n');
         out.append("  atom log records:              ").append(v.inventory().physicalRecords()).append('\n');
         out.append("  exact readback (unique):       ").append(v.exactReadback()).append(" / ")

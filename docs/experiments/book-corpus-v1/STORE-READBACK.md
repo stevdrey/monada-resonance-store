@@ -19,11 +19,11 @@ Prerequisite: the verified normalized body. See [README.md](README.md), "Offline
 
 ```bash
 # 1. Clean import into a new, dedicated experiment directory (its parent must exist).
-./gradlew :monada-evaluation:runBookStoreReadback --args="seed --input ~/monada-corpora/book-corpus-v1/body.txt --work ~/monada-corpora/book-store-readback-v1"
+./gradlew :monada-evaluation:runBookStoreReadback --args="seed --input $HOME/monada-corpora/book-corpus-v1/body.txt --work $HOME/monada-corpora/book-store-readback-v1"
 # 2. Second identical import: reported as REPEAT.
-./gradlew :monada-evaluation:runBookStoreReadback --args="seed --input ~/monada-corpora/book-corpus-v1/body.txt --work ~/monada-corpora/book-store-readback-v1"
+./gradlew :monada-evaluation:runBookStoreReadback --args="seed --input $HOME/monada-corpora/book-corpus-v1/body.txt --work $HOME/monada-corpora/book-store-readback-v1"
 # 3. Read-only verification in a separate JVM/process.
-./gradlew :monada-evaluation:runBookStoreReadback --args="verify --work ~/monada-corpora/book-store-readback-v1"
+./gradlew :monada-evaluation:runBookStoreReadback --args="verify --work $HOME/monada-corpora/book-store-readback-v1"
 # 4. Independent structural audit of the same Store.
 ./gradlew :monada-storage:runIntegrityAudit -Dmonada.store.dir=$HOME/monada-corpora/book-store-readback-v1/store
 ```
@@ -48,7 +48,7 @@ The runner never writes into an arbitrary path. `--work` is accepted only in two
 - It is **absent**. Its parent must already exist. Only the directory itself is created, together with the
   `.monada-book-store-experiment` marker.
 - It is an **existing directory carrying that marker**. It may contain only the marker, `store/` and `chunks/`, and
-  none of these may be a symbolic link.
+  no symbolic link may appear anywhere below `store/` or `chunks/`.
 
 The runner refuses:
 - an unmarked directory, including an empty one, a home directory or a repository;
@@ -73,10 +73,10 @@ Layout:
 | --- | --- | --- |
 | Seeding | Public API: `MonadaMemory.open(store).rememberAll(texts)` | — |
 | Chunk files | `BookChunkFiles` re-reads `chunks.jsonl` and `sidecar.jsonl` from disk. It checks: the header's `chunksFileSha256` and `chunkCount`; key, ordinal and `sha256` on every sidecar line against its chunk; `duplicateOf` names the first earlier equal chunk. | Yes (source mapping) |
-| Exact inventory | Published lower-level read API: `FileManifestStore.load()` for the atom segment, then `FileAtomStore.findAll()` (last-wins). Always uses fresh instances; never `MonadaMemory` and never the seeding instance. | Yes |
-| Structure | Read-only `StorageIntegrityAuditor`. Status is strict `HEALTHY`: no WARNING, ERROR or FATAL finding. | Yes |
+| Exact inventory | Published lower-level read API: the manifest as parsed by the read-only `StorageIntegrityAuditor` (not `FileManifestStore.load()`, which recreates missing directories), then `FileAtomStore.findAll()` (last-wins). Always uses fresh instances; never `MonadaMemory` and never the seeding instance. An unreadable manifest or atom log is reported as `inventory: UNREADABLE`, next to the audit status, not as a crash. | Yes |
+| Structure | Read-only `StorageIntegrityAuditor`, run first. Status is strict `HEALTHY`: no WARNING, ERROR or FATAL finding. | Yes |
 | No hidden writes | SHA-256 tree digest of `store/` before and after verification. | Yes |
-| Self-recall@1 | Public API: `resonate(chunkText).topK(1)` on a reopened instance | **No.** Exploratory ranking only |
+| Self-recall@1 | Public API: `resonate(chunkText).topK(1)` on a reopened instance. Runs only on an intact Store (inventory complete, audit `HEALTHY`, standard directories present), because opening `MonadaMemory` recreates missing directories. | **No.** Exploratory ranking only |
 
 The chunk-to-atom mapping uses the content-derived id `KnowledgeAtom.text(text).id()`. Chunk keys and provenance stay
 in the external sidecar because `FileAtomStore` does not persist atom metadata (ADR 0004). See also
@@ -98,7 +98,7 @@ When it fails, the report lists the SHA-256 of every missing or altered unique c
 | `CLEAN` | The Store was empty or absent; every unique chunk was appended. |
 | `REPEAT` | The Store already held exactly this chunk set. `rememberAll` appended nothing, and the Store bytes are unchanged. No space is reclaimed, and none is promised. |
 | `RESUMED` | The Store held a strict subset (an interrupted import); only the missing chunks were appended. |
-| `FOREIGN` | The Store held atoms that are not chunks of this set. The run fails. |
+| `FOREIGN` | The Store held atoms that are not chunks of this set. Nothing is appended (the Store is left untouched) and the run fails. |
 
 ## Results (book-corpus-v1, policy `book-chunking-v1`)
 

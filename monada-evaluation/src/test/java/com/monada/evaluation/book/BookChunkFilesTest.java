@@ -72,6 +72,15 @@ class BookChunkFilesTest {
     }
 
     @Test
+    void sidecarLineWithoutDuplicateOfIsRejected() throws Exception {
+        copyGolden();
+        Path sidecar = dir.resolve(BookChunkOutputWriter.SIDECAR_FILE);
+        String text = Files.readString(sidecar);
+        Files.writeString(sidecar, text.replaceFirst(",\"duplicateOf\":null", ""));
+        assertTrue(rejected().getMessage().contains("missing field duplicateOf"));
+    }
+
+    @Test
     void missingSidecarIsAnIoFailure() throws Exception {
         copy("expected-chunks.jsonl", BookChunkOutputWriter.CHUNKS_FILE);
         assertThrows(IOException.class, () -> BookChunkFiles.load(dir));

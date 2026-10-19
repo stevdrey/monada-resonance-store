@@ -8,6 +8,8 @@ import com.monada.storage.audit.StorageIntegrityReport;
 import com.monada.storage.audit.StorageIntegritySeverity;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -33,6 +35,8 @@ import java.util.TreeSet;
  * the chunk-to-atom mapping is the content-derived id {@code KnowledgeAtom.text(text).id()}.
  */
 public final class BookStoreReadback {
+
+    private static final List<String> STANDARD_DIRS = List.of("atoms", "vectors", "indexes", "feedback");
 
     private BookStoreReadback() {
     }
@@ -82,18 +86,20 @@ public final class BookStoreReadback {
      * @param failedHashes       text digests of unique chunks that are missing or read back different content
      * @param unexpectedAtoms    persisted atoms that are not any chunk of the set
      * @param storeUnchanged     the Store's bytes are identical before and after verification (it wrote nothing)
-     * @param selfRecallHits     unique chunks whose own text recalls their atom at rank 1 (exploratory)
+     * @param selfRecallHits     unique chunks whose own text recalls their atom at rank 1 (exploratory); 0 when the
+     *                           recall was skipped because the Store is not intact
+     * @param inventoryError     why the atom inventory could not be read (the audit report says more), or null
      */
     public record Verification(BookChunkFiles.Loaded chunks, int attemptedChunks, int duplicateContentChunks,
                                int expectedUniqueAtoms, BookStoreInventory inventory, int exactReadback,
                                int resolvedChunks, List<String> failedHashes, int unexpectedAtoms, Audit audit,
-                               boolean storeUnchanged, int selfRecallHits) {
+                               boolean storeUnchanged, int selfRecallHits, String inventoryError) {
         public Verification {
             failedHashes = List.copyOf(failedHashes);
         }
 
         public boolean passed() {
-            return failedHashes.isEmpty() && exactReadback == expectedUniqueAtoms
+            return inventoryError == null && failedHashes.isEmpty() && exactReadback == expectedUniqueAtoms
                     && resolvedChunks == attemptedChunks && inventory.uniqueAtoms() == expectedUniqueAtoms
                     && unexpectedAtoms == 0 && audit.healthy() && storeUnchanged;
         }
@@ -126,17 +132,19 @@ public final class BookStoreReadback {
         BookChunkFiles.Loaded chunks = BookChunkFiles.load(chunkDir);
 
         BookStoreInventory before = BookStoreInventory.read(store);
+        Map<String, String> expected = expectedContents(chunks);
+        if (!expected.keySet().containsAll(before.contents().keySet())) {
+            // Never append to a Store that holds anything but these chunks: reject it untouched.
+            return new Seed(ImportKind.FOREIGN, before, before, true, verify(chunks, store));
+        }
         String digestBefore = BookStoreInventory.treeDigest(store);
         // MonadaMemory has no close(): the seeding instance is dropped here and everything below reads fresh instances.
         MonadaMemory.open(store).rememberAll(chunks.entries().stream().map(BookChunkFiles.Entry::text).toList());
         String digestAfter = BookStoreInventory.treeDigest(store);
         BookStoreInventory after = BookStoreInventory.read(store);
 
-        Map<String, String> expected = expectedContents(chunks);
         ImportKind kind;
-        if (!expected.keySet().containsAll(before.contents().keySet())) {
-            kind = ImportKind.FOREIGN;
-        } else if (before.uniqueAtoms() == 0) {
+        if (before.uniqueAtoms() == 0) {
             kind = ImportKind.CLEAN;
         } else if (before.fingerprint().equals(after.fingerprint())) {
             kind = ImportKind.REPEAT;
@@ -154,8 +162,18 @@ public final class BookStoreReadback {
 
     private static Verification verify(BookChunkFiles.Loaded chunks, Path store) throws IOException {
         String digestBefore = BookStoreInventory.treeDigest(store);
-        BookStoreInventory inventory = BookStoreInventory.read(store);
-        Audit audit = Audit.of(new StorageIntegrityAuditor().audit(store));
+        // Audit first: it tolerates corruption, so a malformed manifest or atom log still yields a report, and its
+        // parsed manifest is the read-only way to find the atom segment.
+        StorageIntegrityReport report = new StorageIntegrityAuditor().audit(store);
+        Audit audit = Audit.of(report);
+        BookStoreInventory inventory;
+        String inventoryError = null;
+        try {
+            inventory = BookStoreInventory.read(store, report.manifest());
+        } catch (IOException e) {
+            inventory = BookStoreInventory.empty();
+            inventoryError = e.getMessage();
+        }
 
         Map<String, String> expected = expectedContents(chunks);
         int exact = 0;
@@ -177,7 +195,10 @@ public final class BookStoreReadback {
                 .count();
 
         int recallHits = 0;
-        if (Objects.equals(inventory.contents().keySet(), expected.keySet()) && !expected.isEmpty()) {
+        // Opening MonadaMemory recreates missing standard directories, so recall runs only on an intact Store.
+        if (Objects.equals(inventory.contents().keySet(), expected.keySet()) && !expected.isEmpty()
+                && audit.healthy() && STANDARD_DIRS.stream().allMatch(d -> Files.isDirectory(store.resolve(d),
+                        LinkOption.NOFOLLOW_LINKS))) {
             MonadaMemory reopened = MonadaMemory.open(store);
             for (Map.Entry<String, String> entry : expected.entrySet()) {
                 MonadaRecall recall = reopened.resonate(entry.getValue()).topK(1).execute();
@@ -191,7 +212,7 @@ public final class BookStoreReadback {
 
         int duplicates = (int) chunks.entries().stream().filter(e -> e.duplicateOf() != null).count();
         return new Verification(chunks, chunks.entries().size(), duplicates, expected.size(), inventory, exact,
-                resolved, new ArrayList<>(failed), unexpected, audit, unchanged, recallHits);
+                resolved, new ArrayList<>(failed), unexpected, audit, unchanged, recallHits, inventoryError);
     }
 
     /** Content-derived atom id to chunk text, one entry per unique text, in first-occurrence order. */
