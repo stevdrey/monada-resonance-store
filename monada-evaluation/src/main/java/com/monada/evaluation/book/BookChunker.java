@@ -2,6 +2,7 @@ package com.monada.evaluation.book;
 
 import com.monada.evaluation.book.BookChunk.SectionKind;
 import java.nio.charset.StandardCharsets;
+import java.text.BreakIterator;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -22,13 +23,14 @@ import java.util.regex.Pattern;
  *   <li>Paragraphs: maximal runs of non-blank lines inside a section, with leading and trailing whitespace excluded.</li>
  *   <li>Packing: whole paragraphs are packed greedily while the span from the first paragraph start to the last
  *   paragraph end fits the core budget. Chunks never cross sections.</li>
- *   <li>Oversized paragraphs are split at the last whitespace within the budget that is not followed by a combining
- *   mark; if there is none, at the last code point boundary that is not followed by a combining mark (never inside a
- *   surrogate pair). A combining sequence longer than the budget is rejected as invalid input.</li>
+ *   <li>Oversized paragraphs are split at the last breakable whitespace (not a no-break space) within the budget
+ *   whose following text starts a grapheme cluster; if there is none, at the last extended grapheme cluster
+ *   boundary (never inside a surrogate pair, combining sequence, ZWJ emoji, flag or emoji modifier). A single cluster
+ *   longer than the budget is rejected as invalid input.</li>
  *   <li>Overlap (when the policy has any): a chunk after the first of its section starts earlier, at the earliest
  *   word start within {@code overlapBytes} that is not before the previous chunk's core start (the previous core
- *   start itself is eligible, so a short previous core can be repeated whole). A combining mark after whitespace is
- *   never a word start.</li>
+ *   start itself is eligible, so a short previous core can be repeated whole). A word start follows breakable
+ *   whitespace and starts a grapheme cluster.</li>
  * </ol>
  *
  * <p>Every chunk text is exactly a substring of the body that starts and ends with non-whitespace. After chunking,
@@ -59,10 +61,9 @@ public final class BookChunker {
         return Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint);
     }
 
-    private static boolean isCombiningMark(int codePoint) {
-        int type = Character.getType(codePoint);
-        return type == Character.NON_SPACING_MARK || type == Character.ENCLOSING_MARK
-                || type == Character.COMBINING_SPACING_MARK;
+    /** Whitespace that may be a split point: everything {@link #isSpace} accepts except the no-break spaces. */
+    static boolean isBreakableSpace(int codePoint) {
+        return isSpace(codePoint) && codePoint != 0x00A0 && codePoint != 0x2007 && codePoint != 0x202F;
     }
 
     /**
@@ -89,11 +90,14 @@ public final class BookChunker {
         private final int[] lineStarts;
         private final List<BookChunk> chunks = new ArrayList<>();
         private final Map<String, String> firstKeyBySha = new HashMap<>();
+        /** Extended grapheme cluster boundaries of {@link #text} (UAX #29, as implemented by this JDK). */
+        private final BreakIterator graphemes = BreakIterator.getCharacterInstance(Locale.ROOT);
 
         Chunking(VerifiedBookSource source, BookChunkingPolicy policy) {
             this.source = Objects.requireNonNull(source, "source");
             this.policy = Objects.requireNonNull(policy, "policy");
             this.text = source.text();
+            graphemes.setText(text);
             int n = text.length();
             byteAt = new long[n + 1];
             codePointAt = new long[n + 1];
@@ -241,8 +245,9 @@ public final class BookChunker {
                 int fit = lastFittingIndex(pos, paragraph.end(), limit);
                 int cut = -1;
                 for (int s = fit; s > pos; s--) {
-                    // A space followed by a combining mark is not a split point: the next piece would start detached.
-                    if (isSpace(text.charAt(s)) && !isCombiningMark(text.codePointAt(skipSpaces(s, paragraph.end())))) {
+                    // A no-break space is never a split point, and neither is a space whose following text does not
+                    // start a grapheme cluster (e.g. a space followed by a combining mark).
+                    if (isBreakableSpace(text.charAt(s)) && isBoundary(skipSpaces(s, paragraph.end()))) {
                         cut = s;
                         break;
                     }
@@ -285,46 +290,55 @@ public final class BookChunker {
         }
 
         /**
-         * A cut at or before {@code fit}: never inside a surrogate pair and never before a combining mark. A base
-         * character whose combining sequence alone exceeds the budget cannot be split that way, so the input is
-         * rejected rather than emitting a chunk that starts with a detached mark.
+         * The last extended grapheme cluster boundary at or before {@code fit} and after {@code from}: never inside a
+         * surrogate pair, a combining sequence, a ZWJ emoji sequence, a regional-indicator flag or an emoji modifier.
+         * A single cluster longer than the budget cannot be split that way, so the input is rejected.
          */
         private int hardCut(int from, int fit) throws BookInputException {
-            int cut = boundaryAtOrBefore(fit);
-            int preferred = cut;
-            while (preferred > from && isCombiningMark(text.codePointAt(preferred))) {
-                preferred = boundaryAtOrBefore(preferred - 1);
+            int cut = isBoundary(fit) ? fit : graphemes.preceding(fit);
+            if (cut > from) {
+                return cut;
             }
-            if (preferred > from) {
-                return preferred;
-            }
-            throw new BookInputException(BookInputException.Reason.INVALID_INPUT, "combining character sequence at"
-                    + " byte offset " + byteAt[from] + " is longer than the chunk budget of " + policy.coreLimitBytes()
-                    + " bytes and cannot be split without detaching a combining mark");
+            throw new BookInputException(BookInputException.Reason.INVALID_INPUT, "grapheme cluster at byte offset "
+                    + byteAt[from] + " is longer than the chunk budget of " + policy.coreLimitBytes()
+                    + " bytes and cannot be split without breaking it");
         }
 
-        private int boundaryAtOrBefore(int index) {
-            if (index > 0 && index < text.length() && Character.isLowSurrogate(text.charAt(index))
-                    && Character.isHighSurrogate(text.charAt(index - 1))) {
-                return index - 1;
-            }
-            return index;
+        private boolean isBoundary(int index) {
+            return graphemes.isBoundary(index);
         }
 
         private int overlapStart(int previousCoreStart, int coreStart) {
             if (policy.overlapBytes() == 0) {
                 return coreStart;
             }
-            // The previous core start is itself a word start (cores begin with non-whitespace), so a short previous
-            // core that fits the budget is repeated whole.
-            for (int s = previousCoreStart; s < coreStart; s++) {
+            // Every index from the lowest one within the overlap budget onward satisfies the byte bound, so the scan
+            // starts there. The previous core start is itself a word start (cores begin with non-whitespace), so a
+            // short previous core that fits the budget is repeated whole.
+            int lowest = lowestIndexWithin(coreStart, policy.overlapBytes());
+            for (int s = Math.max(previousCoreStart, lowest); s < coreStart; s++) {
                 boolean wordStart = s == previousCoreStart || (!isSpace(text.charAt(s))
-                        && isSpace(text.charAt(s - 1)) && !isCombiningMark(text.codePointAt(s)));
-                if (wordStart && bytes(s, coreStart) <= policy.overlapBytes()) {
+                        && isBreakableSpace(text.charAt(s - 1)) && isBoundary(s));
+                if (wordStart) {
                     return s;
                 }
             }
             return coreStart;
+        }
+
+        /** Smallest char index {@code i <= to} with {@code bytes(i, to) <= budget}. */
+        private int lowestIndexWithin(int to, int budget) {
+            int lo = 0;
+            int hi = to;
+            while (lo < hi) {
+                int mid = (lo + hi) >>> 1;
+                if (bytes(mid, to) <= budget) {
+                    hi = mid;
+                } else {
+                    lo = mid + 1;
+                }
+            }
+            return lo;
         }
 
         private long bytes(int start, int end) {
@@ -350,14 +364,17 @@ public final class BookChunker {
 
         /** Bugs, not input errors: every invariant the sidecar promises is re-checked against the body. */
         private void verify(List<Section> sections) {
+            Map<Integer, Section> sectionByOrdinal = new HashMap<>();
+            for (Section section : sections) {
+                sectionByOrdinal.put(section.ordinal(), section);
+            }
             boolean[] covered = new boolean[text.length()];
             long previousStart = -1;
             long previousEnd = -1;
             for (BookChunk chunk : chunks) {
                 int start = indexOfByte(chunk.byteStart());
                 int end = indexOfByte(chunk.byteEnd());
-                Section section = sections.stream().filter(s -> s.ordinal() == chunk.sectionOrdinal()).findFirst()
-                        .orElseThrow();
+                Section section = sectionByOrdinal.get(chunk.sectionOrdinal());
                 if (start < section.start() || end > section.end() || start >= end) {
                     throw new IllegalStateException("chunk " + chunk.key() + " escapes its section");
                 }

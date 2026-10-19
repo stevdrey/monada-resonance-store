@@ -4,8 +4,8 @@ Issue #164 turns the verified `book-corpus-v1` normalized body into bounded, sou
 chunks plus an external, versioned provenance sidecar. It is an offline evaluation step: no storage
 ingestion, ranking or retrieval happens here, and no persisted Store format changes.
 
-Code: `monada-evaluation/src/main/java/com/monada/evaluation/book/` (JDK only, no other module, no
-network). Tests: `monada-evaluation/src/test/java/com/monada/evaluation/book/` with the original
+Code: `monada-evaluation/src/main/java/com/monada/evaluation/book/` (JDK plus
+monada-storage's `JsonStrings` for JSON escaping; no network). Tests: `monada-evaluation/src/test/java/com/monada/evaluation/book/` with the original
 fixture `monada-evaluation/src/test/resources/book-chunking-fixture-v1/`.
 
 ## Input
@@ -42,28 +42,33 @@ Algorithm (pure function of body bytes and policy; no clock, randomness, locale 
 2. **Paragraphs.** Maximal runs of non-blank lines, with leading/trailing whitespace excluded.
 3. **Packing.** Whole paragraphs are packed greedily while the span from the first paragraph start to
    the last paragraph end fits `maxChunkBytes - overlapBytes`. Chunks never cross sections.
-4. **Oversized paragraphs** are split at the last whitespace within the budget that is not followed
-   by a combining mark; without such whitespace,
-   at the last code point boundary not followed by a combining mark, never inside a surrogate pair.
-   A combining sequence longer than the budget cannot be split that way and is rejected (exit 1).
+4. **Oversized paragraphs** are split at the last breakable whitespace within the budget whose
+   following text starts a grapheme cluster; without such whitespace, at the last extended grapheme
+   cluster boundary (UAX #29 via `BreakIterator.getCharacterInstance`), so a cut never falls inside a
+   surrogate pair, combining sequence, ZWJ emoji, regional-indicator flag or emoji modifier. A single
+   grapheme cluster longer than the budget cannot be split that way and is rejected (exit 1).
 5. **Overlap** (only when `overlapBytes > 0`): a chunk after the first of its section starts at the
    earliest word start within `overlapBytes` before its core, never before the previous chunk's core
    start (which is itself eligible, so a short previous core may be repeated whole) and never in
-   another section. A combining mark after whitespace is never a word start.
+   another section. A word start follows breakable whitespace and starts a grapheme cluster.
 6. **Invariants**, re-checked after every run: each chunk is exactly a body substring that starts
-   and ends with non-whitespace, is non-empty, within its section, in source order (starts never decrease, ends strictly increase) and within
+   and ends with non-whitespace, is non-empty, within its section, in source order (starts never
+   decrease, ends strictly increase) and within
    `maxChunkBytes`; every non-whitespace code point of the body is inside at least one chunk. A
    violation is a bug (`IllegalStateException`), never silently dropped text.
 
-"Whitespace" means `Character.isWhitespace` or `Character.isSpaceChar` (so NBSP counts).
+"Whitespace" means `Character.isWhitespace` or `Character.isSpaceChar` (so NBSP counts for trimming,
+blank lines and coverage). The no-break spaces U+00A0, U+2007 and U+202F are never split points or
+word-start separators, so `Mr. Smith` written with an NBSP stays together.
 
 ## Outputs
 
-Both files are JSON Lines, UTF-8, LF, fixed field order, minimal escaping (non-ASCII is raw UTF-8),
-published as one generation: writers to a directory are serialized by a lock on
-`.book-chunking.lock`, the old sidecar is removed before the chunks file is replaced, and each file
-goes through a uniquely named temporary file, forced to disk, and an atomic move, sidecar last. A present sidecar
-therefore always matches the chunks file beside it; chunks without a sidecar mean an interrupted run.
+Both files are JSON Lines, UTF-8, LF, fixed field order, minimal escaping (`JsonStrings.escape`
+plus DEL and U+2028/U+2029 as `\u` escapes; non-ASCII is raw UTF-8),
+published as one generation: writers are serialized (threads of one JVM on a single monitor,
+processes by a lock on `.book-chunking.lock`), the old sidecar is removed before the chunks file is replaced, and each file
+goes through a uniquely named temporary file, forced to disk, and an atomic move, sidecar last. A
+present sidecar therefore always matches the chunks file beside it; chunks without a sidecar mean an interrupted run.
 
 `chunks.jsonl` — one object per chunk:
 

@@ -11,7 +11,7 @@ import java.util.Map;
 
 /**
  * Offline command line chunker for the verified {@code book-corpus-v1} normalized body (policy
- * {@link BookChunkingPolicy#V1}); JDK only, no network:
+ * {@link BookChunkingPolicy#V1}); offline, no network:
  *
  * <pre>
  * ./gradlew :monada-evaluation:runBookChunking --args="--input &lt;body.txt&gt; --out &lt;dir&gt; [--manifest &lt;manifest.properties&gt;]"

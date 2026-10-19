@@ -203,7 +203,7 @@ tasks.register<JavaExec>("runOpenCostBreakdownBenchmark") {
 }
 
 tasks.register<JavaExec>("runBookChunking") {
-    description = "Chunk the verified book-corpus-v1 normalized body into bounded, chapter-aware chunks plus a versioned provenance sidecar (policy book-chunking-v1; offline, JDK only, no network). Options via --args, e.g. --args=\"--input <body.txt> --out <dir>\""
+    description = "Chunk the verified book-corpus-v1 normalized body into bounded, chapter-aware chunks plus a versioned provenance sidecar (policy book-chunking-v1; offline, no network). Options via --args, e.g. --args=\"--input <body.txt> --out <dir>\""
     group = "application"
     mainClass.set("com.monada.evaluation.book.BookChunkingMain")
     classpath = sourceSets["main"].runtimeClasspath

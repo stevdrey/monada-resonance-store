@@ -1,5 +1,6 @@
 package com.monada.evaluation.book;
 
+import com.monada.storage.JsonStrings;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -10,12 +11,10 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Locale;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 
 /**
  * Serializes a {@link BookChunker.Result} as two JSON Lines files with a fixed field order, minimal RFC 8259 escaping
- * (non-ASCII is written as raw UTF-8) and LF line ends, so the same source and policy always give the same bytes.
+ * via {@link JsonStrings} (non-ASCII is written as raw UTF-8) and LF line ends, so the same source and policy always give the same bytes.
  *
  * <ul>
  *   <li>{@value #CHUNKS_FILE}: one {@code {"key","ordinal","text"}} object per chunk.</li>
@@ -31,7 +30,8 @@ public final class BookChunkOutputWriter {
     /** Empty lock file that serializes writers to one output directory; it is left in place on purpose. */
     public static final String LOCK_FILE = ".book-chunking.lock";
 
-    private static final ConcurrentMap<Path, Object> IN_PROCESS_LOCKS = new ConcurrentHashMap<>();
+    /** Serializes writers within this JVM; a file lock is per JVM, so threads must queue before taking it. */
+    private static final Object WRITE_MONITOR = new Object();
 
     private BookChunkOutputWriter() {
     }
@@ -95,8 +95,8 @@ public final class BookChunkOutputWriter {
      * Writes both files into {@code directory} (created if needed) as one coherent generation:
      *
      * <ol>
-     *   <li>writers to the same directory are serialized: threads of one JVM on a monitor per directory, processes
-     *   by an exclusive lock on {@value #LOCK_FILE};</li>
+     *   <li>writers are serialized: threads of one JVM on a single monitor, processes by an exclusive lock on
+     *   {@value #LOCK_FILE} in the output directory;</li>
      *   <li>the old sidecar is removed before the chunks file is replaced, so an interrupted run leaves chunks
      *   without a sidecar (visibly incomplete), never new chunks beside an old sidecar;</li>
      *   <li>each file goes through a uniquely named temporary file, forced to disk, and an atomic move, the sidecar
@@ -109,8 +109,8 @@ public final class BookChunkOutputWriter {
         directory = directory.toAbsolutePath();
         Files.createDirectories(directory);
         // A file lock is held per JVM, so a second thread would get OverlappingFileLockException instead of waiting:
-        // threads queue on a monitor per real directory first, then take the cross-process file lock.
-        synchronized (IN_PROCESS_LOCKS.computeIfAbsent(directory.toRealPath(), d -> new Object())) {
+        // threads queue on one monitor first (writes are rare and short), then take the cross-process file lock.
+        synchronized (WRITE_MONITOR) {
             // CREATE without TRUNCATE_EXISTING: opening the lock never changes an existing file's bytes.
             try (FileChannel lock = FileChannel.open(directory.resolve(LOCK_FILE), StandardOpenOption.CREATE,
                     StandardOpenOption.WRITE);
@@ -142,26 +142,22 @@ public final class BookChunkOutputWriter {
         }
     }
 
+    /**
+     * A JSON string literal. Escaping is {@link JsonStrings#escape}; the sidecar format v1 additionally pins DEL and
+     * U+2028/U+2029 as JSON unicode escapes so a line never contains a raw line or paragraph separator.
+     */
     static String string(String value) {
         if (value == null) {
             return "null";
         }
-        StringBuilder out = new StringBuilder(value.length() + 2).append('"');
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            switch (c) {
-                case '"' -> out.append("\\\"");
-                case '\\' -> out.append("\\\\");
-                case '\n' -> out.append("\\n");
-                case '\t' -> out.append("\\t");
-                case '\r' -> out.append("\\r");
-                default -> {
-                    if (c < 0x20 || c == 0x7F || c == 0x2028 || c == 0x2029) {
-                        out.append(String.format(Locale.ROOT, "\\u%04x", (int) c));
-                    } else {
-                        out.append(c);
-                    }
-                }
+        String escaped = JsonStrings.escape(value);
+        StringBuilder out = new StringBuilder(escaped.length() + 2).append('"');
+        for (int i = 0; i < escaped.length(); i++) {
+            char c = escaped.charAt(i);
+            if (c == 0x7F || c == 0x2028 || c == 0x2029) {
+                out.append(String.format(Locale.ROOT, "\\u%04x", (int) c));
+            } else {
+                out.append(c);
             }
         }
         return out.append('"').toString();

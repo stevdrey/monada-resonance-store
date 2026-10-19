@@ -151,6 +151,50 @@ class BookChunkerTest {
     }
 
     @Test
+    void hardSplitKeepsFlagsAndSkinToneModifiersWhole() throws Exception {
+        String flag = "\uD83C\uDDFA\uD83C\uDDF8"; // two regional indicators, 8 bytes, one cluster
+        String thumb = "\uD83D\uDC4D\uD83C\uDFFD"; // emoji plus skin-tone modifier, 8 bytes, one cluster
+        for (String cluster : List.of(flag, thumb)) {
+            // 12 + 4 bytes fit a 16-byte piece, but that code point boundary is inside the cluster.
+            String body = "x".repeat(12) + cluster + "yyy\n";
+            BookChunker.Result result = chunk(body, policy(16, 0));
+            assertEquals(List.of("x".repeat(12), cluster + "yyy"), texts(result));
+            assertResolvable(body, result);
+        }
+    }
+
+    @Test
+    void hardSplitKeepsZwjEmojiSequencesWhole() throws Exception {
+        String family = "\uD83D\uDC69\u200D\uD83D\uDC69\u200D\uD83D\uDC67"; // 18 bytes, one cluster
+        String body = "x".repeat(12) + family + "yyy\n";
+        BookChunker.Result result = chunk(body, policy(24, 0));
+        assertEquals(List.of("x".repeat(12), family + "yyy"), texts(result));
+        assertResolvable(body, result);
+    }
+
+    @Test
+    void graphemeClusterLongerThanTheBudgetIsRejected() {
+        String family = "\uD83D\uDC69\u200D\uD83D\uDC69\u200D\uD83D\uDC67"; // 18 bytes > 16
+        BookInputException e = assertThrows(BookInputException.class, () -> chunk(family + "\n", policy(16, 0)));
+        assertEquals(BookInputException.Reason.INVALID_INPUT, e.reason());
+    }
+
+    @Test
+    void oversizedParagraphNeverSplitsAtANoBreakSpace() throws Exception {
+        String body = "aaaa Mr.\u00A0Smithsonian bb\n";
+        BookChunker.Result result = chunk(body, policy(20, 0));
+        assertEquals(List.of("aaaa", "Mr.\u00A0Smithsonian bb"), texts(result));
+        assertResolvable(body, result);
+    }
+
+    @Test
+    void overlapNeverStartsAfterANoBreakSpace() throws Exception {
+        String body = "xxxxxxxxxxx\u00A0yy\n\nzzzzzzzzzzzzzzz\n";
+        BookChunker.Result result = chunk(body, policy(24, 8));
+        assertEquals(List.of("xxxxxxxxxxx\u00A0yy", "zzzzzzzzzzzzzzz"), texts(result));
+    }
+
+    @Test
     void combiningSequenceLongerThanTheBudgetIsRejectedNotDetached() {
         // "q" plus nine U+0307 marks is 19 bytes, NFC-stable, and cannot fit a 16-byte piece in one sequence.
         String body = "q" + "\u0307".repeat(9) + "\n";
