@@ -134,6 +134,23 @@ class BookChunkerTest {
     }
 
     @Test
+    void whitespaceSplitNeverStartsAPieceWithACombiningMark() throws Exception {
+        // A space followed by U+0301 stays decomposed under NFC; cutting at that space would detach the mark.
+        String body = "aaaaaaaa bbbbbbb \u0301ccc\n";
+        BookChunker.Result result = chunk(body, policy(16, 0));
+        assertEquals(List.of("aaaaaaaa", "bbbbbbb \u0301ccc"), texts(result));
+        assertResolvable(body, result);
+    }
+
+    @Test
+    void overlapNeverStartsAtACombiningMark() throws Exception {
+        String body = "xxxxxxxxxx \u0301yy\n\nzzzzzzzzzzzzzzz\n";
+        BookChunker.Result result = chunk(body, policy(24, 8));
+        assertEquals(List.of("xxxxxxxxxx \u0301yy", "zzzzzzzzzzzzzzz"), texts(result));
+        assertResolvable(body, result);
+    }
+
+    @Test
     void combiningSequenceLongerThanTheBudgetIsRejectedNotDetached() {
         // "q" plus nine U+0307 marks is 19 bytes, NFC-stable, and cannot fit a 16-byte piece in one sequence.
         String body = "q" + "\u0307".repeat(9) + "\n";

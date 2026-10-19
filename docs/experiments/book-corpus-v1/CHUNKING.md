@@ -42,13 +42,14 @@ Algorithm (pure function of body bytes and policy; no clock, randomness, locale 
 2. **Paragraphs.** Maximal runs of non-blank lines, with leading/trailing whitespace excluded.
 3. **Packing.** Whole paragraphs are packed greedily while the span from the first paragraph start to
    the last paragraph end fits `maxChunkBytes - overlapBytes`. Chunks never cross sections.
-4. **Oversized paragraphs** are split at the last whitespace within the budget; without whitespace,
+4. **Oversized paragraphs** are split at the last whitespace within the budget that is not followed
+   by a combining mark; without such whitespace,
    at the last code point boundary not followed by a combining mark, never inside a surrogate pair.
    A combining sequence longer than the budget cannot be split that way and is rejected (exit 1).
 5. **Overlap** (only when `overlapBytes > 0`): a chunk after the first of its section starts at the
    earliest word start within `overlapBytes` before its core, never before the previous chunk's core
    start (which is itself eligible, so a short previous core may be repeated whole) and never in
-   another section.
+   another section. A combining mark after whitespace is never a word start.
 6. **Invariants**, re-checked after every run: each chunk is exactly a body substring that starts
    and ends with non-whitespace, is non-empty, within its section, in source order (starts never decrease, ends strictly increase) and within
    `maxChunkBytes`; every non-whitespace code point of the body is inside at least one chunk. A
@@ -61,7 +62,7 @@ Algorithm (pure function of body bytes and policy; no clock, randomness, locale 
 Both files are JSON Lines, UTF-8, LF, fixed field order, minimal escaping (non-ASCII is raw UTF-8),
 published as one generation: writers to a directory are serialized by a lock on
 `.book-chunking.lock`, the old sidecar is removed before the chunks file is replaced, and each file
-goes through a uniquely named temporary file and an atomic move, sidecar last. A present sidecar
+goes through a uniquely named temporary file, forced to disk, and an atomic move, sidecar last. A present sidecar
 therefore always matches the chunks file beside it; chunks without a sidecar mean an interrupted run.
 
 `chunks.jsonl` — one object per chunk:
@@ -115,7 +116,8 @@ java docs/experiments/book-corpus-v1/VerifyBookCorpus.java --write-normalized ~/
 ```
 
 `--manifest` defaults to `docs/experiments/book-corpus-v1/manifest.properties`. Exit `0` success,
-`1` body is not the verified normalized text, `2` usage error, missing file, bad manifest, an output
+`1` body is not the verified normalized text or cannot be chunked under the policy (a combining
+sequence longer than the chunk budget), `2` usage error, missing file, bad manifest, an output
 path that would overwrite an input, or an I/O failure. Keep outputs outside the repository: they
 contain book text.
 

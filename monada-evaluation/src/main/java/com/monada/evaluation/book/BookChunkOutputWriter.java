@@ -1,6 +1,7 @@
 package com.monada.evaluation.book;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
@@ -98,8 +99,8 @@ public final class BookChunkOutputWriter {
      *   by an exclusive lock on {@value #LOCK_FILE};</li>
      *   <li>the old sidecar is removed before the chunks file is replaced, so an interrupted run leaves chunks
      *   without a sidecar (visibly incomplete), never new chunks beside an old sidecar;</li>
-     *   <li>each file goes through a uniquely named temporary file and an atomic move, the sidecar last, so a
-     *   present sidecar always describes the chunks file next to it by digest.</li>
+     *   <li>each file goes through a uniquely named temporary file, forced to disk, and an atomic move, the sidecar
+     *   last, so a present sidecar always describes the chunks file next to it by digest.</li>
      * </ol>
      */
     public static Output write(BookChunker.Result result, Path directory) throws IOException {
@@ -127,7 +128,14 @@ public final class BookChunkOutputWriter {
         // input file, unrelated file or concurrent writer can be overwritten through a fixed temporary name.
         Path temp = Files.createTempFile(target.getParent(), "." + target.getFileName() + ".", ".tmp");
         try {
-            Files.write(temp, bytes);
+            // Force the data to disk before the rename, so a crash cannot leave a renamed but empty or partial file.
+            try (FileChannel channel = FileChannel.open(temp, StandardOpenOption.WRITE)) {
+                ByteBuffer buffer = ByteBuffer.wrap(bytes);
+                while (buffer.hasRemaining()) {
+                    channel.write(buffer);
+                }
+                channel.force(true);
+            }
             Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } finally {
             Files.deleteIfExists(temp);

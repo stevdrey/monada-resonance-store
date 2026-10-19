@@ -22,12 +22,13 @@ import java.util.regex.Pattern;
  *   <li>Paragraphs: maximal runs of non-blank lines inside a section, with leading and trailing whitespace excluded.</li>
  *   <li>Packing: whole paragraphs are packed greedily while the span from the first paragraph start to the last
  *   paragraph end fits the core budget. Chunks never cross sections.</li>
- *   <li>Oversized paragraphs are split at the last whitespace within the budget; if there is none, at the last code
- *   point boundary that is not followed by a combining mark (never inside a surrogate pair). A combining sequence
- *   longer than the budget is rejected as invalid input.</li>
+ *   <li>Oversized paragraphs are split at the last whitespace within the budget that is not followed by a combining
+ *   mark; if there is none, at the last code point boundary that is not followed by a combining mark (never inside a
+ *   surrogate pair). A combining sequence longer than the budget is rejected as invalid input.</li>
  *   <li>Overlap (when the policy has any): a chunk after the first of its section starts earlier, at the earliest
  *   word start within {@code overlapBytes} that is not before the previous chunk's core start (the previous core
- *   start itself is eligible, so a short previous core can be repeated whole).</li>
+ *   start itself is eligible, so a short previous core can be repeated whole). A combining mark after whitespace is
+ *   never a word start.</li>
  * </ol>
  *
  * <p>Every chunk text is exactly a substring of the body that starts and ends with non-whitespace. After chunking,
@@ -240,7 +241,8 @@ public final class BookChunker {
                 int fit = lastFittingIndex(pos, paragraph.end(), limit);
                 int cut = -1;
                 for (int s = fit; s > pos; s--) {
-                    if (isSpace(text.charAt(s))) {
+                    // A space followed by a combining mark is not a split point: the next piece would start detached.
+                    if (isSpace(text.charAt(s)) && !isCombiningMark(text.codePointAt(skipSpaces(s, paragraph.end())))) {
                         cut = s;
                         break;
                     }
@@ -253,12 +255,18 @@ public final class BookChunker {
                     throw new IllegalStateException("empty piece while splitting at char " + pos);
                 }
                 pieces.add(piece);
-                pos = cut;
-                while (pos < paragraph.end() && isSpace(text.charAt(pos))) {
-                    pos++;
-                }
+                pos = skipSpaces(cut, paragraph.end());
             }
             return pieces;
+        }
+
+        /** First index at or after {@code from} (and before {@code end}) that is not whitespace, or {@code end}. */
+        private int skipSpaces(int from, int end) {
+            int pos = from;
+            while (pos < end && isSpace(text.charAt(pos))) {
+                pos++;
+            }
+            return pos;
         }
 
         /** Largest char index {@code i} in {@code [from, to]} with {@code bytes(from, i) <= limit}. */
@@ -310,8 +318,8 @@ public final class BookChunker {
             // The previous core start is itself a word start (cores begin with non-whitespace), so a short previous
             // core that fits the budget is repeated whole.
             for (int s = previousCoreStart; s < coreStart; s++) {
-                boolean wordStart = s == previousCoreStart
-                        || (!isSpace(text.charAt(s)) && isSpace(text.charAt(s - 1)));
+                boolean wordStart = s == previousCoreStart || (!isSpace(text.charAt(s))
+                        && isSpace(text.charAt(s - 1)) && !isCombiningMark(text.codePointAt(s)));
                 if (wordStart && bytes(s, coreStart) <= policy.overlapBytes()) {
                     return s;
                 }

@@ -19,7 +19,8 @@ import java.util.Map;
  *
  * <p>The manifest defaults to {@value #DEFAULT_MANIFEST} (relative to the working directory, the repository root
  * under Gradle). Writes {@code chunks.jsonl} and {@code sidecar.jsonl} into the output directory and prints a
- * deterministic report. Exit 0 on success, 1 when the body is not the verified normalized text, 2 on a usage error,
+ * deterministic report. Exit 0 on success, 1 when the body is not the verified normalized text or cannot be chunked
+ * under the policy (a combining character sequence longer than the chunk budget), 2 on a usage error,
  * a missing file, a bad manifest, an output path that would overwrite an input, or an I/O failure.
  */
 public final class BookChunkingMain {
