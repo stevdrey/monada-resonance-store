@@ -11,12 +11,16 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalInt;
 import java.util.TreeSet;
+import java.util.stream.Stream;
 
 /**
  * Seeds a disposable Store from verified book chunk files and proves, from disk, that every unique chunk is persisted
@@ -36,8 +40,6 @@ import java.util.TreeSet;
  */
 public final class BookStoreReadback {
 
-    private static final List<String> STANDARD_DIRS = List.of("atoms", "vectors", "indexes", "feedback");
-
     private BookStoreReadback() {
     }
 
@@ -49,8 +51,14 @@ public final class BookStoreReadback {
         REPEAT,
         /** The Store held a subset of these chunks (an interrupted import); the missing ones were appended. */
         RESUMED,
-        /** The Store held atoms that are not chunks of this set; the run is not a valid readback experiment. */
-        FOREIGN
+        /** The Store held atoms that are not chunks of this set; nothing was appended and the run fails. */
+        FOREIGN,
+        /**
+         * The existing Store was not structurally {@code HEALTHY} (for example an orphan vector left by an import
+         * interrupted between vector and atom append); nothing was appended and the run fails. Seed a new work
+         * directory instead: appending would duplicate vector index entries.
+         */
+        DAMAGED
     }
 
     /** The structural audit, reduced to deterministic fields (no paths). */
@@ -86,14 +94,15 @@ public final class BookStoreReadback {
      * @param failedHashes       text digests of unique chunks that are missing or read back different content
      * @param unexpectedAtoms    persisted atoms that are not any chunk of the set
      * @param storeUnchanged     the Store's bytes are identical before and after verification (it wrote nothing)
-     * @param selfRecallHits     unique chunks whose own text recalls their atom at rank 1 (exploratory); 0 when the
-     *                           recall was skipped because the Store is not intact
+     * @param selfRecallHits     unique chunks whose own text recalls their atom at rank 1 (exploratory); empty when
+     *                           recall was skipped because the inventory is incomplete or the audit not HEALTHY
      * @param inventoryError     why the atom inventory could not be read (the audit report says more), or null
      */
     public record Verification(BookChunkFiles.Loaded chunks, int attemptedChunks, int duplicateContentChunks,
                                int expectedUniqueAtoms, BookStoreInventory inventory, int exactReadback,
                                int resolvedChunks, List<String> failedHashes, int unexpectedAtoms, Audit audit,
-                               boolean storeUnchanged, int selfRecallHits, String inventoryError) {
+                               boolean storeUnchanged, OptionalInt selfRecallHits,
+                               String inventoryError) {
         public Verification {
             failedHashes = List.copyOf(failedHashes);
         }
@@ -116,7 +125,8 @@ public final class BookStoreReadback {
         }
 
         public boolean passed() {
-            return importKind != ImportKind.FOREIGN && verification.passed();
+            return importKind != ImportKind.FOREIGN && importKind != ImportKind.DAMAGED
+                    && (importKind != ImportKind.REPEAT || storeBytesUnchanged) && verification.passed();
         }
     }
 
@@ -131,6 +141,17 @@ public final class BookStoreReadback {
         BookChunkOutputWriter.write(result, chunkDir);
         BookChunkFiles.Loaded chunks = BookChunkFiles.load(chunkDir);
 
+        if (Files.exists(store, LinkOption.NOFOLLOW_LINKS)
+                && !Audit.of(new StorageIntegrityAuditor().audit(store)).healthy()) {
+            // Never append to a damaged Store: an orphan vector from an interrupted import would get a duplicate.
+            BookStoreInventory before;
+            try {
+                before = BookStoreInventory.read(store);
+            } catch (IOException e) {
+                before = BookStoreInventory.empty();
+            }
+            return new Seed(ImportKind.DAMAGED, before, before, true, verify(chunks, store));
+        }
         BookStoreInventory before = BookStoreInventory.read(store);
         Map<String, String> expected = expectedContents(chunks);
         if (!expected.keySet().containsAll(before.contents().keySet())) {
@@ -194,25 +215,47 @@ public final class BookStoreReadback {
         int unexpected = (int) inventory.contents().keySet().stream().filter(id -> !expected.containsKey(id))
                 .count();
 
-        int recallHits = 0;
-        // Opening MonadaMemory recreates missing standard directories, so recall runs only on an intact Store.
+        OptionalInt recallHits = OptionalInt.empty();
         if (Objects.equals(inventory.contents().keySet(), expected.keySet()) && !expected.isEmpty()
-                && audit.healthy() && STANDARD_DIRS.stream().allMatch(d -> Files.isDirectory(store.resolve(d),
-                        LinkOption.NOFOLLOW_LINKS))) {
-            MonadaMemory reopened = MonadaMemory.open(store);
-            for (Map.Entry<String, String> entry : expected.entrySet()) {
-                MonadaRecall recall = reopened.resonate(entry.getValue()).topK(1).execute();
-                if (!recall.results().isEmpty()
-                        && recall.results().getFirst().atom().id().equals(entry.getKey())) {
-                    recallHits++;
-                }
-            }
+                && audit.healthy()) {
+            recallHits = OptionalInt.of(selfRecallOnCopy(store, expected));
         }
         boolean unchanged = digestBefore.equals(BookStoreInventory.treeDigest(store));
 
         int duplicates = (int) chunks.entries().stream().filter(e -> e.duplicateOf() != null).count();
         return new Verification(chunks, chunks.entries().size(), duplicates, expected.size(), inventory, exact,
                 resolved, new ArrayList<>(failed), unexpected, audit, unchanged, recallHits, inventoryError);
+    }
+
+    /**
+     * Exploratory self-recall@1, run on a throwaway copy of the Store: opening {@code MonadaMemory} may create
+     * missing directories or segment files, and verification must never change the Store it checks.
+     */
+    private static int selfRecallOnCopy(Path store, Map<String, String> expected) throws IOException {
+        Path copy = Files.createTempDirectory("monada-book-recall-");
+        try {
+            try (Stream<Path> walk = Files.walk(store)) {
+                for (Path source : walk.filter(p -> !p.equals(store)).toList()) {
+                    Files.copy(source, copy.resolve(store.relativize(source).toString()),
+                            StandardCopyOption.REPLACE_EXISTING, LinkOption.NOFOLLOW_LINKS);
+                }
+            }
+            MonadaMemory reopened = MonadaMemory.open(copy);
+            int hits = 0;
+            for (Map.Entry<String, String> entry : expected.entrySet()) {
+                MonadaRecall recall = reopened.resonate(entry.getValue()).topK(1).execute();
+                if (!recall.results().isEmpty() && recall.results().getFirst().atom().id().equals(entry.getKey())) {
+                    hits++;
+                }
+            }
+            return hits;
+        } finally {
+            try (Stream<Path> walk = Files.walk(copy)) {
+                for (Path path : walk.sorted(Comparator.reverseOrder()).toList()) {
+                    Files.deleteIfExists(path);
+                }
+            }
+        }
     }
 
     /** Content-derived atom id to chunk text, one entry per unique text, in first-occurrence order. */

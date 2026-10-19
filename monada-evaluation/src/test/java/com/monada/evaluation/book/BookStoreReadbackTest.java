@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
+import java.util.OptionalInt;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -196,7 +197,45 @@ class BookStoreReadbackTest {
 
         assertFalse(Files.exists(work.resolve("store/feedback")), "verify must not recreate directories");
         assertTrue(v.storeUnchanged());
-        assertEquals(0, v.selfRecallHits(), "recall is skipped on a Store that opening would modify");
+        assertEquals(OptionalInt.of(9), v.selfRecallHits(), "recall runs on a throwaway copy");
+    }
+
+    @Test
+    void verifyDoesNotRecreateAMissingFeedbackLogButARepeatSeedFailsWhenItDoes() throws Exception {
+        Path work = work("missing-log");
+        BookStoreReadback.seed(fixtureResult(), work);
+        Path log = work.resolve("store/feedback/feedback-000001.log");
+        Files.delete(log);
+        String digest = BookStoreInventory.treeDigest(work.resolve("store"));
+
+        BookStoreReadback.Verification v = BookStoreReadback.verify(work);
+        assertEquals(digest, BookStoreInventory.treeDigest(work.resolve("store")));
+        assertTrue(v.passed());
+
+        BookStoreReadback.Seed repeat = BookStoreReadback.seed(fixtureResult(), work);
+        assertEquals(BookStoreReadback.ImportKind.REPEAT, repeat.importKind());
+        // Opening MonadaMemory recreates the missing feedback log, so the Store bytes changed.
+        assertFalse(repeat.storeBytesUnchanged());
+        assertFalse(repeat.passed(), "a REPEAT that changed Store bytes must fail");
+        assertTrue(BookStoreReadbackReport.render(repeat).contains("FAIL: a repeat import must not change"));
+    }
+
+    @Test
+    void storeWithAnOrphanVectorIsDamagedAndNotAppendedTo() throws Exception {
+        Path work = work("orphan");
+        BookStoreReadback.seed(fixtureResult(), work);
+        // Simulate an import interrupted after the vector append but before the atom append.
+        Path atomLog = work.resolve("store/atoms/segment-000001.log");
+        List<String> lines = Files.readAllLines(atomLog, StandardCharsets.UTF_8);
+        Files.write(atomLog, lines.subList(0, lines.size() - 1), StandardCharsets.UTF_8);
+        String digest = BookStoreInventory.treeDigest(work.resolve("store"));
+
+        BookStoreReadback.Seed seed = BookStoreReadback.seed(fixtureResult(), work);
+
+        assertEquals(BookStoreReadback.ImportKind.DAMAGED, seed.importKind());
+        assertEquals(digest, BookStoreInventory.treeDigest(work.resolve("store")), "a DAMAGED Store is not touched");
+        assertFalse(seed.passed());
+        assertTrue(BookStoreReadbackReport.render(seed).contains("SKIPPED"));
     }
 
     @Test

@@ -22,7 +22,10 @@ public final class BookStoreReadbackReport {
                 .append(seed.after().physicalRecords()).append('\n');
         out.append("  store bytes unchanged:         ").append(yesNo(seed.storeBytesUnchanged()));
         if (seed.importKind() == BookStoreReadback.ImportKind.REPEAT) {
-            out.append(" (a repeat import appends nothing and reclaims nothing)");
+            out.append(seed.storeBytesUnchanged() ? " (a repeat import appends nothing and reclaims nothing)"
+                    : " (FAIL: a repeat import must not change the Store)");
+        } else if (seed.importKind() == BookStoreReadback.ImportKind.DAMAGED) {
+            out.append(" (the existing Store is not HEALTHY; nothing appended, seed a new work directory)");
         }
         out.append('\n');
         out.append("  fingerprint before:            ").append(seed.before().fingerprint()).append('\n');
@@ -68,9 +71,13 @@ public final class BookStoreReadbackReport {
                 .append(String.format(Locale.ROOT, " (info=%d, warning=%d, error=%d, fatal=%d)", audit.info(),
                         audit.warnings(), audit.errors(), audit.fatal())).append('\n');
         out.append("  verification wrote nothing:    ").append(yesNo(v.storeUnchanged())).append('\n');
-        out.append("  self-recall@1 (exploratory):   ").append(v.selfRecallHits()).append(" / ")
-                .append(v.expectedUniqueAtoms())
-                .append(" (ranking only; not readback evidence)\n");
+        out.append("  self-recall@1 (exploratory):   ");
+        if (v.selfRecallHits().isPresent()) {
+            out.append(v.selfRecallHits().getAsInt()).append(" / ").append(v.expectedUniqueAtoms())
+                    .append(" (ranking only; not readback evidence)\n");
+        } else {
+            out.append("SKIPPED (inventory incomplete or audit not HEALTHY)\n");
+        }
     }
 
     private static String yesNo(boolean value) {
