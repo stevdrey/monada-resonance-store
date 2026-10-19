@@ -5,11 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -103,13 +103,11 @@ class ExperimentDirectoryGuardTest {
         Path work = ExperimentDirectoryGuard.prepareForSeed(dir.resolve("work"), List.of());
         Path store = Files.createDirectory(work.resolve(ExperimentDirectoryGuard.STORE_DIR));
         Path fifo = store.resolve("unused.pipe");
-        Process mkfifo;
-        try {
-            mkfifo = new ProcessBuilder("mkfifo", fifo.toString()).start();
-        } catch (IOException e) {
-            Assumptions.abort("mkfifo is not available here");
-            return;
-        }
+        // An absolute executable path, never one resolved through PATH.
+        Path executable = Stream.of("/usr/bin/mkfifo", "/bin/mkfifo").map(Path::of)
+                .filter(Files::isExecutable).findFirst().orElse(null);
+        Assumptions.assumeTrue(executable != null, "mkfifo is not available here");
+        Process mkfifo = new ProcessBuilder(executable.toString(), fifo.toString()).start();
         Assumptions.assumeTrue(mkfifo.waitFor() == 0 && Files.exists(fifo), "mkfifo failed");
         var e = assertThrows(ExperimentDirectoryGuard.UnsafeDirectoryException.class,
                 () -> ExperimentDirectoryGuard.requireSeeded(work));
