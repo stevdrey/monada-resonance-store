@@ -3,15 +3,19 @@ package com.monada.evaluation.book;
 import com.monada.api.MonadaMemory;
 import com.monada.core.KnowledgeAtom;
 import com.monada.core.MonadaRecall;
+import com.monada.storage.Manifest;
 import com.monada.storage.audit.StorageIntegrityAuditor;
 import com.monada.storage.audit.StorageIntegrityReport;
 import com.monada.storage.audit.StorageIntegritySeverity;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -55,14 +59,21 @@ public final class BookStoreReadback {
         FOREIGN,
         /**
          * The existing Store was not structurally {@code HEALTHY} (for example an orphan vector left by an import
-         * interrupted between vector and atom append); nothing was appended and the run fails. Seed a new work
-         * directory instead: appending would duplicate vector index entries.
+         * interrupted between vector and atom append) or its atom log ends without a line feed (a record whose
+         * terminator was lost); nothing was appended and the run fails. Seed a new work directory instead:
+         * appending would duplicate vector index entries or concatenate onto the unterminated record.
          */
         DAMAGED
     }
 
     /** The structural audit, reduced to deterministic fields (no paths). */
     public record Audit(String status, long info, long warnings, long errors, long fatal) {
+        /** The auditor itself threw on data it could not handle: reported as one fatal finding. */
+        static Audit failed(RuntimeException e) {
+            return new Audit("AUDIT FAILED (" + e.getClass().getSimpleName() + ": " + e.getMessage() + ")", 0, 0, 0,
+                    1);
+        }
+
         static Audit of(StorageIntegrityReport report) {
             return new Audit(status(report), report.countBySeverity(StorageIntegritySeverity.INFO),
                     report.countBySeverity(StorageIntegritySeverity.WARNING),
@@ -141,9 +152,9 @@ public final class BookStoreReadback {
         BookChunkOutputWriter.write(result, chunkDir);
         BookChunkFiles.Loaded chunks = BookChunkFiles.load(chunkDir);
 
-        if (Files.exists(store, LinkOption.NOFOLLOW_LINKS)
-                && !Audit.of(new StorageIntegrityAuditor().audit(store)).healthy()) {
-            // Never append to a damaged Store: an orphan vector from an interrupted import would get a duplicate.
+        if (Files.exists(store, LinkOption.NOFOLLOW_LINKS) && damaged(store)) {
+            // Never append to a damaged Store: an orphan vector from an interrupted import would get a duplicate, and
+            // a new record would be concatenated onto an unterminated one.
             BookStoreInventory before;
             try {
                 before = BookStoreInventory.read(store);
@@ -154,7 +165,9 @@ public final class BookStoreReadback {
         }
         BookStoreInventory before = BookStoreInventory.read(store);
         Map<String, String> expected = expectedContents(chunks);
-        if (!expected.keySet().containsAll(before.contents().keySet())) {
+        if (!before.contents().entrySet().stream()
+                .allMatch(atom -> atom.getValue().equals(expected.get(atom.getKey())))) {
+            // An unknown id, or an expected id holding other content: rememberAll would skip it as already present.
             // Never append to a Store that holds anything but these chunks: reject it untouched.
             return new Seed(ImportKind.FOREIGN, before, before, true, verify(chunks, store));
         }
@@ -185,12 +198,12 @@ public final class BookStoreReadback {
         String digestBefore = BookStoreInventory.treeDigest(store);
         // Audit first: it tolerates corruption, so a malformed manifest or atom log still yields a report, and its
         // parsed manifest is the read-only way to find the atom segment.
-        StorageIntegrityReport report = new StorageIntegrityAuditor().audit(store);
-        Audit audit = Audit.of(report);
+        Audited audited = audit(store);
+        Audit audit = audited.audit();
         BookStoreInventory inventory;
         String inventoryError = null;
         try {
-            inventory = BookStoreInventory.read(store, report.manifest());
+            inventory = BookStoreInventory.read(store, audited.manifest());
         } catch (IOException e) {
             inventory = BookStoreInventory.empty();
             inventoryError = e.getMessage();
@@ -225,6 +238,37 @@ public final class BookStoreReadback {
         int duplicates = (int) chunks.entries().stream().filter(e -> e.duplicateOf() != null).count();
         return new Verification(chunks, chunks.entries().size(), duplicates, expected.size(), inventory, exact,
                 resolved, new ArrayList<>(failed), unexpected, audit, unchanged, recallHits, inventoryError);
+    }
+
+    /** An audit plus the manifest it parsed (null when unreadable or the audit failed). */
+    private record Audited(Audit audit, Manifest manifest) {
+    }
+
+    /** Runs the read-only auditor; an exception from the auditor itself becomes a failed audit, not a crash. */
+    private static Audited audit(Path store) {
+        try {
+            StorageIntegrityReport report = new StorageIntegrityAuditor().audit(store);
+            return new Audited(Audit.of(report), report.manifest());
+        } catch (RuntimeException e) {
+            return new Audited(Audit.failed(e), null);
+        }
+    }
+
+    /** Whether an existing Store must not be appended to: not HEALTHY, or its atom log ends mid-record. */
+    private static boolean damaged(Path store) throws IOException {
+        Audited audited = audit(store);
+        if (!audited.audit().healthy() || audited.manifest() == null) {
+            return true;
+        }
+        Path segment = store.resolve(audited.manifest().atomSegment());
+        try (FileChannel channel = FileChannel.open(segment, StandardOpenOption.READ)) {
+            if (channel.size() == 0) {
+                return false;
+            }
+            ByteBuffer last = ByteBuffer.allocate(1);
+            channel.read(last, channel.size() - 1);
+            return last.get(0) != '\n';
+        }
     }
 
     /**

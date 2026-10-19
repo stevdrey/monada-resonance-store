@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
@@ -236,6 +237,78 @@ class BookStoreReadbackTest {
         assertEquals(digest, BookStoreInventory.treeDigest(work.resolve("store")), "a DAMAGED Store is not touched");
         assertFalse(seed.passed());
         assertTrue(BookStoreReadbackReport.render(seed).contains("SKIPPED"));
+    }
+
+    /** Rewrites field {@code index} of the atom log record for {@code id}. */
+    private static void rewriteAtomField(Path work, String id, int index, String value) throws IOException {
+        Path log = work.resolve("store/atoms/segment-000001.log");
+        List<String> lines = new ArrayList<>();
+        for (String line : Files.readAllLines(log, StandardCharsets.UTF_8)) {
+            String[] fields = line.split("\t", -1);
+            if (fields[0].equals(id)) {
+                fields[index] = value;
+                line = String.join("\t", fields);
+            }
+            lines.add(line);
+        }
+        Files.write(log, lines, StandardCharsets.UTF_8);
+    }
+
+    private static String base64(String text) {
+        return Base64.getEncoder().encodeToString(text.getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void expectedIdHoldingOtherContentIsForeignAndNotAppendedTo() throws Exception {
+        Path work = work("spoofed");
+        BookChunker.Result result = fixtureResult();
+        String first = result.chunks().getFirst().text();
+        MonadaMemory.open(work.resolve("store")).remember(first);
+        rewriteAtomField(work, KnowledgeAtom.text(first).id(), 4, base64("spoofed content"));
+        String digest = BookStoreInventory.treeDigest(work.resolve("store"));
+
+        BookStoreReadback.Seed seed = BookStoreReadback.seed(result, work);
+
+        assertEquals(BookStoreReadback.ImportKind.FOREIGN, seed.importKind());
+        assertEquals(digest, BookStoreInventory.treeDigest(work.resolve("store")), "a FOREIGN Store is not touched");
+        assertFalse(seed.passed());
+    }
+
+    @Test
+    void auditorFailureIsReportedInsteadOfCrashing() throws Exception {
+        Path work = work("audit-throws");
+        BookChunker.Result result = fixtureResult();
+        BookStoreReadback.seed(result, work);
+        // A Base64-valid alias that decodes to a blank string makes atom parsing throw.
+        rewriteAtomField(work, KnowledgeAtom.text(result.chunks().getFirst().text()).id(), 5, base64(" "));
+
+        BookStoreReadback.Verification v = BookStoreReadback.verify(work);
+
+        assertFalse(v.passed());
+        assertFalse(v.audit().healthy());
+        assertTrue(BookStoreReadbackReport.render(v).contains("Result: FAIL"));
+        Run cli = runMain("verify", "--work", work.toString());
+        assertEquals(1, cli.exit(), cli.err());
+        BookStoreReadback.Seed seed = BookStoreReadback.seed(result, work);
+        assertEquals(BookStoreReadback.ImportKind.DAMAGED, seed.importKind());
+    }
+
+    @Test
+    void unterminatedAtomLogIsDamagedAndNotAppendedTo() throws Exception {
+        Path work = work("unterminated");
+        BookChunker.Result result = fixtureResult();
+        MonadaMemory.open(work.resolve("store"))
+                .rememberAll(result.chunks().subList(0, 3).stream().map(BookChunk::text).toList());
+        Path log = work.resolve("store/atoms/segment-000001.log");
+        byte[] bytes = Files.readAllBytes(log);
+        Files.write(log, Arrays.copyOf(bytes, bytes.length - 1));
+        String digest = BookStoreInventory.treeDigest(work.resolve("store"));
+
+        BookStoreReadback.Seed seed = BookStoreReadback.seed(result, work);
+
+        assertEquals(BookStoreReadback.ImportKind.DAMAGED, seed.importKind());
+        assertEquals(digest, BookStoreInventory.treeDigest(work.resolve("store")), "a DAMAGED Store is not touched");
+        assertFalse(seed.passed());
     }
 
     @Test

@@ -52,7 +52,13 @@ public record BookStoreInventory(Map<String, String> contents, long physicalReco
         if (Files.notExists(storeRoot, LinkOption.NOFOLLOW_LINKS)) {
             return empty();
         }
-        return read(storeRoot, new StorageIntegrityAuditor().audit(storeRoot).manifest());
+        Manifest manifest;
+        try {
+            manifest = new StorageIntegrityAuditor().audit(storeRoot).manifest();
+        } catch (RuntimeException e) {
+            throw new IOException("store could not be audited: " + e.getMessage(), e);
+        }
+        return read(storeRoot, manifest);
     }
 
     /**

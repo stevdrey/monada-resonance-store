@@ -74,7 +74,7 @@ Layout:
 | Seeding | Public API: `MonadaMemory.open(store).rememberAll(texts)` | — |
 | Chunk files | `BookChunkFiles` re-reads `chunks.jsonl` and `sidecar.jsonl` from disk. It checks: the header's `chunksFileSha256` and `chunkCount`; key, ordinal and `sha256` on every sidecar line against its chunk; `duplicateOf` names the first earlier equal chunk. | Yes (source mapping) |
 | Exact inventory | Published lower-level read API: the manifest as parsed by the read-only `StorageIntegrityAuditor` (not `FileManifestStore.load()`, which recreates missing directories), then `FileAtomStore.findAll()` (last-wins). Always uses fresh instances; never `MonadaMemory` and never the seeding instance. An unreadable manifest or atom log is reported as `inventory: UNREADABLE`, next to the audit status, not as a crash. | Yes |
-| Structure | Read-only `StorageIntegrityAuditor`, run first. Status is strict `HEALTHY`: no WARNING, ERROR or FATAL finding. | Yes |
+| Structure | Read-only `StorageIntegrityAuditor`, run first. Status is strict `HEALTHY`: no WARNING, ERROR or FATAL finding. If the auditor itself throws on malformed data, the report shows `AUDIT FAILED (...)` and the run fails instead of crashing. | Yes |
 | No hidden writes | SHA-256 tree digest of `store/` before and after verification. | Yes |
 | Self-recall@1 | Public API: `resonate(chunkText).topK(1)` on a reopened instance of a **throwaway copy** of the Store, because opening `MonadaMemory` may recreate missing directories or segment files. Runs only when the inventory is complete and the audit is `HEALTHY`; otherwise the report says `SKIPPED`. | **No.** Exploratory ranking only |
 
@@ -98,8 +98,8 @@ When it fails, the report lists the SHA-256 of every missing or altered unique c
 | `CLEAN` | The Store was empty or absent; every unique chunk was appended. |
 | `REPEAT` | The Store already held exactly this chunk set. `rememberAll` appended nothing, and the Store bytes must be unchanged (otherwise the run fails). No space is reclaimed, and none is promised. |
 | `RESUMED` | The Store held a strict subset and was `HEALTHY` (an import interrupted between atoms); only the missing chunks were appended. |
-| `FOREIGN` | The Store held atoms that are not chunks of this set. Nothing is appended (the Store is left untouched) and the run fails. |
-| `DAMAGED` | The existing Store is not `HEALTHY`, for example an orphan vector left by an import interrupted between the vector and atom appends. Resuming would duplicate vector index entries, so nothing is appended and the run fails; seed a new work directory. |
+| `FOREIGN` | The Store held atoms that are not chunks of this set: an unknown id, or an expected id holding other content. Nothing is appended (the Store is left untouched) and the run fails. |
+| `DAMAGED` | The existing Store is not `HEALTHY` (for example an orphan vector left by an import interrupted between the vector and atom appends), the auditor itself failed on it, or its atom log ends without a line feed (a record whose terminator was lost). Resuming would duplicate vector index entries or concatenate onto that record, so nothing is appended and the run fails; seed a new work directory. |
 
 ## Results (book-corpus-v1, policy `book-chunking-v1`)
 
