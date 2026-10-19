@@ -3,6 +3,7 @@ package com.monada.evaluation.book;
 import com.monada.api.MonadaMemory;
 import com.monada.core.KnowledgeAtom;
 import com.monada.core.MonadaRecall;
+import com.monada.storage.FileFrequencyStore;
 import com.monada.storage.Manifest;
 import com.monada.storage.audit.StorageIntegrityAuditor;
 import com.monada.storage.audit.StorageIntegrityReport;
@@ -231,7 +232,13 @@ public final class BookStoreReadback {
         OptionalInt recallHits = OptionalInt.empty();
         if (Objects.equals(inventory.contents().keySet(), expected.keySet()) && !expected.isEmpty()
                 && audit.healthy()) {
-            recallHits = OptionalInt.of(selfRecallOnCopy(store, expected));
+            try {
+                recallHits = OptionalInt.of(selfRecallOnCopy(store, expected));
+            } catch (RuntimeException e) {
+                // Recall is an optional diagnostic (e.g. a non-default encoding profile cannot be opened with the
+                // default options): it is reported as skipped and never aborts the readback verification.
+                recallHits = OptionalInt.empty();
+            }
         }
         boolean unchanged = digestBefore.equals(BookStoreInventory.treeDigest(store));
 
@@ -254,14 +261,26 @@ public final class BookStoreReadback {
         }
     }
 
-    /** Whether an existing Store must not be appended to: not HEALTHY, or its atom log ends mid-record. */
+    /**
+     * Whether an existing Store must not be appended to: not HEALTHY, or one of the line-oriented logs an import
+     * appends to (the atom segment and the vector index) ends mid-record, since the next append would be
+     * concatenated onto it.
+     */
     private static boolean damaged(Path store) throws IOException {
         Audited audited = audit(store);
         if (!audited.audit().healthy() || audited.manifest() == null) {
             return true;
         }
-        Path segment = store.resolve(audited.manifest().atomSegment());
-        try (FileChannel channel = FileChannel.open(segment, StandardOpenOption.READ)) {
+        return unterminated(store.resolve(audited.manifest().atomSegment()))
+                || unterminated(FileFrequencyStore.resolveVectorMapPath(store));
+    }
+
+    /** A non-empty file whose last byte is not a line feed; an absent file is not unterminated. */
+    private static boolean unterminated(Path file) throws IOException {
+        if (Files.notExists(file, LinkOption.NOFOLLOW_LINKS)) {
+            return false;
+        }
+        try (FileChannel channel = FileChannel.open(file, StandardOpenOption.READ)) {
             if (channel.size() == 0) {
                 return false;
             }

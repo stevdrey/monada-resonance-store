@@ -6,7 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.monada.api.MonadaMemory;
+import com.monada.api.MonadaMemoryOptions;
 import com.monada.core.KnowledgeAtom;
+import com.monada.encoder.LexicalExpansionOptions;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -309,6 +311,42 @@ class BookStoreReadbackTest {
         assertEquals(BookStoreReadback.ImportKind.DAMAGED, seed.importKind());
         assertEquals(digest, BookStoreInventory.treeDigest(work.resolve("store")), "a DAMAGED Store is not touched");
         assertFalse(seed.passed());
+    }
+
+    @Test
+    void unterminatedVectorIndexIsDamagedAndNotAppendedTo() throws Exception {
+        Path work = work("unterminated-index");
+        BookChunker.Result result = fixtureResult();
+        MonadaMemory.open(work.resolve("store"))
+                .rememberAll(result.chunks().subList(0, 3).stream().map(BookChunk::text).toList());
+        Path index = work.resolve("store/indexes/vector-map.idx");
+        byte[] bytes = Files.readAllBytes(index);
+        Files.write(index, Arrays.copyOf(bytes, bytes.length - 1));
+        String digest = BookStoreInventory.treeDigest(work.resolve("store"));
+
+        BookStoreReadback.Seed seed = BookStoreReadback.seed(result, work);
+
+        assertEquals(BookStoreReadback.ImportKind.DAMAGED, seed.importKind());
+        assertEquals(digest, BookStoreInventory.treeDigest(work.resolve("store")), "a DAMAGED Store is not touched");
+    }
+
+    @Test
+    void recallThatCannotOpenTheStoreIsSkippedNotFatal() throws Exception {
+        Path work = work("custom-profile");
+        BookChunker.Result result = fixtureResult();
+        // A Store written with a non-default encoding profile cannot be opened with the default options.
+        MonadaMemoryOptions defaults = MonadaMemoryOptions.defaults();
+        MonadaMemory.open(work.resolve("store"), new MonadaMemoryOptions(defaults.textNormalizer(),
+                        defaults.feedbackAwareRanking(), new LexicalExpansionOptions(1.0, 0.5)))
+                .rememberAll(result.chunks().stream().map(BookChunk::text).toList());
+        BookChunkOutputWriter.write(result, work.resolve("chunks"));
+
+        BookStoreReadback.Verification v = BookStoreReadback.verify(work);
+
+        assertEquals(OptionalInt.empty(), v.selfRecallHits());
+        assertEquals(9, v.exactReadback());
+        assertTrue(v.passed(), "recall is exploratory and never fails the readback");
+        assertTrue(BookStoreReadbackReport.render(v).contains("SKIPPED"));
     }
 
     @Test

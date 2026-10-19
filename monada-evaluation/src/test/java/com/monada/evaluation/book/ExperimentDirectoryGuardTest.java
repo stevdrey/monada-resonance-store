@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -79,6 +80,21 @@ class ExperimentDirectoryGuardTest {
         assertTrue(e.getMessage().contains("atoms"), e.getMessage());
         assertThrows(ExperimentDirectoryGuard.UnsafeDirectoryException.class,
                 () -> ExperimentDirectoryGuard.requireSeeded(work));
+    }
+
+    @Test
+    void hardLinkedFileBelowTheStoreIsRefused() throws Exception {
+        Path work = ExperimentDirectoryGuard.prepareForSeed(dir.resolve("work"), List.of());
+        Path atoms = Files.createDirectories(work.resolve(ExperimentDirectoryGuard.STORE_DIR).resolve("atoms"));
+        Path outside = Files.writeString(dir.resolve("other-store-segment.log"), "", StandardCharsets.UTF_8);
+        try {
+            Files.createLink(atoms.resolve("segment-000001.log"), outside);
+        } catch (UnsupportedOperationException e) {
+            Assumptions.abort("hard links are not supported here");
+        }
+        var e = assertThrows(ExperimentDirectoryGuard.UnsafeDirectoryException.class,
+                () -> ExperimentDirectoryGuard.prepareForSeed(work, List.of()));
+        assertTrue(e.getMessage().contains("hard-linked"), e.getMessage());
     }
 
     @Test

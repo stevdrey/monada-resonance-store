@@ -17,7 +17,8 @@ import java.util.stream.Stream;
  * <p>A work directory is accepted when it is either absent (its parent must already exist; only the directory itself
  * is created, together with the {@value #MARKER_FILE} marker) or an existing directory that already carries the
  * marker and holds nothing but the marker and the experiment children {@value #STORE_DIR} and {@value #CHUNKS_DIR}.
- * Symbolic links are refused anywhere the runner writes to (the work directory and everything below it), and no input file may live inside the work
+ * Symbolic links and hard-linked files are refused anywhere the runner writes to (the work directory and
+ * everything below it), and no input file may live inside the work
  * directory. Every check runs before anything is written.
  */
 public final class ExperimentDirectoryGuard {
@@ -111,12 +112,28 @@ public final class ExperimentDirectoryGuard {
             if (Files.notExists(dir, LinkOption.NOFOLLOW_LINKS)) {
                 continue;
             }
+            List<Path> entries;
             try (Stream<Path> walk = Files.walk(dir)) {
-                Path link = walk.filter(Files::isSymbolicLink).findFirst().orElse(null);
-                if (link != null) {
-                    throw new UnsafeDirectoryException("work directory contains a symbolic link: " + link);
+                entries = walk.toList();
+            }
+            for (Path entry : entries) {
+                if (Files.isSymbolicLink(entry)) {
+                    throw new UnsafeDirectoryException("work directory contains a symbolic link: " + entry);
+                }
+                // A hard link shares its inode with a file elsewhere, so appending through it writes outside work.
+                if (Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS) && linkCount(entry) > 1) {
+                    throw new UnsafeDirectoryException("work directory contains a hard-linked file: " + entry);
                 }
             }
+        }
+    }
+
+    /** The file's hard link count, or 1 where the file system does not report one. */
+    private static int linkCount(Path file) throws IOException {
+        try {
+            return (Integer) Files.getAttribute(file, "unix:nlink", LinkOption.NOFOLLOW_LINKS);
+        } catch (UnsupportedOperationException | IllegalArgumentException e) {
+            return 1;
         }
     }
 

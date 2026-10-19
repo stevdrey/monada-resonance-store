@@ -48,12 +48,12 @@ The runner never writes into an arbitrary path. `--work` is accepted only in two
 - It is **absent**. Its parent must already exist. Only the directory itself is created, together with the
   `.monada-book-store-experiment` marker.
 - It is an **existing directory carrying that marker**. It may contain only the marker, `store/` and `chunks/`, and
-  no symbolic link may appear anywhere below `store/` or `chunks/`.
+  no symbolic link or hard-linked file may appear anywhere below `store/` or `chunks/`.
 
 The runner refuses:
 - an unmarked directory, including an empty one, a home directory or a repository;
 - unexpected entries such as `.git`;
-- symbolic links;
+- symbolic links or hard-linked files;
 - input files located inside the work directory.
 
 All of these checks run before anything is written. `seed` verifies the body against the manifest *before* creating
@@ -76,7 +76,7 @@ Layout:
 | Exact inventory | Published lower-level read API: the manifest as parsed by the read-only `StorageIntegrityAuditor` (not `FileManifestStore.load()`, which recreates missing directories), then `FileAtomStore.findAll()` (last-wins). Always uses fresh instances; never `MonadaMemory` and never the seeding instance. An unreadable manifest or atom log is reported as `inventory: UNREADABLE`, next to the audit status, not as a crash. | Yes |
 | Structure | Read-only `StorageIntegrityAuditor`, run first. Status is strict `HEALTHY`: no WARNING, ERROR or FATAL finding. If the auditor itself throws on malformed data, the report shows `AUDIT FAILED (...)` and the run fails instead of crashing. | Yes |
 | No hidden writes | SHA-256 tree digest of `store/` before and after verification. | Yes |
-| Self-recall@1 | Public API: `resonate(chunkText).topK(1)` on a reopened instance of a **throwaway copy** of the Store, because opening `MonadaMemory` may recreate missing directories or segment files. Runs only when the inventory is complete and the audit is `HEALTHY`; otherwise the report says `SKIPPED`. | **No.** Exploratory ranking only |
+| Self-recall@1 | Public API: `resonate(chunkText).topK(1)` on a reopened instance of a **throwaway copy** of the Store, because opening `MonadaMemory` may recreate missing directories or segment files. Runs only when the inventory is complete and the audit is `HEALTHY`; otherwise, or when the copy cannot be opened (for example a non-default encoding profile), the report says `SKIPPED` and the readback result is unaffected. | **No.** Exploratory ranking only |
 
 The chunk-to-atom mapping uses the content-derived id `KnowledgeAtom.text(text).id()`. Chunk keys and provenance stay
 in the external sidecar because `FileAtomStore` does not persist atom metadata (ADR 0004). See also
@@ -99,7 +99,7 @@ When it fails, the report lists the SHA-256 of every missing or altered unique c
 | `REPEAT` | The Store already held exactly this chunk set. `rememberAll` appended nothing, and the Store bytes must be unchanged (otherwise the run fails). No space is reclaimed, and none is promised. |
 | `RESUMED` | The Store held a strict subset and was `HEALTHY` (an import interrupted between atoms); only the missing chunks were appended. |
 | `FOREIGN` | The Store held atoms that are not chunks of this set: an unknown id, or an expected id holding other content. Nothing is appended (the Store is left untouched) and the run fails. |
-| `DAMAGED` | The existing Store is not `HEALTHY` (for example an orphan vector left by an import interrupted between the vector and atom appends), the auditor itself failed on it, or its atom log ends without a line feed (a record whose terminator was lost). Resuming would duplicate vector index entries or concatenate onto that record, so nothing is appended and the run fails; seed a new work directory. |
+| `DAMAGED` | The existing Store is not `HEALTHY` (for example an orphan vector left by an import interrupted between the vector and atom appends), the auditor itself failed on it, or its atom log or vector index ends without a line feed (a record whose terminator was lost). Resuming would duplicate vector index entries or concatenate onto that record, so nothing is appended and the run fails; seed a new work directory. |
 
 ## Results (book-corpus-v1, policy `book-chunking-v1`)
 

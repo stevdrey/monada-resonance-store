@@ -76,7 +76,7 @@ public final class BookStoreReadbackReport {
             out.append(v.selfRecallHits().getAsInt()).append(" / ").append(v.expectedUniqueAtoms())
                     .append(" (ranking only; not readback evidence)\n");
         } else {
-            out.append("SKIPPED (inventory incomplete or audit not HEALTHY)\n");
+            out.append("SKIPPED (inventory incomplete, audit not HEALTHY, or the Store could not be opened)\n");
         }
     }
 
