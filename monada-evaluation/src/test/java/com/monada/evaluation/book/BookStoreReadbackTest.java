@@ -367,6 +367,23 @@ class BookStoreReadbackTest {
     }
 
     @Test
+    void verifyFailsAStoreWhoseLogsLostTheirFinalLineFeed() throws Exception {
+        for (String log : List.of("store/atoms/segment-000001.log", "store/indexes/vector-map.idx")) {
+            Path work = work("unterminated-verify-" + log.hashCode());
+            BookStoreReadback.seed(fixtureResult(), work);
+            byte[] bytes = Files.readAllBytes(work.resolve(log));
+            Files.write(work.resolve(log), Arrays.copyOf(bytes, bytes.length - 1));
+
+            BookStoreReadback.Verification v = BookStoreReadback.verify(work);
+
+            assertEquals(9, v.exactReadback(), log);
+            assertFalse(v.logsTerminated(), log);
+            assertFalse(v.passed(), log);
+            assertTrue(BookStoreReadbackReport.render(v).contains("logs line-terminated:          no"), log);
+        }
+    }
+
+    @Test
     void alteredPersistedContentIsAFailedHash() throws Exception {
         Path work = work("altered");
         BookChunker.Result result = fixtureResult();

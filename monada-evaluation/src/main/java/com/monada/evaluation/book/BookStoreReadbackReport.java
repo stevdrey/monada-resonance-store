@@ -73,6 +73,7 @@ public final class BookStoreReadbackReport {
         out.append("  integrity audit:               ").append(audit.status())
                 .append(String.format(Locale.ROOT, " (info=%d, warning=%d, error=%d, fatal=%d)", audit.info(),
                         audit.warnings(), audit.errors(), audit.fatal())).append('\n');
+        out.append("  logs line-terminated:          ").append(yesNo(v.logsTerminated())).append('\n');
         out.append("  verification wrote nothing:    ").append(yesNo(v.storeUnchanged())).append('\n');
         out.append("  self-recall@1 (exploratory):   ");
         if (v.selfRecallHits().isPresent()) {

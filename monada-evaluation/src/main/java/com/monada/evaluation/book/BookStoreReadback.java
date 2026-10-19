@@ -118,18 +118,20 @@ public final class BookStoreReadback {
      * @param selfRecallHits     unique chunks whose own text recalls their atom at rank 1 (exploratory); empty when
      *                           recall was skipped because the inventory is incomplete or the audit not HEALTHY
      * @param inventoryError     why the atom inventory could not be read (the audit report says more), or null
+     * @param logsTerminated     the atom segment and the vector index each end with a line feed (the auditor accepts
+     *                           an unterminated last record, but it marks an interrupted write)
      */
     public record Verification(BookChunkFiles.Loaded chunks, int attemptedChunks, int duplicateContentChunks,
                                int expectedUniqueAtoms, BookStoreInventory inventory, int exactReadback,
                                int resolvedChunks, List<String> failedHashes, int unexpectedAtoms, Audit audit,
                                boolean storeUnchanged, OptionalInt selfRecallHits,
-                               String inventoryError) {
+                               String inventoryError, boolean logsTerminated) {
         public Verification {
             failedHashes = List.copyOf(failedHashes);
         }
 
         public boolean passed() {
-            return inventoryError == null && failedHashes.isEmpty() && exactReadback == expectedUniqueAtoms
+            return inventoryError == null && logsTerminated && failedHashes.isEmpty() && exactReadback == expectedUniqueAtoms
                     && resolvedChunks == attemptedChunks && inventory.uniqueAtoms() == expectedUniqueAtoms
                     && unexpectedAtoms == 0 && audit.healthy() && storeUnchanged;
         }
@@ -256,7 +258,8 @@ public final class BookStoreReadback {
 
         int duplicates = (int) chunks.entries().stream().filter(e -> e.duplicateOf() != null).count();
         return new Verification(chunks, chunks.entries().size(), duplicates, expected.size(), inventory, exact,
-                resolved, new ArrayList<>(failed), unexpected, audit, unchanged, recallHits, inventoryError);
+                resolved, new ArrayList<>(failed), unexpected, audit, unchanged, recallHits, inventoryError,
+                logsTerminated(store, audited.manifest()));
     }
 
     /** An audit plus the manifest it parsed (null when unreadable or the audit failed). */
@@ -282,9 +285,7 @@ public final class BookStoreReadback {
     private static ImportKind refusal(Path store) throws IOException {
         Audited audited = audit(store);
         Manifest manifest = audited.manifest();
-        if (!audited.audit().healthy() || manifest == null
-                || unterminated(store.resolve(manifest.atomSegment()))
-                || unterminated(FileFrequencyStore.resolveVectorMapPath(store))) {
+        if (!audited.audit().healthy() || manifest == null || !logsTerminated(store, manifest)) {
             return ImportKind.DAMAGED;
         }
         if (!CURRENT_MANIFEST_VERSION.equals(manifest.version())
@@ -293,6 +294,14 @@ public final class BookStoreReadback {
             return ImportKind.INCOMPATIBLE;
         }
         return null;
+    }
+
+    /** Whether the line-oriented logs an import appends to (atom segment, vector index) end with a line feed. */
+    private static boolean logsTerminated(Path store, Manifest manifest) throws IOException {
+        Path root = store.toAbsolutePath().normalize();
+        Path segment = manifest == null ? null : root.resolve(manifest.atomSegment()).normalize();
+        return (segment == null || !segment.startsWith(root) || !unterminated(segment))
+                && !unterminated(FileFrequencyStore.resolveVectorMapPath(store));
     }
 
     /** A non-empty file whose last byte is not a line feed; an absent file is not unterminated. */

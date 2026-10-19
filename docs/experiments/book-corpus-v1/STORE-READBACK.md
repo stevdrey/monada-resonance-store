@@ -76,6 +76,7 @@ Layout:
 | Chunk files | `BookChunkFiles` re-reads `chunks.jsonl` and `sidecar.jsonl` from disk. It checks: the header's `chunksFileSha256` and `chunkCount`; key, ordinal and `sha256` on every sidecar line against its chunk; `duplicateOf` names the first earlier equal chunk. | Yes (source mapping) |
 | Exact inventory | Published lower-level read API: the manifest as parsed by the read-only `StorageIntegrityAuditor` (not `FileManifestStore.load()`, which recreates missing directories), then `FileAtomStore.findAll()` (last-wins). Always uses fresh instances; never `MonadaMemory` and never the seeding instance. An unreadable manifest or atom log is reported as `inventory: UNREADABLE`, next to the audit status, not as a crash. | Yes |
 | Structure | Read-only `StorageIntegrityAuditor`, run first. Status is strict `HEALTHY`: no WARNING, ERROR or FATAL finding. If the auditor itself throws on malformed data, the report shows `AUDIT FAILED (...)` and the run fails instead of crashing. | Yes |
+| Log termination | The atom segment and `indexes/vector-map.idx` must each end with a line feed. The auditor accepts an unterminated last record, but it marks an interrupted write. | Yes |
 | No hidden writes | SHA-256 tree digest of `store/` before and after verification. | Yes |
 | Self-recall@1 | Public API: `resonate(chunkText).topK(1)` on a reopened instance of a **throwaway copy** of the Store, because opening `MonadaMemory` may recreate missing directories or segment files. Runs only when the inventory is complete and the audit is `HEALTHY`; otherwise, or when the copy cannot be opened (for example a non-default encoding profile), the report says `SKIPPED` and the readback result is unaffected. | **No.** Exploratory ranking only |
 
@@ -88,6 +89,7 @@ A readback **passes** when all of these hold:
 - every chunk, repeats included, resolves to its exact text;
 - the Store holds no unexpected atoms;
 - the audit is `HEALTHY`;
+- both line-oriented logs end with a line feed;
 - verification wrote nothing.
 
 When it fails, the report lists the SHA-256 of every missing or altered unique chunk under **failed hashes**.
