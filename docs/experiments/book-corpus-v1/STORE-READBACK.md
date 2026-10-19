@@ -48,7 +48,8 @@ The runner never writes into an arbitrary path. `--work` is accepted only in two
 - It is **absent**. Its parent must already exist. Only the directory itself is created, together with the
   `.monada-book-store-experiment` marker.
 - It is an **existing directory carrying that marker**. It may contain only the marker, `store/` and `chunks/`, and
-  no symbolic link or hard-linked file may appear anywhere below `store/` or `chunks/`.
+  no symbolic link or hard-linked file may appear anywhere below `store/` or `chunks/`. Where the file system does not report hard-link counts, an existing
+  work directory with files is refused (fail closed); a new one still works.
 
 The runner refuses:
 - an unmarked directory, including an empty one, a home directory or a repository;
@@ -100,6 +101,7 @@ When it fails, the report lists the SHA-256 of every missing or altered unique c
 | `RESUMED` | The Store held a strict subset and was `HEALTHY` (an import interrupted between atoms); only the missing chunks were appended. |
 | `FOREIGN` | The Store held atoms that are not chunks of this set: an unknown id, or an expected id holding other content. Nothing is appended (the Store is left untouched) and the run fails. |
 | `DAMAGED` | The existing Store is not `HEALTHY` (for example an orphan vector left by an import interrupted between the vector and atom appends), the auditor itself failed on it, or its atom log or vector index ends without a line feed (a record whose terminator was lost). Resuming would duplicate vector index entries or concatenate onto that record, so nothing is appended and the run fails; seed a new work directory. |
+| `INCOMPATIBLE` | The existing Store was written with another manifest version or encoding profile than the default options the runner uses. Nothing is opened or appended and the run fails; seed a new work directory. |
 
 ## Results (book-corpus-v1, policy `book-chunking-v1`)
 

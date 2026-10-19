@@ -24,6 +24,9 @@ public final class BookStoreReadbackReport {
         if (seed.importKind() == BookStoreReadback.ImportKind.REPEAT) {
             out.append(seed.storeBytesUnchanged() ? " (a repeat import appends nothing and reclaims nothing)"
                     : " (FAIL: a repeat import must not change the Store)");
+        } else if (seed.importKind() == BookStoreReadback.ImportKind.INCOMPATIBLE) {
+            out.append(" (the existing Store has another manifest version or encoding profile; nothing opened or"
+                    + " appended, seed a new work directory)");
         } else if (seed.importKind() == BookStoreReadback.ImportKind.DAMAGED) {
             out.append(" (the existing Store is not HEALTHY; nothing appended, seed a new work directory)");
         }

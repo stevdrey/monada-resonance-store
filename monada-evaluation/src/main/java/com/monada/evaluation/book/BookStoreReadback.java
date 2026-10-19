@@ -1,6 +1,7 @@
 package com.monada.evaluation.book;
 
 import com.monada.api.MonadaMemory;
+import com.monada.api.MonadaMemoryOptions;
 import com.monada.core.KnowledgeAtom;
 import com.monada.core.MonadaRecall;
 import com.monada.storage.FileFrequencyStore;
@@ -45,6 +46,9 @@ import java.util.stream.Stream;
  */
 public final class BookStoreReadback {
 
+    /** The manifest version {@code MonadaMemory.open} writes for a new Store (not exported by the API). */
+    private static final String CURRENT_MANIFEST_VERSION = "0.4";
+
     private BookStoreReadback() {
     }
 
@@ -64,7 +68,12 @@ public final class BookStoreReadback {
          * terminator was lost); nothing was appended and the run fails. Seed a new work directory instead:
          * appending would duplicate vector index entries or concatenate onto the unterminated record.
          */
-        DAMAGED
+        DAMAGED,
+        /**
+         * The existing Store was written with another manifest version or encoding profile than the default options
+         * the runner opens it with; nothing was opened or appended and the run fails.
+         */
+        INCOMPATIBLE
     }
 
     /** The structural audit, reduced to deterministic fields (no paths). */
@@ -138,7 +147,7 @@ public final class BookStoreReadback {
 
         public boolean passed() {
             return importKind != ImportKind.FOREIGN && importKind != ImportKind.DAMAGED
-                    && (importKind != ImportKind.REPEAT || storeBytesUnchanged) && verification.passed();
+                    && importKind != ImportKind.INCOMPATIBLE && (importKind != ImportKind.REPEAT || storeBytesUnchanged) && verification.passed();
         }
     }
 
@@ -153,16 +162,18 @@ public final class BookStoreReadback {
         BookChunkOutputWriter.write(result, chunkDir);
         BookChunkFiles.Loaded chunks = BookChunkFiles.load(chunkDir);
 
-        if (Files.exists(store, LinkOption.NOFOLLOW_LINKS) && damaged(store)) {
-            // Never append to a damaged Store: an orphan vector from an interrupted import would get a duplicate, and
-            // a new record would be concatenated onto an unterminated one.
+        ImportKind refused = Files.exists(store, LinkOption.NOFOLLOW_LINKS) ? refusal(store) : null;
+        if (refused != null) {
+            // Never open or append to a damaged or incompatible Store: an orphan vector from an interrupted import
+            // would get a duplicate, a new record would be concatenated onto an unterminated one, and opening with
+            // a mismatched profile throws after FileManifestStore may already have recreated directories.
             BookStoreInventory before;
             try {
                 before = BookStoreInventory.read(store);
             } catch (IOException e) {
                 before = BookStoreInventory.empty();
             }
-            return new Seed(ImportKind.DAMAGED, before, before, true, verify(chunks, store));
+            return new Seed(refused, before, before, true, verify(chunks, store));
         }
         BookStoreInventory before = BookStoreInventory.read(store);
         Map<String, String> expected = expectedContents(chunks);
@@ -234,9 +245,10 @@ public final class BookStoreReadback {
                 && audit.healthy()) {
             try {
                 recallHits = OptionalInt.of(selfRecallOnCopy(store, expected));
-            } catch (RuntimeException e) {
-                // Recall is an optional diagnostic (e.g. a non-default encoding profile cannot be opened with the
-                // default options): it is reported as skipped and never aborts the readback verification.
+            } catch (IOException | RuntimeException e) {
+                // Recall is an optional diagnostic: a Store with a non-default encoding profile cannot be opened with
+                // the default options, and the temporary copy can fail (a full or unwritable tmpdir). Either way it is
+                // reported as skipped and never aborts the readback verification.
                 recallHits = OptionalInt.empty();
             }
         }
@@ -262,17 +274,25 @@ public final class BookStoreReadback {
     }
 
     /**
-     * Whether an existing Store must not be appended to: not HEALTHY, or one of the line-oriented logs an import
-     * appends to (the atom segment and the vector index) ends mid-record, since the next append would be
-     * concatenated onto it.
+     * Why an existing Store must not be opened for appending, or null when it may be: {@code DAMAGED} when it is not
+     * HEALTHY or a line-oriented log an import appends to (the atom segment, the vector index) ends mid-record;
+     * {@code INCOMPATIBLE} when its manifest version or encoding profile differs from what the default options
+     * expect.
      */
-    private static boolean damaged(Path store) throws IOException {
+    private static ImportKind refusal(Path store) throws IOException {
         Audited audited = audit(store);
-        if (!audited.audit().healthy() || audited.manifest() == null) {
-            return true;
+        Manifest manifest = audited.manifest();
+        if (!audited.audit().healthy() || manifest == null
+                || unterminated(store.resolve(manifest.atomSegment()))
+                || unterminated(FileFrequencyStore.resolveVectorMapPath(store))) {
+            return ImportKind.DAMAGED;
         }
-        return unterminated(store.resolve(audited.manifest().atomSegment()))
-                || unterminated(FileFrequencyStore.resolveVectorMapPath(store));
+        if (!CURRENT_MANIFEST_VERSION.equals(manifest.version())
+                || !Objects.equals(manifest.encodingProfile(),
+                        MonadaMemory.getExpectedProfile(manifest.dimensions(), MonadaMemoryOptions.defaults()))) {
+            return ImportKind.INCOMPATIBLE;
+        }
+        return null;
     }
 
     /** A non-empty file whose last byte is not a line feed; an absent file is not unterminated. */

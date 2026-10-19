@@ -128,12 +128,16 @@ public final class ExperimentDirectoryGuard {
         }
     }
 
-    /** The file's hard link count, or 1 where the file system does not report one. */
-    private static int linkCount(Path file) throws IOException {
+    /**
+     * The file's hard link count. Fails closed where the file system does not report one (for example NTFS through
+     * the default Windows provider), since a hard link could not be ruled out; a fresh work directory still works.
+     */
+    private static int linkCount(Path file) throws IOException, UnsafeDirectoryException {
         try {
             return (Integer) Files.getAttribute(file, "unix:nlink", LinkOption.NOFOLLOW_LINKS);
         } catch (UnsupportedOperationException | IllegalArgumentException e) {
-            return 1;
+            throw new UnsafeDirectoryException("cannot determine the hard-link count of " + file
+                    + " on this file system; pass a work directory that does not exist yet");
         }
     }
 

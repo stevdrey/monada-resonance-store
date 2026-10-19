@@ -350,6 +350,23 @@ class BookStoreReadbackTest {
     }
 
     @Test
+    void storeWithAnotherEncodingProfileIsIncompatibleAndNotOpened() throws Exception {
+        Path work = work("incompatible");
+        BookChunker.Result result = fixtureResult();
+        MonadaMemoryOptions defaults = MonadaMemoryOptions.defaults();
+        MonadaMemory.open(work.resolve("store"), new MonadaMemoryOptions(defaults.textNormalizer(),
+                        defaults.feedbackAwareRanking(), new LexicalExpansionOptions(1.0, 0.5)))
+                .rememberAll(result.chunks().subList(0, 3).stream().map(BookChunk::text).toList());
+        String digest = BookStoreInventory.treeDigest(work.resolve("store"));
+
+        BookStoreReadback.Seed seed = BookStoreReadback.seed(result, work);
+
+        assertEquals(BookStoreReadback.ImportKind.INCOMPATIBLE, seed.importKind());
+        assertEquals(digest, BookStoreInventory.treeDigest(work.resolve("store")), "nothing is opened or appended");
+        assertFalse(seed.passed());
+    }
+
+    @Test
     void alteredPersistedContentIsAFailedHash() throws Exception {
         Path work = work("altered");
         BookChunker.Result result = fixtureResult();
