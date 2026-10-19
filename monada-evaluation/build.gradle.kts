@@ -202,6 +202,14 @@ tasks.register<JavaExec>("runOpenCostBreakdownBenchmark") {
     classpath = sourceSets["main"].runtimeClasspath
 }
 
+tasks.register<JavaExec>("runBookChunking") {
+    description = "Chunk the verified book-corpus-v1 normalized body into bounded, chapter-aware chunks plus a versioned provenance sidecar (policy book-chunking-v1; offline, no network). Options via --args, e.g. --args=\"--input <body.txt> --out <dir>\""
+    group = "application"
+    mainClass.set("com.monada.evaluation.book.BookChunkingMain")
+    classpath = sourceSets["main"].runtimeClasspath
+    workingDir = rootProject.projectDir
+}
+
 tasks.named<Test>("test") {
     // The cross-JVM determinism test starts child JVMs that run the evaluation command on this runtime classpath.
     doFirst {

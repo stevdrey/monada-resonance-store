@@ -12,6 +12,7 @@ verifies it offline against the checksums in [`manifest.properties`](manifest.pr
 | [`manifest.properties`](manifest.properties) | Machine-readable contract: source, revision, checksums, encoding, rights status. |
 | [`RIGHTS.md`](RIGHTS.md) | Rights assessment: book text vs. Project Gutenberg license/trademark, jurisdictions. |
 | [`VerifyBookCorpus.java`](VerifyBookCorpus.java) | Offline verifier, JDK only (source launcher), no network classes. |
+| [`CHUNKING.md`](CHUNKING.md) | Chunking policy v1 and provenance sidecar format (issue #164, Book 2/8). |
 
 ## Pinned edition
 
