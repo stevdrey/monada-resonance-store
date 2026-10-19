@@ -13,6 +13,7 @@ verifies it offline against the checksums in [`manifest.properties`](manifest.pr
 | [`RIGHTS.md`](RIGHTS.md) | Rights assessment: book text vs. Project Gutenberg license/trademark, jurisdictions. |
 | [`VerifyBookCorpus.java`](VerifyBookCorpus.java) | Offline verifier, JDK only (source launcher), no network classes. |
 | [`CHUNKING.md`](CHUNKING.md) | Chunking policy v1 and provenance sidecar format (issue #164, Book 2/8). |
+| [`STORE-READBACK.md`](STORE-READBACK.md) | Persist the chunks, reopen the Store and verify exact readback (issue #165, Book 3/8). |
 
 ## Pinned edition
 

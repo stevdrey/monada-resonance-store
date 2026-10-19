@@ -1,0 +1,89 @@
+package com.monada.evaluation.book;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+class ExperimentDirectoryGuardTest {
+    @TempDir
+    Path dir;
+
+    @Test
+    void absentDirectoryIsCreatedWithItsMarkerOnly() throws Exception {
+        Path work = ExperimentDirectoryGuard.prepareForSeed(dir.resolve("work"), List.of());
+        try (var children = Files.list(work)) {
+            assertEquals(List.of(work.resolve(ExperimentDirectoryGuard.MARKER_FILE)), children.toList());
+        }
+        assertEquals(work, ExperimentDirectoryGuard.prepareForSeed(work, List.of()), "a marked directory is reusable");
+    }
+
+    @Test
+    void missingParentIsNotCreated() {
+        Path work = dir.resolve("missing/work");
+        assertThrows(ExperimentDirectoryGuard.UnsafeDirectoryException.class,
+                () -> ExperimentDirectoryGuard.prepareForSeed(work, List.of()));
+        assertFalse(Files.exists(dir.resolve("missing")));
+    }
+
+    @Test
+    void existingDirectoryWithoutMarkerIsRefusedUntouched() throws Exception {
+        Path work = Files.createDirectory(dir.resolve("home-like"));
+        Files.writeString(work.resolve("notes.txt"), "keep me", StandardCharsets.UTF_8);
+        String digest = BookStoreInventory.treeDigest(work);
+
+        assertThrows(ExperimentDirectoryGuard.UnsafeDirectoryException.class,
+                () -> ExperimentDirectoryGuard.prepareForSeed(work, List.of()));
+        assertThrows(ExperimentDirectoryGuard.UnsafeDirectoryException.class,
+                () -> ExperimentDirectoryGuard.prepareForSeed(Files.createDirectory(dir.resolve("empty")), List.of()));
+        assertEquals(digest, BookStoreInventory.treeDigest(work));
+    }
+
+    @Test
+    void markedDirectoryWithUnexpectedEntriesIsRefused() throws Exception {
+        Path work = ExperimentDirectoryGuard.prepareForSeed(dir.resolve("work"), List.of());
+        Files.createDirectory(work.resolve(".git"));
+        var e = assertThrows(ExperimentDirectoryGuard.UnsafeDirectoryException.class,
+                () -> ExperimentDirectoryGuard.prepareForSeed(work, List.of()));
+        assertTrue(e.getMessage().contains(".git"), e.getMessage());
+    }
+
+    @Test
+    void symbolicLinksAreRefused() throws Exception {
+        Path real = ExperimentDirectoryGuard.prepareForSeed(dir.resolve("real"), List.of());
+        Path link = Files.createSymbolicLink(dir.resolve("link"), real);
+        assertThrows(ExperimentDirectoryGuard.UnsafeDirectoryException.class,
+                () -> ExperimentDirectoryGuard.prepareForSeed(link, List.of()));
+
+        Path elsewhere = Files.createDirectory(dir.resolve("elsewhere"));
+        Files.createSymbolicLink(real.resolve(ExperimentDirectoryGuard.STORE_DIR), elsewhere);
+        assertThrows(ExperimentDirectoryGuard.UnsafeDirectoryException.class,
+                () -> ExperimentDirectoryGuard.prepareForSeed(real, List.of()));
+    }
+
+    @Test
+    void inputInsideTheWorkDirectoryIsRefused() throws Exception {
+        Path work = ExperimentDirectoryGuard.prepareForSeed(dir.resolve("work"), List.of());
+        Path chunks = Files.createDirectory(work.resolve(ExperimentDirectoryGuard.CHUNKS_DIR));
+        Path input = Files.writeString(chunks.resolve("body.txt"), "body", StandardCharsets.UTF_8);
+        assertThrows(ExperimentDirectoryGuard.UnsafeDirectoryException.class,
+                () -> ExperimentDirectoryGuard.prepareForSeed(work, List.of(input)));
+    }
+
+    @Test
+    void verificationNeedsASeededDirectory() throws Exception {
+        Path work = ExperimentDirectoryGuard.prepareForSeed(dir.resolve("work"), List.of());
+        assertThrows(ExperimentDirectoryGuard.UnsafeDirectoryException.class,
+                () -> ExperimentDirectoryGuard.requireSeeded(work));
+        assertThrows(ExperimentDirectoryGuard.UnsafeDirectoryException.class,
+                () -> ExperimentDirectoryGuard.requireSeeded(dir.resolve("absent")));
+        assertFalse(Files.exists(dir.resolve("absent")));
+    }
+}
