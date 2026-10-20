@@ -1,0 +1,33 @@
+id|split|category|answerable|text|rationale
+LIT-01|DEV|LITERAL|true|What words are printed on the label of the little bottle Alice finds on the glass table?|The label text is given verbatim when Alice first finds the bottle in the hall.
+LIT-02|HOLDOUT|LITERAL|true|What was written on the jar Alice took from a shelf while she was falling down the well?|The jar label is quoted during the fall; it turns out to be empty.
+LIT-03|DEV|LITERAL|true|What is the name of Alice's cat?|The narrator states the cat's name in a parenthetical while Alice talks during the fall.
+LIT-04|DEV|LITERAL|true|What name does the White Rabbit call Alice when he mistakes her for his housemaid?|The Rabbit addresses her by the maid's name outside his house and again from inside.
+LIT-05|DEV|LITERAL|true|What is the Caterpillar smoking when Alice first meets it?|The first description of the Caterpillar on the mushroom names what it smokes.
+PAR-01|HOLDOUT|PARAPHRASE|true|Which animal can disappear gradually until nothing but its smile is left?|Paraphrase of the Cheshire Cat vanishing tail-first and leaving only its grin.
+PAR-02|HOLDOUT|PARAPHRASE|true|What object was making Alice shrink after she picked it up in the hall?|Alice realises the item she was holding caused the shrinking; she had picked it up after the Rabbit dropped it.
+PAR-03|DEV|PARAPHRASE|true|In the royal outdoor game, which living creatures served as the sticks and the balls?|Paraphrase of the croquet ground description: hedgehogs as balls, flamingoes as mallets.
+PAR-04|DEV|PARAPHRASE|true|Who was dozing between two tea drinkers while they leaned on him like a pillow?|Paraphrase of the opening of the tea party: the Dormouse used as a cushion.
+PAR-05|DEV|PARAPHRASE|true|Which odd-sounding school subjects did the sorrowful sea creature say he had studied?|Paraphrase pointing to the Mock Turtle's list of pun-subjects.
+PAR-06|DEV|PARAPHRASE|true|How did the girl reward the runners once everyone was declared a winner?|Paraphrase of the end of the Caucus-race: Alice hands out comfits as prizes.
+NAR-01|DEV|NARRATIVE_TEMPORAL|true|What happened to Alice's size right after she drank from the first bottle?|Directly after drinking she shrinks to a stated height; the answer is the immediate consequence.
+NAR-02|DEV|NARRATIVE_TEMPORAL|true|Where did Alice land at the end of her long fall?|The end of the fall is narrated with the landing place.
+NAR-03|HOLDOUT|NARRATIVE_TEMPORAL|true|Where did Alice go right after the Cat vanished and left its grin behind?|Immediately afterwards she reaches the March Hare's house; the Cat had earlier pointed the way.
+NAR-04|DEV|NARRATIVE_TEMPORAL|true|What happened just before Alice woke up on the bank?|The cards fly at her at the trial; then she finds herself on the bank with her sister.
+MUL-01|DEV|MULTI_EVIDENCE|true|What did Alice eat or drink that made her grow bigger?|Three separate growth causes in three chapters: the cake, the bottle in the Rabbit's house, and the mushroom.
+MUL-02|HOLDOUT|MULTI_EVIDENCE|true|Who was called as a witness at the trial of the Knave?|Three witnesses are called in turn across two chapters: the Hatter, the cook, and Alice.
+MUL-03|DEV|MULTI_EVIDENCE|true|Which poems did Alice try to recite but get the words wrong?|Three garbled recitations in three chapters.
+MUL-04|DEV|MULTI_EVIDENCE|true|In which places does the Cheshire Cat show up?|Kitchen hearth, a tree bough in the wood, and the croquet ground.
+MUL-05|DEV|MULTI_EVIDENCE|true|Where in the story does the Hatter appear?|At the tea party and as the first witness at the trial; the Cat also mentions him earlier.
+CON-01|DEV|CONFOUNDER|true|What does the Duchess's baby turn into?|The transformation is narrated in the wood and confirmed to the Cat; the guinea-pig passage at the trial shares the word but is unrelated.
+CON-02|HOLDOUT|CONFOUNDER|true|Who is accused of stealing the tarts?|The accusation is read at the trial; the procession passage shows the Knave but says nothing about the theft.
+CON-03|DEV|CONFOUNDER|true|What does the Mock Turtle say he used to be?|He says it at the start of his story; the Queen's soup remark names him but does not answer.
+CON-04|DEV|CONFOUNDER|true|What happened to Bill the Lizard when he came down the chimney?|Alice kicks him up the chimney; Bill as a juror at the trial is the same character in an unrelated scene.
+AMB-01|HOLDOUT|AMBIGUOUS|true|Why is the White Rabbit in such a hurry?|Ambiguous: he is simply late at first; later he fears keeping the Duchess waiting.
+AMB-02|DEV|AMBIGUOUS|true|Who tells Alice a sad story?|Both the Mouse and the Mock Turtle are defensible readings.
+AMB-03|DEV|AMBIGUOUS|true|Who in Wonderland is mad?|The Cat calls the Hatter and the March Hare mad, then says everyone there is.
+NOA-01|DEV|NO_ANSWER|false|What is the name of Alice's older sister?|The sister appears at the beginning and the end but is never named.
+NOA-02|DEV|NO_ANSWER|false|How old is Alice?|No age is stated; Alice only compares herself with children of her own age.
+NOA-03|HOLDOUT|NO_ANSWER|false|Who slays the Jabberwock?|The Jabberwock belongs to the sequel; this corpus does not mention it.
+NOA-04|DEV|NO_ANSWER|false|What is the Queen of Hearts' first name?|The Queen is only ever called by her title.
+NOA-05|DEV|NO_ANSWER|false|What does Alice usually eat for breakfast at home?|Her home routine is never described; there is no mention of breakfast.
