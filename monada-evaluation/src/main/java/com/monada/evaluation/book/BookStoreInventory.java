@@ -25,7 +25,8 @@ import java.util.stream.Stream;
  * cache of the seeding instance can stand in for the persisted bytes.
  *
  * <p>Reading never creates anything: {@code FileManifestStore.load()} recreates missing directories, so it is not
- * used, and {@link FileAtomStore} is constructed only once its segment exists. {@link #treeDigest(Path)} lets callers prove it.
+ * used, and {@link FileAtomStore} is constructed only once its segment exists. {@link #treeDigest(Path)} lets
+ * callers prove it.
  *
  * @param contents         atom id to exact original content, ordered by id
  * @param physicalRecords  atom log records parsed (history duplicates included)
@@ -41,24 +42,6 @@ public record BookStoreInventory(Map<String, String> contents, long physicalReco
     /** The inventory of a Store that does not exist yet. */
     public static BookStoreInventory empty() {
         return of(Map.of(), 0);
-    }
-
-    /**
-     * Reads every atom of the existing Store at {@code storeRoot}; an absent Store directory is {@link #empty()}.
-     * The manifest comes from the read-only {@link StorageIntegrityAuditor}, because
-     * {@code FileManifestStore.load()} recreates missing standard directories.
-     */
-    public static BookStoreInventory read(Path storeRoot) throws IOException {
-        if (Files.notExists(storeRoot, LinkOption.NOFOLLOW_LINKS)) {
-            return empty();
-        }
-        Manifest manifest;
-        try {
-            manifest = new StorageIntegrityAuditor().audit(storeRoot).manifest();
-        } catch (RuntimeException e) {
-            throw new IOException("store could not be audited: " + e.getMessage(), e);
-        }
-        return read(storeRoot, manifest);
     }
 
     /**

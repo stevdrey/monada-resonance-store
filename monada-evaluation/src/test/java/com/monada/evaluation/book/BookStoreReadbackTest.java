@@ -22,6 +22,9 @@ import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
 import java.util.OptionalInt;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -184,6 +187,7 @@ class BookStoreReadbackTest {
         assertEquals(digest, BookStoreInventory.treeDigest(work.resolve("store")));
         Run cli = runMain("verify", "--work", work.toString());
         assertEquals(1, cli.exit(), cli.err());
+        assertFalse(cli.out().contains(dir.toString()), "a failure report must not contain paths");
     }
 
     @Test
@@ -399,23 +403,97 @@ class BookStoreReadbackTest {
     }
 
     @Test
+    void workDirectorySeededFromAnotherChunkSetIsForeignAndKeepsItsChunkFiles() throws Exception {
+        Path work = work("other-chunk-set");
+        BookStoreReadback.seed(fixtureResult(), work);
+        String chunksDigest = BookStoreInventory.treeDigest(work.resolve("chunks"));
+        String storeDigest = BookStoreInventory.treeDigest(work.resolve("store"));
+        BookChunker.Result otherPolicy = BookChunker.chunk(VerifiedBookSource.load(dir.resolve("manifest.properties"),
+                dir.resolve("body.txt")), BookChunkingPolicy.V1);
+
+        BookStoreReadback.Seed seed = BookStoreReadback.seed(otherPolicy, work);
+
+        assertEquals(BookStoreReadback.ImportKind.FOREIGN, seed.importKind());
+        assertEquals(chunksDigest, BookStoreInventory.treeDigest(work.resolve("chunks")), "chunk files are kept");
+        assertEquals(storeDigest, BookStoreInventory.treeDigest(work.resolve("store")), "the Store is untouched");
+        assertEquals("fixture-max200", seed.verification().chunks().policyId(), "verified against its own chunks");
+        assertTrue(BookStoreReadback.verify(work).passed());
+    }
+
+    @Test
+    void concurrentSeedsOfOneWorkDirectoryAreSerialized() throws Exception {
+        Path work = work("concurrent");
+        BookChunker.Result result = fixtureResult();
+        var pool = Executors.newFixedThreadPool(2);
+        try {
+            var start = new CountDownLatch(1);
+            List<Future<BookStoreReadback.Seed>> runs = new ArrayList<>();
+            for (int i = 0; i < 2; i++) {
+                runs.add(pool.submit(() -> {
+                    start.await();
+                    return BookStoreReadback.seed(result, work);
+                }));
+            }
+            start.countDown();
+            List<BookStoreReadback.ImportKind> kinds = new ArrayList<>();
+            for (var run : runs) {
+                BookStoreReadback.Seed seed = run.get();
+                assertTrue(seed.passed(), BookStoreReadbackReport.render(seed));
+                kinds.add(seed.importKind());
+            }
+            kinds.sort(Comparator.naturalOrder());
+            assertEquals(List.of(BookStoreReadback.ImportKind.CLEAN, BookStoreReadback.ImportKind.REPEAT), kinds);
+        } finally {
+            pool.shutdownNow();
+        }
+        BookStoreReadback.Verification v = BookStoreReadback.verify(work);
+        assertEquals(9, v.inventory().physicalRecords());
+        assertEquals("HEALTHY", v.audit().status());
+    }
+
+    @Test
+    void atomSegmentOutsideTheStoreFailsClosed() throws Exception {
+        Path work = work("outside-segment");
+        BookStoreReadback.seed(fixtureResult(), work);
+        Path manifest = work.resolve("store/manifest.json");
+        Files.writeString(manifest, Files.readString(manifest, StandardCharsets.UTF_8)
+                .replace("\"atoms/segment-000001.log\"", "\"../outside.log\""), StandardCharsets.UTF_8);
+
+        BookStoreReadback.Verification v = BookStoreReadback.verify(work);
+
+        assertFalse(v.logsTerminated());
+        assertFalse(v.passed());
+    }
+
+    @Test
+    void failureMessagesAreStrippedOfStoreAndWorkPaths() {
+        Path store = dir.resolve("w").resolve("store");
+        assertEquals("cannot read <store>/atoms/x.log near <work>/chunks",
+                BookStoreReadback.withoutPaths("cannot read " + store.toAbsolutePath() + "/atoms/x.log near "
+                        + store.toAbsolutePath().getParent() + "/chunks", store));
+        assertEquals("no detail", BookStoreReadback.withoutPaths(null, store));
+    }
+
+    @Test
+    void recallWhoseTemporaryCopyCannotBeCreatedIsSkippedNotFatal() throws Exception {
+        Path work = work("recall-io");
+        BookStoreReadback.seed(fixtureResult(), work);
+        Path notADirectory = Files.writeString(dir.resolve("tmp-is-a-file"), "", StandardCharsets.UTF_8);
+
+        BookStoreReadback.Verification v = BookStoreReadback.verify(work, notADirectory);
+
+        assertEquals(OptionalInt.empty(), v.selfRecallHits());
+        assertTrue(v.passed(), "recall is exploratory and never fails the readback");
+        assertTrue(BookStoreReadbackReport.render(v).contains("SKIPPED"));
+    }
+
+    @Test
     void alteredPersistedContentIsAFailedHash() throws Exception {
         Path work = work("altered");
         BookChunker.Result result = fixtureResult();
         BookStoreReadback.seed(result, work);
         BookChunk victim = result.chunks().get(4);
-        String id = KnowledgeAtom.text(victim.text()).id();
-        Path log = work.resolve("store/atoms/segment-000001.log");
-        List<String> lines = new ArrayList<>();
-        for (String line : Files.readAllLines(log, StandardCharsets.UTF_8)) {
-            String[] fields = line.split("\t", -1);
-            if (fields[0].equals(id)) {
-                fields[4] = Base64.getEncoder().encodeToString("tampered".getBytes(StandardCharsets.UTF_8));
-                line = String.join("\t", fields);
-            }
-            lines.add(line);
-        }
-        Files.write(log, lines, StandardCharsets.UTF_8);
+        rewriteAtomField(work, KnowledgeAtom.text(victim.text()).id(), 4, base64("tampered"));
 
         BookStoreReadback.Verification v = BookStoreReadback.verify(work);
 

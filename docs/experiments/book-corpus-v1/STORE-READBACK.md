@@ -46,8 +46,8 @@ across runs because atom `createdAt` is `Instant.now()`. Its id-to-content inven
 The runner never writes into an arbitrary path. `--work` is accepted only in two cases:
 
 - It is **absent**. Its parent must already exist. Only the directory itself is created, together with the
-  `.monada-book-store-experiment` marker.
-- It is an **existing directory carrying that marker**. It may contain only the marker, `store/` and `chunks/`, and
+  `.monada-book-store-experiment` marker and the `.monada-book-store.lock` seed lock.
+- It is an **existing directory carrying that marker**. It may contain only the marker, the lock, `store/` and `chunks/`, and
   only directories and ordinary single-linked files may appear below `store/` or `chunks/` (no symbolic
   links, hard-linked files, FIFOs, sockets or devices). Where the file system does not report hard-link counts, an existing
   work directory with files is refused (fail closed); a new one still works.
@@ -61,10 +61,15 @@ The runner refuses:
 All of these checks run before anything is written. `seed` verifies the body against the manifest *before* creating
 the work directory, so a wrong input leaves no trace. `verify` never creates anything.
 
+Concurrent runs on one work directory are serialized: `seed` holds an exclusive lock on
+`.monada-book-store.lock` from its first check to the end of its verification, and `verify` takes a shared lock
+when the lock file exists (it never creates it).
+
 Layout:
 
 ```
 <work>/.monada-book-store-experiment
+<work>/.monada-book-store.lock              # seed (exclusive) / verify (shared) lock
 <work>/chunks/chunks.jsonl, sidecar.jsonl   # canonical chunks + provenance, outside the Store
 <work>/store/                               # the Store (manifest, atoms, vectors, indexes, feedback)
 ```
@@ -102,7 +107,7 @@ When it fails, the report lists the SHA-256 of every missing or altered unique c
 | `CLEAN` | The Store was empty or absent; every unique chunk was appended. |
 | `REPEAT` | The Store already held exactly this chunk set. `rememberAll` appended nothing, and the Store bytes must be unchanged (otherwise the run fails). No space is reclaimed, and none is promised. |
 | `RESUMED` | The Store held a strict subset and was `HEALTHY` (an import interrupted between atoms); only the missing chunks were appended. |
-| `FOREIGN` | The Store held atoms that are not chunks of this set: an unknown id, or an expected id holding other content. Nothing is appended (the Store is left untouched) and the run fails. |
+| `FOREIGN` | The Store held atoms that are not chunks of this set (an unknown id, or an expected id holding other content), or the work directory was seeded from a different chunk set. Nothing is written, chunk files included (they stay the Store's provenance), and the run fails. |
 | `DAMAGED` | The existing Store is not `HEALTHY` (for example an orphan vector left by an import interrupted between the vector and atom appends), the auditor itself failed on it, or its atom log or vector index ends without a line feed (a record whose terminator was lost). Resuming would duplicate vector index entries or concatenate onto that record, so nothing is appended and the run fails; seed a new work directory. |
 | `INCOMPATIBLE` | The existing Store was written with another manifest version or encoding profile than the default options the runner uses. Nothing is opened or appended and the run fails; seed a new work directory. |
 

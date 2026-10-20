@@ -19,10 +19,11 @@ class ExperimentDirectoryGuardTest {
     Path dir;
 
     @Test
-    void absentDirectoryIsCreatedWithItsMarkerOnly() throws Exception {
+    void absentDirectoryIsCreatedWithItsMarkerAndLockOnly() throws Exception {
         Path work = ExperimentDirectoryGuard.prepareForSeed(dir.resolve("work"), List.of());
         try (var children = Files.list(work)) {
-            assertEquals(List.of(work.resolve(ExperimentDirectoryGuard.MARKER_FILE)), children.toList());
+            assertEquals(List.of(work.resolve(ExperimentDirectoryGuard.MARKER_FILE),
+                    work.resolve(ExperimentDirectoryGuard.LOCK_FILE)), children.sorted().toList());
         }
         assertEquals(work, ExperimentDirectoryGuard.prepareForSeed(work, List.of()), "a marked directory is reusable");
     }

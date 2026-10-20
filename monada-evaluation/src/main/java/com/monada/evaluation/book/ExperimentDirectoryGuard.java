@@ -15,8 +15,9 @@ import java.util.stream.Stream;
  * experiment, so the runner never writes into an arbitrary path (a home directory, a repository, a real Store).
  *
  * <p>A work directory is accepted when it is either absent (its parent must already exist; only the directory itself
- * is created, together with the {@value #MARKER_FILE} marker) or an existing directory that already carries the
- * marker and holds nothing but the marker and the experiment children {@value #STORE_DIR} and {@value #CHUNKS_DIR}.
+ * is created, together with the {@value #MARKER_FILE} marker and the {@value #LOCK_FILE} seed lock) or an existing
+ * directory that already carries the marker and holds nothing but the marker, the lock and the experiment children
+ * {@value #STORE_DIR} and {@value #CHUNKS_DIR}.
  * Only directories and ordinary single-linked files are allowed: symbolic links, hard-linked files and special
  * files (FIFOs, sockets, devices) are refused anywhere the runner writes to (the work directory and
  * everything below it), and no input file may live inside the work
@@ -26,8 +27,10 @@ public final class ExperimentDirectoryGuard {
     public static final String MARKER_FILE = ".monada-book-store-experiment";
     public static final String STORE_DIR = "store";
     public static final String CHUNKS_DIR = "chunks";
+    /** Empty lock file that serializes seeds (exclusive) against verifications (shared); left in place. */
+    public static final String LOCK_FILE = ".monada-book-store.lock";
     static final String MARKER_CONTENT = "monada-book-store-experiment v1\n";
-    private static final Set<String> EXPECTED_CHILDREN = Set.of(MARKER_FILE, STORE_DIR, CHUNKS_DIR);
+    private static final Set<String> EXPECTED_CHILDREN = Set.of(MARKER_FILE, LOCK_FILE, STORE_DIR, CHUNKS_DIR);
 
     private ExperimentDirectoryGuard() {
     }
@@ -54,6 +57,7 @@ public final class ExperimentDirectoryGuard {
             requireNoInputInside(absolute, inputs);
             Files.createDirectory(absolute);
             Files.writeString(absolute.resolve(MARKER_FILE), MARKER_CONTENT, StandardCharsets.UTF_8);
+            Files.createFile(absolute.resolve(LOCK_FILE));
             return absolute;
         }
         requireDedicated(absolute);
@@ -99,7 +103,11 @@ public final class ExperimentDirectoryGuard {
                     unexpected.add(name);
                 } else if (Files.isSymbolicLink(child)) {
                     throw new UnsafeDirectoryException("work directory entry is a symbolic link: " + child);
-                } else if (!name.equals(MARKER_FILE) && !Files.isDirectory(child, LinkOption.NOFOLLOW_LINKS)) {
+                } else if (name.equals(MARKER_FILE) || name.equals(LOCK_FILE)) {
+                    if (!Files.isRegularFile(child, LinkOption.NOFOLLOW_LINKS)) {
+                        throw new UnsafeDirectoryException("work directory entry is not a regular file: " + child);
+                    }
+                } else if (!Files.isDirectory(child, LinkOption.NOFOLLOW_LINKS)) {
                     throw new UnsafeDirectoryException("work directory entry is not a directory: " + child);
                 }
             }

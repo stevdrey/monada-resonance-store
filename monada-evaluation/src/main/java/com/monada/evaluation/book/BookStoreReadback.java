@@ -12,6 +12,7 @@ import com.monada.storage.audit.StorageIntegritySeverity;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -19,6 +20,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,7 +38,7 @@ import java.util.stream.Stream;
  * <ul>
  *   <li><b>write</b>: the public {@link MonadaMemory#rememberAll(List)} API, nothing lower;</li>
  *   <li><b>exact readback</b>: {@link BookStoreInventory}, the published lower-level storage read API
- *   ({@code FileManifestStore} + {@code FileAtomStore.findAll}), on fresh instances, never the seeding instance;</li>
+ *   (the audited manifest + {@code FileAtomStore.findAll}), on fresh instances, never the seeding instance;</li>
  *   <li><b>structure</b>: the read-only {@link StorageIntegrityAuditor};</li>
  *   <li><b>semantic</b>: public {@link MonadaMemory#resonate(String)} self-recall@1, reported as exploratory and
  *   never counted as readback evidence (top-K ranking does not prove full-source readback).</li>
@@ -49,6 +51,9 @@ public final class BookStoreReadback {
     /** The manifest version {@code MonadaMemory.open} writes for a new Store (not exported by the API). */
     private static final String CURRENT_MANIFEST_VERSION = "0.4";
 
+    /** Serializes seed/verify lock holders within this JVM; a file lock is per JVM, so threads queue here first. */
+    private static final Object LOCK_MONITOR = new Object();
+
     private BookStoreReadback() {
     }
 
@@ -60,7 +65,10 @@ public final class BookStoreReadback {
         REPEAT,
         /** The Store held a subset of these chunks (an interrupted import); the missing ones were appended. */
         RESUMED,
-        /** The Store held atoms that are not chunks of this set; nothing was appended and the run fails. */
+        /**
+         * The Store held atoms that are not chunks of this set, or the work directory was seeded from a different
+         * chunk set; nothing (chunk files included) was written and the run fails.
+         */
         FOREIGN,
         /**
          * The existing Store was not structurally {@code HEALTHY} (for example an orphan vector left by an import
@@ -79,27 +87,28 @@ public final class BookStoreReadback {
     /** The structural audit, reduced to deterministic fields (no paths). */
     public record Audit(String status, long info, long warnings, long errors, long fatal) {
         /** The auditor itself threw on data it could not handle: reported as one fatal finding. */
-        static Audit failed(RuntimeException e) {
-            return new Audit("AUDIT FAILED (" + e.getClass().getSimpleName() + ": " + e.getMessage() + ")", 0, 0, 0,
-                    1);
+        static Audit failed(String message) {
+            return new Audit("AUDIT FAILED (" + message + ")", 0, 0, 0, 1);
         }
 
         static Audit of(StorageIntegrityReport report) {
-            return new Audit(status(report), report.countBySeverity(StorageIntegritySeverity.INFO),
+            return new Audit(statusLine(report), report.countBySeverity(StorageIntegritySeverity.INFO),
                     report.countBySeverity(StorageIntegritySeverity.WARNING),
                     report.countBySeverity(StorageIntegritySeverity.ERROR),
                     report.countBySeverity(StorageIntegritySeverity.FATAL));
         }
 
-        /** Mirrors {@link StorageIntegrityReport#render()}: HEALTHY means no finding at WARNING or above. */
-        private static String status(StorageIntegrityReport report) {
-            if (report.countBySeverity(StorageIntegritySeverity.FATAL) > 0) {
-                return "CORRUPTED (FATAL)";
+        /**
+         * The status exactly as {@link StorageIntegrityReport#render()} prints it, so the severity-to-status mapping
+         * has a single source (the report exposes no status accessor, and monada-storage is out of scope here).
+         */
+        private static String statusLine(StorageIntegrityReport report) {
+            for (String line : report.render().split("\\R")) {
+                if (line.startsWith("Status:")) {
+                    return line.substring("Status:".length()).trim();
+                }
             }
-            if (report.countBySeverity(StorageIntegritySeverity.ERROR) > 0) {
-                return "INCONSISTENT (ERRORS)";
-            }
-            return report.countBySeverity(StorageIntegritySeverity.WARNING) > 0 ? "WARNINGS" : "HEALTHY";
+            throw new IllegalStateException("integrity report has no Status line");
         }
 
         public boolean healthy() {
@@ -131,9 +140,10 @@ public final class BookStoreReadback {
         }
 
         public boolean passed() {
-            return inventoryError == null && logsTerminated && failedHashes.isEmpty() && exactReadback == expectedUniqueAtoms
-                    && resolvedChunks == attemptedChunks && inventory.uniqueAtoms() == expectedUniqueAtoms
-                    && unexpectedAtoms == 0 && audit.healthy() && storeUnchanged;
+            return inventoryError == null && logsTerminated && failedHashes.isEmpty()
+                    && exactReadback == expectedUniqueAtoms && resolvedChunks == attemptedChunks
+                    && inventory.uniqueAtoms() == expectedUniqueAtoms && unexpectedAtoms == 0 && audit.healthy()
+                    && storeUnchanged;
         }
     }
 
@@ -149,7 +159,8 @@ public final class BookStoreReadback {
 
         public boolean passed() {
             return importKind != ImportKind.FOREIGN && importKind != ImportKind.DAMAGED
-                    && importKind != ImportKind.INCOMPATIBLE && (importKind != ImportKind.REPEAT || storeBytesUnchanged) && verification.passed();
+                    && importKind != ImportKind.INCOMPATIBLE
+                    && (importKind != ImportKind.REPEAT || storeBytesUnchanged) && verification.passed();
         }
     }
 
@@ -157,39 +168,61 @@ public final class BookStoreReadback {
      * Writes the chunk files of {@code result} into {@code work/chunks} (outside the Store), reloads them from disk,
      * remembers every chunk into {@code work/store} through the public API and verifies the Store on fresh instances.
      * {@code work} must already have passed {@link ExperimentDirectoryGuard#prepareForSeed}.
+     *
+     * <p>Seeds of one work directory are serialized: threads of one JVM on a monitor, processes by an exclusive lock
+     * on {@value ExperimentDirectoryGuard#LOCK_FILE}, held from the first check to the end of verification.
      */
     public static Seed seed(BookChunker.Result result, Path work) throws IOException, BookInputException {
+        synchronized (LOCK_MONITOR) {
+            // CREATE without TRUNCATE_EXISTING: opening the lock never changes an existing file's bytes.
+            try (FileChannel lock = FileChannel.open(work.resolve(ExperimentDirectoryGuard.LOCK_FILE),
+                    StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+                 FileLock ignored = lock.lock()) {
+                return seedLocked(result, work);
+            }
+        }
+    }
+
+    private static Seed seedLocked(BookChunker.Result result, Path work) throws IOException, BookInputException {
         Path chunkDir = work.resolve(ExperimentDirectoryGuard.CHUNKS_DIR);
         Path store = work.resolve(ExperimentDirectoryGuard.STORE_DIR);
+        if (chunkFilesDiffer(chunkDir, BookChunkOutputWriter.render(result))) {
+            // The work directory was seeded from another chunk set: keep its chunk files (the Store's provenance)
+            // and its Store untouched, and verify the Store against the chunk files it was seeded from.
+            BookStoreInventory before = readQuietly(store, audit(store).manifest());
+            return new Seed(ImportKind.FOREIGN, before, before, true,
+                    verify(BookChunkFiles.load(chunkDir), store, null));
+        }
         BookChunkOutputWriter.write(result, chunkDir);
         BookChunkFiles.Loaded chunks = BookChunkFiles.load(chunkDir);
 
-        ImportKind refused = Files.exists(store, LinkOption.NOFOLLOW_LINKS) ? refusal(store) : null;
-        if (refused != null) {
-            // Never open or append to a damaged or incompatible Store: an orphan vector from an interrupted import
-            // would get a duplicate, a new record would be concatenated onto an unterminated one, and opening with
-            // a mismatched profile throws after FileManifestStore may already have recreated directories.
-            BookStoreInventory before;
-            try {
-                before = BookStoreInventory.read(store);
-            } catch (IOException e) {
-                before = BookStoreInventory.empty();
+        BookStoreInventory before = BookStoreInventory.empty();
+        if (Files.exists(store, LinkOption.NOFOLLOW_LINKS)) {
+            Audited pre = audit(store);
+            ImportKind refused = refusal(store, pre);
+            if (refused != null) {
+                // Never open or append to a damaged or incompatible Store: an orphan vector from an interrupted
+                // import would get a duplicate, a new record would be concatenated onto an unterminated one, and
+                // opening with a mismatched profile throws after FileManifestStore may have recreated directories.
+                BookStoreInventory existing = readQuietly(store, pre.manifest());
+                return new Seed(refused, existing, existing, true, verify(chunks, store, null));
             }
-            return new Seed(refused, before, before, true, verify(chunks, store));
+            before = BookStoreInventory.read(store, pre.manifest());
         }
-        BookStoreInventory before = BookStoreInventory.read(store);
         Map<String, String> expected = expectedContents(chunks);
         if (!before.contents().entrySet().stream()
                 .allMatch(atom -> atom.getValue().equals(expected.get(atom.getKey())))) {
             // An unknown id, or an expected id holding other content: rememberAll would skip it as already present.
             // Never append to a Store that holds anything but these chunks: reject it untouched.
-            return new Seed(ImportKind.FOREIGN, before, before, true, verify(chunks, store));
+            return new Seed(ImportKind.FOREIGN, before, before, true, verify(chunks, store, null));
         }
         String digestBefore = BookStoreInventory.treeDigest(store);
         // MonadaMemory has no close(): the seeding instance is dropped here and everything below reads fresh instances.
         MonadaMemory.open(store).rememberAll(chunks.entries().stream().map(BookChunkFiles.Entry::text).toList());
         String digestAfter = BookStoreInventory.treeDigest(store);
-        BookStoreInventory after = BookStoreInventory.read(store);
+        // The verification audits and inventories the Store on fresh instances; its inventory is the "after" state.
+        Verification verification = verify(chunks, store, null);
+        BookStoreInventory after = verification.inventory();
 
         ImportKind kind;
         if (before.uniqueAtoms() == 0) {
@@ -199,16 +232,65 @@ public final class BookStoreReadback {
         } else {
             kind = ImportKind.RESUMED;
         }
-        return new Seed(kind, before, after, digestBefore.equals(digestAfter), verify(chunks, store));
+        return new Seed(kind, before, after, digestBefore.equals(digestAfter), verification);
     }
 
-    /** Verifies the Store of an already seeded work directory against its chunk files; writes nothing. */
+    /**
+     * Whether {@code chunkDir} already holds a complete chunk file pair that differs from {@code rendered}. A missing
+     * sidecar means no complete pair (the writer removes it first), so it can be rewritten.
+     */
+    private static boolean chunkFilesDiffer(Path chunkDir, BookChunkOutputWriter.Output rendered) throws IOException {
+        Path chunksFile = chunkDir.resolve(BookChunkOutputWriter.CHUNKS_FILE);
+        Path sidecarFile = chunkDir.resolve(BookChunkOutputWriter.SIDECAR_FILE);
+        if (Files.notExists(sidecarFile, LinkOption.NOFOLLOW_LINKS)) {
+            return false;
+        }
+        return Files.notExists(chunksFile, LinkOption.NOFOLLOW_LINKS)
+                || !Arrays.equals(Files.readAllBytes(chunksFile), rendered.chunks())
+                || !Arrays.equals(Files.readAllBytes(sidecarFile), rendered.sidecar());
+    }
+
+    private static BookStoreInventory readQuietly(Path store, Manifest manifest) {
+        if (Files.notExists(store, LinkOption.NOFOLLOW_LINKS)) {
+            return BookStoreInventory.empty();
+        }
+        try {
+            return BookStoreInventory.read(store, manifest);
+        } catch (IOException e) {
+            return BookStoreInventory.empty();
+        }
+    }
+
+    /**
+     * Verifies the Store of an already seeded work directory against its chunk files; writes nothing. When the work
+     * directory has a seed lock, a shared lock on it keeps a concurrent seed from changing the Store mid-check.
+     */
     public static Verification verify(Path work) throws IOException, BookInputException {
-        return verify(BookChunkFiles.load(work.resolve(ExperimentDirectoryGuard.CHUNKS_DIR)),
-                work.resolve(ExperimentDirectoryGuard.STORE_DIR));
+        return verify(work, null);
     }
 
-    private static Verification verify(BookChunkFiles.Loaded chunks, Path store) throws IOException {
+    /** {@link #verify(Path)} with the temporary root for the recall copy ({@code null}: the default temp dir). */
+    static Verification verify(Path work, Path recallTmpRoot) throws IOException, BookInputException {
+        Path lockFile = work.resolve(ExperimentDirectoryGuard.LOCK_FILE);
+        if (!Files.isRegularFile(lockFile, LinkOption.NOFOLLOW_LINKS)) {
+            return verifyWork(work, recallTmpRoot);
+        }
+        synchronized (LOCK_MONITOR) {
+            // A shared lock needs a channel open for reading; READ alone creates and changes nothing.
+            try (FileChannel lock = FileChannel.open(lockFile, StandardOpenOption.READ);
+                 FileLock ignored = lock.lock(0, Long.MAX_VALUE, true)) {
+                return verifyWork(work, recallTmpRoot);
+            }
+        }
+    }
+
+    private static Verification verifyWork(Path work, Path recallTmpRoot) throws IOException, BookInputException {
+        return verify(BookChunkFiles.load(work.resolve(ExperimentDirectoryGuard.CHUNKS_DIR)),
+                work.resolve(ExperimentDirectoryGuard.STORE_DIR), recallTmpRoot);
+    }
+
+    private static Verification verify(BookChunkFiles.Loaded chunks, Path store, Path recallTmpRoot)
+            throws IOException {
         String digestBefore = BookStoreInventory.treeDigest(store);
         // Audit first: it tolerates corruption, so a malformed manifest or atom log still yields a report, and its
         // parsed manifest is the read-only way to find the atom segment.
@@ -220,7 +302,7 @@ public final class BookStoreReadback {
             inventory = BookStoreInventory.read(store, audited.manifest());
         } catch (IOException e) {
             inventory = BookStoreInventory.empty();
-            inventoryError = e.getMessage();
+            inventoryError = withoutPaths(e.getMessage(), store);
         }
 
         Map<String, String> expected = expectedContents(chunks);
@@ -246,7 +328,7 @@ public final class BookStoreReadback {
         if (Objects.equals(inventory.contents().keySet(), expected.keySet()) && !expected.isEmpty()
                 && audit.healthy()) {
             try {
-                recallHits = OptionalInt.of(selfRecallOnCopy(store, expected));
+                recallHits = OptionalInt.of(selfRecallOnCopy(store, expected, recallTmpRoot));
             } catch (IOException | RuntimeException e) {
                 // Recall is an optional diagnostic: a Store with a non-default encoding profile cannot be opened with
                 // the default options, and the temporary copy can fail (a full or unwritable tmpdir). Either way it is
@@ -262,6 +344,20 @@ public final class BookStoreReadback {
                 logsTerminated(store, audited.manifest()));
     }
 
+    /**
+     * {@code message} with the Store and work directory paths replaced by {@code <store>} and {@code <work>}, so a
+     * failure report stays as deterministic as a passing one.
+     */
+    static String withoutPaths(String message, Path store) {
+        if (message == null) {
+            return "no detail";
+        }
+        Path absolute = store.toAbsolutePath().normalize();
+        String result = message.replace(absolute.toString(), "<store>").replace(store.toString(), "<store>");
+        Path work = absolute.getParent();
+        return work == null ? result : result.replace(work.toString(), "<work>");
+    }
+
     /** An audit plus the manifest it parsed (null when unreadable or the audit failed). */
     private record Audited(Audit audit, Manifest manifest) {
     }
@@ -272,7 +368,8 @@ public final class BookStoreReadback {
             StorageIntegrityReport report = new StorageIntegrityAuditor().audit(store);
             return new Audited(Audit.of(report), report.manifest());
         } catch (RuntimeException e) {
-            return new Audited(Audit.failed(e), null);
+            return new Audited(Audit.failed(e.getClass().getSimpleName() + ": " + withoutPaths(e.getMessage(), store)),
+                    null);
         }
     }
 
@@ -282,8 +379,7 @@ public final class BookStoreReadback {
      * {@code INCOMPATIBLE} when its manifest version or encoding profile differs from what the default options
      * expect.
      */
-    private static ImportKind refusal(Path store) throws IOException {
-        Audited audited = audit(store);
+    private static ImportKind refusal(Path store, Audited audited) {
         Manifest manifest = audited.manifest();
         if (!audited.audit().healthy() || manifest == null || !logsTerminated(store, manifest)) {
             return ImportKind.DAMAGED;
@@ -296,12 +392,19 @@ public final class BookStoreReadback {
         return null;
     }
 
-    /** Whether the line-oriented logs an import appends to (atom segment, vector index) end with a line feed. */
+    /**
+     * Whether the line-oriented logs an import appends to (atom segment, vector index) end with a line feed. An atom
+     * segment that resolves outside the Store fails closed.
+     */
     private static boolean logsTerminated(Path store, Manifest manifest) {
-        Path root = store.toAbsolutePath().normalize();
-        Path segment = manifest == null ? null : root.resolve(manifest.atomSegment()).normalize();
-        return (segment == null || !segment.startsWith(root) || !unterminated(segment))
-                && !unterminated(FileFrequencyStore.resolveVectorMapPath(store));
+        if (manifest != null) {
+            Path root = store.toAbsolutePath().normalize();
+            Path segment = root.resolve(manifest.atomSegment()).normalize();
+            if (!segment.startsWith(root) || unterminated(segment)) {
+                return false;
+            }
+        }
+        return !unterminated(FileFrequencyStore.resolveVectorMapPath(store));
     }
 
     /**
@@ -328,11 +431,13 @@ public final class BookStoreReadback {
     }
 
     /**
-     * Exploratory self-recall@1, run on a throwaway copy of the Store: opening {@code MonadaMemory} may create
-     * missing directories or segment files, and verification must never change the Store it checks.
+     * Exploratory self-recall@1, run on a throwaway copy of the Store (under {@code tmpRoot}, or the default temp
+     * directory when null): opening {@code MonadaMemory} may create missing directories or segment files, and
+     * verification must never change the Store it checks.
      */
-    private static int selfRecallOnCopy(Path store, Map<String, String> expected) throws IOException {
-        Path copy = Files.createTempDirectory("monada-book-recall-");
+    private static int selfRecallOnCopy(Path store, Map<String, String> expected, Path tmpRoot) throws IOException {
+        String prefix = "monada-book-recall-";
+        Path copy = tmpRoot == null ? Files.createTempDirectory(prefix) : Files.createTempDirectory(tmpRoot, prefix);
         try {
             try (Stream<Path> walk = Files.walk(store)) {
                 for (Path source : walk.filter(p -> !p.equals(store)).toList()) {
