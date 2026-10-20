@@ -165,8 +165,10 @@ public final class BookStoreReadback {
     }
 
     /**
-     * Writes the chunk files of {@code result} into {@code work/chunks} (outside the Store), reloads them from disk,
-     * remembers every chunk into {@code work/store} through the public API and verifies the Store on fresh instances.
+     * Checks the existing Store and chunk files against {@code result} first; only when the import is accepted does it
+     * write the chunk files into {@code work/chunks} (outside the Store, and only if they are not already identical),
+     * reload them from disk, remember every chunk into {@code work/store} through the public API and verify the Store
+     * on fresh instances. A rejected import leaves both {@code chunks/} and {@code store/} byte for byte untouched.
      * {@code work} must already have passed {@link ExperimentDirectoryGuard#prepareForSeed}.
      *
      * <p>Seeds of one work directory are serialized: threads of one JVM on a monitor, processes by an exclusive lock
@@ -186,15 +188,19 @@ public final class BookStoreReadback {
     private static Seed seedLocked(BookChunker.Result result, Path work) throws IOException, BookInputException {
         Path chunkDir = work.resolve(ExperimentDirectoryGuard.CHUNKS_DIR);
         Path store = work.resolve(ExperimentDirectoryGuard.STORE_DIR);
-        if (chunkFilesDiffer(chunkDir, BookChunkOutputWriter.render(result))) {
+        BookChunkOutputWriter.Output rendered = BookChunkOutputWriter.render(result);
+        if (chunkFilesDiffer(chunkDir, rendered)) {
             // The work directory was seeded from another chunk set: keep its chunk files (the Store's provenance)
             // and its Store untouched, and verify the Store against the chunk files it was seeded from.
             BookStoreInventory before = readQuietly(store, audit(store).manifest());
             return new Seed(ImportKind.FOREIGN, before, before, true,
                     verify(BookChunkFiles.load(chunkDir), store, null));
         }
-        BookChunkOutputWriter.write(result, chunkDir);
-        BookChunkFiles.Loaded chunks = BookChunkFiles.load(chunkDir);
+        // Nothing under chunks/ or store/ is written until the import is accepted: an identical chunk pair on disk is
+        // used as is, otherwise the rendered pair is checked in memory and only written once every check passed.
+        boolean chunkFilesCurrent = chunkFilesPresent(chunkDir);
+        BookChunkFiles.Loaded chunks = chunkFilesCurrent ? BookChunkFiles.load(chunkDir)
+                : BookChunkFiles.parse(rendered.chunks(), rendered.sidecar());
 
         BookStoreInventory before = BookStoreInventory.empty();
         if (Files.exists(store, LinkOption.NOFOLLOW_LINKS)) {
@@ -215,6 +221,11 @@ public final class BookStoreReadback {
             // An unknown id, or an expected id holding other content: rememberAll would skip it as already present.
             // Never append to a Store that holds anything but these chunks: reject it untouched.
             return new Seed(ImportKind.FOREIGN, before, before, true, verify(chunks, store, null));
+        }
+        if (!chunkFilesCurrent) {
+            // Accepted: persist the canonical chunk files first and seed from what is on disk.
+            BookChunkOutputWriter.write(result, chunkDir);
+            chunks = BookChunkFiles.load(chunkDir);
         }
         String digestBefore = BookStoreInventory.treeDigest(store);
         // MonadaMemory has no close(): the seeding instance is dropped here and everything below reads fresh instances.
@@ -248,6 +259,12 @@ public final class BookStoreReadback {
         return Files.notExists(chunksFile, LinkOption.NOFOLLOW_LINKS)
                 || !Arrays.equals(Files.readAllBytes(chunksFile), rendered.chunks())
                 || !Arrays.equals(Files.readAllBytes(sidecarFile), rendered.sidecar());
+    }
+
+    /** Whether {@code chunkDir} holds a complete chunk pair (the writer removes the sidecar first). */
+    private static boolean chunkFilesPresent(Path chunkDir) {
+        return Files.isRegularFile(chunkDir.resolve(BookChunkOutputWriter.CHUNKS_FILE), LinkOption.NOFOLLOW_LINKS)
+                && Files.isRegularFile(chunkDir.resolve(BookChunkOutputWriter.SIDECAR_FILE), LinkOption.NOFOLLOW_LINKS);
     }
 
     private static BookStoreInventory readQuietly(Path store, Manifest manifest) {

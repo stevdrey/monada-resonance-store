@@ -42,9 +42,13 @@ public final class BookChunkFiles {
     }
 
     public static Loaded load(Path directory) throws IOException, BookInputException {
-        byte[] chunkBytes = Files.readAllBytes(directory.resolve(BookChunkOutputWriter.CHUNKS_FILE));
-        List<String> sidecarLines = lines(Files.readAllBytes(directory.resolve(BookChunkOutputWriter.SIDECAR_FILE)),
-                BookChunkOutputWriter.SIDECAR_FILE);
+        return parse(Files.readAllBytes(directory.resolve(BookChunkOutputWriter.CHUNKS_FILE)),
+                Files.readAllBytes(directory.resolve(BookChunkOutputWriter.SIDECAR_FILE)));
+    }
+
+    /** Cross-checks a chunks/sidecar pair given as bytes (for example rendered but not yet written). */
+    public static Loaded parse(byte[] chunkBytes, byte[] sidecarBytes) throws BookInputException {
+        List<String> sidecarLines = lines(sidecarBytes, BookChunkOutputWriter.SIDECAR_FILE);
         List<String> chunkLines = lines(chunkBytes, BookChunkOutputWriter.CHUNKS_FILE);
         if (sidecarLines.isEmpty()) {
             throw invalid("sidecar has no header line");

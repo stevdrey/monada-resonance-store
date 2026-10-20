@@ -15,13 +15,17 @@ import java.io.InputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.OptionalInt;
+import java.util.TreeMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -485,6 +489,78 @@ class BookStoreReadbackTest {
         assertEquals(OptionalInt.empty(), v.selfRecallHits());
         assertTrue(v.passed(), "recall is exploratory and never fails the readback");
         assertTrue(BookStoreReadbackReport.render(v).contains("SKIPPED"));
+    }
+
+    /**
+     * Every entry below {@code dir} with its file key (inode), modification time and bytes: an atomic rewrite with
+     * identical bytes still changes the file key, so this catches rewrites that a content digest cannot.
+     */
+    private static Map<Path, String> snapshot(Path dir) throws IOException {
+        Map<Path, String> entries = new TreeMap<>();
+        try (var walk = Files.walk(dir)) {
+            for (Path entry : walk.toList()) {
+                BasicFileAttributes attributes = Files.readAttributes(entry, BasicFileAttributes.class,
+                        LinkOption.NOFOLLOW_LINKS);
+                String bytes = attributes.isRegularFile()
+                        ? VerifiedBookSource.sha256(Files.readAllBytes(entry)) : "dir";
+                entries.put(dir.relativize(entry), attributes.fileKey() + "|" + attributes.lastModifiedTime() + "|"
+                        + bytes);
+            }
+        }
+        return entries;
+    }
+
+    @Test
+    void rejectedImportsLeaveStoreAndPopulatedChunkFilesUntouched() throws Exception {
+        BookChunker.Result result = fixtureResult();
+
+        Path foreign = work("untouched-foreign");
+        BookStoreReadback.seed(result, foreign);
+        MonadaMemory.open(foreign.resolve("store")).remember("an atom that is no chunk of this book");
+
+        Path damaged = work("untouched-damaged");
+        BookStoreReadback.seed(result, damaged);
+        Path atomLog = damaged.resolve("store/atoms/segment-000001.log");
+        List<String> lines = Files.readAllLines(atomLog, StandardCharsets.UTF_8);
+        Files.write(atomLog, lines.subList(0, lines.size() - 1), StandardCharsets.UTF_8);
+
+        Path incompatible = work("untouched-incompatible");
+        BookChunkOutputWriter.write(result, incompatible.resolve("chunks"));
+        MonadaMemoryOptions defaults = MonadaMemoryOptions.defaults();
+        MonadaMemory.open(incompatible.resolve("store"), new MonadaMemoryOptions(defaults.textNormalizer(),
+                        defaults.feedbackAwareRanking(), new LexicalExpansionOptions(1.0, 0.5)))
+                .rememberAll(result.chunks().subList(0, 3).stream().map(BookChunk::text).toList());
+
+        Map<Path, BookStoreReadback.ImportKind> expected = Map.of(foreign, BookStoreReadback.ImportKind.FOREIGN,
+                damaged, BookStoreReadback.ImportKind.DAMAGED, incompatible, BookStoreReadback.ImportKind.INCOMPATIBLE);
+        for (Map.Entry<Path, BookStoreReadback.ImportKind> run : expected.entrySet()) {
+            Path work = run.getKey();
+            assertTrue(Files.size(work.resolve("chunks").resolve(BookChunkOutputWriter.SIDECAR_FILE)) > 0,
+                    "a populated chunk pair is in place");
+            Map<Path, String> chunksBefore = snapshot(work.resolve("chunks"));
+            Map<Path, String> storeBefore = snapshot(work.resolve("store"));
+            Thread.sleep(20); // so a rewrite would also show up as a newer modification time
+
+            BookStoreReadback.Seed seed = BookStoreReadback.seed(result, work);
+
+            assertEquals(run.getValue(), seed.importKind());
+            assertFalse(seed.passed());
+            assertEquals(chunksBefore, snapshot(work.resolve("chunks")), run.getValue() + ": chunks/ untouched");
+            assertEquals(storeBefore, snapshot(work.resolve("store")), run.getValue() + ": store/ untouched");
+        }
+    }
+
+    @Test
+    void repeatImportDoesNotRewriteIdenticalChunkFiles() throws Exception {
+        Path work = work("no-rewrite");
+        BookStoreReadback.seed(fixtureResult(), work);
+        Map<Path, String> chunksBefore = snapshot(work.resolve("chunks"));
+        Thread.sleep(20);
+
+        BookStoreReadback.Seed repeat = BookStoreReadback.seed(fixtureResult(), work);
+
+        assertEquals(BookStoreReadback.ImportKind.REPEAT, repeat.importKind());
+        assertEquals(chunksBefore, snapshot(work.resolve("chunks")));
     }
 
     @Test
