@@ -46,7 +46,8 @@ class BookCorpusV1ContractTest {
     // Both directories are immutable for v1; any extra tracked file (e.g. a book excerpt) must fail here.
     private static final String CONTRACT_DIR = "docs/experiments/book-corpus-v1";
     private static final Set<String> CONTRACT_FILES = Set.of(
-            "README.md", "RIGHTS.md", "manifest.properties", "VerifyBookCorpus.java", "CHUNKING.md");
+            "README.md", "RIGHTS.md", "manifest.properties", "VerifyBookCorpus.java", "CHUNKING.md",
+            "STORE-READBACK.md");
     private static final String FIXTURE_DIR = "monada-evaluation/src/test/resources/book-corpus-fixture-v1";
     private static final Set<String> FIXTURE_FILES = Set.of(".gitattributes", "manifest.properties", "sample.txt");
 

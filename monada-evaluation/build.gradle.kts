@@ -210,6 +210,14 @@ tasks.register<JavaExec>("runBookChunking") {
     workingDir = rootProject.projectDir
 }
 
+tasks.register<JavaExec>("runBookStoreReadback") {
+    description = "Seed a disposable Store from the verified book-corpus-v1 chunks, reopen it and verify exact content readback, sidecar mapping and structural audit (evaluation only; offline). Options via --args, e.g. --args=\"seed --input <body.txt> --work <new dir>\" or --args=\"verify --work <dir>\""
+    group = "application"
+    mainClass.set("com.monada.evaluation.book.BookStoreReadbackMain")
+    classpath = sourceSets["main"].runtimeClasspath
+    workingDir = rootProject.projectDir
+}
+
 tasks.named<Test>("test") {
     // The cross-JVM determinism test starts child JVMs that run the evaluation command on this runtime classpath.
     doFirst {
