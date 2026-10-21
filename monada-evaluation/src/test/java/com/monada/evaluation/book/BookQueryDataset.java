@@ -31,6 +31,7 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
 
     static final String RESOURCE_ROOT = "/com/monada/evaluation/book/book-queries-v1/";
     static final String DATASET = "book-queries-v1";
+    static final String PROTOCOL = "MANUAL_READING_OF_NORMALIZED_BODY_NO_RETRIEVAL";
     static final String SPLIT_METHOD = "per-category-sha256-rank-last-third-holdout-v1";
     static final String QUERIES_HEADER = "id|split|category|answerable|text|rationale";
     static final String JUDGMENTS_HEADER = "queryId|chunkKey|byteStart|byteEnd|spanSha256|grade|role|note";
@@ -115,6 +116,10 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
         check(DATASET.equals(manifest.getProperty("dataset")), "manifest dataset is not " + DATASET);
         check("monada-book-queries".equals(manifest.getProperty("format"))
                 && "1".equals(manifest.getProperty("formatVersion")), "unsupported dataset format");
+        check("1".equals(manifest.getProperty("datasetVersion")),
+                "unsupported datasetVersion " + manifest.getProperty("datasetVersion"));
+        check(PROTOCOL.equals(manifest.getProperty("judgment.protocol")),
+                "unsupported judgment.protocol " + manifest.getProperty("judgment.protocol"));
         check("0".equals(manifest.getProperty("judgment.retrievalRunsBeforeFreeze")),
                 "labels must be frozen before any retrieval run");
         String review = manifest.getProperty("judgment.reviewStatus");
