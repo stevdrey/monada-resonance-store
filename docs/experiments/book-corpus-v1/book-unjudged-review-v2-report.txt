@@ -17,10 +17,10 @@ selection.target=60
 selection.sha256=c095247df3d57b568afc15fa12eee9b5efa9bc9ac74f9f7dedd6ecfa9463418d
 review.protocol=SCORE_BLIND_WORKSHEET_QUERY_AND_CHUNK_TEXT_ONLY
 review.sha256=37dc4627c26edd9a0ff49d1f766672cb2c91293025ab8d9ef64bd415d13b40e6
-judgment.reviewStatus=PENDING_HUMAN_REVIEW
-judgment.reviewer=
-judgment.reviewedAt=
-judgment.approvedBy=
+judgment.reviewStatus=REVIEWED
+judgment.reviewer=Steven Rey Sequeira
+judgment.reviewedAt=2026-10-21
+judgment.approvedBy=stevdrey
 reclassification.policy=NONE
 
 == Definitions ==

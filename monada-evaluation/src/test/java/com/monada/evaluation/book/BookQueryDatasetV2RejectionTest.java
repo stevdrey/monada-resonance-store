@@ -298,6 +298,9 @@ class BookQueryDatasetV2RejectionTest {
         byte[] rev = bytes(review);
         Properties m = new Properties();
         m.putAll(MANIFEST);
+        // Fixtures start unsigned, whatever the bundled dataset's sign-off; tests sign off explicitly.
+        m.setProperty("judgment.reviewStatus", "PENDING_HUMAN_REVIEW");
+        List.of("judgment.reviewer", "judgment.approvedBy", "judgment.reviewedAt").forEach(k -> m.setProperty(k, ""));
         m.setProperty("selection.sha256", BookQueryDataset.sha256(sel));
         m.setProperty("review.sha256", BookQueryDataset.sha256(rev));
         BookQueryDatasetV2.expectedCounts(BookQueryDatasetV2.build(m, base, baseManifest, sel, rev))
