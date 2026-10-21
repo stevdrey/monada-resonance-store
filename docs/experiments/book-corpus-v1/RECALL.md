@@ -207,6 +207,7 @@ By category (DEV + HOLDOUT):
 
 ## Follow-ups (not in this issue)
 
-- Investigate hub chunks such as `s009/c0001`: why do they score high for unrelated queries?
+- Investigate hub chunks such as `s009/c0001`: why do they score high for unrelated queries? Diagnosed in
+  [HUB-DIAGNOSTICS.md](HUB-DIAGNOSTICS.md) (#176, evaluation only).
 - Explore chunk size and overlap on DEV only, then confirm on HOLDOUT once.
 - Judge the most frequent `U` hits for `book-queries-v2`, so unjudged hits stop hiding possible relevance.

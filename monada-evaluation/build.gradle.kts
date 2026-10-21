@@ -226,6 +226,14 @@ tasks.register<JavaExec>("runBookRecall") {
     workingDir = rootProject.projectDir
 }
 
+tasks.register<JavaExec>("runBookHubDiagnostics") {
+    description = "Diagnose top-K hub chunks of the frozen book recall baseline: top-1/3/10 frequency by DEV/HOLDOUT/ALL, predeclared DEV controls, length/token/vector metrics and an exact per-bucket score decomposition with production score parity (evaluation only; offline; read-only). Options via --args, e.g. --args=\"--work <seeded dir> --baseline docs/experiments/book-corpus-v1/book-recall-v1-report.txt [--out <report.txt>]\""
+    group = "application"
+    mainClass.set("com.monada.evaluation.book.BookHubDiagnosticsMain")
+    classpath = sourceSets["main"].runtimeClasspath
+    workingDir = rootProject.projectDir
+}
+
 tasks.named<Test>("test") {
     // The cross-JVM determinism test starts child JVMs that run the evaluation command on this runtime classpath.
     doFirst {

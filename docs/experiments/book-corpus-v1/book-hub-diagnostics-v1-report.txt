@@ -1,0 +1,446 @@
+Monada book hub-concentration diagnostics (Issue #176, evaluation only)
+format=monada-book-hub-diagnostics
+formatVersion=1
+status=DIAGNOSTIC: counts and measurements of the frozen book-recall-v1 baseline; no ranking, encoder or default is changed; correlations are not causes; HOLDOUT is counted only, never used to choose controls or anything else
+
+== Inputs ==
+corpus=book-corpus-v1
+corpusVersion=1
+corpusManifest.sha256=d68aae03a7b4bebdc78d2fe43260adb055d6369d77be9324fb8378ea3a39228f
+source.sizeBytes=151095
+source.sha256=b44b499274ef98e0bc12c190ee08d9c63480b7c96946101a540a0cb24b3a944c
+chunking.policy=book-chunking-v1
+chunking.chapterHeadingPattern=CHAPTER [IVXLC]+\.
+chunking.maxChunkBytes=2048
+chunking.overlapBytes=0
+chunks.count=87
+chunksFile.sha256=e1f4ea9dd6dfcfb3225a845855b79476f686b8868b526a45d05fd863a2608a04
+sidecar.sha256=d3c62fe220a5e8b7ec584c06f44469ec887f08a71d8ed87a94d65f4ec709f017
+dataset=book-queries-v1 v1
+queries.sha256=9b1b0b222f26932622c9fe38a8d4351a0a637bd41f49319d882152a44fe05e14
+judgments.sha256=5f129b6e0b8cb0565d9ba13cb6a57c67238403e7cde77e45c702068d6b163968
+chunkMap.sha256=d3c62fe220a5e8b7ec584c06f44469ec887f08a71d8ed87a94d65f4ec709f017
+split.method=per-category-sha256-rank-last-third-holdout-v1
+split.digest=12f79086668abf3494161639250d92d39f595bd8759ad00368d31925dad41a43
+judgment.reviewStatus=REVIEWED
+store.atoms=87
+store.fingerprint=dd11b6ba7e7f51b00af4f9bbaec4dc2649fd87ed05b3bbb97bdf9d0b42bb03d7
+store.vectorsSha256=b781092b4cc9ffb50aa75f4e07521bd6133184eb22907423a42de15720224370
+store.feedbackEvents=0 (required: feedback-aware ranking must not reorder the baseline)
+store.manifestVersion=0.4
+profile=MonadaMemoryOptions.defaults()
+encodingProfile=EncodingProfile[encoder=SimpleFrequencyEncoder, encoderVersion=1.0, dimensions=128, normalizer=LexicalEnrichmentPipeline, normalizerVersion=LexicalEnrichmentPipeline#fc22fb3d254ceb3f30c61a81fc75ba94e80344d6c2280e9fccb204ed086faff0, weightingStrategy=WeightedTokens, originalWeight=1.0, expansionWeight=0.25, aliasOriginalWeight=0.25, aliasExpansionWeight=0.0625]
+api=MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+k=[1, 3, 5, 10]
+runs=2 per query on fresh instances of one throwaway Store copy; must be identical
+baseline.report=monada-book-recall-report v1, reproduced byte for byte before any diagnostic
+baseline.report.sha256=86501f764e985835487a90b05ce5dbbdc2821455c94a97aaf5d443bba1a2ffd2
+
+== Definitions ==
+top-K count = queries that ranked the chunk's atom within the first K of the frozen top-10; repeated text is one atom, counted once per query under its first key (aliases listed)
+occurrences = query-hit pairs (a query contributes up to K); distinct = different atoms among them
+labels: E2/E1 judged evidence, C0 judged confounder, U unjudged for that query (not assumed irrelevant)
+tokens = production weighted tokens of MonadaMemoryOptions.defaults(): original = normalized terms (weight 1.0), expansion = lexical expansions (weight 0.25); stop words already removed
+topTok = occurrences of the chunk's most frequent original token (token not named); nz = non-zero buckets of the stored vector; maxAbs = largest |component|; norm = L2 norm
+centroidCos = cosine (double arithmetic) of the stored vector with the mean of all stored chunk vectors; a diagnostic of vector geometry, not a production score
+bucket contribution = q[i]*c[i]/(|q||c|) exactly as the production cosine sums it; pos/neg = sums of positive/negative contributions; shared = buckets non-zero in both vectors
+cover = distinct original query tokens also among the chunk's original tokens / distinct original query tokens
+bucket tokens: query tokens hashing to the bucket (+ = expansion), m = their occurrences in the chunk's weighted tokens, o = other distinct chunk tokens colliding in that bucket
+rank (decomposition) = rank among all atoms in the recomputed ranking; ranks 1-10 equal production (parity), deeper ranks come from the same recomputation
+
+== Parity (recomputation vs production) ==
+tolerance=0.0 (bit-identical: verbatim production cosine on the stored vectors)
+queries=32 comparedHits=320 maxAbsDifference=0.0 rankedAtomsPerQuery=87 storedVectors=87 result=PASS (atoms, order incl. atom-id ties, scores)
+storedNorm min=0.999999942 max=1.000000067 (every stored vector is L2-normalized, so norm cannot rank chunks)
+reencode=87/87 stored vectors equal the production encoding of their chunk text
+
+== Concentration summary ==
+-- DEV: queries 24, zero-hit 0; top-1 occurrences 24 over 17 distinct atoms; top-3 occurrences 72 over 37 distinct atoms; top-10 occurrences 240 over 74 distinct atoms
+   most frequent top-1: book-corpus-v1/book-chunking-v1/s009/c0001 6/24 (0.2500)
+-- HOLDOUT: queries 8, zero-hit 0; top-1 occurrences 8 over 8 distinct atoms; top-3 occurrences 24 over 22 distinct atoms; top-10 occurrences 80 over 50 distinct atoms
+   most frequent top-1: book-corpus-v1/book-chunking-v1/s009/c0003 1/8 (0.1250)
+-- ALL: queries 32, zero-hit 0; top-1 occurrences 32 over 23 distinct atoms; top-3 occurrences 96 over 48 distinct atoms; top-10 occurrences 320 over 79 distinct atoms
+   most frequent top-1: book-corpus-v1/book-chunking-v1/s009/c0001 6/32 (0.1875)
+
+== Frequency distribution (every atom in any top-10; order: ALL top-1, top-3, top-10 desc, key asc) ==
+columns: DEV t1/t3/t10 | HOLDOUT t1/t3/t10 | ALL t1/t3/t10 | NO_ANSWER top-1 | key [aliases]
+ 6/10/16 |  0/ 1/ 2 |  6/11/18 | 2 | book-corpus-v1/book-chunking-v1/s009/c0001
+ 1/ 5/12 |  1/ 2/ 3 |  2/ 7/15 | 0 | book-corpus-v1/book-chunking-v1/s009/c0003
+ 1/ 2/ 3 |  1/ 1/ 1 |  2/ 3/ 4 | 0 | book-corpus-v1/book-chunking-v1/s011/c0005
+ 2/ 2/ 9 |  0/ 0/ 2 |  2/ 2/11 | 0 | book-corpus-v1/book-chunking-v1/s009/c0006
+ 2/ 2/ 3 |  0/ 0/ 0 |  2/ 2/ 3 | 0 | book-corpus-v1/book-chunking-v1/s008/c0007
+ 1/ 4/ 8 |  0/ 1/ 2 |  1/ 5/10 | 0 | book-corpus-v1/book-chunking-v1/s009/c0005
+ 1/ 4/ 6 |  0/ 0/ 0 |  1/ 4/ 6 | 0 | book-corpus-v1/book-chunking-v1/s009/c0002
+ 1/ 3/ 8 |  0/ 0/ 1 |  1/ 3/ 9 | 1 | book-corpus-v1/book-chunking-v1/s008/c0001
+ 0/ 2/ 4 |  1/ 1/ 2 |  1/ 3/ 6 | 0 | book-corpus-v1/book-chunking-v1/s001/c0001
+ 0/ 2/ 3 |  1/ 1/ 2 |  1/ 3/ 5 | 0 | book-corpus-v1/book-chunking-v1/s011/c0001
+ 1/ 2/ 2 |  0/ 1/ 1 |  1/ 3/ 3 | 0 | book-corpus-v1/book-chunking-v1/s006/c0002
+ 1/ 2/ 6 |  0/ 0/ 0 |  1/ 2/ 6 | 1 | book-corpus-v1/book-chunking-v1/s008/c0002
+ 1/ 1/ 3 |  0/ 1/ 1 |  1/ 2/ 4 | 0 | book-corpus-v1/book-chunking-v1/s010/c0000
+ 0/ 1/ 2 |  1/ 1/ 1 |  1/ 2/ 3 | 0 | book-corpus-v1/book-chunking-v1/s001/c0005
+ 1/ 1/ 4 |  0/ 0/ 1 |  1/ 1/ 5 | 0 | book-corpus-v1/book-chunking-v1/s006/c0000
+ 1/ 1/ 4 |  0/ 0/ 0 |  1/ 1/ 4 | 0 | book-corpus-v1/book-chunking-v1/s005/c0000
+ 0/ 0/ 2 |  1/ 1/ 2 |  1/ 1/ 4 | 1 | book-corpus-v1/book-chunking-v1/s011/c0000
+ 1/ 1/ 2 |  0/ 0/ 1 |  1/ 1/ 3 | 0 | book-corpus-v1/book-chunking-v1/s004/c0004
+ 0/ 0/ 1 |  1/ 1/ 1 |  1/ 1/ 2 | 0 | book-corpus-v1/book-chunking-v1/s002/c0002
+ 1/ 1/ 1 |  0/ 0/ 1 |  1/ 1/ 2 | 0 | book-corpus-v1/book-chunking-v1/s003/c0000
+ 1/ 1/ 2 |  0/ 0/ 0 |  1/ 1/ 2 | 0 | book-corpus-v1/book-chunking-v1/s004/c0003
+ 0/ 0/ 0 |  1/ 1/ 1 |  1/ 1/ 1 | 0 | book-corpus-v1/book-chunking-v1/s005/c0004
+ 1/ 1/ 1 |  0/ 0/ 0 |  1/ 1/ 1 | 0 | book-corpus-v1/book-chunking-v1/s007/c0002
+ 0/ 7/12 |  0/ 1/ 2 |  0/ 8/14 | 0 | book-corpus-v1/book-chunking-v1/s007/c0001
+ 0/ 0/ 3 |  0/ 2/ 3 |  0/ 2/ 6 | 0 | book-corpus-v1/book-chunking-v1/s008/c0006
+ 0/ 1/ 4 |  0/ 1/ 2 |  0/ 2/ 6 | 0 | book-corpus-v1/book-chunking-v1/s011/c0004
+ 0/ 2/ 2 |  0/ 0/ 0 |  0/ 2/ 2 | 0 | book-corpus-v1/book-chunking-v1/s002/c0004
+ 0/ 0/ 7 |  0/ 1/ 3 |  0/ 1/10 | 0 | book-corpus-v1/book-chunking-v1/s002/c0005
+ 0/ 1/ 4 |  0/ 0/ 3 |  0/ 1/ 7 | 0 | book-corpus-v1/book-chunking-v1/s001/c0000
+ 0/ 1/ 4 |  0/ 0/ 2 |  0/ 1/ 6 | 0 | book-corpus-v1/book-chunking-v1/s004/c0000
+ 0/ 0/ 4 |  0/ 1/ 2 |  0/ 1/ 6 | 0 | book-corpus-v1/book-chunking-v1/s008/c0003
+ 0/ 0/ 4 |  0/ 1/ 2 |  0/ 1/ 6 | 0 | book-corpus-v1/book-chunking-v1/s011/c0002
+ 0/ 1/ 5 |  0/ 0/ 0 |  0/ 1/ 5 | 0 | book-corpus-v1/book-chunking-v1/s003/c0001
+ 0/ 1/ 2 |  0/ 0/ 3 |  0/ 1/ 5 | 0 | book-corpus-v1/book-chunking-v1/s004/c0006
+ 0/ 1/ 5 |  0/ 0/ 0 |  0/ 1/ 5 | 0 | book-corpus-v1/book-chunking-v1/s010/c0006
+ 0/ 1/ 2 |  0/ 0/ 2 |  0/ 1/ 4 | 0 | book-corpus-v1/book-chunking-v1/s003/c0003
+ 0/ 1/ 3 |  0/ 0/ 1 |  0/ 1/ 4 | 0 | book-corpus-v1/book-chunking-v1/s004/c0007
+ 0/ 1/ 2 |  0/ 0/ 2 |  0/ 1/ 4 | 0 | book-corpus-v1/book-chunking-v1/s005/c0002
+ 0/ 1/ 4 |  0/ 0/ 0 |  0/ 1/ 4 | 0 | book-corpus-v1/book-chunking-v1/s006/c0003
+ 0/ 1/ 3 |  0/ 0/ 1 |  0/ 1/ 4 | 0 | book-corpus-v1/book-chunking-v1/s009/c0004
+ 0/ 1/ 4 |  0/ 0/ 0 |  0/ 1/ 4 | 0 | book-corpus-v1/book-chunking-v1/s010/c0003
+ 0/ 0/ 0 |  0/ 1/ 3 |  0/ 1/ 3 | 0 | book-corpus-v1/book-chunking-v1/s001/c0003
+ 0/ 1/ 2 |  0/ 0/ 0 |  0/ 1/ 2 | 0 | book-corpus-v1/book-chunking-v1/s002/c0000
+ 0/ 0/ 1 |  0/ 1/ 1 |  0/ 1/ 2 | 0 | book-corpus-v1/book-chunking-v1/s004/c0002
+ 0/ 0/ 1 |  0/ 1/ 1 |  0/ 1/ 2 | 0 | book-corpus-v1/book-chunking-v1/s006/c0001
+ 0/ 0/ 0 |  0/ 1/ 1 |  0/ 1/ 1 | 0 | book-corpus-v1/book-chunking-v1/s001/c0006
+ 0/ 1/ 1 |  0/ 0/ 0 |  0/ 1/ 1 | 0 | book-corpus-v1/book-chunking-v1/s006/c0005
+ 0/ 1/ 1 |  0/ 0/ 0 |  0/ 1/ 1 | 0 | book-corpus-v1/book-chunking-v1/s006/c0006
+ 0/ 0/ 6 |  0/ 0/ 1 |  0/ 0/ 7 | 0 | book-corpus-v1/book-chunking-v1/s007/c0000
+ 0/ 0/ 5 |  0/ 0/ 1 |  0/ 0/ 6 | 0 | book-corpus-v1/book-chunking-v1/s007/c0004
+ 0/ 0/ 2 |  0/ 0/ 3 |  0/ 0/ 5 | 0 | book-corpus-v1/book-chunking-v1/s006/c0007
+ 0/ 0/ 4 |  0/ 0/ 0 |  0/ 0/ 4 | 0 | book-corpus-v1/book-chunking-v1/s003/c0002
+ 0/ 0/ 3 |  0/ 0/ 1 |  0/ 0/ 4 | 0 | book-corpus-v1/book-chunking-v1/s005/c0003
+ 0/ 0/ 2 |  0/ 0/ 2 |  0/ 0/ 4 | 0 | book-corpus-v1/book-chunking-v1/s007/c0005
+ 0/ 0/ 3 |  0/ 0/ 1 |  0/ 0/ 4 | 0 | book-corpus-v1/book-chunking-v1/s010/c0004
+ 0/ 0/ 2 |  0/ 0/ 1 |  0/ 0/ 3 | 0 | book-corpus-v1/book-chunking-v1/s003/c0004
+ 0/ 0/ 1 |  0/ 0/ 2 |  0/ 0/ 3 | 0 | book-corpus-v1/book-chunking-v1/s008/c0004
+ 0/ 0/ 3 |  0/ 0/ 0 |  0/ 0/ 3 | 0 | book-corpus-v1/book-chunking-v1/s008/c0005
+ 0/ 0/ 3 |  0/ 0/ 0 |  0/ 0/ 3 | 0 | book-corpus-v1/book-chunking-v1/s009/c0000
+ 0/ 0/ 1 |  0/ 0/ 2 |  0/ 0/ 3 | 0 | book-corpus-v1/book-chunking-v1/s012/c0000
+ 0/ 0/ 2 |  0/ 0/ 1 |  0/ 0/ 3 | 0 | book-corpus-v1/book-chunking-v1/s012/c0001
+ 0/ 0/ 1 |  0/ 0/ 1 |  0/ 0/ 2 | 0 | book-corpus-v1/book-chunking-v1/s002/c0006
+ 0/ 0/ 2 |  0/ 0/ 0 |  0/ 0/ 2 | 0 | book-corpus-v1/book-chunking-v1/s004/c0001
+ 0/ 0/ 1 |  0/ 0/ 1 |  0/ 0/ 2 | 0 | book-corpus-v1/book-chunking-v1/s005/c0001
+ 0/ 0/ 2 |  0/ 0/ 0 |  0/ 0/ 2 | 0 | book-corpus-v1/book-chunking-v1/s007/c0003
+ 0/ 0/ 1 |  0/ 0/ 1 |  0/ 0/ 2 | 0 | book-corpus-v1/book-chunking-v1/s008/c0000
+ 0/ 0/ 2 |  0/ 0/ 0 |  0/ 0/ 2 | 0 | book-corpus-v1/book-chunking-v1/s010/c0002
+ 0/ 0/ 2 |  0/ 0/ 0 |  0/ 0/ 2 | 0 | book-corpus-v1/book-chunking-v1/s012/c0002
+ 0/ 0/ 1 |  0/ 0/ 1 |  0/ 0/ 2 | 0 | book-corpus-v1/book-chunking-v1/s012/c0004
+ 0/ 0/ 2 |  0/ 0/ 0 |  0/ 0/ 2 | 0 | book-corpus-v1/book-chunking-v1/s012/c0005
+ 0/ 0/ 1 |  0/ 0/ 0 |  0/ 0/ 1 | 0 | book-corpus-v1/book-chunking-v1/s000/c0000
+ 0/ 0/ 0 |  0/ 0/ 1 |  0/ 0/ 1 | 0 | book-corpus-v1/book-chunking-v1/s001/c0002
+ 0/ 0/ 1 |  0/ 0/ 0 |  0/ 0/ 1 | 0 | book-corpus-v1/book-chunking-v1/s001/c0004
+ 0/ 0/ 0 |  0/ 0/ 1 |  0/ 0/ 1 | 0 | book-corpus-v1/book-chunking-v1/s003/c0005
+ 0/ 0/ 1 |  0/ 0/ 0 |  0/ 0/ 1 | 0 | book-corpus-v1/book-chunking-v1/s010/c0001
+ 0/ 0/ 1 |  0/ 0/ 0 |  0/ 0/ 1 | 0 | book-corpus-v1/book-chunking-v1/s010/c0005
+ 0/ 0/ 1 |  0/ 0/ 0 |  0/ 0/ 1 | 0 | book-corpus-v1/book-chunking-v1/s011/c0003
+ 0/ 0/ 1 |  0/ 0/ 0 |  0/ 0/ 1 | 0 | book-corpus-v1/book-chunking-v1/s012/c0003
+ 0/ 0/ 1 |  0/ 0/ 0 |  0/ 0/ 1 | 0 | book-corpus-v1/book-chunking-v1/s012/c0006
+
+== Top-1 references (query split category rank score label) ==
+book-corpus-v1/book-chunking-v1/s009/c0001 top-1 6/32:
+  AMB-02 DEV     AMBIGUOUS #1 0.295196 U
+  AMB-03 DEV     AMBIGUOUS #1 0.316288 U
+  LIT-03 DEV     LITERAL #1 0.476470 U
+  LIT-05 DEV     LITERAL #1 0.497553 U
+  NOA-01 DEV     NO_ANSWER #1 0.449220 U NO_ANSWER
+  NOA-02 DEV     NO_ANSWER #1 0.426670 U NO_ANSWER
+book-corpus-v1/book-chunking-v1/s009/c0003 top-1 2/32:
+  CON-02 HOLDOUT CONFOUNDER #1 0.210352 U
+  NAR-04 DEV     NARRATIVE_TEMPORAL #1 0.243230 U
+book-corpus-v1/book-chunking-v1/s011/c0005 top-1 2/32:
+  AMB-01 HOLDOUT AMBIGUOUS #1 0.312270 U
+  LIT-04 DEV     LITERAL #1 0.393985 U
+book-corpus-v1/book-chunking-v1/s009/c0006 top-1 2/32:
+  CON-03 DEV     CONFOUNDER #1 0.266320 U
+  MUL-01 DEV     MULTI_EVIDENCE #1 0.292341 U
+book-corpus-v1/book-chunking-v1/s008/c0007 top-1 2/32:
+  PAR-04 DEV     PARAPHRASE #1 0.282549 U
+  PAR-05 DEV     PARAPHRASE #1 0.164399 U
+book-corpus-v1/book-chunking-v1/s009/c0005 top-1 1/32:
+  LIT-01 DEV     LITERAL #1 0.404788 U
+book-corpus-v1/book-chunking-v1/s009/c0002 top-1 1/32:
+  NAR-02 DEV     NARRATIVE_TEMPORAL #1 0.395642 U
+book-corpus-v1/book-chunking-v1/s008/c0001 top-1 1/32:
+  NOA-04 DEV     NO_ANSWER #1 0.362891 C0 NO_ANSWER
+book-corpus-v1/book-chunking-v1/s001/c0001 top-1 1/32:
+  LIT-02 HOLDOUT LITERAL #1 0.597078 E2
+book-corpus-v1/book-chunking-v1/s011/c0001 top-1 1/32:
+  MUL-02 HOLDOUT MULTI_EVIDENCE #1 0.389145 U
+book-corpus-v1/book-chunking-v1/s006/c0002 top-1 1/32:
+  CON-01 DEV     CONFOUNDER #1 0.205027 U
+book-corpus-v1/book-chunking-v1/s008/c0002 top-1 1/32:
+  NOA-05 DEV     NO_ANSWER #1 0.272291 U NO_ANSWER
+book-corpus-v1/book-chunking-v1/s010/c0000 top-1 1/32:
+  MUL-04 DEV     MULTI_EVIDENCE #1 0.207713 U
+book-corpus-v1/book-chunking-v1/s001/c0005 top-1 1/32:
+  PAR-02 HOLDOUT PARAPHRASE #1 0.523281 U
+book-corpus-v1/book-chunking-v1/s006/c0000 top-1 1/32:
+  PAR-03 DEV     PARAPHRASE #1 0.224699 U
+book-corpus-v1/book-chunking-v1/s005/c0000 top-1 1/32:
+  MUL-03 DEV     MULTI_EVIDENCE #1 0.189634 U
+book-corpus-v1/book-chunking-v1/s011/c0000 top-1 1/32:
+  NOA-03 HOLDOUT NO_ANSWER #1 0.183027 U NO_ANSWER
+book-corpus-v1/book-chunking-v1/s004/c0004 top-1 1/32:
+  CON-04 DEV     CONFOUNDER #1 0.188764 E2
+book-corpus-v1/book-chunking-v1/s002/c0002 top-1 1/32:
+  NAR-03 HOLDOUT NARRATIVE_TEMPORAL #1 0.342010 U
+book-corpus-v1/book-chunking-v1/s003/c0000 top-1 1/32:
+  PAR-06 DEV     PARAPHRASE #1 0.346553 U
+book-corpus-v1/book-chunking-v1/s004/c0003 top-1 1/32:
+  NAR-01 DEV     NARRATIVE_TEMPORAL #1 0.500578 U
+book-corpus-v1/book-chunking-v1/s005/c0004 top-1 1/32:
+  PAR-01 HOLDOUT PARAPHRASE #1 0.309892 U
+book-corpus-v1/book-chunking-v1/s007/c0002 top-1 1/32:
+  MUL-05 DEV     MULTI_EVIDENCE #1 0.166718 U
+
+== Controls (predeclared rules, DEV only) ==
+HUB = book-corpus-v1/book-chunking-v1/s009/c0001  [rule: most DEV top-1 appearances (ties: DEV top-3, DEV top-10 descending, key ascending)]
+  in top-10: AMB-01 HOLDOUT AMBIGUOUS #4 0.202107 U
+  in top-10: AMB-02 DEV     AMBIGUOUS #1 0.295196 U
+  in top-10: AMB-03 DEV     AMBIGUOUS #1 0.316288 U
+  in top-10: CON-01 DEV     CONFOUNDER #3 0.155929 U
+  in top-10: CON-02 HOLDOUT CONFOUNDER #2 0.209097 U
+  in top-10: LIT-01 DEV     LITERAL #3 0.315117 U
+  in top-10: LIT-03 DEV     LITERAL #1 0.476470 U
+  in top-10: LIT-04 DEV     LITERAL #6 0.228841 U
+  in top-10: LIT-05 DEV     LITERAL #1 0.497553 U
+  in top-10: MUL-01 DEV     MULTI_EVIDENCE #9 0.191341 U
+  in top-10: MUL-03 DEV     MULTI_EVIDENCE #8 0.104368 U
+  in top-10: MUL-05 DEV     MULTI_EVIDENCE #5 0.122998 U
+  in top-10: NAR-01 DEV     NARRATIVE_TEMPORAL #4 0.428734 U
+  in top-10: NAR-04 DEV     NARRATIVE_TEMPORAL #2 0.235791 U
+  in top-10: NOA-01 DEV     NO_ANSWER #1 0.449220 U NO_ANSWER
+  in top-10: NOA-02 DEV     NO_ANSWER #1 0.426670 U NO_ANSWER
+  in top-10: NOA-04 DEV     NO_ANSWER #3 0.269476 U NO_ANSWER
+  in top-10: NOA-05 DEV     NO_ANSWER #6 0.233373 U NO_ANSWER
+RUNNER_UP = book-corpus-v1/book-chunking-v1/s009/c0006  [rule: next chunk in the same DEV order]
+  in top-10: CON-01 DEV     CONFOUNDER #9 0.077648 U
+  in top-10: CON-03 DEV     CONFOUNDER #1 0.266320 U
+  in top-10: LIT-01 DEV     LITERAL #9 0.278736 U
+  in top-10: LIT-02 HOLDOUT LITERAL #8 0.394192 U
+  in top-10: LIT-03 DEV     LITERAL #4 0.375269 U
+  in top-10: MUL-01 DEV     MULTI_EVIDENCE #1 0.292341 U
+  in top-10: NOA-01 DEV     NO_ANSWER #8 0.308154 U NO_ANSWER
+  in top-10: NOA-02 DEV     NO_ANSWER #5 0.307519 U NO_ANSWER
+  in top-10: NOA-05 DEV     NO_ANSWER #9 0.217898 U NO_ANSWER
+  in top-10: PAR-02 HOLDOUT PARAPHRASE #8 0.454752 U
+  in top-10: PAR-06 DEV     PARAPHRASE #8 0.216549 U
+TOP1_EVIDENCE = book-corpus-v1/book-chunking-v1/s004/c0004  [rule: judged evidence ranked #1 for a DEV query (first by query id), else absent]
+  in top-10: CON-04 DEV     CONFOUNDER #1 0.188764 E2
+  in top-10: NAR-01 DEV     NARRATIVE_TEMPORAL #9 0.384455 U
+  in top-10: NOA-03 HOLDOUT NO_ANSWER #10 0.128152 U NO_ANSWER
+JUDGED_EVIDENCE = book-corpus-v1/book-chunking-v1/s006/c0005  [rule: grade-2 evidence judged for the most DEV queries (ties: key ascending)]
+  in top-10: MUL-04 DEV     MULTI_EVIDENCE #2 0.174793 E2
+
+== Control chunk metrics (value, rank among 87 atoms by value desc; equal values share a rank) ==
+HUB book-corpus-v1/book-chunking-v1/s009/c0001 ordinal 61: utf8Bytes=1977 (#25) codePoints=1833 (#41) originalTokens=284 (#26) distinctOriginalTokens=160 (#40) expansionTokens=0 (#1) topTok=12 (#30) nz=88 (#10) maxAbs=0.522562 (#13) centroidCos=0.772385 (#26)
+RUNNER_UP book-corpus-v1/book-chunking-v1/s009/c0006 ordinal 66: utf8Bytes=1710 (#67) codePoints=1606 (#68) originalTokens=229 (#71) distinctOriginalTokens=137 (#72) expansionTokens=0 (#1) topTok=9 (#58) nz=76 (#66) maxAbs=0.376633 (#68) centroidCos=0.786046 (#14)
+TOP1_EVIDENCE book-corpus-v1/book-chunking-v1/s004/c0004 ordinal 25: utf8Bytes=1982 (#22) codePoints=1868 (#27) originalTokens=321 (#2) distinctOriginalTokens=179 (#7) expansionTokens=0 (#1) topTok=13 (#21) nz=84 (#23) maxAbs=0.360694 (#80) centroidCos=0.760529 (#36)
+JUDGED_EVIDENCE book-corpus-v1/book-chunking-v1/s006/c0005 ordinal 42: utf8Bytes=2023 (#11) codePoints=1939 (#7) originalTokens=319 (#3) distinctOriginalTokens=180 (#4) expansionTokens=0 (#1) topTok=18 (#4) nz=84 (#23) maxAbs=0.520266 (#14) centroidCos=0.788600 (#13)
+
+== Corpus chunk metrics (every atom, chunk order) ==
+columns: ordinal key utf8 cp orig distinct exp topTok nz maxAbs centroidCos | DEV t1 t10 | HOLDOUT t1 t10 (observed only)
+  0 book-corpus-v1/book-chunking-v1/s000/c0000   587   579   75   59   0  12  49 0.789542 0.177898 | 0  1 | 0 0
+  1 book-corpus-v1/book-chunking-v1/s001/c0000  1712  1700  250  146   0  12  81 0.405442 0.661428 | 0  4 | 0 3
+  2 book-corpus-v1/book-chunking-v1/s001/c0001  1724  1684  269  157   0  12  81 0.358209 0.717002 | 0  4 | 1 2
+  3 book-corpus-v1/book-chunking-v1/s001/c0002  1728  1666  280  162   0  11  84 0.433289 0.708200 | 0  0 | 0 1
+  4 book-corpus-v1/book-chunking-v1/s001/c0003  1376  1368  221  134   0  14  78 0.472208 0.680848 | 0  0 | 0 3
+  5 book-corpus-v1/book-chunking-v1/s001/c0004  1887  1847  293  188   0  10  82 0.333148 0.781755 | 0  1 | 0 0
+  6 book-corpus-v1/book-chunking-v1/s001/c0005  1615  1595  225  138   0  18  62 0.595713 0.767821 | 0  2 | 1 1
+  7 book-corpus-v1/book-chunking-v1/s001/c0006  1723  1679  243  148   0  10  83 0.367118 0.690247 | 0  0 | 0 1
+  8 book-corpus-v1/book-chunking-v1/s002/c0000  1839  1781  290  180   0  12  92 0.391362 0.778263 | 0  2 | 0 0
+  9 book-corpus-v1/book-chunking-v1/s002/c0001  1342  1318  206  133   0  10  77 0.472490 0.619953 | 0  0 | 0 0
+ 10 book-corpus-v1/book-chunking-v1/s002/c0002  2035  1943  335  172   0  28  87 0.658323 0.686967 | 0  1 | 1 1
+ 11 book-corpus-v1/book-chunking-v1/s002/c0003  1974  1932  304  182   0  21  88 0.559885 0.781721 | 0  0 | 0 0
+ 12 book-corpus-v1/book-chunking-v1/s002/c0004  1692  1627  258  150   0  14  82 0.443607 0.720920 | 0  2 | 0 0
+ 13 book-corpus-v1/book-chunking-v1/s002/c0005  1749  1663  279  165   0  11  87 0.343582 0.815214 | 0  7 | 0 3
+ 14 book-corpus-v1/book-chunking-v1/s002/c0006   693   677  105   85   0   6  53 0.475831 0.685995 | 0  1 | 0 1
+ 15 book-corpus-v1/book-chunking-v1/s003/c0000  1952  1890  267  178   0   7  81 0.405887 0.697901 | 1  1 | 0 1
+ 16 book-corpus-v1/book-chunking-v1/s003/c0001  1617  1523  229  145   0  12  77 0.458496 0.722348 | 0  5 | 0 0
+ 17 book-corpus-v1/book-chunking-v1/s003/c0002  1858  1800  264  155   0   8  79 0.382739 0.642107 | 0  4 | 0 0
+ 18 book-corpus-v1/book-chunking-v1/s003/c0003  1947  1861  279  167   0   9  90 0.373725 0.820534 | 0  2 | 0 2
+ 19 book-corpus-v1/book-chunking-v1/s003/c0004  1747  1661  262  176   0   9  79 0.407570 0.743825 | 0  2 | 0 1
+ 20 book-corpus-v1/book-chunking-v1/s003/c0005   530   516   80   67   0   5  49 0.416667 0.615962 | 0  0 | 0 1
+ 21 book-corpus-v1/book-chunking-v1/s004/c0000  1616  1586  245  153   0  12  85 0.436725 0.723190 | 0  4 | 0 2
+ 22 book-corpus-v1/book-chunking-v1/s004/c0001  1605  1535  255  160   0  13  83 0.428845 0.784459 | 0  2 | 0 0
+ 23 book-corpus-v1/book-chunking-v1/s004/c0002  1979  1915  306  174   0  13  92 0.373182 0.739330 | 0  1 | 0 1
+ 24 book-corpus-v1/book-chunking-v1/s004/c0003  1682  1604  247  149   0  14  80 0.544016 0.701988 | 1  2 | 0 0
+ 25 book-corpus-v1/book-chunking-v1/s004/c0004  1982  1868  321  179   0  13  84 0.360694 0.760529 | 1  2 | 0 1
+ 26 book-corpus-v1/book-chunking-v1/s004/c0005  1761  1661  270  159   0  10  86 0.404368 0.842101 | 0  0 | 0 0
+ 27 book-corpus-v1/book-chunking-v1/s004/c0006  1427  1413  218  146   0  12  73 0.489261 0.779927 | 0  2 | 0 3
+ 28 book-corpus-v1/book-chunking-v1/s004/c0007  2021  2001  303  184   0  14  82 0.480479 0.749143 | 0  3 | 0 1
+ 29 book-corpus-v1/book-chunking-v1/s004/c0008   285   285   35   34   0   2  28 0.328798 0.240235 | 0  0 | 0 0
+ 30 book-corpus-v1/book-chunking-v1/s005/c0000  2029  1911  290  159   0  18  82 0.503726 0.776261 | 1  4 | 0 0
+ 31 book-corpus-v1/book-chunking-v1/s005/c0001  1967  1855  288  164   0  13  87 0.447914 0.760944 | 0  1 | 0 1
+ 32 book-corpus-v1/book-chunking-v1/s005/c0002  1868  1762  272  162   0  13  78 0.411409 0.798015 | 0  2 | 0 2
+ 33 book-corpus-v1/book-chunking-v1/s005/c0003  1910  1888  268  160   0  13  79 0.474342 0.729718 | 0  3 | 0 1
+ 34 book-corpus-v1/book-chunking-v1/s005/c0004  2025  1937  303  180   0  14  93 0.429399 0.681129 | 0  0 | 1 1
+ 35 book-corpus-v1/book-chunking-v1/s005/c0005  1912  1812  293  158   0  17  81 0.410535 0.833032 | 0  0 | 0 0
+ 36 book-corpus-v1/book-chunking-v1/s005/c0006   858   834  143  103   0   6  62 0.508329 0.747105 | 0  0 | 0 0
+ 37 book-corpus-v1/book-chunking-v1/s006/c0000  1899  1863  259  173   0   7  84 0.373979 0.650878 | 1  4 | 0 1
+ 38 book-corpus-v1/book-chunking-v1/s006/c0001  2046  1948  288  176   0   7  86 0.449050 0.762536 | 0  1 | 0 1
+ 39 book-corpus-v1/book-chunking-v1/s006/c0002  1930  1858  276  168   0  10  85 0.372935 0.762300 | 1  2 | 0 1
+ 40 book-corpus-v1/book-chunking-v1/s006/c0003  1800  1732  256  163   0   9  78 0.476603 0.778749 | 0  4 | 0 0
+ 41 book-corpus-v1/book-chunking-v1/s006/c0004  1737  1691  272  152   0  15  81 0.485135 0.777549 | 0  0 | 0 0
+ 42 book-corpus-v1/book-chunking-v1/s006/c0005  2023  1939  319  180   0  18  84 0.520266 0.788600 | 0  1 | 0 0
+ 43 book-corpus-v1/book-chunking-v1/s006/c0006  1954  1812  312  153   0  16  81 0.496493 0.854712 | 0  1 | 0 0
+ 44 book-corpus-v1/book-chunking-v1/s006/c0007  1019   987  153  109   0   7  70 0.390702 0.664645 | 0  2 | 0 3
+ 45 book-corpus-v1/book-chunking-v1/s007/c0000  2030  1910  312  168   0  14  91 0.512989 0.838792 | 0  6 | 0 1
+ 46 book-corpus-v1/book-chunking-v1/s007/c0001  2041  1917  301  148   0  16  75 0.445674 0.739091 | 0 12 | 0 2
+ 47 book-corpus-v1/book-chunking-v1/s007/c0002  1982  1854  291  152   0  15  73 0.447352 0.750795 | 1  1 | 0 0
+ 48 book-corpus-v1/book-chunking-v1/s007/c0003  1933  1785  271  163   0  11  87 0.476491 0.744697 | 0  2 | 0 0
+ 49 book-corpus-v1/book-chunking-v1/s007/c0004  2009  1873  278  155   0   9  88 0.443607 0.770415 | 0  5 | 0 1
+ 50 book-corpus-v1/book-chunking-v1/s007/c0005  1717  1625  237  135   0   9  76 0.407407 0.699972 | 0  2 | 0 2
+ 51 book-corpus-v1/book-chunking-v1/s007/c0006  1791  1727  267  163   0  15  86 0.492133 0.818272 | 0  0 | 0 0
+ 52 book-corpus-v1/book-chunking-v1/s008/c0000  1911  1829  286  177   0   8  90 0.493999 0.757715 | 0  1 | 0 1
+ 53 book-corpus-v1/book-chunking-v1/s008/c0001  2042  2000  283  164   0   9  83 0.426671 0.633963 | 1  8 | 0 1
+ 54 book-corpus-v1/book-chunking-v1/s008/c0002  1931  1837  250  166   0  10  80 0.630126 0.631319 | 1  6 | 0 0
+ 55 book-corpus-v1/book-chunking-v1/s008/c0003  1360  1276  185  126   0   7  70 0.513436 0.721230 | 0  4 | 0 2
+ 56 book-corpus-v1/book-chunking-v1/s008/c0004  1963  1933  279  174   0  13  84 0.417786 0.713696 | 0  1 | 0 2
+ 57 book-corpus-v1/book-chunking-v1/s008/c0005  1884  1764  284  159   0  13  83 0.471405 0.784650 | 0  3 | 0 0
+ 58 book-corpus-v1/book-chunking-v1/s008/c0006  2026  1996  291  179   0  13  80 0.434542 0.800696 | 0  3 | 0 3
+ 59 book-corpus-v1/book-chunking-v1/s008/c0007  1055  1021  159  100   0   7  62 0.364769 0.565090 | 2  3 | 0 0
+ 60 book-corpus-v1/book-chunking-v1/s009/c0000  2007  1913  311  174   0  12  89 0.367843 0.803696 | 0  3 | 0 0
+ 61 book-corpus-v1/book-chunking-v1/s009/c0001  1977  1833  284  160   0  12  88 0.522562 0.772385 | 6 16 | 0 2
+ 62 book-corpus-v1/book-chunking-v1/s009/c0002  1737  1651  241  154   0   7  70 0.395642 0.728785 | 1  6 | 0 0
+ 63 book-corpus-v1/book-chunking-v1/s009/c0003  1973  1895  283  150   0  10  78 0.407646 0.761303 | 1 12 | 1 3
+ 64 book-corpus-v1/book-chunking-v1/s009/c0004  1954  1858  293  176   0   9  86 0.498784 0.776896 | 0  3 | 0 1
+ 65 book-corpus-v1/book-chunking-v1/s009/c0005  2031  1863  260  150   0  11  80 0.583708 0.720398 | 1  8 | 0 2
+ 66 book-corpus-v1/book-chunking-v1/s009/c0006  1710  1606  229  137   0   9  76 0.376633 0.786046 | 2  9 | 0 2
+ 67 book-corpus-v1/book-chunking-v1/s010/c0000  2014  1870  257  156   0   9  83 0.439646 0.560667 | 1  3 | 0 1
+ 68 book-corpus-v1/book-chunking-v1/s010/c0001  1991  1895  308  142   0  28  84 0.597505 0.534807 | 0  1 | 0 0
+ 69 book-corpus-v1/book-chunking-v1/s010/c0002  2001  1851  282  132   0  12  78 0.369473 0.713128 | 0  2 | 0 0
+ 70 book-corpus-v1/book-chunking-v1/s010/c0003  2020  1898  282  163   0  12  81 0.559865 0.808253 | 0  4 | 0 0
+ 71 book-corpus-v1/book-chunking-v1/s010/c0004  1829  1747  263  173   0   9  75 0.370370 0.796871 | 0  3 | 0 1
+ 72 book-corpus-v1/book-chunking-v1/s010/c0005  1964  1872  259  156   0  11  81 0.364420 0.379656 | 0  1 | 0 0
+ 73 book-corpus-v1/book-chunking-v1/s010/c0006   286   266   36   32   0   2  27 0.308607 0.195793 | 0  5 | 0 0
+ 74 book-corpus-v1/book-chunking-v1/s011/c0000  1909  1851  272  171   0   9  81 0.317011 0.741741 | 0  2 | 1 2
+ 75 book-corpus-v1/book-chunking-v1/s011/c0001  1856  1788  250  155   0   6  83 0.338667 0.607598 | 0  3 | 1 2
+ 76 book-corpus-v1/book-chunking-v1/s011/c0002  1995  1901  277  168   0  12  81 0.502519 0.746485 | 0  4 | 0 2
+ 77 book-corpus-v1/book-chunking-v1/s011/c0003  1950  1798  252  149   0  12  72 0.496700 0.641231 | 0  1 | 0 0
+ 78 book-corpus-v1/book-chunking-v1/s011/c0004  2013  1917  285  170   0   9  90 0.483368 0.770541 | 0  4 | 0 2
+ 79 book-corpus-v1/book-chunking-v1/s011/c0005  1170  1122  157  113   0   6  59 0.437087 0.502140 | 1  3 | 1 1
+ 80 book-corpus-v1/book-chunking-v1/s012/c0000  1880  1836  264  167   0  10  76 0.361787 0.741131 | 0  1 | 0 2
+ 81 book-corpus-v1/book-chunking-v1/s012/c0001  1956  1826  273  158   0  14  76 0.649027 0.734447 | 0  2 | 0 1
+ 82 book-corpus-v1/book-chunking-v1/s012/c0002  2044  1938  306  162   0  11  82 0.484626 0.764781 | 0  2 | 0 0
+ 83 book-corpus-v1/book-chunking-v1/s012/c0003  1778  1654  266  147   0   9  89 0.400000 0.781962 | 0  1 | 0 0
+ 84 book-corpus-v1/book-chunking-v1/s012/c0004  1950  1866  286  173   0  11  83 0.558156 0.769973 | 0  1 | 0 1
+ 85 book-corpus-v1/book-chunking-v1/s012/c0005  1989  1957  259  177   0  14  81 0.523570 0.586111 | 0  2 | 0 0
+ 86 book-corpus-v1/book-chunking-v1/s012/c0006   564   564   77   57   0   4  45 0.501745 0.361042 | 0  1 | 0 0
+
+== Score decomposition (DEV queries x controls; top 3 buckets by contribution) ==
+-- HUB book-corpus-v1/book-chunking-v1/s009/c0001: DEV queries 24, rank<=1 6, rank<=3 10, rank<=10 16, mean score 0.227677, median rank 5.5, mean cover 0.3655, mean shared 6.33, mean pos 0.256521, mean neg -0.028845, max residual 5.551e-17
+  AMB-02 rank 1 score 0.295196 pos 0.295196 neg 0.000000 shared 4 cover 2/5 top: b73 +0.233697 [alice] m=9 o=1; b30 +0.024600 [story] m=0 o=2; b113 +0.024600 [who] m=2 o=0
+  AMB-03 rank 1 score 0.316288 pos 0.316288 neg 0.000000 shared 3 cover 2/4 top: b73 +0.261281 [is] m=10 o=1; b82 +0.027503 [mad] m=0 o=2; b113 +0.027503 [who] m=2 o=0
+  CON-01 rank 3 score 0.155929 pos 0.166324 neg -0.010395 shared 5 cover 4/7 top: b65 +0.062372 [duchess] m=6 o=0; b7 +0.051976 [s] m=5 o=3; b64 +0.041581 [what] m=5 o=1
+  CON-03 rank 12 score 0.116686 pos 0.116686 neg 0.000000 shared 5 cover 4/8 top: b91 +0.048619 [be] m=4 o=1; b64 +0.038895 [what] m=5 o=1; b47 +0.009724 [he] m=1 o=0
+  CON-04 rank 21 score 0.093557 pos 0.103953 neg -0.010395 shared 6 cover 3/9 top: b64 +0.041581 [what] m=5 o=1; b22 +0.020791 [bill] m=0 o=2; b82 +0.020791 [when] m=0 o=2
+  LIT-01 rank 3 score 0.315117 pos 0.348287 neg -0.033170 shared 9 cover 3/11 top: b73 +0.157558 [alice] m=9 o=1; b27 +0.091218 [little] m=1 o=3; b64 +0.033170 [what] m=5 o=1
+  LIT-03 rank 1 score 0.476470 pos 0.476470 neg 0.000000 shared 4 cover 4/6 top: b73 +0.369507 [is,alice] m=19 o=0; b7 +0.048619 [s] m=5 o=3; b64 +0.038895 [what] m=5 o=1
+  LIT-04 rank 6 score 0.228841 pos 0.244097 neg -0.015256 shared 9 cover 4/13 top: b73 +0.144933 [alice] m=9 o=1; b64 +0.030512 [what] m=5 o=1; b57 +0.015256 [housemaid] m=0 o=5
+  LIT-05 rank 1 score 0.497553 pos 0.505845 neg -0.008293 shared 7 cover 4/9 top: b73 +0.315117 [is,alice] m=19 o=0; b4 +0.116096 [it] m=12 o=2; b64 +0.033170 [what] m=5 o=1
+  MUL-01 rank 9 score 0.191341 pos 0.304405 neg -0.113065 shared 9 cover 4/10 top: b73 +0.165249 [alice] m=9 o=1; b35 +0.078276 [that] m=9 o=0; b64 +0.034789 [what] m=5 o=1
+  MUL-03 rank 8 score 0.104368 pos 0.208735 neg -0.104368 shared 8 cover 3/10 top: b73 +0.165249 [alice] m=9 o=1; b55 +0.017395 [but] m=2 o=0; b17 +0.008697 [poems] m=0 o=1
+  MUL-04 rank 78 score -0.010395 pos 0.031186 neg -0.041581 shared 3 cover 0/7 top: b113 +0.020791 [places] m=0 o=1; b69 +0.010395 [which] m=0 o=1; b64 -0.041581 [up] m=0 o=2
+  MUL-05 rank 5 score 0.122998 pos 0.122998 neg 0.000000 shared 4 cover 1/5 top: b65 +0.073799 [where] m=0 o=1; b30 +0.024600 [story] m=0 o=2; b16 +0.012300 [appear] m=1 o=0
+  NAR-01 rank 4 score 0.428734 pos 0.436673 neg -0.007940 shared 12 cover 6/12 top: b73 +0.150851 [alice] m=9 o=1; b4 +0.111153 [size] m=0 o=3; b7 +0.039698 [s] m=5 o=3
+  NAR-02 rank 14 score 0.320871 pos 0.348375 neg -0.027503 shared 7 cover 3/9 top: b73 +0.174187 [alice] m=9 o=1; b27 +0.100845 [at] m=1 o=3; b65 +0.055007 [where] m=0 o=1
+  NAR-04 rank 2 score 0.235791 pos 0.247020 neg -0.011228 shared 5 cover 2/8 top: b73 +0.213335 [alice] m=9 o=1; b3 +0.011228 [before] m=0 o=1; b71 +0.011228 [woke] m=0 o=1
+  NOA-01 NO_ANSWER rank 1 score 0.449220 pos 0.449220 neg 0.000000 shared 4 cover 4/7 top: b73 +0.348375 [is,alice] m=19 o=0; b7 +0.045839 [s] m=5 o=3; b64 +0.036671 [what] m=5 o=1
+  NOA-02 NO_ANSWER rank 1 score 0.426670 pos 0.437898 neg -0.011228 shared 3 cover 3/4 top: b73 +0.426670 [is,alice] m=19 o=0; b97 +0.011228 [how] m=1 o=2; b87 -0.011228 [old] m=0 o=1
+  NOA-04 NO_ANSWER rank 3 score 0.269476 pos 0.291932 neg -0.022456 shared 6 cover 2/6 top: b73 +0.213335 [is] m=10 o=1; b64 +0.044913 [what] m=5 o=1; b127 +0.022456 [name] m=0 o=2
+  NOA-05 NO_ANSWER rank 6 score 0.233373 pos 0.330612 neg -0.097239 shared 5 cover 3/8 top: b73 +0.184754 [alice] m=9 o=1; b27 +0.106963 [at] m=1 o=3; b64 +0.038895 [what] m=5 o=1
+  PAR-03 rank 58 score 0.060881 pos 0.078276 neg -0.017395 shared 8 cover 1/10 top: b76 +0.017395 [sticks] m=0 o=2; b127 +0.017395 [as] m=3 o=1; b47 +0.008697 [outdoor] m=0 o=1
+  PAR-04 rank 42 score 0.099418 pos 0.134925 neg -0.035507 shared 10 cover 3/13 top: b7 +0.035507 [while] m=0 o=4; b30 +0.028405 [tea,drinkers] m=0 o=2; b118 +0.028405 [was] m=1 o=3
+  PAR-05 rank 34 score -0.007628 pos 0.091536 neg -0.099164 shared 10 cover 3/13 top: b43 +0.030512 [creature] m=0 o=1; b28 +0.015256 [sea] m=0 o=3; b89 +0.015256 [school] m=0 o=1
+  PAR-06 rank 72 score 0.043486 pos 0.069578 neg -0.026092 shared 6 cover 2/10 top: b118 +0.034789 [was] m=1 o=3; b70 +0.026092 [girl] m=0 o=2; b97 +0.008697 [how] m=1 o=2
+-- RUNNER_UP book-corpus-v1/book-chunking-v1/s009/c0006: DEV queries 24, rank<=1 2, rank<=3 2, rank<=10 9, mean score 0.188651, median rank 15.0, mean cover 0.3462, mean shared 5.88, mean pos 0.223375, mean neg -0.034724, max residual 5.551e-17
+  AMB-02 rank 11 score 0.214372 pos 0.214372 neg 0.000000 shared 4 cover 1/5 top: b73 +0.137811 [alice] m=6 o=1; b30 +0.030625 [story] m=0 o=2; b97 +0.030625 [sad] m=0 o=1
+  AMB-03 rank 19 score 0.171197 pos 0.171197 neg 0.000000 shared 2 cover 0/4 top: b73 +0.154077 [is] m=0 o=2; b112 +0.017120 [wonderland] m=0 o=1
+  CON-01 rank 9 score 0.077648 pos 0.103530 neg -0.025883 shared 5 cover 3/7 top: b7 +0.051765 [s] m=2 o=2; b64 +0.038824 [what] m=3 o=0; b69 +0.012941 [turn] m=1 o=2
+  CON-03 rank 1 score 0.266320 pos 0.278425 neg -0.012105 shared 7 cover 6/8 top: b105 +0.084738 [mock] m=6 o=1; b11 +0.072633 [turtle] m=6 o=0; b47 +0.060527 [he] m=6 o=1
+  CON-04 rank 64 score 0.000000 pos 0.077648 neg -0.077648 shared 6 cover 2/9 top: b64 +0.038824 [what] m=3 o=0; b22 +0.025883 [bill] m=0 o=2; b94 +0.012941 [happened] m=0 o=1
+  LIT-01 rank 9 score 0.278736 pos 0.299383 neg -0.020647 shared 7 cover 3/11 top: b27 +0.113559 [little] m=1 o=2; b73 +0.092912 [alice] m=6 o=1; b77 +0.041294 [finds] m=0 o=2
+  LIT-03 rank 4 score 0.375269 pos 0.375269 neg 0.000000 shared 4 cover 3/6 top: b73 +0.217898 [is,alice] m=6 o=1; b11 +0.072633 [cat] m=0 o=1; b7 +0.048422 [s] m=2 o=2
+  LIT-04 rank 14 score 0.199422 pos 0.227911 neg -0.028489 shared 10 cover 5/13 top: b73 +0.085467 [alice] m=6 o=1; b47 +0.047481 [he] m=6 o=1; b64 +0.028489 [what] m=3 o=0
+  LIT-05 rank 21 score 0.278736 pos 0.289059 neg -0.010324 shared 5 cover 4/9 top: b73 +0.185824 [is,alice] m=6 o=1; b4 +0.051618 [it] m=5 o=0; b64 +0.030971 [what] m=3 o=0
+  MUL-01 rank 1 score 0.292341 pos 0.335650 neg -0.043310 shared 7 cover 6/10 top: b73 +0.097447 [alice] m=6 o=1; b105 +0.075792 [made] m=1 o=1; b35 +0.054137 [that] m=4 o=1
+  MUL-03 rank 56 score 0.000000 pos 0.140757 neg -0.140757 shared 6 cover 2/10 top: b73 +0.097447 [alice] m=6 o=1; b34 +0.043310 [did] m=5 o=3; b69 -0.010827 [which] m=0 o=3
+  MUL-04 rank 72 score 0.012941 pos 0.090589 neg -0.077648 shared 6 cover 1/7 top: b11 +0.077648 [cat] m=0 o=1; b80 +0.012941 [show] m=1 o=0; b54 -0.012941 [does] m=0 o=1
+  MUL-05 rank 49 score -0.015312 pos 0.030625 neg -0.045937 shared 3 cover 0/5 top: b30 +0.030625 [story] m=0 o=2; b54 -0.015312 [does] m=0 o=1; b16 -0.030625 [appear] m=0 o=2
+  NAR-01 rank 30 score 0.336058 pos 0.355826 neg -0.019768 shared 11 cover 6/12 top: b73 +0.088956 [alice] m=6 o=1; b101 +0.088956 [she] m=3 o=2; b4 +0.049420 [size] m=0 o=1
+  NAR-02 rank 24 score 0.285328 pos 0.308154 neg -0.022826 shared 6 cover 3/9 top: b27 +0.125544 [at] m=0 o=3; b73 +0.102718 [alice] m=6 o=1; b34 +0.045652 [did] m=5 o=3
+  NAR-04 rank 17 score 0.195694 pos 0.195694 neg 0.000000 shared 5 cover 3/8 top: b73 +0.125803 [alice] m=6 o=1; b125 +0.027956 [just] m=0 o=2; b3 +0.013978 [before] m=1 o=0
+  NOA-01 NO_ANSWER rank 8 score 0.308154 pos 0.308154 neg 0.000000 shared 4 cover 3/7 top: b73 +0.205436 [is,alice] m=6 o=1; b7 +0.045652 [s] m=2 o=2; b64 +0.034239 [what] m=3 o=0
+  NOA-02 NO_ANSWER rank 5 score 0.307519 pos 0.307519 neg 0.000000 shared 3 cover 3/4 top: b73 +0.251607 [is,alice] m=6 o=1; b87 +0.027956 [old] m=2 o=0; b97 +0.027956 [how] m=2 o=0
+  NOA-04 NO_ANSWER rank 14 score 0.181716 pos 0.195694 neg -0.013978 shared 4 cover 2/6 top: b73 +0.125803 [is] m=0 o=2; b64 +0.041934 [what] m=3 o=0; b100 +0.027956 [first] m=1 o=1
+  NOA-05 NO_ANSWER rank 9 score 0.217898 pos 0.278425 neg -0.060527 shared 5 cover 2/8 top: b27 +0.133160 [at] m=0 o=3; b73 +0.108949 [alice] m=6 o=1; b64 +0.036316 [what] m=3 o=0
+  PAR-03 rank 16 score 0.129929 pos 0.151584 neg -0.021655 shared 6 cover 1/10 top: b105 +0.075792 [balls] m=0 o=2; b47 +0.054137 [outdoor] m=0 o=2; b94 +0.010827 [creatures] m=1 o=0
+  PAR-04 rank 17 score 0.159130 pos 0.265217 neg -0.106087 shared 10 cover 4/13 top: b118 +0.088406 [was] m=7 o=2; b40 +0.044203 [they] m=3 o=2; b7 +0.035362 [while] m=0 o=3
+  PAR-05 rank 22 score 0.037985 pos 0.132948 neg -0.094963 shared 10 cover 5/13 top: b47 +0.047481 [he] m=6 o=1; b34 +0.037985 [did] m=5 o=3; b28 +0.018993 [sea] m=0 o=2
+  PAR-06 rank 8 score 0.216549 pos 0.227376 neg -0.010827 shared 5 cover 4/10 top: b118 +0.108274 [was] m=7 o=2; b40 +0.054137 [once] m=1 o=2; b34 +0.043310 [did] m=5 o=3
+-- TOP1_EVIDENCE book-corpus-v1/book-chunking-v1/s004/c0004: DEV queries 24, rank<=1 1, rank<=3 1, rank<=10 2, mean score 0.134010, median rank 32.5, mean cover 0.4117, mean shared 6.33, mean pos 0.179348, mean neg -0.045339, max residual 5.551e-17
+  AMB-02 rank 22 score 0.186124 pos 0.186124 neg 0.000000 shared 5 cover 2/5 top: b73 +0.074449 [alice] m=3 o=2; b60 +0.037225 [tells] m=0 o=1; b30 +0.024816 [story] m=0 o=2
+  AMB-03 rank 69 score 0.069364 pos 0.110983 neg -0.041619 shared 4 cover 2/4 top: b73 +0.083237 [is] m=2 o=2; b113 +0.027746 [who] m=2 o=0; b82 -0.013873 [mad] m=0 o=1
+  CON-01 rank 19 score 0.062921 pos 0.136329 neg -0.073408 shared 5 cover 2/7 top: b7 +0.094382 [s] m=7 o=2; b64 +0.020974 [what] m=4 o=2; b14 +0.010487 [into] m=0 o=1
+  CON-03 rank 32 score 0.058857 pos 0.088286 neg -0.029429 shared 4 cover 3/8 top: b91 +0.049048 [be] m=4 o=1; b64 +0.019619 [what] m=4 o=2; b105 +0.019619 [mock] m=0 o=1
+  CON-04 rank 1 score 0.188764 pos 0.209738 neg -0.020974 shared 6 cover 6/9 top: b22 +0.104869 [bill] m=10 o=2; b69 +0.073408 [down] m=6 o=1; b64 +0.020974 [what] m=4 o=2
+  LIT-01 rank 18 score 0.234238 pos 0.301163 neg -0.066925 shared 9 cover 5/11 top: b77 +0.108753 [finds] m=0 o=4; b27 +0.083656 [little] m=4 o=2; b73 +0.050194 [alice] m=3 o=2
+  LIT-03 rank 22 score 0.264859 pos 0.264859 neg 0.000000 shared 4 cover 4/6 top: b73 +0.117715 [is,alice] m=5 o=1; b7 +0.088286 [s] m=7 o=2; b127 +0.039238 [name] m=0 o=4
+  LIT-04 rank 51 score 0.107734 pos 0.169296 neg -0.061562 shared 11 cover 4/13 top: b73 +0.046172 [alice] m=3 o=2; b57 +0.038476 [housemaid] m=0 o=4; b127 +0.030781 [name] m=0 o=4
+  LIT-05 rank 50 score 0.192410 pos 0.200775 neg -0.008366 shared 6 cover 5/9 top: b73 +0.100388 [is,alice] m=5 o=1; b4 +0.058559 [it] m=6 o=1; b55 +0.016731 [caterpillar] m=0 o=1
+  MUL-01 rank 33 score 0.122835 pos 0.201801 neg -0.078966 shared 9 cover 6/10 top: b73 +0.052644 [alice] m=3 o=2; b35 +0.043870 [that] m=3 o=1; b34 +0.035096 [did] m=1 o=2
+  MUL-03 rank 21 score 0.070192 pos 0.193027 neg -0.122835 shared 9 cover 4/10 top: b69 +0.061418 [which] m=0 o=2; b73 +0.052644 [alice] m=3 o=2; b34 +0.035096 [did] m=1 o=2
+  MUL-04 rank 77 score -0.000000 pos 0.094382 neg -0.094382 shared 5 cover 1/7 top: b69 +0.073408 [which] m=0 o=2; b113 +0.020974 [places] m=0 o=1; b64 -0.020974 [up] m=1 o=2
+  MUL-05 rank 31 score 0.012408 pos 0.037225 neg -0.024816 shared 3 cover 1/5 top: b30 +0.024816 [story] m=0 o=2; b65 +0.012408 [where] m=1 o=0; b16 -0.024816 [appear] m=0 o=1
+  NAR-01 rank 9 score 0.384455 pos 0.400474 neg -0.016019 shared 10 cover 6/12 top: b7 +0.072085 [s] m=7 o=2; b4 +0.056066 [size] m=0 o=2; b69 +0.056066 [from] m=0 o=2
+  NAR-02 rank 32 score 0.268208 pos 0.286705 neg -0.018497 shared 9 cover 6/9 top: b27 +0.092486 [at] m=5 o=2; b73 +0.055491 [alice] m=3 o=2; b34 +0.036994 [did] m=1 o=2
+  NAR-04 rank 72 score 0.079290 pos 0.090617 neg -0.011327 shared 3 cover 3/8 top: b73 +0.067963 [alice] m=3 o=2; b3 +0.022654 [before] m=0 o=2; b42 -0.011327 [bank] m=0 o=1
+  NOA-01 NO_ANSWER rank 13 score 0.277457 pos 0.277457 neg 0.000000 shared 5 cover 4/7 top: b73 +0.110983 [is,alice] m=5 o=1; b7 +0.083237 [s] m=7 o=2; b127 +0.036994 [name] m=0 o=4
+  NOA-02 NO_ANSWER rank 55 score 0.158580 pos 0.158580 neg 0.000000 shared 2 cover 2/4 top: b73 +0.135926 [is,alice] m=5 o=1; b97 +0.022654 [how] m=0 o=1
+  NOA-04 NO_ANSWER rank 39 score 0.113271 pos 0.135926 neg -0.022654 shared 4 cover 3/6 top: b73 +0.067963 [is] m=2 o=2; b127 +0.045309 [name] m=0 o=4; b64 +0.022654 [what] m=4 o=2
+  NOA-05 NO_ANSWER rank 31 score 0.137334 pos 0.186382 neg -0.049048 shared 6 cover 3/8 top: b27 +0.098096 [at] m=5 o=2; b73 +0.058857 [alice] m=3 o=2; b64 +0.019619 [what] m=4 o=2
+  PAR-03 rank 57 score 0.061418 pos 0.122835 neg -0.061418 shared 7 cover 1/10 top: b69 +0.061418 [which] m=0 o=2; b127 +0.035096 [as] m=5 o=3; b105 +0.017548 [balls] m=0 o=1
+  PAR-04 rank 33 score 0.121786 pos 0.193425 neg -0.071639 shared 11 cover 5/13 top: b7 +0.064475 [while] m=0 o=3; b30 +0.028656 [tea,drinkers] m=0 o=2; b40 +0.028656 [they] m=5 o=3
+  PAR-05 rank 64 score -0.061562 pos 0.100038 neg -0.161601 shared 9 cover 2/13 top: b69 +0.053867 [which] m=0 o=2; b34 +0.030781 [did] m=1 o=2; b28 +0.007695 [sea] m=0 o=1
+  PAR-06 rank 48 score 0.105287 pos 0.157931 neg -0.052644 shared 6 cover 2/10 top: b70 +0.043870 [girl] m=0 o=3; b34 +0.035096 [did] m=1 o=2; b40 +0.035096 [once] m=0 o=4
+-- JUDGED_EVIDENCE book-corpus-v1/book-chunking-v1/s006/c0005: DEV queries 24, rank<=1 0, rank<=3 1, rank<=10 1, mean score 0.098179, median rank 53.5, mean cover 0.4273, mean shared 6.04, mean pos 0.147912, mean neg -0.049733, max residual 1.388e-17
+  AMB-02 rank 81 score 0.051704 pos 0.090483 neg -0.038778 shared 3 cover 2/5 top: b73 +0.064631 [alice] m=6 o=1; b113 +0.025852 [who] m=1 o=1; b60 -0.038778 [tells] m=0 o=2
+  AMB-03 rank 37 score 0.144518 pos 0.173422 neg -0.028904 shared 4 cover 2/4 top: b73 +0.072259 [is] m=0 o=2; b82 +0.072259 [mad] m=1 o=1; b113 +0.028904 [who] m=1 o=1
+  CON-01 rank 74 score -0.054623 pos 0.032774 neg -0.087396 shared 5 cover 3/7 top: b14 +0.021849 [into] m=2 o=0; b65 +0.010925 [duchess] m=0 o=2; b7 -0.021849 [s] m=1 o=3
+  CON-03 rank 19 score 0.081752 pos 0.102190 neg -0.020438 shared 5 cover 2/8 top: b11 +0.051095 [turtle] m=0 o=2; b91 +0.020438 [be] m=4 o=2; b105 +0.020438 [mock] m=0 o=2
+  CON-04 rank 19 score 0.098321 pos 0.131095 neg -0.032774 shared 6 cover 3/9 top: b82 +0.054623 [when] m=4 o=1; b69 +0.043698 [down] m=2 o=3; b22 +0.021849 [bill] m=0 o=1
+  LIT-01 rank 75 score 0.069718 pos 0.165581 neg -0.095863 shared 10 cover 3/11 top: b27 +0.087148 [little] m=3 o=2; b73 +0.043574 [alice] m=6 o=1; b77 +0.017430 [finds] m=0 o=1
+  LIT-03 rank 60 score 0.163504 pos 0.204380 neg -0.040876 shared 5 cover 5/6 top: b73 +0.102190 [is,alice] m=6 o=1; b11 +0.051095 [cat] m=6 o=1; b127 +0.051095 [name] m=1 o=1
+  LIT-04 rank 54 score 0.104214 pos 0.144296 neg -0.040082 shared 8 cover 5/13 top: b73 +0.040082 [alice] m=6 o=1; b82 +0.040082 [when] m=4 o=1; b127 +0.040082 [name] m=1 o=1
+  LIT-05 rank 20 score 0.278873 pos 0.305017 neg -0.026144 shared 7 cover 4/9 top: b4 +0.156866 [it] m=18 o=0; b73 +0.087148 [is,alice] m=6 o=1; b82 +0.043574 [when] m=4 o=1
+  MUL-01 rank 45 score 0.091401 pos 0.173663 neg -0.082261 shared 8 cover 6/10 top: b35 +0.054841 [that] m=8 o=2; b73 +0.045701 [alice] m=6 o=1; b34 +0.036561 [did] m=1 o=1
+  MUL-03 rank 55 score 0.000000 pos 0.127962 neg -0.127962 shared 9 cover 5/10 top: b73 +0.045701 [alice] m=6 o=1; b34 +0.036561 [did] m=1 o=1; b69 +0.036561 [which] m=2 o=3
+  MUL-04 rank 2 score 0.174793 pos 0.174793 neg 0.000000 shared 5 cover 4/7 top: b11 +0.054623 [cat] m=6 o=1; b69 +0.043698 [which] m=2 o=3; b60 +0.032774 [cheshire] m=2 o=1
+  MUL-05 rank 44 score -0.012926 pos 0.025852 neg -0.038778 shared 3 cover 2/5 top: b65 +0.012926 [where] m=2 o=1; b110 +0.012926 [hatter] m=1 o=2; b16 -0.038778 [appear] m=0 o=2
+  NAR-01 rank 24 score 0.342095 pos 0.375470 neg -0.033375 shared 10 cover 6/12 top: b4 +0.150188 [size] m=0 o=1; b101 +0.108469 [she] m=13 o=0; b73 +0.041719 [alice] m=6 o=1
+  NAR-02 rank 36 score 0.260133 pos 0.279402 neg -0.019269 shared 7 cover 6/9 top: b27 +0.096346 [at] m=1 o=2; b33 +0.067442 [long] m=3 o=1; b73 +0.048173 [alice] m=6 o=1
+  NAR-04 rank 59 score 0.117999 pos 0.117999 neg 0.000000 shared 5 cover 4/8 top: b73 +0.058999 [alice] m=6 o=1; b125 +0.023600 [just] m=2 o=0; b3 +0.011800 [before] m=0 o=1
+  NOA-01 NO_ANSWER rank 80 score 0.077076 pos 0.154153 neg -0.077076 shared 6 cover 4/7 top: b73 +0.096346 [is,alice] m=6 o=1; b127 +0.048173 [name] m=1 o=1; b18 +0.009635 [sister] m=0 o=1
+  NOA-02 NO_ANSWER rank 75 score 0.117999 pos 0.117999 neg 0.000000 shared 1 cover 1/4 top: b73 +0.117999 [is,alice] m=6 o=1
+  NOA-04 NO_ANSWER rank 53 score 0.082599 pos 0.117999 neg -0.035400 shared 4 cover 2/6 top: b73 +0.058999 [is] m=0 o=2; b127 +0.058999 [name] m=1 o=1; b93 -0.011800 [hearts] m=0 o=1
+  NOA-05 NO_ANSWER rank 63 score 0.081752 pos 0.173723 neg -0.091971 shared 6 cover 4/8 top: b27 +0.102190 [at] m=1 o=2; b73 +0.051095 [alice] m=6 o=1; b81 +0.020438 [usually] m=0 o=2
+  PAR-03 rank 47 score 0.082261 pos 0.109682 neg -0.027420 shared 6 cover 2/10 top: b127 +0.045701 [as] m=4 o=1; b69 +0.036561 [which] m=2 o=3; b105 +0.018280 [balls] m=0 o=2
+  PAR-04 rank 85 score -0.074629 pos 0.074629 neg -0.149258 shared 10 cover 4/13 top: b118 +0.022389 [was] m=4 o=2; b29 +0.014926 [dozing] m=0 o=1; b72 +0.014926 [like] m=2 o=2
+  PAR-05 rank 23 score 0.032066 pos 0.104214 neg -0.072148 shared 8 cover 4/13 top: b34 +0.032066 [did] m=1 o=1; b69 +0.032066 [which] m=2 o=3; b28 +0.016033 [sea] m=0 o=5
+  PAR-06 rank 71 score 0.045701 pos 0.073121 neg -0.027420 shared 4 cover 2/10 top: b34 +0.036561 [did] m=1 o=1; b118 +0.027420 [was] m=4 o=2; b40 +0.009140 [once] m=0 o=1
+
+== Not measured ==
+- per-token share of a bucket contribution: buckets mix colliding tokens (o > 0), so the cosine is attributed to buckets only; no per-token percentage is derived
+- corpus-level token weighting (IDF): the production encoder uses raw weighted counts, so there is no IDF to inspect; only per-chunk counts are reported
+- relevance of unjudged (U) hub hits: not adjudicated; a U label is not evidence of irrelevance
+- causation: no intervention was run; the numbers above are observations of one frozen configuration
+- HOLDOUT score decompositions: not computed by design (HOLDOUT is reserved for a later final check)
