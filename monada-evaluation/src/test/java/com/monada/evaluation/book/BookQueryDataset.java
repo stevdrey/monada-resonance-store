@@ -7,11 +7,14 @@ import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashSet;
+import java.util.IntSummaryStatistics;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,7 +59,7 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
     /** EVIDENCE answers the query (grade 1 partial, 2 direct); CONFOUNDER is judged non-relevant (grade 0). */
     enum Role { EVIDENCE, CONFOUNDER }
 
-    record ChunkRef(String key, long byteStart, long byteEnd) {
+    record ChunkRef(String key, int ordinal, long byteStart, long byteEnd) {
     }
 
     record Judgment(String chunkKey, long byteStart, long byteEnd, String spanSha256, int grade, Role role,
@@ -132,7 +135,12 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
         check(review.equals("REVIEWED") || review.equals("PENDING_HUMAN_REVIEW"), "unknown review status " + review);
         if (review.equals("REVIEWED")) {
             require(manifest, "judgment.reviewer");
-            require(manifest, "judgment.reviewedAt");
+            try {
+                LocalDate.parse(require(manifest, "judgment.reviewedAt"));
+            } catch (DateTimeParseException e) {
+                throw new IllegalStateException("judgment.reviewedAt is not an ISO date: "
+                        + manifest.getProperty("judgment.reviewedAt"));
+            }
         }
         check(SPLIT_METHOD.equals(manifest.getProperty("split.method")),
                 "unsupported split method " + manifest.getProperty("split.method"));
@@ -144,13 +152,13 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
         long sourceBytes = Long.parseLong(manifest.getProperty("source.sizeBytes"));
         Map<String, ChunkRef> chunks = chunkMap(manifest, chunkMapBytes, sourceBytes);
         Map<String, Case> parsed = queries(queries);
-        Map<String, List<Judgment>> byCase = judgments(judgments, parsed.keySet(), chunks, sourceBytes);
+        Map<String, List<Judgment>> byCase = judgments(judgments, parsed.keySet(), chunks);
 
         List<Case> cases = new ArrayList<>();
         for (Case c : parsed.values()) {
             Case full = new Case(c.id(), c.split(), c.category(), c.answerable(), c.text(), c.rationale(),
                     byCase.getOrDefault(c.id(), List.of()));
-            validateCase(full);
+            validateCase(full, chunks);
             cases.add(full);
         }
         validateSplit(manifest, cases);
@@ -191,7 +199,12 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
     private static Map<String, ChunkRef> chunkMap(Properties manifest, byte[] bytes, long sourceBytes) {
         List<String> lines = lines(bytes, "chunk map");
         check(!lines.isEmpty(), "chunk map is empty");
-        Map<String, String> header = sidecarHeader(lines.get(0));
+        Map<String, String> header;
+        try {
+            header = BookChunkFiles.header(lines.get(0));
+        } catch (BookInputException e) {
+            throw new IllegalStateException("chunk map header: " + e.getMessage(), e);
+        }
         check("monada-book-chunk-sidecar".equals(header.get("format")) && "1".equals(header.get("formatVersion")),
                 "chunk map is not a format 1 chunk sidecar");
         expect(header, "corpus", manifest.getProperty("corpus"));
@@ -201,36 +214,23 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
         expect(header, "manifestSha256", manifest.getProperty("corpusManifest.sha256"));
         expect(header, "policy.id", manifest.getProperty("chunking.policy"));
         expect(header, "chunksFileSha256", manifest.getProperty("chunksFile.sha256"));
-        check(Integer.parseInt(header.get("chunkCount")) == lines.size() - 1,
+        check(number(header, "chunkCount", "chunk map header") == lines.size() - 1,
                 "chunk map header chunkCount does not match its entries");
 
         Map<String, ChunkRef> chunks = new LinkedHashMap<>();
         String keyPrefix = manifest.getProperty("corpus") + "/" + manifest.getProperty("chunking.policy") + "/";
         for (String line : lines.subList(1, lines.size())) {
             Map<String, String> entry = JsonStrings.parseFlat(line, "chunk map");
-            String key = entry.get("key");
-            check(key != null && key.startsWith(keyPrefix), "chunk map key outside corpus/policy: " + key);
-            ChunkRef ref = new ChunkRef(key, Long.parseLong(entry.get("byteStart")),
-                    Long.parseLong(entry.get("byteEnd")));
+            String key = field(entry, "key", "chunk map entry");
+            check(key.startsWith(keyPrefix), "chunk map key outside corpus/policy: " + key);
+            String where = "chunk map entry " + key;
+            ChunkRef ref = new ChunkRef(key, (int) number(entry, "ordinal", where), number(entry, "byteStart", where),
+                    number(entry, "byteEnd", where));
             check(0 <= ref.byteStart() && ref.byteStart() < ref.byteEnd() && ref.byteEnd() <= sourceBytes,
                     "chunk map span out of source bounds: " + key);
             check(chunks.put(key, ref) == null, "duplicate chunk key in chunk map: " + key);
         }
         return chunks;
-    }
-
-    /** Flat fields of the sidecar header, with the nested {@code policy} object lifted to {@code policy.*}. */
-    private static Map<String, String> sidecarHeader(String line) {
-        String marker = "\"policy\":{";
-        int start = line.indexOf(marker);
-        check(start >= 0, "chunk map header has no policy object");
-        int close = line.indexOf('}', start);
-        check(close > start, "chunk map header policy object is not closed");
-        Map<String, String> header = new LinkedHashMap<>(JsonStrings.parseFlat(
-                line.substring(0, start) + "\"policy\":null" + line.substring(close + 1), "chunk map header"));
-        JsonStrings.parseFlat(line.substring(start + marker.length() - 1, close + 1), "chunk map policy")
-                .forEach((name, value) -> header.put("policy." + name, value));
-        return header;
     }
 
     private static Map<String, Case> queries(byte[] bytes) {
@@ -256,8 +256,7 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
         return cases;
     }
 
-    private static Map<String, List<Judgment>> judgments(byte[] bytes, Set<String> ids, Map<String, ChunkRef> chunks,
-                                                         long sourceBytes) {
+    private static Map<String, List<Judgment>> judgments(byte[] bytes, Set<String> ids, Map<String, ChunkRef> chunks) {
         List<String> lines = lines(bytes, "judgments.psv");
         check(!lines.isEmpty() && JUDGMENTS_HEADER.equals(lines.get(0)),
                 "judgments.psv header must be " + JUDGMENTS_HEADER);
@@ -272,8 +271,8 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
             check(chunk != null, id + ": orphan judgment for unknown chunk key " + f[1]);
             long start = parseLong(f[2], id);
             long end = parseLong(f[3], id);
-            check(0 <= start && start < end && end <= sourceBytes, id + ": span [" + start + "," + end
-                    + ") is empty or outside the source");
+            check(0 <= start && start < end, id + ": span [" + start + "," + end + ") is empty or negative");
+            // Chunks are bounded by the source (chunkMap), so containment also bounds the span.
             check(chunk.byteStart() <= start && end <= chunk.byteEnd(), id + ": span [" + start + "," + end
                     + ") is not inside chunk " + chunk.key());
             check(SHA256.matcher(f[4]).matches(), id + ": spanSha256 is not a lowercase SHA-256");
@@ -291,7 +290,7 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
         return byCase;
     }
 
-    private static void validateCase(Case c) {
+    private static void validateCase(Case c, Map<String, ChunkRef> chunks) {
         int evidence = c.evidence().size();
         if (!c.answerable()) {
             check(evidence == 0, c.id() + ": NO_ANSWER case must not have evidence");
@@ -300,8 +299,14 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
         check(evidence > 0, c.id() + ": empty label, answerable case has no evidence");
         check(c.evidence().stream().anyMatch(j -> j.grade() == 2), c.id() + ": no evidence directly answers it");
         switch (c.category()) {
-            case MULTI_EVIDENCE, AMBIGUOUS -> check(evidence >= 2,
-                    c.id() + ": " + c.category() + " needs evidence in at least two chunks");
+            // Adjacent chunks may be one passage split by the chunker; require a real gap between two of them.
+            case MULTI_EVIDENCE -> {
+                IntSummaryStatistics ordinals = c.evidence().stream()
+                        .mapToInt(j -> chunks.get(j.chunkKey()).ordinal()).summaryStatistics();
+                check(ordinals.getMax() - ordinals.getMin() >= 2,
+                        c.id() + ": MULTI_EVIDENCE needs evidence in at least two non-adjacent chunks");
+            }
+            case AMBIGUOUS -> check(evidence >= 2, c.id() + ": AMBIGUOUS needs evidence in at least two chunks");
             case CONFOUNDER -> check(!c.confounders().isEmpty(), c.id() + ": CONFOUNDER case has no confounder");
             default -> { }
         }
@@ -332,6 +337,21 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
         cases.forEach(c -> perCategory.merge(c.category(), 1L, Long::sum));
         for (Category category : Category.values()) {
             checkCount(manifest, "counts." + category, perCategory.getOrDefault(category, 0L));
+        }
+    }
+
+    private static String field(Map<String, String> fields, String name, String where) {
+        String value = fields.get(name);
+        check(value != null && !value.isBlank() && !value.equals("null"), where + " is missing " + name);
+        return value;
+    }
+
+    private static long number(Map<String, String> fields, String name, String where) {
+        String value = field(fields, name, where);
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException e) {
+            throw new IllegalStateException(where + " has a non-numeric " + name + ": " + value);
         }
     }
 

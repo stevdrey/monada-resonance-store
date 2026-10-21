@@ -39,7 +39,7 @@ must report unjudged hits as such.
 | `LITERAL` | 5 | The answer is stated in words close to the question. It may recur (e.g. `LIT-04` has two grade-2 occurrences); the category is defined by lexical closeness, not by occurrence count. |
 | `PARAPHRASE` | 6 | The answer is present, but the question deliberately avoids its key words (e.g. "smile" for grin). |
 | `NARRATIVE_TEMPORAL` | 4 | The answer depends on story order ("right after", "just before"). |
-| `MULTI_EVIDENCE` | 5 | The answer is spread over two or more chunks, usually in different chapters. |
+| `MULTI_EVIDENCE` | 5 | The answer is spread over two or more chunks, usually in different chapters; at least two evidence chunks must be non-adjacent (ordinals differ by 2 or more), so one passage split by the chunker does not count. |
 | `CONFOUNDER` | 4 | Correct evidence plus at least one plausible but wrong chunk (same word or character, different scene). |
 | `AMBIGUOUS` | 3 | Several defensible readings, all judged. |
 | `NO_ANSWER` | 5 | Plausible, but the corpus does not contain the answer. Confounders are optional near misses; any evidence is rejected. |
@@ -50,8 +50,8 @@ must report unjudged hits as such.
 Rejected at load (`BookQueryDatasetRejectionTest`):
 - **contradictory labels:** the same chunk twice in one case (for example as both evidence and confounder), evidence
   with grade 0, a confounder with a positive grade, or an answerable flag that contradicts `NO_ANSWER`;
-- **empty labels:** an answerable case without evidence or without grade-2 evidence, a multi-evidence or ambiguous
-  case with a single chunk, a confounder case without a confounder, or blank text, rationale or note;
+- **empty labels:** an answerable case without evidence or without grade-2 evidence, a multi-evidence case
+  without two non-adjacent evidence chunks, an ambiguous case with a single chunk, a confounder case without a confounder, or blank text, rationale or note;
 - **orphan labels:** an unknown query id or chunk key, or a span that is empty, outside its chunk or outside the
   source;
 - **schema and digest drift:** extra columns (for example a score), unknown enum values, duplicate ids, wrong

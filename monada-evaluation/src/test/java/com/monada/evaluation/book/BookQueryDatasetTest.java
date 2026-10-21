@@ -12,11 +12,18 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
 import java.util.regex.Pattern;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /** The committed {@code book-queries-v1} set: acceptance thresholds, frozen bindings and no score leakage. */
 class BookQueryDatasetTest {
-    private static final BookQueryDataset DATASET = BookQueryDataset.load();
+    // Loaded in @BeforeAll, not a static initializer, so a validation failure reports its own message.
+    private static BookQueryDataset DATASET;
+
+    @BeforeAll
+    static void loadDataset() {
+        DATASET = BookQueryDataset.load();
+    }
 
     @Test
     void meetsTheIssueThresholds() {

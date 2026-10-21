@@ -33,7 +33,7 @@ class BookQueryDatasetRejectionTest {
             BookQueryDataset.JUDGMENTS_HEADER,
             "LIT-01|" + KEY + "0|10|20|" + SPAN + "|2|EVIDENCE|direct",
             "MUL-01|" + KEY + "0|30|40|" + SPAN + "|2|EVIDENCE|first part",
-            "MUL-01|" + KEY + "1|100|120|" + SPAN + "|1|EVIDENCE|second part",
+            "MUL-01|" + KEY + "2|240|250|" + SPAN + "|1|EVIDENCE|second part",
             "CON-01|" + KEY + "1|130|140|" + SPAN + "|2|EVIDENCE|answer",
             "CON-01|" + KEY + "2|200|210|" + SPAN + "|0|CONFOUNDER|same word, unrelated",
             "NOA-01|" + KEY + "2|220|230|" + SPAN + "|0|CONFOUNDER|near miss"));
@@ -105,7 +105,27 @@ class BookQueryDatasetRejectionTest {
     @Test
     void rejectsAMultiEvidenceCaseWithASingleChunk() {
         judgments.remove(3);
-        reject("MUL-01: MULTI_EVIDENCE needs evidence in at least two chunks");
+        reject("MUL-01: MULTI_EVIDENCE needs evidence in at least two non-adjacent chunks");
+    }
+
+    @Test
+    void rejectsAMultiEvidenceCaseWhoseChunksAreAdjacent() {
+        // One passage split across a chunk boundary is not evidence from separate places.
+        judgments.set(3, "MUL-01|" + KEY + "1|100|120|" + SPAN + "|1|EVIDENCE|next chunk");
+        reject("MUL-01: MULTI_EVIDENCE needs evidence in at least two non-adjacent chunks");
+    }
+
+    @Test
+    void chunkMapHeaderWithABraceInsideAStringLoads() {
+        chunkMap.set(0, chunkMap.get(0).replace("CHAPTER [IVXLC]+\\\\.", "CHAPTER [IVXLC]{1,4}\\\\."));
+        assertTrue(chunkMap.get(0).contains("{1,4}"));
+        assertEquals(3, load(m -> { }).chunkMap().size());
+    }
+
+    @Test
+    void rejectsAChunkMapEntryWithAMissingField() {
+        chunkMap.set(2, "{\"key\":\"" + KEY + "1\",\"ordinal\":1,\"byteStart\":92}");
+        reject("chunk map entry " + KEY + "1 is missing byteEnd");
     }
 
     @Test
@@ -142,9 +162,9 @@ class BookQueryDatasetRejectionTest {
         judgments.set(1, "LIT-01|" + KEY + "0|80|95|" + SPAN + "|2|EVIDENCE|direct");
         reject("LIT-01: span [80,95) is not inside chunk " + KEY + "0");
         judgments.set(1, "LIT-01|" + KEY + "0|20|20|" + SPAN + "|2|EVIDENCE|direct");
-        reject("LIT-01: span [20,20) is empty or outside the source");
+        reject("LIT-01: span [20,20) is empty or negative");
         judgments.set(1, "LIT-01|" + KEY + "2|290|301|" + SPAN + "|2|EVIDENCE|direct");
-        reject("LIT-01: span [290,301) is empty or outside the source");
+        reject("LIT-01: span [290,301) is not inside chunk " + KEY + "2");
     }
 
     @Test
@@ -214,6 +234,11 @@ class BookQueryDatasetRejectionTest {
                 "labels must be frozen before any retrieval run");
         reject(m -> m.setProperty("judgment.reviewStatus", "REVIEWED"), "manifest is missing judgment.reviewer");
         reject(m -> m.setProperty("judgment.reviewStatus", "MAYBE"), "unknown review status MAYBE");
+        reject(m -> {
+            m.setProperty("judgment.reviewStatus", "REVIEWED");
+            m.setProperty("judgment.reviewer", "Reviewer");
+            m.setProperty("judgment.reviewedAt", "soon");
+        }, "judgment.reviewedAt is not an ISO date: soon");
     }
 
     @Test
