@@ -1,0 +1,233 @@
+package com.monada.evaluation.book;
+
+import com.monada.evaluation.book.BookUnjudgedSelection.Pair;
+import java.io.IOException;
+import java.io.PrintStream;
+import java.io.StringReader;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
+
+/**
+ * Offline review workflow of {@code book-queries-v2} (Issue #177, evaluation only; no network, no model):
+ *
+ * <pre>
+ * ./gradlew :monada-evaluation:runBookUnjudgedReview --args="select [--baseline &lt;report&gt;] [--out &lt;file&gt;]"
+ * ./gradlew :monada-evaluation:runBookUnjudgedReview --args="worksheet --input &lt;body.txt&gt; --out &lt;sheet.md&gt;"
+ * ./gradlew :monada-evaluation:runBookUnjudgedReview --args="apply --input &lt;body.txt&gt; --worksheet &lt;sheet.md&gt;
+ *     --dataset &lt;book-queries-v2 dir&gt;"
+ * ./gradlew :monada-evaluation:runBookUnjudgedReview --args="report [--baseline &lt;report&gt;] [--out &lt;file&gt;]"
+ * </pre>
+ *
+ * <p>{@code select} re-derives the selection from the frozen baseline (default {@value
+ * BookUnjudgedSelection#BASELINE_REPORT}) and checks it against the committed receipt, or writes it to {@code --out}.
+ * {@code worksheet} writes the score-blind review sheet, which holds book text: it refuses any path inside a Git
+ * work tree and never overwrites a file. {@code apply} turns the filled sheet into {@code review.psv}, updates only
+ * {@code review.sha256} and {@code counts.*} of the v2 manifest, and writes nothing unless the result validates; it
+ * never touches the review status or sign-off. {@code report} renders the coverage report.
+ *
+ * <p>Exit 0 on success, 1 when the inputs fail validation or the receipt is not reproduced, 2 on a usage error, a
+ * missing file, an unsafe output path or an I/O failure.
+ */
+public final class BookUnjudgedReviewMain {
+    private static final String USAGE = "usage: select [--baseline <report>] [--out <file>]"
+            + " | worksheet --input <body.txt> --out <sheet.md> [--manifest <corpus manifest>]"
+            + " | apply --input <body.txt> --worksheet <sheet.md> --dataset <book-queries-v2 dir>"
+            + " [--manifest <corpus manifest>] | report [--baseline <report>] [--out <file>]";
+    private static final Map<String, Set<String>> OPTIONS = Map.of(
+            "select", Set.of("--baseline", "--out"),
+            "worksheet", Set.of("--input", "--out", "--manifest"),
+            "apply", Set.of("--input", "--worksheet", "--dataset", "--manifest"),
+            "report", Set.of("--baseline", "--out"));
+    private static final Map<String, Set<String>> REQUIRED = Map.of(
+            "select", Set.of(), "worksheet", Set.of("--input", "--out"),
+            "apply", Set.of("--input", "--worksheet", "--dataset"), "report", Set.of());
+
+    private BookUnjudgedReviewMain() {
+    }
+
+    public static void main(String[] args) {
+        System.exit(run(args, System.out, System.err));
+    }
+
+    static int run(String[] args, PrintStream out, PrintStream err) {
+        if (args.length == 0 || !OPTIONS.containsKey(args[0])) {
+            err.println(USAGE);
+            return 2;
+        }
+        String command = args[0];
+        Map<String, String> options = BookStoreReadbackMain.parseOptions(args, 1, OPTIONS.get(command), command, err,
+                USAGE);
+        if (options == null) {
+            return 2;
+        }
+        if (!options.keySet().containsAll(REQUIRED.get(command))) {
+            err.println(USAGE);
+            return 2;
+        }
+        try {
+            return switch (command) {
+                case "select" -> select(options, out, err);
+                case "worksheet" -> worksheet(options, out, err);
+                case "apply" -> apply(options, out);
+                default -> report(options, out);
+            };
+        } catch (InvalidPathException e) {
+            err.println("invalid path: " + e.getMessage() + "\n" + USAGE);
+            return 2;
+        } catch (NoSuchFileException e) {
+            err.println("file not found: " + e.getFile());
+            return 2;
+        } catch (BookInputException | IllegalStateException e) {
+            err.println(e.getMessage());
+            return 1;
+        } catch (IOException | UncheckedIOException e) {
+            err.println("I/O failure: " + e);
+            return 2;
+        }
+    }
+
+    private static int select(Map<String, String> options, PrintStream out, PrintStream err) throws IOException {
+        String receipt = BookUnjudgedSelection.render(BookUnjudgedSelection.select(trace(options)));
+        if (options.containsKey("--out")) {
+            BookRecallMain.write(Path.of(options.get("--out")), receipt);
+            out.println("wrote " + options.get("--out"));
+            return 0;
+        }
+        if (!Arrays.equals(receipt.getBytes(StandardCharsets.UTF_8), BookQueryDatasetV2.resource("selection.psv"))) {
+            err.println("the committed selection.psv is not reproduced by " + BookUnjudgedSelection.RULE);
+            return 1;
+        }
+        out.println("selection.psv reproduced: " + BookUnjudgedSelection.parse(
+                receipt.getBytes(StandardCharsets.UTF_8)).size() + " pairs, sha256 "
+                + BookQueryDataset.sha256(receipt.getBytes(StandardCharsets.UTF_8)));
+        return 0;
+    }
+
+    private static int worksheet(Map<String, String> options, PrintStream out, PrintStream err)
+            throws IOException, BookInputException {
+        Path target = Path.of(options.get("--out"));
+        if (insideGitWorkTree(target)) {
+            err.println("--out must be outside any Git work tree; the worksheet holds book text: " + target);
+            return 2;
+        }
+        if (Files.exists(target)) {
+            err.println("--out already exists and is never overwritten (it may hold review work): " + target);
+            return 2;
+        }
+        byte[] body = body(options);
+        BookQueryDatasetV2 v2 = BookQueryDatasetV2.load();
+        Files.writeString(target, BookReviewWorksheet.render(body, v2.base(), v2.selection()), StandardCharsets.UTF_8,
+                java.nio.file.StandardOpenOption.CREATE_NEW);
+        out.println("wrote " + target + " (" + v2.selection().size() + " pairs; keep it outside Git)");
+        return 0;
+    }
+
+    private static int apply(Map<String, String> options, PrintStream out) throws IOException, BookInputException {
+        byte[] body = body(options);
+        Path dir = Path.of(options.get("--dataset"));
+        Path manifestPath = dir.resolve("manifest.properties");
+        String manifestText = Files.readString(manifestPath, StandardCharsets.UTF_8);
+        byte[] selection = Files.readAllBytes(dir.resolve("selection.psv"));
+        BookQueryDataset base = BookQueryDataset.load();
+        List<Pair> pairs = BookUnjudgedSelection.parse(selection);
+        String review = BookReviewWorksheet.apply(
+                Files.readString(Path.of(options.get("--worksheet")), StandardCharsets.UTF_8), body, base, pairs);
+        byte[] reviewBytes = review.getBytes(StandardCharsets.UTF_8);
+        byte[] baseManifest = BookQueryDataset.resource("manifest.properties");
+
+        String updated = replace(manifestText, "review.sha256", BookQueryDataset.sha256(reviewBytes));
+        BookQueryDatasetV2 built = BookQueryDatasetV2.build(properties(updated), base, baseManifest, selection,
+                reviewBytes);
+        for (var e : BookQueryDatasetV2.expectedCounts(built).entrySet()) {
+            updated = replace(updated, e.getKey(), e.getValue());
+        }
+        // Validate everything, sign-off included, before anything is written.
+        BookQueryDatasetV2 checked = BookQueryDatasetV2.parse(properties(updated), base, baseManifest, selection,
+                reviewBytes);
+        BookRecallMain.write(dir.resolve("review.psv"), review);
+        BookRecallMain.write(manifestPath, updated);
+        out.println("wrote review.psv: " + checked.reviews().size() + " decided, " + checked.pending().size()
+                + " pending, " + checked.addedJudgments().size() + " added judgments, " + checked.findings().size()
+                + " findings; review status unchanged (" + checked.manifest().getProperty("judgment.reviewStatus")
+                + ")");
+        return 0;
+    }
+
+    private static int report(Map<String, String> options, PrintStream out) throws IOException {
+        String report = BookUnjudgedReviewReport.render(trace(options), BookQueryDatasetV2.load());
+        if (options.containsKey("--out")) {
+            BookRecallMain.write(Path.of(options.get("--out")), report);
+            out.println("wrote " + options.get("--out"));
+        } else {
+            out.print(report);
+        }
+        return 0;
+    }
+
+    private static List<BookUnjudgedSelection.Hit> trace(Map<String, String> options) throws IOException {
+        byte[] baseline = Files.readAllBytes(
+                Path.of(options.getOrDefault("--baseline", BookUnjudgedSelection.BASELINE_REPORT)));
+        return BookUnjudgedSelection.parseTrace(baseline, BookQueryDataset.load());
+    }
+
+    private static byte[] body(Map<String, String> options) throws IOException, BookInputException {
+        VerifiedBookSource source = VerifiedBookSource.load(
+                Path.of(options.getOrDefault("--manifest", BookChunkingMain.DEFAULT_MANIFEST)),
+                Path.of(options.get("--input")));
+        String pinned = BookQueryDataset.load().manifest().getProperty("source.sha256");
+        if (!pinned.equals(source.sha256())) {
+            throw new IllegalStateException("body SHA-256 " + source.sha256() + " is not the judged body " + pinned);
+        }
+        return source.text().getBytes(StandardCharsets.UTF_8);
+    }
+
+    /** Whether {@code target} lies in a directory tree that has a {@code .git} entry, compared on real paths. */
+    static boolean insideGitWorkTree(Path target) throws IOException {
+        Path existing = target.toAbsolutePath().normalize();
+        while (existing != null && Files.notExists(existing)) {
+            existing = existing.getParent();
+        }
+        for (Path dir = existing == null ? null : existing.toRealPath(); dir != null; dir = dir.getParent()) {
+            if (Files.exists(dir.resolve(".git"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Replaces the value of exactly one existing {@code key=} line. */
+    static String replace(String manifest, String key, String value) {
+        List<String> lines = new ArrayList<>(List.of(manifest.split("\n", -1)));
+        int hits = 0;
+        for (int i = 0; i < lines.size(); i++) {
+            if (lines.get(i).startsWith(key + "=")) {
+                lines.set(i, key + "=" + value);
+                hits++;
+            }
+        }
+        if (hits != 1) {
+            throw new IllegalStateException("manifest must have exactly one " + key + " line, found " + hits);
+        }
+        return String.join("\n", lines);
+    }
+
+    private static Properties properties(String text) {
+        Properties properties = new Properties();
+        try {
+            properties.load(new StringReader(text));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return properties;
+    }
+}

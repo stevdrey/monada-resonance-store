@@ -234,6 +234,14 @@ tasks.register<JavaExec>("runBookHubDiagnostics") {
     workingDir = rootProject.projectDir
 }
 
+tasks.register<JavaExec>("runBookUnjudgedReview") {
+    description = "Review formerly unjudged DEV book hits for book-queries-v2: re-derive the predeclared selection from the frozen book-recall-v1 report, write a local score-blind worksheet (outside Git), apply human decisions to review.psv, and render the label-coverage report (evaluation only; offline; no model). Options via --args, e.g. --args=\"select\", --args=\"worksheet --input <body.txt> --out <sheet.md>\", --args=\"apply --input <body.txt> --worksheet <sheet.md> --dataset <dir>\" or --args=\"report [--out <file>]\""
+    group = "application"
+    mainClass.set("com.monada.evaluation.book.BookUnjudgedReviewMain")
+    classpath = sourceSets["main"].runtimeClasspath
+    workingDir = rootProject.projectDir
+}
+
 tasks.named<Test>("test") {
     // The cross-JVM determinism test starts child JVMs that run the evaluation command on this runtime classpath.
     doFirst {
