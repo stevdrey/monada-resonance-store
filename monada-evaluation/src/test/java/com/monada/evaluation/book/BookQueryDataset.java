@@ -31,6 +31,7 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
 
     static final String RESOURCE_ROOT = "/com/monada/evaluation/book/book-queries-v1/";
     static final String DATASET = "book-queries-v1";
+    static final String SPLIT_METHOD = "per-category-sha256-rank-last-third-holdout-v1";
     static final String QUERIES_HEADER = "id|split|category|answerable|text|rationale";
     static final String JUDGMENTS_HEADER = "queryId|chunkKey|byteStart|byteEnd|spanSha256|grade|role|note";
 
@@ -122,6 +123,8 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
             require(manifest, "judgment.reviewer");
             require(manifest, "judgment.reviewedAt");
         }
+        check(SPLIT_METHOD.equals(manifest.getProperty("split.method")),
+                "unsupported split method " + manifest.getProperty("split.method"));
         check(DATASET.concat("|").equals(manifest.getProperty("split.salt")), "unexpected split salt");
         checkDigest(manifest, "chunkMap.sha256", chunkMapBytes);
         checkDigest(manifest, "queries.sha256", queries);
@@ -263,7 +266,8 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
             check(chunk.byteStart() <= start && end <= chunk.byteEnd(), id + ": span [" + start + "," + end
                     + ") is not inside chunk " + chunk.key());
             check(SHA256.matcher(f[4]).matches(), id + ": spanSha256 is not a lowercase SHA-256");
-            int grade = (int) parseLong(f[5], id);
+            // Kept as long until validated, so an out-of-range value cannot wrap into a valid grade.
+            long grade = parseLong(f[5], id);
             Role role = parseEnum(Role.class, f[6], id, "role");
             check(role == Role.EVIDENCE ? grade == 1 || grade == 2 : grade == 0,
                     id + ": contradictory label, " + role + " with grade " + grade + " on " + chunk.key());
@@ -271,7 +275,7 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
             check(seenChunks.add(id + "\u0000" + chunk.key()),
                     id + ": contradictory label, chunk " + chunk.key() + " is judged more than once");
             byCase.computeIfAbsent(id, k -> new ArrayList<>())
-                    .add(new Judgment(chunk.key(), start, end, f[4], grade, role, f[7]));
+                    .add(new Judgment(chunk.key(), start, end, f[4], (int) grade, role, f[7]));
         }
         return byCase;
     }

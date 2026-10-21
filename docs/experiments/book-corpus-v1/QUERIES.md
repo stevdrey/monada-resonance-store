@@ -36,7 +36,7 @@ must report unjudged hits as such.
 
 | Category | Cases | What it tests |
 | --- | --- | --- |
-| `LITERAL` | 5 | The answer is stated once, in words close to the question. |
+| `LITERAL` | 5 | The answer is stated in words close to the question. It may recur (e.g. `LIT-04` has a grade-2 and a grade-1 occurrence); the category is defined by lexical closeness, not by occurrence count. |
 | `PARAPHRASE` | 6 | The answer is present, but the question deliberately avoids its key words (e.g. "smile" for grin). |
 | `NARRATIVE_TEMPORAL` | 4 | The answer depends on story order ("right after", "just before"). |
 | `MULTI_EVIDENCE` | 5 | The answer is spread over two or more chunks, usually in different chapters. |

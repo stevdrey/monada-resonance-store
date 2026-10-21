@@ -169,6 +169,8 @@ class BookQueryDatasetRejectionTest {
         reject("LIT-01: contradictory label, EVIDENCE with grade 3");
         judgments.set(1, "LIT-01|" + KEY + "0|10|20|" + SPAN + "|2|RELEVANT|direct");
         reject("LIT-01: unknown role RELEVANT");
+        judgments.set(1, "LIT-01|" + KEY + "0|10|20|" + SPAN + "|4294967298|EVIDENCE|wraps to 2 as an int");
+        reject("LIT-01: contradictory label, EVIDENCE with grade 4294967298");
     }
 
     @Test
@@ -190,6 +192,7 @@ class BookQueryDatasetRejectionTest {
     void rejectsCountsOrDigestsThatDoNotMatchTheData() {
         reject(m -> m.setProperty("counts.queries", "5"), "counts.queries is 5 but the data has 4");
         reject(m -> m.setProperty("split.digest", "e".repeat(64)), "split.digest does not match");
+        reject(m -> m.setProperty("split.method", "random-v2"), "unsupported split method random-v2");
         reject(m -> m.setProperty("judgments.sha256", "e".repeat(64)), "judgments.sha256 does not match the file");
         reject(m -> m.setProperty("chunkMap.sha256", "e".repeat(64)), "chunkMap.sha256 does not match the file");
     }
@@ -263,7 +266,7 @@ class BookQueryDatasetRejectionTest {
         m.setProperty("judgment.draftedBy", "test");
         m.setProperty("judgment.reviewStatus", "PENDING_HUMAN_REVIEW");
         m.setProperty("judgment.retrievalRunsBeforeFreeze", "0");
-        m.setProperty("split.method", "per-category-sha256-rank-last-third-holdout-v1");
+        m.setProperty("split.method", BookQueryDataset.SPLIT_METHOD);
         m.setProperty("split.salt", "book-queries-v1|");
 
         Map<String, Split> declared = new TreeMap<>();
