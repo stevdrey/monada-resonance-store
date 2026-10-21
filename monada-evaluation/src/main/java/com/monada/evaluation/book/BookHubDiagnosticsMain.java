@@ -21,7 +21,8 @@ import java.util.Set;
  * <p>{@code --work} is the seeded work directory measured by {@code runBookRecall}; it is only read. The recall
  * evaluation is re-run on a throwaway Store copy and must reproduce {@code --baseline} byte for byte before anything
  * is diagnosed, so the report always explains that committed baseline. The report goes to standard output, or to
- * {@code --out} (written atomically, outside the work directory).
+ * {@code --out} (written atomically, outside the work directory and never onto the {@code --baseline} file or an
+ * alias of it).
  *
  * <p>Exit 0 when the report was produced, 1 when the inputs are not the judged corpus, the baseline is not
  * reproduced, score parity fails, the inputs change during the run or reading them fails unexpectedly, 2 on a usage
@@ -60,7 +61,15 @@ public final class BookHubDiagnosticsMain {
                 err.println("--out directory does not exist: " + outDir);
                 return 2;
             }
-            byte[] baseline = Files.readAllBytes(Path.of(options.get("--baseline")));
+            Path baselinePath = Path.of(options.get("--baseline"));
+            // The output is written by atomic replacement: an alias of the pinned baseline (same path, symbolic or
+            // hard link) would silently overwrite the reference report this diagnostic must preserve.
+            if (target != null && Files.exists(target) && Files.exists(baselinePath)
+                    && Files.isSameFile(target, baselinePath)) {
+                err.println("--out must not be the --baseline file, which is only read: " + target);
+                return 2;
+            }
+            byte[] baseline = Files.readAllBytes(baselinePath);
             String report = BookHubReport.render(BookHubProbe.diagnose(work, BookQueryDataset.load(), baseline));
             if (target == null) {
                 out.print(report);

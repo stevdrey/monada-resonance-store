@@ -39,7 +39,8 @@ Exit codes:
   - the chunk files or the Store changed between the evaluation and the probe;
   - score parity failed;
   - reading the inputs failed unexpectedly ("diagnostic failed").
-- `2`: usage error, missing file, unsafe work directory or I/O failure.
+- `2`: usage error (including `--out` inside the work directory or naming the `--baseline` file through any
+  alias), missing file, unsafe work directory or I/O failure.
 
 The committed report was produced on OpenJDK 27 (Zulu 27.28+101, build 27+35).
 

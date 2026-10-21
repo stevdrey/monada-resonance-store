@@ -1,5 +1,6 @@
 package com.monada.evaluation.book;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -9,6 +10,8 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -51,6 +54,29 @@ class BookHubDiagnosticsMainTest {
         assertEquals(2, result.exit());
         assertTrue(result.err().startsWith("--out must not be inside the work directory"), result.err());
         assertEquals(digest, BookStoreInventory.treeDigest(work));
+    }
+
+    @Test
+    void outThatIsTheBaselineIsRefusedAndTheBaselineIsUntouched() throws Exception {
+        Path work = BookRecallFixture.seededWork(dir, "work", BookRecallFixture.POLICY);
+        String digest = BookStoreInventory.treeDigest(work);
+        Path baseline = Files.writeString(dir.resolve("baseline.txt"), "pinned baseline bytes\n");
+        byte[] bytes = Files.readAllBytes(baseline);
+        FileTime modified = Files.getLastModifiedTime(baseline);
+        Files.createDirectories(dir.resolve("sub"));
+        List<Path> aliases = List.of(
+                baseline,
+                dir.resolve("sub/../baseline.txt"),
+                Files.createSymbolicLink(dir.resolve("baseline-link.txt"), baseline),
+                Files.createLink(dir.resolve("baseline-hard.txt"), baseline));
+        for (Path out : aliases) {
+            Run result = run("--work", work.toString(), "--baseline", baseline.toString(), "--out", out.toString());
+            assertEquals(2, result.exit(), out.toString());
+            assertTrue(result.err().startsWith("--out must not be the --baseline file"), result.err());
+            assertArrayEquals(bytes, Files.readAllBytes(baseline), "baseline bytes unchanged: " + out);
+            assertEquals(modified, Files.getLastModifiedTime(baseline), "baseline not replaced: " + out);
+        }
+        assertEquals(digest, BookStoreInventory.treeDigest(work), "the work directory is unchanged");
     }
 
     @Test
