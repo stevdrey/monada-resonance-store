@@ -111,7 +111,8 @@ It regenerates the chunk map with `book-chunking-v1`. It requires byte-identical
 
 ## Non-goals respected
 
-- No labels generated or filtered by the system under evaluation; no retrieval metrics are reported here (Book 5/8).
+- No labels generated or filtered by the system under evaluation; no retrieval metrics are reported here. They are
+  in [RECALL.md](RECALL.md) (Book 5/8).
 - No answer-generation or hallucination judging; these are retrieval relevance labels only.
 - No change to `KnowledgeAtom`, `MonadaMemory`, the Store format, `book-corpus-v1/manifest.properties` or the
   chunking policy; no book text in Git.

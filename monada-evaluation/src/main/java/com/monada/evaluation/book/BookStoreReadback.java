@@ -453,15 +453,7 @@ public final class BookStoreReadback {
      * verification must never change the Store it checks.
      */
     private static int selfRecallOnCopy(Path store, Map<String, String> expected, Path tmpRoot) throws IOException {
-        String prefix = "monada-book-recall-";
-        Path copy = tmpRoot == null ? Files.createTempDirectory(prefix) : Files.createTempDirectory(tmpRoot, prefix);
-        try {
-            try (Stream<Path> walk = Files.walk(store)) {
-                for (Path source : walk.filter(p -> !p.equals(store)).toList()) {
-                    Files.copy(source, copy.resolve(store.relativize(source).toString()),
-                            StandardCopyOption.REPLACE_EXISTING, LinkOption.NOFOLLOW_LINKS);
-                }
-            }
+        return onCopy(store, tmpRoot, copy -> {
             MonadaMemory reopened = MonadaMemory.open(copy);
             int hits = 0;
             for (Map.Entry<String, String> entry : expected.entrySet()) {
@@ -471,6 +463,30 @@ public final class BookStoreReadback {
                 }
             }
             return hits;
+        });
+    }
+
+    /** Work done on a throwaway Store copy. */
+    @FunctionalInterface
+    interface CopyTask<T> {
+        T run(Path copy) throws IOException;
+    }
+
+    /**
+     * Runs {@code task} on a throwaway copy of {@code store} (under {@code tmpRoot}, or the default temp directory
+     * when null) and deletes the copy afterwards, so nothing that opens {@code MonadaMemory} changes the Store itself.
+     */
+    static <T> T onCopy(Path store, Path tmpRoot, CopyTask<T> task) throws IOException {
+        String prefix = "monada-book-recall-";
+        Path copy = tmpRoot == null ? Files.createTempDirectory(prefix) : Files.createTempDirectory(tmpRoot, prefix);
+        try {
+            try (Stream<Path> walk = Files.walk(store)) {
+                for (Path source : walk.filter(p -> !p.equals(store)).toList()) {
+                    Files.copy(source, copy.resolve(store.relativize(source).toString()),
+                            StandardCopyOption.REPLACE_EXISTING, LinkOption.NOFOLLOW_LINKS);
+                }
+            }
+            return task.run(copy);
         } finally {
             try (Stream<Path> walk = Files.walk(copy)) {
                 for (Path path : walk.sorted(Comparator.reverseOrder()).toList()) {
