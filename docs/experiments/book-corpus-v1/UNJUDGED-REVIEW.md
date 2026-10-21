@@ -98,7 +98,9 @@ The receipt is re-derived and compared byte for byte by `BookUnjudgedSelectionTe
    - writes `review.psv`;
    - updates only `review.sha256` and `counts.*`.
 
-   Nothing is written unless the whole dataset validates. `apply` never sets the review status.
+   Nothing is written unless the whole dataset validates. `apply` never sets the review status, and it refuses
+   to change the decisions of a `REVIEWED` dataset: reset the status and clear the sign-off first, so a sign-off
+   never covers labels that nobody approved.
 4. **Sign-off is manual and human.** The reviewer edits `judgment.reviewStatus=REVIEWED`, `judgment.reviewer`,
    `judgment.approvedBy` and `judgment.reviewedAt` (ISO date). The loader rejects `REVIEWED` in these cases:
    - any selected pair is still pending;

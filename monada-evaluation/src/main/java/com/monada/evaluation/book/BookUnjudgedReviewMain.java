@@ -144,6 +144,7 @@ public final class BookUnjudgedReviewMain {
                 Files.readString(Path.of(options.get("--worksheet")), StandardCharsets.UTF_8), body, base, pairs);
         byte[] reviewBytes = review.getBytes(StandardCharsets.UTF_8);
         byte[] baseManifest = BookQueryDataset.resource("manifest.properties");
+        requireUnsignedChange(properties(manifestText), BookQueryDataset.sha256(reviewBytes));
 
         String updated = replace(manifestText, "review.sha256", BookQueryDataset.sha256(reviewBytes));
         BookQueryDatasetV2 built = BookQueryDatasetV2.build(properties(updated), base, baseManifest, selection,
@@ -203,6 +204,18 @@ public final class BookUnjudgedReviewMain {
             }
         }
         return false;
+    }
+
+    /**
+     * A sign-off covers one review digest: changing the decisions of a {@code REVIEWED} dataset would keep a stale
+     * reviewer, approver and date on labels nobody approved. Re-applying the same decisions stays allowed.
+     */
+    static void requireUnsignedChange(Properties manifest, String newReviewSha256) {
+        if ("REVIEWED".equals(manifest.getProperty("judgment.reviewStatus"))
+                && !newReviewSha256.equals(manifest.getProperty("review.sha256"))) {
+            throw new IllegalStateException("the dataset is REVIEWED and these decisions differ from the signed-off"
+                    + " review.psv; reset judgment.reviewStatus to PENDING_HUMAN_REVIEW and clear the sign-off first");
+        }
     }
 
     /** Replaces the value of exactly one existing {@code key=} line. */

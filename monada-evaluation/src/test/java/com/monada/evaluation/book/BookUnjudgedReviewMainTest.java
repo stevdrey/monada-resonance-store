@@ -10,6 +10,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Properties;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -85,6 +86,19 @@ class BookUnjudgedReviewMainTest {
         Result overwrite = run("worksheet", "--input", "body.txt", "--out", existing.toString());
         assertEquals(2, overwrite.code());
         assertEquals("review work", Files.readString(existing));
+    }
+
+    @Test
+    void applyNeverCarriesASignOffOverToChangedDecisions() {
+        Properties signed = new Properties();
+        signed.setProperty("judgment.reviewStatus", "REVIEWED");
+        signed.setProperty("review.sha256", "a".repeat(64));
+        BookUnjudgedReviewMain.requireUnsignedChange(signed, "a".repeat(64));
+        var e = assertThrows(IllegalStateException.class,
+                () -> BookUnjudgedReviewMain.requireUnsignedChange(signed, "b".repeat(64)));
+        assertTrue(e.getMessage().contains("reset judgment.reviewStatus to PENDING_HUMAN_REVIEW"), e.getMessage());
+        signed.setProperty("judgment.reviewStatus", "PENDING_HUMAN_REVIEW");
+        BookUnjudgedReviewMain.requireUnsignedChange(signed, "b".repeat(64));
     }
 
     @Test
