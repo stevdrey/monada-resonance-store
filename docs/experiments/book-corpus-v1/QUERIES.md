@@ -36,7 +36,7 @@ must report unjudged hits as such.
 
 | Category | Cases | What it tests |
 | --- | --- | --- |
-| `LITERAL` | 5 | The answer is stated in words close to the question. It may recur (e.g. `LIT-04` has a grade-2 and a grade-1 occurrence); the category is defined by lexical closeness, not by occurrence count. |
+| `LITERAL` | 5 | The answer is stated in words close to the question. It may recur (e.g. `LIT-04` has two grade-2 occurrences); the category is defined by lexical closeness, not by occurrence count. |
 | `PARAPHRASE` | 6 | The answer is present, but the question deliberately avoids its key words (e.g. "smile" for grin). |
 | `NARRATIVE_TEMPORAL` | 4 | The answer depends on story order ("right after", "just before"). |
 | `MULTI_EVIDENCE` | 5 | The answer is spread over two or more chunks, usually in different chapters. |
@@ -74,6 +74,8 @@ Rejected at load (`BookQueryDatasetRejectionTest`):
      `body.txt`.
    - `BookQueryDatasetTest.labelsAreHumanReviewed` fails until this sign-off is recorded.
 5. Freeze: the manifest pins the SHA-256 of `queries.psv`, `judgments.psv` and `chunk-map.jsonl`.
+6. **Correction before freeze:** during PR review, and before any retrieval run, the reviewer approved one change: `LIT-04`'s second span (`s004/c0003`) was regraded from 1 to 2, because it names the maid by itself.
+   It is recorded in `judgment.corrections`. `judgment.reviewedAt` is unchanged.
 
 ## Dev / holdout partition
 
