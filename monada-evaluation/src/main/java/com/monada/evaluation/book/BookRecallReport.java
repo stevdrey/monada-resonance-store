@@ -205,9 +205,10 @@ final class BookRecallReport {
             line(out, head.toString());
             line(out, "  query: " + r.query().text());
             gold(out, r.query().judgments(), "  ");
+            // Compact: ordinal and section are in the sidecar under the key; the examples above show them inline.
             for (RankedHit h : r.hits()) {
-                line(out, "  " + hit(h) + " atom=" + h.atomId()
-                        + (h.keys().size() > 1 ? " sameText=" + h.keys() : ""));
+                line(out, String.format(Locale.ROOT, "  #%d %.6f %-2s %s atom=%s%s", h.rank(), h.score(), h.label(),
+                        h.key(), h.atomId(), h.keys().size() > 1 ? " sameText=" + h.keys() : ""));
             }
         }
     }
