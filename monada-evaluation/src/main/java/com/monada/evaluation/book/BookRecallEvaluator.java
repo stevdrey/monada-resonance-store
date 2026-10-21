@@ -13,6 +13,7 @@ import com.monada.evaluation.book.BookQueryDataset.Category;
 import com.monada.evaluation.book.BookQueryDataset.Judgment;
 import com.monada.evaluation.book.BookQueryDataset.Role;
 import com.monada.evaluation.book.BookQueryDataset.Split;
+import com.monada.storage.FileFrequencyStore;
 import com.monada.storage.JsonStrings;
 import com.monada.storage.Manifest;
 import com.monada.storage.audit.StorageIntegrityAuditor;
@@ -21,11 +22,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -183,7 +187,8 @@ final class BookRecallEvaluator {
             // Checked before readback: a feedback log is reported as feedback, not as a generic readback failure.
             requireNoFeedback(store, manifest);
         }
-        BookStoreReadback.Verification readback = BookStoreReadback.verify(work, tmpRoot);
+        // Only the verdict is needed: skip the exploratory self-recall and its extra Store copy.
+        BookStoreReadback.Verification readback = BookStoreReadback.verify(work, tmpRoot, false);
         if (!readback.passed() || !readback.chunks().equals(chunks)) {
             throw invalid("the Store does not pass the book readback (run runBookStoreReadback verify): "
                     + "status " + readback.audit().status() + ", exact readback " + readback.exactReadback() + "/"
@@ -231,7 +236,7 @@ final class BookRecallEvaluator {
         }
 
         Identity identity = identity(dataset.manifest(), chunks, header, sidecarBytes, manifest, readback,
-                storeDigest);
+                rankingDigest(store, manifest));
         List<Aggregate> partitions = List.of(
                 aggregate("DEV", results, r -> r.query().split() == Split.DEV),
                 aggregate("HOLDOUT", results, r -> r.query().split() == Split.HOLDOUT),
@@ -241,6 +246,31 @@ final class BookRecallEvaluator {
             categories.add(aggregate(category.name(), results, r -> r.query().category() == category));
         }
         return new Result(identity, results, partitions, categories, thresholds(results));
+    }
+
+    /**
+     * SHA-256 over the Store files that determine ranking and carry no timestamps, in fixed order: the manifest, the
+     * vector segment and the vector index, each as {@code name NUL length NUL bytes}.
+     */
+    private static String rankingDigest(Path store, Manifest manifest) throws IOException, BookInputException {
+        Path root = store.toAbsolutePath().normalize();
+        MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+        for (Path file : List.of(root.resolve("manifest.json"), root.resolve(manifest.vectorSegment()),
+                FileFrequencyStore.resolveVectorMapPath(root))) {
+            Path normalized = file.normalize();
+            if (!normalized.startsWith(root) || !Files.isRegularFile(normalized, LinkOption.NOFOLLOW_LINKS)) {
+                throw invalid("the Store's ranking file " + root.relativize(normalized) + " is missing or outside it");
+            }
+            byte[] bytes = Files.readAllBytes(normalized);
+            digest.update((root.relativize(normalized) + "\0" + bytes.length + "\0").getBytes(StandardCharsets.UTF_8));
+            digest.update(bytes);
+        }
+        return HexFormat.of().formatHex(digest.digest());
     }
 
     /** The manifest as the read-only auditor parses it, or null when it cannot (the readback then reports why). */
@@ -348,14 +378,19 @@ final class BookRecallEvaluator {
         c.judgments().forEach(j -> judged.put(j.chunkKey(), j));
         Set<String> evidence = new LinkedHashSet<>();
         Set<String> direct = new LinkedHashSet<>();
-        Set<Integer> evidenceOrdinals = new HashSet<>();
         for (Judgment j : c.evidence()) {
             evidence.add(relevanceKey.get(j.chunkKey()));
             if (j.grade() == 2) {
                 direct.add(relevanceKey.get(j.chunkKey()));
             }
-            evidenceOrdinals.add(byKey.get(j.chunkKey()).ordinal());
         }
+        // Every occurrence of an evidence atom: a passage repeated elsewhere has neighbours there too.
+        Set<Integer> evidenceOrdinals = new HashSet<>();
+        relevanceKey.forEach((key, relevance) -> {
+            if (evidence.contains(relevance)) {
+                evidenceOrdinals.add(byKey.get(key).ordinal());
+            }
+        });
         Set<String> confounders = new LinkedHashSet<>();
         c.confounders().forEach(j -> confounders.add(relevanceKey.get(j.chunkKey())));
         confounders.removeAll(evidence);
@@ -488,7 +523,7 @@ final class BookRecallEvaluator {
 
     private static Identity identity(Properties dataset, BookChunkFiles.Loaded chunks, Map<String, String> header,
                                      byte[] sidecarBytes, Manifest manifest,
-                                     BookStoreReadback.Verification readback, String storeDigest) {
+                                     BookStoreReadback.Verification readback, String rankingDigest) {
         Map<String, String> f = new LinkedHashMap<>();
         f.put("corpus", chunks.corpus());
         f.put("corpusVersion", chunks.corpusVersion());
@@ -511,9 +546,10 @@ final class BookRecallEvaluator {
         f.put("judgment.reviewStatus", dataset.getProperty("judgment.reviewStatus"));
         f.put("store.atoms", String.valueOf(readback.inventory().uniqueAtoms()));
         f.put("store.fingerprint", readback.inventory().fingerprint());
-        // Every persisted byte (manifest, atoms, vectors, index, feedback log), so altered or stale vectors cannot
-        // produce a different report under the same atom-only fingerprint.
-        f.put("store.treeSha256", storeDigest);
+        // The bytes that decide ranking (manifest, vectors, vector index), so altered or stale vectors cannot produce
+        // a different report under the same atom-only fingerprint. The atom log is left out: it records wall-clock
+        // creation times, so it differs between two seedings of the same corpus.
+        f.put("store.vectorsSha256", rankingDigest);
         f.put("store.feedbackEvents", "0 (required: feedback-aware ranking must not reorder the baseline)");
         f.put("store.manifestVersion", manifest.version());
         f.put("profile", PROFILE);

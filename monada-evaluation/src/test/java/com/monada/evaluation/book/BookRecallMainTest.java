@@ -61,6 +61,16 @@ class BookRecallMainTest {
     }
 
     @Test
+    void missingOutDirectoryIsRefusedBeforeEvaluation() throws Exception {
+        Path work = BookRecallFixture.seededWork(dir, "work", BookRecallFixture.POLICY);
+        Path out = dir.resolve("absent/report.txt");
+        Run result = run("--work", work.toString(), "--out", out.toString());
+        assertEquals(2, result.exit());
+        assertEquals("--out directory does not exist: " + dir.resolve("absent") + "\n", result.err(),
+                "refused before evaluating the (foreign) fixture work directory");
+    }
+
+    @Test
     void workDirectoryFromAnotherCorpusExitsOneAndWritesNothing() throws Exception {
         Path work = BookRecallFixture.seededWork(dir, "work", BookRecallFixture.POLICY);
         Path out = dir.resolve("report.txt");

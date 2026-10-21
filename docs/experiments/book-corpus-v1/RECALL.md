@@ -63,9 +63,11 @@ The evaluation fails deterministically, measuring nothing, when any of these che
 2. **Store integrity.** The #165 readback runs on fresh instances and must pass, with exact readback of every chunk
    and a `HEALTHY` audit. The Store must carry the encoding profile of `MonadaMemoryOptions.defaults()`.
    The feedback log must be absent or empty: the default options rank feedback-aware, so recorded feedback would
-   change scores without changing the atom fingerprint. The report header binds `store.treeSha256`, a digest of every
-   persisted Store byte (manifest, atoms, vectors, index, feedback log), so altered or stale vectors cannot produce a
-   different report under the same identity.
+   change scores without changing the atom fingerprint. The report header binds `store.vectorsSha256`, a digest of the
+   Store files that decide ranking (manifest, vector segment, vector index), so altered or stale vectors cannot
+   produce a different report under the same identity. The atom log is left out on purpose: it records wall-clock
+   creation times, so any reseeding of the same corpus would otherwise change the identity. Its content is bound by
+   the exact readback and `store.fingerprint`.
 3. **Gold validity.**
    - Every judged chunk key exists in the chunk set.
    - Every answerable query has evidence, and no NO_ANSWER query has any.

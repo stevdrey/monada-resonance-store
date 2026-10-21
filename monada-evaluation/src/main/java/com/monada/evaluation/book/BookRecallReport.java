@@ -93,15 +93,20 @@ final class BookRecallReport {
 
     private static void categories(StringBuilder out, List<Aggregate> categories) {
         line(out, "== Metrics by category (DEV + HOLDOUT) ==");
+        // Columns follow the evaluated K set: the smallest and largest K for Hit, the two largest for Recall.
+        List<Integer> ks = BookRecallEvaluator.KS;
+        int low = ks.getFirst();
+        int high = ks.getLast();
+        int mid = ks.get(Math.max(0, ks.size() - 2));
         line(out, String.format(Locale.ROOT, "%-19s %-3s %-4s %-7s %-7s %-7s %-7s %-7s %s", "category", "n", "ans",
-                "Hit@1", "Hit@10", "R@5", "R@10", "MRR", "false hits"));
+                "Hit@" + low, "Hit@" + high, "R@" + mid, "R@" + high, "MRR", "false hits"));
         for (Aggregate a : categories) {
             if (a.queries() == 0) {
                 continue;
             }
             line(out, String.format(Locale.ROOT, "%-19s %-3d %-4d %-7s %-7s %-7s %-7s %-7s %s", a.name(), a.queries(),
-                    a.answerable(), num(a.hit().get(1)), num(a.hit().get(10)), num(a.recall().get(5)),
-                    num(a.recall().get(10)), num(a.mrr()),
+                    a.answerable(), num(a.hit().get(low)), num(a.hit().get(high)), num(a.recall().get(mid)),
+                    num(a.recall().get(high)), num(a.mrr()),
                     a.negatives() == 0 ? "-" : a.negativesWithHits() + "/" + a.negatives()));
         }
         line(out, "");

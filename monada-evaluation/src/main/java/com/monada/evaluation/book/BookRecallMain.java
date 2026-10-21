@@ -9,7 +9,6 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
@@ -40,17 +39,10 @@ public final class BookRecallMain {
     }
 
     static int run(String[] args, PrintStream out, PrintStream err) {
-        Map<String, String> options = new HashMap<>();
-        for (int i = 0; i < args.length; i++) {
-            String name = args[i];
-            if (!Set.of("--work", "--out").contains(name)) {
-                err.println("unknown option " + name + "\n" + USAGE);
-                return 2;
-            }
-            if (i + 1 >= args.length || options.put(name, args[++i]) != null) {
-                err.println("option " + name + " needs exactly one value\n" + USAGE);
-                return 2;
-            }
+        Map<String, String> options = BookStoreReadbackMain.parseOptions(args, 0, Set.of("--work", "--out"), null,
+                err, USAGE);
+        if (options == null) {
+            return 2;
         }
         if (!options.containsKey("--work")) {
             err.println(USAGE);
@@ -61,6 +53,13 @@ public final class BookRecallMain {
             Path target = options.containsKey("--out") ? Path.of(options.get("--out")) : null;
             if (target != null && insideWork(target, work)) {
                 err.println("--out must not be inside the work directory, which is only read: " + target);
+                return 2;
+            }
+            Path outDir = target == null ? null : target.toAbsolutePath().normalize().getParent();
+            if (outDir != null && !Files.isDirectory(outDir)) {
+                // Checked before the evaluation, so a typo in --out costs nothing and is not reported as a missing
+                // work-directory file.
+                err.println("--out directory does not exist: " + outDir);
                 return 2;
             }
             String report = BookRecallReport.render(BookRecallEvaluator.evaluate(work, BookQueryDataset.load()));

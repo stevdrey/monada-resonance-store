@@ -2,6 +2,7 @@ package com.monada.evaluation.book;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -210,10 +211,56 @@ class BookRecallEvaluatorTest {
     }
 
     @Test
-    void identityBindsEveryPersistedStoreByte() throws Exception {
+    void identityBindsRankingBytesButNotTimestamps() throws Exception {
+        // A second seeding of the same corpus: same vectors, but the atom log records new creation times.
+        Path again = BookRecallFixture.seededWork(dir, "again", BookRecallFixture.POLICY);
+        assertNotEquals(BookStoreInventory.treeDigest(work.resolve("store")),
+                BookStoreInventory.treeDigest(again.resolve("store")));
+        String first = BookRecallEvaluator.evaluate(work, dataset, scripted(script()), dir).identity().fields()
+                .get("store.vectorsSha256");
+        String second = BookRecallEvaluator.evaluate(again, BookRecallFixture.dataset(again), scripted(script()), dir)
+                .identity().fields().get("store.vectorsSha256");
+        assertTrue(first.matches("[0-9a-f]{64}"), first);
+        assertEquals(first, second, "reseeding the same corpus must reproduce the report identity");
+
+        // Altered vector bytes change the identity.
+        Path vectors = work.resolve("store/vectors/segment-000001.f32");
+        byte[] bytes = Files.readAllBytes(vectors);
+        bytes[0] ^= 1;
+        Files.write(vectors, bytes);
+        assertNotEquals(first, BookRecallEvaluator.evaluate(work, dataset, scripted(script()), dir).identity()
+                .fields().get("store.vectorsSha256"));
+    }
+
+    @Test
+    void repeatedEvidenceIsAdjacentThroughItsOtherOccurrence() throws Exception {
+        // LIT-02's gold is s002/c0006 (ordinal 9); its text repeats at s002/c0003 (ordinal 6). s002/c0002 (ordinal 5)
+        // neighbours only the earlier occurrence.
+        Map<String, List<String>> ranking = new HashMap<>(script());
+        ranking.put("The tide turns twice a day.", List.of("s002/c0002", "s002/c0003"));
+        Result result = BookRecallEvaluator.evaluate(work, dataset, scripted(ranking), dir);
+        assertEquals(BookRecallFailure.CHUNK_BOUNDARY_GAP, byId(result, "LIT-02").failure());
+    }
+
+    @Test
+    void failureExamplesCoverEachClassInOrderAndAreCapped() throws Exception {
         Result result = BookRecallEvaluator.evaluate(work, dataset, scripted(script()), dir);
-        assertEquals(BookStoreInventory.treeDigest(work.resolve("store")),
-                result.identity().fields().get("store.treeSha256"));
+        List<CaseResult> examples = BookRecallReport.examples(result.cases());
+        assertEquals(List.of("LIT-03", "CON-01", "LIT-01", "MUL-01", "NOA-01"),
+                examples.stream().map(r -> r.query().id()).toList(), "one per failure class, in class order");
+        assertTrue(examples.size() >= 3, "the issue requires at least three failure examples");
+
+        CaseResult template = byId(result, "LIT-03");
+        List<CaseResult> many = new ArrayList<>();
+        for (int i = 1; i <= 9; i++) {
+            var q = template.query();
+            many.add(new CaseResult(new BookQueryDataset.Case("LIT-0" + i, q.split(), q.category(), q.answerable(),
+                    q.text(), q.rationale(), q.judgments()), template.hits(), template.precision(), template.recall(),
+                    template.hit(), template.directHit(), template.reciprocalRank(), template.firstRelevantRank(),
+                    template.failure()));
+        }
+        assertEquals(List.of("LIT-01", "LIT-02", "LIT-03", "LIT-04", "LIT-05", "LIT-06"),
+                BookRecallReport.examples(many).stream().map(r -> r.query().id()).toList());
     }
 
     @Test
