@@ -16,8 +16,9 @@ import java.util.Set;
 
 /**
  * Renders a {@link BookRecallEvaluator.Result} as a versioned, deterministic plain-text report: no paths, timings or
- * host details, fixed number formats, queries in id order. The report quotes query text and reviewer judgment notes,
- * never book text, and never states an answer.
+ * host details, fixed number formats, queries in id order. The report quotes query text and judged chunk keys with
+ * byte spans and grades, never book text; reviewer judgment notes are left out because some of them state the
+ * answer.
  */
 final class BookRecallReport {
     static final String FORMAT = "monada-book-recall-report";
@@ -220,7 +221,7 @@ final class BookRecallReport {
         for (Judgment j : judgments) {
             String label = j.role() == BookQueryDataset.Role.EVIDENCE ? "E" + j.grade() : "C0";
             line(out, indent + "gold " + label + " " + j.chunkKey() + " span [" + j.byteStart() + "," + j.byteEnd()
-                    + ") note: " + j.note());
+                    + ")");
         }
     }
 

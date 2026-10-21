@@ -19,6 +19,7 @@ import com.monada.storage.audit.StorageIntegrityAuditor;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -177,13 +178,17 @@ final class BookRecallEvaluator {
         bind(dataset.manifest(), chunks, header, sidecarBytes);
 
         String storeDigest = BookStoreInventory.treeDigest(store);
+        Manifest manifest = auditedManifest(store);
+        if (manifest != null) {
+            // Checked before readback: a feedback log is reported as feedback, not as a generic readback failure.
+            requireNoFeedback(store, manifest);
+        }
         BookStoreReadback.Verification readback = BookStoreReadback.verify(work, tmpRoot);
         if (!readback.passed() || !readback.chunks().equals(chunks)) {
             throw invalid("the Store does not pass the book readback (run runBookStoreReadback verify): "
                     + "status " + readback.audit().status() + ", exact readback " + readback.exactReadback() + "/"
                     + readback.expectedUniqueAtoms());
         }
-        Manifest manifest = new StorageIntegrityAuditor().audit(store).manifest();
         if (manifest == null || !Objects.equals(manifest.encodingProfile(),
                 MonadaMemory.getExpectedProfile(manifest.dimensions(), MonadaMemoryOptions.defaults()))) {
             throw invalid("the Store's encoding profile is not the one " + PROFILE + " expects");
@@ -225,7 +230,8 @@ final class BookRecallEvaluator {
             results.add(score(c, hits, byAtom, byKey, relevanceKey, sections));
         }
 
-        Identity identity = identity(dataset.manifest(), chunks, header, sidecarBytes, manifest, readback);
+        Identity identity = identity(dataset.manifest(), chunks, header, sidecarBytes, manifest, readback,
+                storeDigest);
         List<Aggregate> partitions = List.of(
                 aggregate("DEV", results, r -> r.query().split() == Split.DEV),
                 aggregate("HOLDOUT", results, r -> r.query().split() == Split.HOLDOUT),
@@ -235,6 +241,32 @@ final class BookRecallEvaluator {
             categories.add(aggregate(category.name(), results, r -> r.query().category() == category));
         }
         return new Result(identity, results, partitions, categories, thresholds(results));
+    }
+
+    /** The manifest as the read-only auditor parses it, or null when it cannot (the readback then reports why). */
+    private static Manifest auditedManifest(Path store) {
+        try {
+            return new StorageIntegrityAuditor().audit(store).manifest();
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /**
+     * The default options rank feedback-aware, so recorded feedback would change scores and order without changing
+     * the atom fingerprint: this baseline requires an absent or empty feedback log.
+     */
+    private static void requireNoFeedback(Path store, Manifest manifest) throws IOException, BookInputException {
+        Path root = store.toAbsolutePath().normalize();
+        Path log = root.resolve(manifest.feedbackSegment()).normalize();
+        if (!log.startsWith(root)) {
+            throw invalid("the Store's feedback segment resolves outside the Store");
+        }
+        if (Files.exists(log, LinkOption.NOFOLLOW_LINKS)
+                && (!Files.isRegularFile(log, LinkOption.NOFOLLOW_LINKS) || Files.size(log) > 0)) {
+            throw invalid("the Store has recorded feedback; book recall is measured on a feedback-free Store only"
+                    + " (seed a new work directory)");
+        }
     }
 
     /** The chunk set in the work directory must be the one the judgments were made against. */
@@ -456,7 +488,7 @@ final class BookRecallEvaluator {
 
     private static Identity identity(Properties dataset, BookChunkFiles.Loaded chunks, Map<String, String> header,
                                      byte[] sidecarBytes, Manifest manifest,
-                                     BookStoreReadback.Verification readback) {
+                                     BookStoreReadback.Verification readback, String storeDigest) {
         Map<String, String> f = new LinkedHashMap<>();
         f.put("corpus", chunks.corpus());
         f.put("corpusVersion", chunks.corpusVersion());
@@ -479,6 +511,10 @@ final class BookRecallEvaluator {
         f.put("judgment.reviewStatus", dataset.getProperty("judgment.reviewStatus"));
         f.put("store.atoms", String.valueOf(readback.inventory().uniqueAtoms()));
         f.put("store.fingerprint", readback.inventory().fingerprint());
+        // Every persisted byte (manifest, atoms, vectors, index, feedback log), so altered or stale vectors cannot
+        // produce a different report under the same atom-only fingerprint.
+        f.put("store.treeSha256", storeDigest);
+        f.put("store.feedbackEvents", "0 (required: feedback-aware ranking must not reorder the baseline)");
         f.put("store.manifestVersion", manifest.version());
         f.put("profile", PROFILE);
         f.put("encodingProfile", manifest.encodingProfile().toString());

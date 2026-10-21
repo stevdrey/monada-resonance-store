@@ -25,6 +25,8 @@ split.digest=12f79086668abf3494161639250d92d39f595bd8759ad00368d31925dad41a43
 judgment.reviewStatus=REVIEWED
 store.atoms=87
 store.fingerprint=dd11b6ba7e7f51b00af4f9bbaec4dc2649fd87ed05b3bbb97bdf9d0b42bb03d7
+store.treeSha256=1fb8baaf3ef81346b78c5170087b4dab88347f37060d5fa6008a3461d870e3c3
+store.feedbackEvents=0 (required: feedback-aware ranking must not reorder the baseline)
 store.manifestVersion=0.4
 profile=MonadaMemoryOptions.defaults()
 encodingProfile=EncodingProfile[encoder=SimpleFrequencyEncoder, encoderVersion=1.0, dimensions=128, normalizer=LexicalEnrichmentPipeline, normalizerVersion=LexicalEnrichmentPipeline#fc22fb3d254ceb3f30c61a81fc75ba94e80344d6c2280e9fccb204ed086faff0, weightingStrategy=WeightedTokens, originalWeight=1.0, expansionWeight=0.25, aliasOriginalWeight=0.25, aliasExpansionWeight=0.0625]
@@ -116,8 +118,8 @@ t      DEV false hits     DEV evidence kept  HOLDOUT false hits HOLDOUT evidence
 == Failure examples (expected vs actual chunks; no book text, no answer text) ==
 -- Example 1: AMB-01 (HOLDOUT, AMBIGUOUS) -> NO_RELEVANT_RESULT
 query: Why is the White Rabbit in such a hurry?
-  gold E1 book-corpus-v1/book-chunking-v1/s001/c0003 span [6041,6189) note: late, no reason given
-  gold E2 book-corpus-v1/book-chunking-v1/s002/c0001 span [14494,14640) note: afraid of keeping the Duchess waiting
+  gold E1 book-corpus-v1/book-chunking-v1/s001/c0003 span [6041,6189)
+  gold E2 book-corpus-v1/book-chunking-v1/s002/c0001 span [14494,14640)
 actual top-5:
   #1 0.312270 U  book-corpus-v1/book-chunking-v1/s011/c0005 (ordinal 79, CHAPTER XI.)
   #2 0.266776 U  book-corpus-v1/book-chunking-v1/s008/c0003 (ordinal 55, CHAPTER VIII.)
@@ -128,8 +130,8 @@ first evidence rank: none in top-10
 
 -- Example 2: AMB-02 (DEV, AMBIGUOUS) -> NO_RELEVANT_RESULT
 query: Who tells Alice a sad story?
-  gold E2 book-corpus-v1/book-chunking-v1/s003/c0003 span [29866,29949) note: the Mouse's long and sad tale
-  gold E2 book-corpus-v1/book-chunking-v1/s009/c0004 span [111281,111367) note: the Mock Turtle's story
+  gold E2 book-corpus-v1/book-chunking-v1/s003/c0003 span [29866,29949)
+  gold E2 book-corpus-v1/book-chunking-v1/s009/c0004 span [111281,111367)
 actual top-5:
   #1 0.295196 U  book-corpus-v1/book-chunking-v1/s009/c0001 (ordinal 61, CHAPTER IX.)
   #2 0.270489 U  book-corpus-v1/book-chunking-v1/s002/c0000 (ordinal 8, CHAPTER II.)
@@ -140,8 +142,8 @@ first evidence rank: none in top-10
 
 -- Example 3: CON-03 (DEV, CONFOUNDER) -> CHUNK_BOUNDARY_GAP
 query: What does the Mock Turtle say he used to be?
-  gold E2 book-corpus-v1/book-chunking-v1/s009/c0004 span [111281,111367) note: start of his story
-  gold C0 book-corpus-v1/book-chunking-v1/s009/c0003 span [108742,108917) note: the Queen's soup remark: names him, does not answer
+  gold E2 book-corpus-v1/book-chunking-v1/s009/c0004 span [111281,111367)
+  gold C0 book-corpus-v1/book-chunking-v1/s009/c0003 span [108742,108917)
 actual top-5:
   #1 0.266320 U  book-corpus-v1/book-chunking-v1/s009/c0006 (ordinal 66, CHAPTER IX.)
   #2 0.247647 U  book-corpus-v1/book-chunking-v1/s009/c0005 (ordinal 65, CHAPTER IX.)
@@ -152,8 +154,8 @@ first evidence rank: 6 #6 0.198390 E2 book-corpus-v1/book-chunking-v1/s009/c0004
 
 -- Example 4: AMB-03 (DEV, AMBIGUOUS) -> WRONG_RANK
 query: Who in Wonderland is mad?
-  gold E2 book-corpus-v1/book-chunking-v1/s006/c0005 span [71585,71791) note: the Hatter and the March Hare are mad
-  gold E2 book-corpus-v1/book-chunking-v1/s006/c0006 span [71859,71941) note: we're all mad here
+  gold E2 book-corpus-v1/book-chunking-v1/s006/c0005 span [71585,71791)
+  gold E2 book-corpus-v1/book-chunking-v1/s006/c0006 span [71859,71941)
 actual top-5:
   #1 0.316288 U  book-corpus-v1/book-chunking-v1/s009/c0001 (ordinal 61, CHAPTER IX.)
   #2 0.249053 U  book-corpus-v1/book-chunking-v1/s007/c0001 (ordinal 46, CHAPTER VII.)
@@ -164,9 +166,9 @@ first evidence rank: 3 #3 0.248246 E2 book-corpus-v1/book-chunking-v1/s006/c0006
 
 -- Example 5: CON-04 (DEV, CONFOUNDER) -> MULTI_EVIDENCE_GAP
 query: What happened to Bill the Lizard when he came down the chimney?
-  gold E2 book-corpus-v1/book-chunking-v1/s004/c0004 span [41938,42253) note: Alice kicks
-  gold E1 book-corpus-v1/book-chunking-v1/s004/c0005 span [42255,42401) note: chorus as he flies out
-  gold C0 book-corpus-v1/book-chunking-v1/s011/c0001 span [130886,131097) note: Bill as a juror: same character, unrelated scene
+  gold E2 book-corpus-v1/book-chunking-v1/s004/c0004 span [41938,42253)
+  gold E1 book-corpus-v1/book-chunking-v1/s004/c0005 span [42255,42401)
+  gold C0 book-corpus-v1/book-chunking-v1/s011/c0001 span [130886,131097)
 actual top-5:
   #1 0.188764 E2 book-corpus-v1/book-chunking-v1/s004/c0004 (ordinal 25, CHAPTER IV.)
   #2 0.174705 U  book-corpus-v1/book-chunking-v1/s008/c0001 (ordinal 53, CHAPTER VIII.)
@@ -177,8 +179,8 @@ first evidence rank: 1 #1 0.188764 E2 book-corpus-v1/book-chunking-v1/s004/c0004
 
 -- Example 6: NOA-01 (DEV, NO_ANSWER) -> FALSE_POSITIVE
 query: What is the name of Alice's older sister?
-  gold C0 book-corpus-v1/book-chunking-v1/s001/c0000 span [626,823) note: sister mentioned, unnamed
-  gold C0 book-corpus-v1/book-chunking-v1/s012/c0004 span [147991,148077) note: sister speaks, unnamed
+  gold C0 book-corpus-v1/book-chunking-v1/s001/c0000 span [626,823)
+  gold C0 book-corpus-v1/book-chunking-v1/s012/c0004 span [147991,148077)
 actual top-5:
   #1 0.449220 U  book-corpus-v1/book-chunking-v1/s009/c0001 (ordinal 61, CHAPTER IX.)
   #2 0.428551 U  book-corpus-v1/book-chunking-v1/s009/c0003 (ordinal 63, CHAPTER IX.)
@@ -190,8 +192,8 @@ expected: no chunk (NO_ANSWER); returned 10
 == Per-query trace (all hits, raw atom ids) ==
 AMB-01 HOLDOUT AMBIGUOUS failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P@1=0.0000 R@1=0.0000 P@3=0.0000 R@3=0.0000 P@5=0.0000 R@5=0.0000 P@10=0.0000 R@10=0.0000
   query: Why is the White Rabbit in such a hurry?
-  gold E1 book-corpus-v1/book-chunking-v1/s001/c0003 span [6041,6189) note: late, no reason given
-  gold E2 book-corpus-v1/book-chunking-v1/s002/c0001 span [14494,14640) note: afraid of keeping the Duchess waiting
+  gold E1 book-corpus-v1/book-chunking-v1/s001/c0003 span [6041,6189)
+  gold E2 book-corpus-v1/book-chunking-v1/s002/c0001 span [14494,14640)
   #1 0.312270 U  book-corpus-v1/book-chunking-v1/s011/c0005 atom=05eddcd7-da5c-3e38-a124-07d8dd46bb74
   #2 0.266776 U  book-corpus-v1/book-chunking-v1/s008/c0003 atom=1eb31a6c-f8c0-3975-b9d6-cb2aa89a4fd9
   #3 0.216776 U  book-corpus-v1/book-chunking-v1/s002/c0005 atom=bf64a864-24e1-361e-b8ca-fc20b0fa1d9a
@@ -204,8 +206,8 @@ AMB-01 HOLDOUT AMBIGUOUS failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.000
   #10 0.161881 U  book-corpus-v1/book-chunking-v1/s002/c0006 atom=3c92d48e-e452-39bb-9cb6-1132083c1198
 AMB-02 DEV AMBIGUOUS failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P@1=0.0000 R@1=0.0000 P@3=0.0000 R@3=0.0000 P@5=0.0000 R@5=0.0000 P@10=0.0000 R@10=0.0000
   query: Who tells Alice a sad story?
-  gold E2 book-corpus-v1/book-chunking-v1/s003/c0003 span [29866,29949) note: the Mouse's long and sad tale
-  gold E2 book-corpus-v1/book-chunking-v1/s009/c0004 span [111281,111367) note: the Mock Turtle's story
+  gold E2 book-corpus-v1/book-chunking-v1/s003/c0003 span [29866,29949)
+  gold E2 book-corpus-v1/book-chunking-v1/s009/c0004 span [111281,111367)
   #1 0.295196 U  book-corpus-v1/book-chunking-v1/s009/c0001 atom=fc3c2125-0cbb-37e9-b34d-cc49499a1ebe
   #2 0.270489 U  book-corpus-v1/book-chunking-v1/s002/c0000 atom=4ad18c69-fd7d-382e-a92d-25fa5997b109
   #3 0.269240 U  book-corpus-v1/book-chunking-v1/s002/c0004 atom=e77245b8-1db4-3717-8e75-81eb201c7c51
@@ -218,8 +220,8 @@ AMB-02 DEV AMBIGUOUS failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P@
   #10 0.215325 U  book-corpus-v1/book-chunking-v1/s010/c0004 atom=5de1241e-84b2-39aa-9b9b-f442302ab711
 AMB-03 DEV AMBIGUOUS failure=WRONG_RANK firstEvidenceRank=3 RR=0.3333 P@1=0.0000 R@1=0.0000 P@3=0.3333 R@3=0.5000 P@5=0.2000 R@5=0.5000 P@10=0.1000 R@10=0.5000
   query: Who in Wonderland is mad?
-  gold E2 book-corpus-v1/book-chunking-v1/s006/c0005 span [71585,71791) note: the Hatter and the March Hare are mad
-  gold E2 book-corpus-v1/book-chunking-v1/s006/c0006 span [71859,71941) note: we're all mad here
+  gold E2 book-corpus-v1/book-chunking-v1/s006/c0005 span [71585,71791)
+  gold E2 book-corpus-v1/book-chunking-v1/s006/c0006 span [71859,71941)
   #1 0.316288 U  book-corpus-v1/book-chunking-v1/s009/c0001 atom=fc3c2125-0cbb-37e9-b34d-cc49499a1ebe
   #2 0.249053 U  book-corpus-v1/book-chunking-v1/s007/c0001 atom=aa0f92b1-43e1-3c6b-bad8-009534de980f
   #3 0.248246 E2 book-corpus-v1/book-chunking-v1/s006/c0006 atom=5a6f5bf5-ec4d-3313-92af-01d3c194fb1f
@@ -232,9 +234,9 @@ AMB-03 DEV AMBIGUOUS failure=WRONG_RANK firstEvidenceRank=3 RR=0.3333 P@1=0.0000
   #10 0.189705 U  book-corpus-v1/book-chunking-v1/s009/c0005 atom=71a6fff0-b7a4-3d55-bfb7-f5193a6368b6
 CON-01 DEV CONFOUNDER failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P@1=0.0000 R@1=0.0000 P@3=0.0000 R@3=0.0000 P@5=0.0000 R@5=0.0000 P@10=0.0000 R@10=0.0000
   query: What does the Duchess's baby turn into?
-  gold E2 book-corpus-v1/book-chunking-v1/s006/c0005 span [69838,70118) note: transformation in the wood
-  gold E2 book-corpus-v1/book-chunking-v1/s006/c0006 span [73071,73146) note: Alice tells the Cat
-  gold C0 book-corpus-v1/book-chunking-v1/s011/c0004 span [135924,136241) note: guinea-pigs suppressed at the trial: same word, unrelated
+  gold E2 book-corpus-v1/book-chunking-v1/s006/c0005 span [69838,70118)
+  gold E2 book-corpus-v1/book-chunking-v1/s006/c0006 span [73071,73146)
+  gold C0 book-corpus-v1/book-chunking-v1/s011/c0004 span [135924,136241)
   #1 0.205027 U  book-corpus-v1/book-chunking-v1/s006/c0002 atom=a218b1dc-8483-3550-bcec-e898613ba9d1
   #2 0.176728 U  book-corpus-v1/book-chunking-v1/s009/c0002 atom=b1bb809d-1fe6-3a41-a8c5-e4236d1c8db0
   #3 0.155929 U  book-corpus-v1/book-chunking-v1/s009/c0001 atom=fc3c2125-0cbb-37e9-b34d-cc49499a1ebe
@@ -247,8 +249,8 @@ CON-01 DEV CONFOUNDER failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P
   #10 0.077557 U  book-corpus-v1/book-chunking-v1/s007/c0000 atom=33ab9543-f84e-3375-9728-5d42c7f835c8
 CON-02 HOLDOUT CONFOUNDER failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P@1=0.0000 R@1=0.0000 P@3=0.0000 R@3=0.0000 P@5=0.0000 R@5=0.0000 P@10=0.0000 R@10=0.0000
   query: Who is accused of stealing the tarts?
-  gold E2 book-corpus-v1/book-chunking-v1/s011/c0001 span [131331,131476) note: the accusation is read
-  gold C0 book-corpus-v1/book-chunking-v1/s008/c0001 span [90828,91019) note: Knave in the procession: same character, no theft
+  gold E2 book-corpus-v1/book-chunking-v1/s011/c0001 span [131331,131476)
+  gold C0 book-corpus-v1/book-chunking-v1/s008/c0001 span [90828,91019)
   #1 0.210352 U  book-corpus-v1/book-chunking-v1/s009/c0003 atom=2af0e887-5d53-3735-bf92-3d03ff89b592
   #2 0.209097 U  book-corpus-v1/book-chunking-v1/s009/c0001 atom=fc3c2125-0cbb-37e9-b34d-cc49499a1ebe
   #3 0.208834 U  book-corpus-v1/book-chunking-v1/s009/c0005 atom=71a6fff0-b7a4-3d55-bfb7-f5193a6368b6
@@ -261,8 +263,8 @@ CON-02 HOLDOUT CONFOUNDER failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.00
   #10 0.139686 U  book-corpus-v1/book-chunking-v1/s002/c0005 atom=bf64a864-24e1-361e-b8ca-fc20b0fa1d9a
 CON-03 DEV CONFOUNDER failure=CHUNK_BOUNDARY_GAP firstEvidenceRank=6 RR=0.1667 P@1=0.0000 R@1=0.0000 P@3=0.0000 R@3=0.0000 P@5=0.0000 R@5=0.0000 P@10=0.1000 R@10=1.0000
   query: What does the Mock Turtle say he used to be?
-  gold E2 book-corpus-v1/book-chunking-v1/s009/c0004 span [111281,111367) note: start of his story
-  gold C0 book-corpus-v1/book-chunking-v1/s009/c0003 span [108742,108917) note: the Queen's soup remark: names him, does not answer
+  gold E2 book-corpus-v1/book-chunking-v1/s009/c0004 span [111281,111367)
+  gold C0 book-corpus-v1/book-chunking-v1/s009/c0003 span [108742,108917)
   #1 0.266320 U  book-corpus-v1/book-chunking-v1/s009/c0006 atom=2a4def87-aad2-3920-9664-3fa79fd5613a
   #2 0.247647 U  book-corpus-v1/book-chunking-v1/s009/c0005 atom=71a6fff0-b7a4-3d55-bfb7-f5193a6368b6
   #3 0.209586 U  book-corpus-v1/book-chunking-v1/s010/c0003 atom=b73c44bc-7a91-38eb-8469-8a812ded67de
@@ -275,9 +277,9 @@ CON-03 DEV CONFOUNDER failure=CHUNK_BOUNDARY_GAP firstEvidenceRank=6 RR=0.1667 P
   #10 0.129636 U  book-corpus-v1/book-chunking-v1/s012/c0003 atom=c8fa1f75-1648-3501-97bd-1dadcb61d585
 CON-04 DEV CONFOUNDER failure=MULTI_EVIDENCE_GAP firstEvidenceRank=1 RR=1.0000 P@1=1.0000 R@1=0.5000 P@3=0.3333 R@3=0.5000 P@5=0.2000 R@5=0.5000 P@10=0.1000 R@10=0.5000
   query: What happened to Bill the Lizard when he came down the chimney?
-  gold E2 book-corpus-v1/book-chunking-v1/s004/c0004 span [41938,42253) note: Alice kicks
-  gold E1 book-corpus-v1/book-chunking-v1/s004/c0005 span [42255,42401) note: chorus as he flies out
-  gold C0 book-corpus-v1/book-chunking-v1/s011/c0001 span [130886,131097) note: Bill as a juror: same character, unrelated scene
+  gold E2 book-corpus-v1/book-chunking-v1/s004/c0004 span [41938,42253)
+  gold E1 book-corpus-v1/book-chunking-v1/s004/c0005 span [42255,42401)
+  gold C0 book-corpus-v1/book-chunking-v1/s011/c0001 span [130886,131097)
   #1 0.188764 E2 book-corpus-v1/book-chunking-v1/s004/c0004 atom=b7024e85-43b8-3380-88c9-b978411b5858
   #2 0.174705 U  book-corpus-v1/book-chunking-v1/s008/c0001 atom=c05c2cd9-3bf2-392d-b40f-9d9b03b3ca99
   #3 0.172315 U  book-corpus-v1/book-chunking-v1/s001/c0001 atom=c1c426f9-cc38-3d32-b7f4-8107f867c83a
@@ -290,7 +292,7 @@ CON-04 DEV CONFOUNDER failure=MULTI_EVIDENCE_GAP firstEvidenceRank=1 RR=1.0000 P
   #10 0.127216 U  book-corpus-v1/book-chunking-v1/s006/c0000 atom=9bf98d25-ac89-3368-88b2-705ccecc8f6a
 LIT-01 DEV LITERAL failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P@1=0.0000 R@1=0.0000 P@3=0.0000 R@3=0.0000 P@5=0.0000 R@5=0.0000 P@10=0.0000 R@10=0.0000
   query: What words are printed on the label of the little bottle Alice finds on the glass table?
-  gold E2 book-corpus-v1/book-chunking-v1/s001/c0004 span [8079,8300) note: bottle label in the hall
+  gold E2 book-corpus-v1/book-chunking-v1/s001/c0004 span [8079,8300)
   #1 0.404788 U  book-corpus-v1/book-chunking-v1/s009/c0005 atom=71a6fff0-b7a4-3d55-bfb7-f5193a6368b6
   #2 0.357174 U  book-corpus-v1/book-chunking-v1/s009/c0004 atom=3a28c214-1eb6-3f97-af30-0cae7290db48
   #3 0.315117 U  book-corpus-v1/book-chunking-v1/s009/c0001 atom=fc3c2125-0cbb-37e9-b34d-cc49499a1ebe
@@ -303,7 +305,7 @@ LIT-01 DEV LITERAL failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P@1=
   #10 0.267394 U  book-corpus-v1/book-chunking-v1/s008/c0003 atom=1eb31a6c-f8c0-3975-b9d6-cb2aa89a4fd9
 LIT-02 HOLDOUT LITERAL failure=NONE firstEvidenceRank=1 RR=1.0000 P@1=1.0000 R@1=1.0000 P@3=0.3333 R@3=1.0000 P@5=0.2000 R@5=1.0000 P@10=0.1000 R@10=1.0000
   query: What was written on the jar Alice took from a shelf while she was falling down the well?
-  gold E2 book-corpus-v1/book-chunking-v1/s001/c0001 span [2723,2925) note: jar label during the fall
+  gold E2 book-corpus-v1/book-chunking-v1/s001/c0001 span [2723,2925)
   #1 0.597078 E2 book-corpus-v1/book-chunking-v1/s001/c0001 atom=c1c426f9-cc38-3d32-b7f4-8107f867c83a
   #2 0.532140 U  book-corpus-v1/book-chunking-v1/s001/c0003 atom=8e8e04e6-53c3-3b3d-ac06-a8c084b522c0
   #3 0.453440 U  book-corpus-v1/book-chunking-v1/s011/c0004 atom=7aabf3e5-d332-35e2-bc0f-9626232d511d
@@ -316,7 +318,7 @@ LIT-02 HOLDOUT LITERAL failure=NONE firstEvidenceRank=1 RR=1.0000 P@1=1.0000 R@1
   #10 0.374576 U  book-corpus-v1/book-chunking-v1/s001/c0000 atom=6415669b-3407-301e-9544-c8c30625eb36
 LIT-03 DEV LITERAL failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P@1=0.0000 R@1=0.0000 P@3=0.0000 R@3=0.0000 P@5=0.0000 R@5=0.0000 P@10=0.0000 R@10=0.0000
   query: What is the name of Alice's cat?
-  gold E2 book-corpus-v1/book-chunking-v1/s001/c0002 span [4816,4963) note: narrator names the cat
+  gold E2 book-corpus-v1/book-chunking-v1/s001/c0002 span [4816,4963)
   #1 0.476470 U  book-corpus-v1/book-chunking-v1/s009/c0001 atom=fc3c2125-0cbb-37e9-b34d-cc49499a1ebe
   #2 0.465633 U  book-corpus-v1/book-chunking-v1/s009/c0003 atom=2af0e887-5d53-3735-bf92-3d03ff89b592
   #3 0.380021 U  book-corpus-v1/book-chunking-v1/s007/c0001 atom=aa0f92b1-43e1-3c6b-bad8-009534de980f
@@ -329,8 +331,8 @@ LIT-03 DEV LITERAL failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P@1=
   #10 0.312500 U  book-corpus-v1/book-chunking-v1/s008/c0005 atom=6f2c3275-c31d-3891-8c75-c256265c5e13
 LIT-04 DEV LITERAL failure=WRONG_RANK firstEvidenceRank=2 RR=0.5000 P@1=0.0000 R@1=0.0000 P@3=0.3333 R@3=0.5000 P@5=0.2000 R@5=0.5000 P@10=0.1000 R@10=0.5000
   query: What name does the White Rabbit call Alice when he mistakes her for his housemaid?
-  gold E2 book-corpus-v1/book-chunking-v1/s004/c0000 span [34164,34304) note: first time the Rabbit uses the maid's name
-  gold E2 book-corpus-v1/book-chunking-v1/s004/c0003 span [38587,38666) note: the Rabbit calls the maid's name again
+  gold E2 book-corpus-v1/book-chunking-v1/s004/c0000 span [34164,34304)
+  gold E2 book-corpus-v1/book-chunking-v1/s004/c0003 span [38587,38666)
   #1 0.393985 U  book-corpus-v1/book-chunking-v1/s011/c0005 atom=05eddcd7-da5c-3e38-a124-07d8dd46bb74
   #2 0.312908 E2 book-corpus-v1/book-chunking-v1/s004/c0000 atom=7d0b84c3-7c89-34bf-af4a-dcc488eae98d
   #3 0.299865 U  book-corpus-v1/book-chunking-v1/s001/c0000 atom=6415669b-3407-301e-9544-c8c30625eb36
@@ -343,7 +345,7 @@ LIT-04 DEV LITERAL failure=WRONG_RANK firstEvidenceRank=2 RR=0.5000 P@1=0.0000 R
   #10 0.211890 U  book-corpus-v1/book-chunking-v1/s009/c0000 atom=b2652333-dd23-3a78-9ec7-7fae7322f602
 LIT-05 DEV LITERAL failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P@1=0.0000 R@1=0.0000 P@3=0.0000 R@3=0.0000 P@5=0.0000 R@5=0.0000 P@10=0.0000 R@10=0.0000
   query: What is the Caterpillar smoking when Alice first meets it?
-  gold E2 book-corpus-v1/book-chunking-v1/s004/c0008 span [47470,47755) note: first meeting with the Caterpillar
+  gold E2 book-corpus-v1/book-chunking-v1/s004/c0008 span [47470,47755)
   #1 0.497553 U  book-corpus-v1/book-chunking-v1/s009/c0001 atom=fc3c2125-0cbb-37e9-b34d-cc49499a1ebe
   #2 0.434745 U  book-corpus-v1/book-chunking-v1/s007/c0001 atom=aa0f92b1-43e1-3c6b-bad8-009534de980f
   #3 0.357125 U  book-corpus-v1/book-chunking-v1/s003/c0001 atom=9718adc0-fcc1-3399-9374-9eb4b46ac4c1
@@ -356,10 +358,10 @@ LIT-05 DEV LITERAL failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P@1=
   #10 0.303758 U  book-corpus-v1/book-chunking-v1/s005/c0000 atom=3b0c71fb-23ec-3dde-9576-eac3465ee90f
 MUL-01 DEV MULTI_EVIDENCE failure=WRONG_RANK firstEvidenceRank=8 RR=0.1250 P@1=0.0000 R@1=0.0000 P@3=0.0000 R@3=0.0000 P@5=0.0000 R@5=0.0000 P@10=0.1000 R@10=0.2500
   query: What did Alice eat or drink that made her grow bigger?
-  gold E2 book-corpus-v1/book-chunking-v1/s001/c0006 span [11302,11727) note: cake marked EAT ME
-  gold E1 book-corpus-v1/book-chunking-v1/s002/c0000 span [12406,12627) note: effect of the cake: she opens out
-  gold E2 book-corpus-v1/book-chunking-v1/s004/c0001 span [36209,36604) note: bottle in the Rabbit's house
-  gold E2 book-corpus-v1/book-chunking-v1/s005/c0003 span [53901,53989) note: Caterpillar on the mushroom's effect
+  gold E2 book-corpus-v1/book-chunking-v1/s001/c0006 span [11302,11727)
+  gold E1 book-corpus-v1/book-chunking-v1/s002/c0000 span [12406,12627)
+  gold E2 book-corpus-v1/book-chunking-v1/s004/c0001 span [36209,36604)
+  gold E2 book-corpus-v1/book-chunking-v1/s005/c0003 span [53901,53989)
   #1 0.292341 U  book-corpus-v1/book-chunking-v1/s009/c0006 atom=2a4def87-aad2-3920-9664-3fa79fd5613a
   #2 0.236119 U  book-corpus-v1/book-chunking-v1/s008/c0001 atom=c05c2cd9-3bf2-392d-b40f-9d9b03b3ca99
   #3 0.228070 U  book-corpus-v1/book-chunking-v1/s009/c0003 atom=2af0e887-5d53-3735-bf92-3d03ff89b592
@@ -372,9 +374,9 @@ MUL-01 DEV MULTI_EVIDENCE failure=WRONG_RANK firstEvidenceRank=8 RR=0.1250 P@1=0
   #10 0.182386 U  book-corpus-v1/book-chunking-v1/s007/c0001 atom=aa0f92b1-43e1-3c6b-bad8-009534de980f
 MUL-02 HOLDOUT MULTI_EVIDENCE failure=CHUNK_BOUNDARY_GAP firstEvidenceRank=2 RR=0.5000 P@1=0.0000 R@1=0.0000 P@3=0.3333 R@3=0.3333 P@5=0.2000 R@5=0.3333 P@10=0.2000 R@10=0.6667
   query: Who was called as a witness at the trial of the Knave?
-  gold E2 book-corpus-v1/book-chunking-v1/s011/c0002 span [131781,132028) note: first witness
-  gold E2 book-corpus-v1/book-chunking-v1/s011/c0004 span [137330,137542) note: next witness
-  gold E2 book-corpus-v1/book-chunking-v1/s011/c0005 span [138813,138915) note: Alice is called
+  gold E2 book-corpus-v1/book-chunking-v1/s011/c0002 span [131781,132028)
+  gold E2 book-corpus-v1/book-chunking-v1/s011/c0004 span [137330,137542)
+  gold E2 book-corpus-v1/book-chunking-v1/s011/c0005 span [138813,138915)
   #1 0.389145 U  book-corpus-v1/book-chunking-v1/s011/c0001 atom=5962d593-7843-3820-a025-3e4cac812f1f
   #2 0.355335 E2 book-corpus-v1/book-chunking-v1/s011/c0002 atom=610112e6-d606-3622-945e-94852062b26f
   #3 0.342722 U  book-corpus-v1/book-chunking-v1/s008/c0006 atom=93c3095f-412e-34dd-8572-dfca865d21dd
@@ -387,9 +389,9 @@ MUL-02 HOLDOUT MULTI_EVIDENCE failure=CHUNK_BOUNDARY_GAP firstEvidenceRank=2 RR=
   #10 0.307614 E2 book-corpus-v1/book-chunking-v1/s011/c0004 atom=7aabf3e5-d332-35e2-bc0f-9626232d511d
 MUL-03 DEV MULTI_EVIDENCE failure=CHUNK_BOUNDARY_GAP firstEvidenceRank=7 RR=0.1429 P@1=0.0000 R@1=0.0000 P@3=0.0000 R@3=0.0000 P@5=0.0000 R@5=0.0000 P@10=0.1000 R@10=0.3333
   query: Which poems did Alice try to recite but get the words wrong?
-  gold E2 book-corpus-v1/book-chunking-v1/s002/c0002 span [16286,16673) note: crocodile verse
-  gold E2 book-corpus-v1/book-chunking-v1/s005/c0001 span [50680,50847) note: Father William
-  gold E2 book-corpus-v1/book-chunking-v1/s010/c0004 span [124070,124346) note: voice of the Lobster
+  gold E2 book-corpus-v1/book-chunking-v1/s002/c0002 span [16286,16673)
+  gold E2 book-corpus-v1/book-chunking-v1/s005/c0001 span [50680,50847)
+  gold E2 book-corpus-v1/book-chunking-v1/s010/c0004 span [124070,124346)
   #1 0.189634 U  book-corpus-v1/book-chunking-v1/s005/c0000 atom=3b0c71fb-23ec-3dde-9576-eac3465ee90f
   #2 0.141088 U  book-corpus-v1/book-chunking-v1/s004/c0007 atom=2ac84c5b-9aab-3c1e-878c-37b1b8af68fd
   #3 0.139392 U  book-corpus-v1/book-chunking-v1/s005/c0002 atom=bef3d0f0-04eb-3aa5-ba36-71990bbddbd2
@@ -402,9 +404,9 @@ MUL-03 DEV MULTI_EVIDENCE failure=CHUNK_BOUNDARY_GAP firstEvidenceRank=7 RR=0.14
   #10 0.095346 U  book-corpus-v1/book-chunking-v1/s011/c0002 atom=610112e6-d606-3622-945e-94852062b26f
 MUL-04 DEV MULTI_EVIDENCE failure=WRONG_RANK firstEvidenceRank=2 RR=0.5000 P@1=0.0000 R@1=0.0000 P@3=0.3333 R@3=0.3333 P@5=0.2000 R@5=0.3333 P@10=0.1000 R@10=0.3333
   query: In which places does the Cheshire Cat show up?
-  gold E2 book-corpus-v1/book-chunking-v1/s006/c0002 span [64501,64792) note: on the kitchen hearth
-  gold E2 book-corpus-v1/book-chunking-v1/s006/c0005 span [70480,70626) note: on a bough in the wood
-  gold E2 book-corpus-v1/book-chunking-v1/s008/c0004 span [97256,97407) note: in the air over the croquet ground
+  gold E2 book-corpus-v1/book-chunking-v1/s006/c0002 span [64501,64792)
+  gold E2 book-corpus-v1/book-chunking-v1/s006/c0005 span [70480,70626)
+  gold E2 book-corpus-v1/book-chunking-v1/s008/c0004 span [97256,97407)
   #1 0.207713 U  book-corpus-v1/book-chunking-v1/s010/c0000 atom=f111f5e8-f605-31b5-bc3f-275428067246
   #2 0.174793 E2 book-corpus-v1/book-chunking-v1/s006/c0005 atom=97f3eab3-b587-3387-813b-f894c6ec329a
   #3 0.170516 U  book-corpus-v1/book-chunking-v1/s011/c0004 atom=7aabf3e5-d332-35e2-bc0f-9626232d511d
@@ -417,9 +419,9 @@ MUL-04 DEV MULTI_EVIDENCE failure=WRONG_RANK firstEvidenceRank=2 RR=0.5000 P@1=0
   #10 0.136743 U  book-corpus-v1/book-chunking-v1/s012/c0000 atom=a381ab4a-fad0-38b3-a612-01a0e27db683
 MUL-05 DEV MULTI_EVIDENCE failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P@1=0.0000 R@1=0.0000 P@3=0.0000 R@3=0.0000 P@5=0.0000 R@5=0.0000 P@10=0.0000 R@10=0.0000
   query: Where in the story does the Hatter appear?
-  gold E2 book-corpus-v1/book-chunking-v1/s007/c0000 span [74804,74945) note: at the tea party
-  gold E2 book-corpus-v1/book-chunking-v1/s011/c0002 span [131781,131919) note: first witness at the trial
-  gold E1 book-corpus-v1/book-chunking-v1/s006/c0005 span [71585,71733) note: the Cat mentions where he lives
+  gold E2 book-corpus-v1/book-chunking-v1/s007/c0000 span [74804,74945)
+  gold E2 book-corpus-v1/book-chunking-v1/s011/c0002 span [131781,131919)
+  gold E1 book-corpus-v1/book-chunking-v1/s006/c0005 span [71585,71733)
   #1 0.166718 U  book-corpus-v1/book-chunking-v1/s007/c0002 atom=aa705ebd-c082-334d-8aa6-b707e4aead90
   #2 0.144766 U  book-corpus-v1/book-chunking-v1/s009/c0002 atom=b1bb809d-1fe6-3a41-a8c5-e4236d1c8db0
   #3 0.140690 U  book-corpus-v1/book-chunking-v1/s007/c0001 atom=aa0f92b1-43e1-3c6b-bad8-009534de980f
@@ -432,7 +434,7 @@ MUL-05 DEV MULTI_EVIDENCE failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.00
   #10 0.069007 U  book-corpus-v1/book-chunking-v1/s010/c0006 atom=ad29cc7d-b80d-3767-96a5-e9ecc0486a93
 NAR-01 DEV NARRATIVE_TEMPORAL failure=WRONG_RANK firstEvidenceRank=2 RR=0.5000 P@1=0.0000 R@1=0.0000 P@3=0.3333 R@3=1.0000 P@5=0.2000 R@5=1.0000 P@10=0.1000 R@10=1.0000
   query: What happened to Alice's size right after she drank from the first bottle?
-  gold E2 book-corpus-v1/book-chunking-v1/s001/c0005 span [9429,9586) note: shrinks right after drinking
+  gold E2 book-corpus-v1/book-chunking-v1/s001/c0005 span [9429,9586)
   #1 0.500578 U  book-corpus-v1/book-chunking-v1/s004/c0003 atom=91443fa7-702b-37ba-9053-400d71ffea45
   #2 0.439473 E2 book-corpus-v1/book-chunking-v1/s001/c0005 atom=21bd335c-7302-3795-bb79-cf29e7c929c8
   #3 0.432426 U  book-corpus-v1/book-chunking-v1/s001/c0001 atom=c1c426f9-cc38-3d32-b7f4-8107f867c83a
@@ -445,7 +447,7 @@ NAR-01 DEV NARRATIVE_TEMPORAL failure=WRONG_RANK firstEvidenceRank=2 RR=0.5000 P
   #10 0.378215 U  book-corpus-v1/book-chunking-v1/s004/c0000 atom=7d0b84c3-7c89-34bf-af4a-dcc488eae98d
 NAR-02 DEV NARRATIVE_TEMPORAL failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P@1=0.0000 R@1=0.0000 P@3=0.0000 R@3=0.0000 P@5=0.0000 R@5=0.0000 P@10=0.0000 R@10=0.0000
   query: Where did Alice land at the end of her long fall?
-  gold E2 book-corpus-v1/book-chunking-v1/s001/c0002 span [5596,5760) note: end of the fall
+  gold E2 book-corpus-v1/book-chunking-v1/s001/c0002 span [5596,5760)
   #1 0.395642 U  book-corpus-v1/book-chunking-v1/s009/c0002 atom=b1bb809d-1fe6-3a41-a8c5-e4236d1c8db0
   #2 0.395537 U  book-corpus-v1/book-chunking-v1/s006/c0002 atom=a218b1dc-8483-3550-bcec-e898613ba9d1
   #3 0.391059 U  book-corpus-v1/book-chunking-v1/s006/c0003 atom=843dd2b3-ef87-3bd5-b11e-56d9cdd7209d
@@ -458,8 +460,8 @@ NAR-02 DEV NARRATIVE_TEMPORAL failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=
   #10 0.334497 U  book-corpus-v1/book-chunking-v1/s012/c0006 atom=daefcdcc-7a14-3af3-8331-e1e80c7f121c
 NAR-03 HOLDOUT NARRATIVE_TEMPORAL failure=WRONG_RANK firstEvidenceRank=4 RR=0.2500 P@1=0.0000 R@1=0.0000 P@3=0.0000 R@3=0.0000 P@5=0.2000 R@5=0.5000 P@10=0.1000 R@10=0.5000
   query: Where did Alice go right after the Cat vanished and left its grin behind?
-  gold E2 book-corpus-v1/book-chunking-v1/s006/c0007 span [74226,74434) note: arrives at the March Hare's house
-  gold E1 book-corpus-v1/book-chunking-v1/s006/c0005 span [71585,71791) note: the Cat gives directions earlier
+  gold E2 book-corpus-v1/book-chunking-v1/s006/c0007 span [74226,74434)
+  gold E1 book-corpus-v1/book-chunking-v1/s006/c0005 span [71585,71791)
   #1 0.342010 U  book-corpus-v1/book-chunking-v1/s002/c0002 atom=a20df8a3-4b64-392d-9632-a0740e1a8b39
   #2 0.337146 U  book-corpus-v1/book-chunking-v1/s009/c0003 atom=2af0e887-5d53-3735-bf92-3d03ff89b592
   #3 0.310913 U  book-corpus-v1/book-chunking-v1/s006/c0002 atom=a218b1dc-8483-3550-bcec-e898613ba9d1
@@ -472,7 +474,7 @@ NAR-03 HOLDOUT NARRATIVE_TEMPORAL failure=WRONG_RANK firstEvidenceRank=4 RR=0.25
   #10 0.254353 U  book-corpus-v1/book-chunking-v1/s011/c0001 atom=5962d593-7843-3820-a025-3e4cac812f1f
 NAR-04 DEV NARRATIVE_TEMPORAL failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P@1=0.0000 R@1=0.0000 P@3=0.0000 R@3=0.0000 P@5=0.0000 R@5=0.0000 P@10=0.0000 R@10=0.0000
   query: What happened just before Alice woke up on the bank?
-  gold E2 book-corpus-v1/book-chunking-v1/s012/c0004 span [147520,147989) note: cards fly up; she wakes
+  gold E2 book-corpus-v1/book-chunking-v1/s012/c0004 span [147520,147989)
   #1 0.243230 U  book-corpus-v1/book-chunking-v1/s009/c0003 atom=2af0e887-5d53-3735-bf92-3d03ff89b592
   #2 0.235791 U  book-corpus-v1/book-chunking-v1/s009/c0001 atom=fc3c2125-0cbb-37e9-b34d-cc49499a1ebe
   #3 0.230469 U  book-corpus-v1/book-chunking-v1/s004/c0006 atom=5ffdb8d1-8743-3837-bb73-25f9598ed0d6
@@ -485,8 +487,8 @@ NAR-04 DEV NARRATIVE_TEMPORAL failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=
   #10 0.210490 U  book-corpus-v1/book-chunking-v1/s011/c0004 atom=7aabf3e5-d332-35e2-bc0f-9626232d511d
 NOA-01 DEV NO_ANSWER failure=FALSE_POSITIVE
   query: What is the name of Alice's older sister?
-  gold C0 book-corpus-v1/book-chunking-v1/s001/c0000 span [626,823) note: sister mentioned, unnamed
-  gold C0 book-corpus-v1/book-chunking-v1/s012/c0004 span [147991,148077) note: sister speaks, unnamed
+  gold C0 book-corpus-v1/book-chunking-v1/s001/c0000 span [626,823)
+  gold C0 book-corpus-v1/book-chunking-v1/s012/c0004 span [147991,148077)
   #1 0.449220 U  book-corpus-v1/book-chunking-v1/s009/c0001 atom=fc3c2125-0cbb-37e9-b34d-cc49499a1ebe
   #2 0.428551 U  book-corpus-v1/book-chunking-v1/s009/c0003 atom=2af0e887-5d53-3735-bf92-3d03ff89b592
   #3 0.384503 U  book-corpus-v1/book-chunking-v1/s007/c0001 atom=aa0f92b1-43e1-3c6b-bad8-009534de980f
@@ -499,7 +501,7 @@ NOA-01 DEV NO_ANSWER failure=FALSE_POSITIVE
   #10 0.299729 U  book-corpus-v1/book-chunking-v1/s009/c0002 atom=b1bb809d-1fe6-3a41-a8c5-e4236d1c8db0
 NOA-02 DEV NO_ANSWER failure=FALSE_POSITIVE
   query: How old is Alice?
-  gold C0 book-corpus-v1/book-chunking-v1/s002/c0001 span [15425,15557) note: children of the same age, no number
+  gold C0 book-corpus-v1/book-chunking-v1/s002/c0001 span [15425,15557)
   #1 0.426670 U  book-corpus-v1/book-chunking-v1/s009/c0001 atom=fc3c2125-0cbb-37e9-b34d-cc49499a1ebe
   #2 0.345643 U  book-corpus-v1/book-chunking-v1/s009/c0003 atom=2af0e887-5d53-3735-bf92-3d03ff89b592
   #3 0.333617 U  book-corpus-v1/book-chunking-v1/s009/c0005 atom=71a6fff0-b7a4-3d55-bfb7-f5193a6368b6
@@ -525,7 +527,7 @@ NOA-03 HOLDOUT NO_ANSWER failure=FALSE_POSITIVE
   #10 0.128152 U  book-corpus-v1/book-chunking-v1/s004/c0004 atom=b7024e85-43b8-3380-88c9-b978411b5858
 NOA-04 DEV NO_ANSWER failure=FALSE_POSITIVE
   query: What is the Queen of Hearts' first name?
-  gold C0 book-corpus-v1/book-chunking-v1/s008/c0001 span [90967,91019) note: KING AND QUEEN OF HEARTS in the procession
+  gold C0 book-corpus-v1/book-chunking-v1/s008/c0001 span [90967,91019)
   #1 0.362891 C0 book-corpus-v1/book-chunking-v1/s008/c0001 atom=c05c2cd9-3bf2-392d-b40f-9d9b03b3ca99
   #2 0.288973 U  book-corpus-v1/book-chunking-v1/s007/c0001 atom=aa0f92b1-43e1-3c6b-bad8-009534de980f
   #3 0.269476 U  book-corpus-v1/book-chunking-v1/s009/c0001 atom=fc3c2125-0cbb-37e9-b34d-cc49499a1ebe
@@ -551,8 +553,8 @@ NOA-05 DEV NO_ANSWER failure=FALSE_POSITIVE
   #10 0.209586 U  book-corpus-v1/book-chunking-v1/s010/c0003 atom=b73c44bc-7a91-38eb-8469-8a812ded67de
 PAR-01 HOLDOUT PARAPHRASE failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P@1=0.0000 R@1=0.0000 P@3=0.0000 R@3=0.0000 P@5=0.0000 R@5=0.0000 P@10=0.0000 R@10=0.0000
   query: Which animal can disappear gradually until nothing but its smile is left?
-  gold E2 book-corpus-v1/book-chunking-v1/s006/c0007 span [73883,74224) note: slow vanishing that leaves the grin
-  gold E1 book-corpus-v1/book-chunking-v1/s008/c0004 span [97256,97407) note: the grin appears first and Alice identifies the Cat
+  gold E2 book-corpus-v1/book-chunking-v1/s006/c0007 span [73883,74224)
+  gold E1 book-corpus-v1/book-chunking-v1/s008/c0004 span [97256,97407)
   #1 0.309892 U  book-corpus-v1/book-chunking-v1/s005/c0004 atom=65f39b42-95d0-38ec-aad5-fcae688a6d7d
   #2 0.296296 U  book-corpus-v1/book-chunking-v1/s006/c0001 atom=4ca20f65-19ce-3506-ab52-399e430734ca
   #3 0.278298 U  book-corpus-v1/book-chunking-v1/s004/c0002 atom=bffae6d6-529f-3c33-9228-1762ca9fa9f5
@@ -565,8 +567,8 @@ PAR-01 HOLDOUT PARAPHRASE failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.00
   #10 0.244344 U  book-corpus-v1/book-chunking-v1/s007/c0000 atom=33ab9543-f84e-3375-9728-5d42c7f835c8
 PAR-02 HOLDOUT PARAPHRASE failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P@1=0.0000 R@1=0.0000 P@3=0.0000 R@3=0.0000 P@5=0.0000 R@5=0.0000 P@10=0.0000 R@10=0.0000
   query: What object was making Alice shrink after she picked it up in the hall?
-  gold E2 book-corpus-v1/book-chunking-v1/s002/c0003 span [17817,18162) note: Alice identifies the cause of shrinking
-  gold E1 book-corpus-v1/book-chunking-v1/s002/c0001 span [14927,15069) note: Alice picks up the dropped items
+  gold E2 book-corpus-v1/book-chunking-v1/s002/c0003 span [17817,18162)
+  gold E1 book-corpus-v1/book-chunking-v1/s002/c0001 span [14927,15069)
   #1 0.523281 U  book-corpus-v1/book-chunking-v1/s001/c0005 atom=21bd335c-7302-3795-bb79-cf29e7c929c8
   #2 0.503069 U  book-corpus-v1/book-chunking-v1/s001/c0006 atom=f15c0f90-ddb5-38fa-b375-6d7cee710f57
   #3 0.496805 U  book-corpus-v1/book-chunking-v1/s008/c0006 atom=93c3095f-412e-34dd-8572-dfca865d21dd
@@ -579,7 +581,7 @@ PAR-02 HOLDOUT PARAPHRASE failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.00
   #10 0.437331 U  book-corpus-v1/book-chunking-v1/s004/c0000 atom=7d0b84c3-7c89-34bf-af4a-dcc488eae98d
 PAR-03 DEV PARAPHRASE failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P@1=0.0000 R@1=0.0000 P@3=0.0000 R@3=0.0000 P@5=0.0000 R@5=0.0000 P@10=0.0000 R@10=0.0000
   query: In the royal outdoor game, which living creatures served as the sticks and the balls?
-  gold E2 book-corpus-v1/book-chunking-v1/s008/c0003 span [95267,95543) note: croquet ground with live animals
+  gold E2 book-corpus-v1/book-chunking-v1/s008/c0003 span [95267,95543)
   #1 0.224699 U  book-corpus-v1/book-chunking-v1/s006/c0000 atom=9bf98d25-ac89-3368-88b2-705ccecc8f6a
   #2 0.190676 U  book-corpus-v1/book-chunking-v1/s007/c0001 atom=aa0f92b1-43e1-3c6b-bad8-009534de980f
   #3 0.188193 U  book-corpus-v1/book-chunking-v1/s008/c0002 atom=6608d87f-a8e6-371a-9b6c-6a3b650fbf03
@@ -592,7 +594,7 @@ PAR-03 DEV PARAPHRASE failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P
   #10 0.148159 U  book-corpus-v1/book-chunking-v1/s002/c0005 atom=bf64a864-24e1-361e-b8ca-fc20b0fa1d9a
 PAR-04 DEV PARAPHRASE failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P@1=0.0000 R@1=0.0000 P@3=0.0000 R@3=0.0000 P@5=0.0000 R@5=0.0000 P@10=0.0000 R@10=0.0000
   query: Who was dozing between two tea drinkers while they leaned on him like a pillow?
-  gold E2 book-corpus-v1/book-chunking-v1/s007/c0000 span [74804,75190) note: tea-table scene
+  gold E2 book-corpus-v1/book-chunking-v1/s007/c0000 span [74804,75190)
   #1 0.282549 U  book-corpus-v1/book-chunking-v1/s008/c0007 atom=6b7c4d98-54f7-3759-920e-190ebd072341
   #2 0.260030 U  book-corpus-v1/book-chunking-v1/s009/c0002 atom=b1bb809d-1fe6-3a41-a8c5-e4236d1c8db0
   #3 0.253924 U  book-corpus-v1/book-chunking-v1/s011/c0005 atom=05eddcd7-da5c-3e38-a124-07d8dd46bb74
@@ -605,7 +607,7 @@ PAR-04 DEV PARAPHRASE failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P
   #10 0.174727 U  book-corpus-v1/book-chunking-v1/s011/c0004 atom=7aabf3e5-d332-35e2-bc0f-9626232d511d
 PAR-05 DEV PARAPHRASE failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P@1=0.0000 R@1=0.0000 P@3=0.0000 R@3=0.0000 P@5=0.0000 R@5=0.0000 P@10=0.0000 R@10=0.0000
   query: Which odd-sounding school subjects did the sorrowful sea creature say he had studied?
-  gold E2 book-corpus-v1/book-chunking-v1/s009/c0005 span [113563,113746) note: list of subjects
+  gold E2 book-corpus-v1/book-chunking-v1/s009/c0005 span [113563,113746)
   #1 0.164399 U  book-corpus-v1/book-chunking-v1/s008/c0007 atom=6b7c4d98-54f7-3759-920e-190ebd072341
   #2 0.129153 U  book-corpus-v1/book-chunking-v1/s011/c0001 atom=5962d593-7843-3820-a025-3e4cac812f1f
   #3 0.128388 U  book-corpus-v1/book-chunking-v1/s010/c0006 atom=ad29cc7d-b80d-3767-96a5-e9ecc0486a93
@@ -618,7 +620,7 @@ PAR-05 DEV PARAPHRASE failure=NO_RELEVANT_RESULT firstEvidenceRank=0 RR=0.0000 P
   #10 0.070657 U  book-corpus-v1/book-chunking-v1/s004/c0000 atom=7d0b84c3-7c89-34bf-af4a-dcc488eae98d
 PAR-06 DEV PARAPHRASE failure=CHUNK_BOUNDARY_GAP firstEvidenceRank=7 RR=0.1429 P@1=0.0000 R@1=0.0000 P@3=0.0000 R@3=0.0000 P@5=0.0000 R@5=0.0000 P@10=0.1000 R@10=1.0000
   query: How did the girl reward the runners once everyone was declared a winner?
-  gold E2 book-corpus-v1/book-chunking-v1/s003/c0002 span [28117,28657) note: everybody wins; comfits handed round
+  gold E2 book-corpus-v1/book-chunking-v1/s003/c0002 span [28117,28657)
   #1 0.346553 U  book-corpus-v1/book-chunking-v1/s003/c0000 atom=bb53c1bc-60b7-3b6b-9561-a8341c8ab66e
   #2 0.240481 U  book-corpus-v1/book-chunking-v1/s002/c0004 atom=e77245b8-1db4-3717-8e75-81eb201c7c51
   #3 0.236364 U  book-corpus-v1/book-chunking-v1/s003/c0003 atom=86423dbc-f49c-32c6-a93a-67c2a8721578

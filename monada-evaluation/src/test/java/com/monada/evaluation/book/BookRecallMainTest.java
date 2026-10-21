@@ -8,6 +8,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -42,6 +43,21 @@ class BookRecallMainTest {
         assertTrue(missing.err().contains("work directory does not exist"), missing.err());
         Path plain = Files.createDirectories(dir.resolve("plain"));
         assertEquals(2, run("--work", plain.toString()).exit());
+    }
+
+    @Test
+    void reportInsideTheWorkDirectoryIsRefusedBeforeEvaluation() throws Exception {
+        Path work = BookRecallFixture.seededWork(dir, "work", BookRecallFixture.POLICY);
+        String digest = BookStoreInventory.treeDigest(work);
+        for (Path target : List.of(work.resolve("report.txt"), work.resolve("store/manifest.json"),
+                work.resolve("chunks/../store/new/report.txt"))) {
+            Run result = run("--work", work.toString(), "--out", target.toString());
+            assertEquals(2, result.exit(), target.toString());
+            assertTrue(result.err().startsWith("--out must not be inside the work directory"), result.err());
+        }
+        Path link = Files.createSymbolicLink(dir.resolve("link"), work);
+        assertEquals(2, run("--work", work.toString(), "--out", link.resolve("r.txt").toString()).exit());
+        assertEquals(digest, BookStoreInventory.treeDigest(work), "the work directory is unchanged");
     }
 
     @Test

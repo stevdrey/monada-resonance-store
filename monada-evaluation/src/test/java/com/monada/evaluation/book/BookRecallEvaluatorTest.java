@@ -9,6 +9,7 @@ import com.monada.evaluation.book.BookRecallEvaluator.CaseResult;
 import com.monada.evaluation.book.BookRecallEvaluator.Hit;
 import com.monada.evaluation.book.BookRecallEvaluator.Result;
 import com.monada.evaluation.book.BookRecallEvaluator.RetrieverFactory;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -196,6 +197,23 @@ class BookRecallEvaluatorTest {
         BookInputException e = assertThrows(BookInputException.class,
                 () -> BookRecallEvaluator.evaluate(work, invalid, scripted(script()), dir));
         assertEquals(message, e.getMessage());
+    }
+
+    @Test
+    void storeWithRecordedFeedbackIsRejected() throws Exception {
+        Path log = work.resolve("store/feedback/feedback-000001.log");
+        Files.createDirectories(log.getParent());
+        Files.writeString(log, "{\"recorded\":\"feedback\"}\n");
+        BookInputException e = assertThrows(BookInputException.class,
+                () -> BookRecallEvaluator.evaluate(work, dataset, scripted(script()), dir));
+        assertTrue(e.getMessage().contains("feedback"), e.getMessage());
+    }
+
+    @Test
+    void identityBindsEveryPersistedStoreByte() throws Exception {
+        Result result = BookRecallEvaluator.evaluate(work, dataset, scripted(script()), dir);
+        assertEquals(BookStoreInventory.treeDigest(work.resolve("store")),
+                result.identity().fields().get("store.treeSha256"));
     }
 
     @Test

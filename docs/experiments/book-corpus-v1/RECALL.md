@@ -37,7 +37,8 @@ Exit codes:
 - `2`: usage error, missing or unseeded work directory, or I/O failure.
 
 The work directory is only read. Queries run on a throwaway copy of the Store, and the Store's tree digest is
-compared before and after the run.
+compared before and after the run. `--out` must point outside the work directory, compared on real paths so a
+symbolic link cannot route the report into it; otherwise the command exits `2` before evaluating.
 
 The opt-in test regenerates the report and requires it to be byte-identical to the committed file:
 
@@ -61,6 +62,10 @@ The evaluation fails deterministically, measuring nothing, when any of these che
    Any mismatch is reported as `foreign corpus input: …`.
 2. **Store integrity.** The #165 readback runs on fresh instances and must pass, with exact readback of every chunk
    and a `HEALTHY` audit. The Store must carry the encoding profile of `MonadaMemoryOptions.defaults()`.
+   The feedback log must be absent or empty: the default options rank feedback-aware, so recorded feedback would
+   change scores without changing the atom fingerprint. The report header binds `store.treeSha256`, a digest of every
+   persisted Store byte (manifest, atoms, vectors, index, feedback log), so altered or stale vectors cannot produce a
+   different report under the same identity.
 3. **Gold validity.**
    - Every judged chunk key exists in the chunk set.
    - Every answerable query has evidence, and no NO_ANSWER query has any.
@@ -122,8 +127,9 @@ Each answerable query is classified at K=10. The first matching class wins:
 NO_ANSWER queries are classified `FALSE_POSITIVE` (something was returned) or `ABSTAINED` (nothing was returned).
 
 The report renders at least three failure examples in full: the first query of each failure class, then further
-failures, up to six. Each example shows the query, the expected chunk keys with byte spans and the reviewer's
-judgment notes, the actual top-5, and the first evidence rank. Examples contain **no book text and no answer text**.
+failures, up to six. Each example shows the query, the expected chunk keys with byte spans and grades, the actual
+top-5, and the first evidence rank. Examples contain **no book text and no answer text**. Reviewer judgment notes
+are left out of the report entirely, because some of them state the answer; they stay in `judgments.psv`.
 
 ## Results (book-corpus-v1, `book-chunking-v1`, `book-queries-v1`)
 
