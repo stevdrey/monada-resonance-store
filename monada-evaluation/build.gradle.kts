@@ -218,6 +218,14 @@ tasks.register<JavaExec>("runBookStoreReadback") {
     workingDir = rootProject.projectDir
 }
 
+tasks.register<JavaExec>("runBookRecall") {
+    description = "Measure exploratory recall quality of a seeded book Store against the judged book-queries-v1 evidence: per-partition P@K/R@K/Hit@K/MRR, negative-query false hits, failure taxonomy and full per-query trace (evaluation only; offline). Options via --args, e.g. --args=\"--work <seeded dir> [--out <report.txt>]\""
+    group = "application"
+    mainClass.set("com.monada.evaluation.book.BookRecallMain")
+    classpath = sourceSets["main"].runtimeClasspath
+    workingDir = rootProject.projectDir
+}
+
 tasks.named<Test>("test") {
     // The cross-JVM determinism test starts child JVMs that run the evaluation command on this runtime classpath.
     doFirst {

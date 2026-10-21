@@ -15,6 +15,7 @@ verifies it offline against the checksums in [`manifest.properties`](manifest.pr
 | [`CHUNKING.md`](CHUNKING.md) | Chunking policy v1 and provenance sidecar format (issue #164, Book 2/8). |
 | [`STORE-READBACK.md`](STORE-READBACK.md) | Persist the chunks, reopen the Store and verify exact readback (issue #165, Book 3/8). |
 | [`QUERIES.md`](QUERIES.md) | Judged query set `book-queries-v1` with frozen spans, chunk keys and dev/holdout split (issue #166, Book 4/8). |
+| [`RECALL.md`](RECALL.md) | Exploratory recall quality against the judged evidence, failure taxonomy and versioned report (issue #167, Book 5/8). |
 
 ## Pinned edition
 

@@ -125,7 +125,8 @@ public final class BookStoreReadback {
      * @param unexpectedAtoms    persisted atoms that are not any chunk of the set
      * @param storeUnchanged     the Store's bytes are identical before and after verification (it wrote nothing)
      * @param selfRecallHits     unique chunks whose own text recalls their atom at rank 1 (exploratory); empty when
-     *                           recall was skipped because the inventory is incomplete or the audit not HEALTHY
+     *                           recall was skipped because the inventory is incomplete, the audit not HEALTHY or
+     *                           the caller did not ask for it
      * @param inventoryError     why the atom inventory could not be read (the audit report says more), or null
      * @param logsTerminated     the atom segment and the vector index each end with a line feed (the auditor accepts
      *                           an unterminated last record, but it marks an interrupted write)
@@ -288,26 +289,41 @@ public final class BookStoreReadback {
 
     /** {@link #verify(Path)} with the temporary root for the recall copy ({@code null}: the default temp dir). */
     static Verification verify(Path work, Path recallTmpRoot) throws IOException, BookInputException {
+        return verify(work, recallTmpRoot, true);
+    }
+
+    /**
+     * {@link #verify(Path, Path)}; {@code selfRecall} false skips the exploratory self-recall (its Store copy and one
+     * query per chunk) for callers that only need the readback verdict, leaving {@code selfRecallHits} empty.
+     */
+    static Verification verify(Path work, Path recallTmpRoot, boolean selfRecall)
+            throws IOException, BookInputException {
         Path lockFile = work.resolve(ExperimentDirectoryGuard.LOCK_FILE);
         if (!Files.isRegularFile(lockFile, LinkOption.NOFOLLOW_LINKS)) {
-            return verifyWork(work, recallTmpRoot);
+            return verifyWork(work, recallTmpRoot, selfRecall);
         }
         synchronized (LOCK_MONITOR) {
             // A shared lock needs a channel open for reading; READ alone creates and changes nothing.
             try (FileChannel lock = FileChannel.open(lockFile, StandardOpenOption.READ);
                  FileLock ignored = lock.lock(0, Long.MAX_VALUE, true)) {
-                return verifyWork(work, recallTmpRoot);
+                return verifyWork(work, recallTmpRoot, selfRecall);
             }
         }
     }
 
-    private static Verification verifyWork(Path work, Path recallTmpRoot) throws IOException, BookInputException {
+    private static Verification verifyWork(Path work, Path recallTmpRoot, boolean selfRecall)
+            throws IOException, BookInputException {
         return verify(BookChunkFiles.load(work.resolve(ExperimentDirectoryGuard.CHUNKS_DIR)),
-                work.resolve(ExperimentDirectoryGuard.STORE_DIR), recallTmpRoot);
+                work.resolve(ExperimentDirectoryGuard.STORE_DIR), recallTmpRoot, selfRecall);
     }
 
     private static Verification verify(BookChunkFiles.Loaded chunks, Path store, Path recallTmpRoot)
             throws IOException {
+        return verify(chunks, store, recallTmpRoot, true);
+    }
+
+    private static Verification verify(BookChunkFiles.Loaded chunks, Path store, Path recallTmpRoot,
+                                       boolean selfRecall) throws IOException {
         String digestBefore = BookStoreInventory.treeDigest(store);
         // Audit first: it tolerates corruption, so a malformed manifest or atom log still yields a report, and its
         // parsed manifest is the read-only way to find the atom segment.
@@ -342,7 +358,7 @@ public final class BookStoreReadback {
                 .count();
 
         OptionalInt recallHits = OptionalInt.empty();
-        if (Objects.equals(inventory.contents().keySet(), expected.keySet()) && !expected.isEmpty()
+        if (selfRecall && Objects.equals(inventory.contents().keySet(), expected.keySet()) && !expected.isEmpty()
                 && audit.healthy()) {
             try {
                 recallHits = OptionalInt.of(selfRecallOnCopy(store, expected, recallTmpRoot));
@@ -453,15 +469,7 @@ public final class BookStoreReadback {
      * verification must never change the Store it checks.
      */
     private static int selfRecallOnCopy(Path store, Map<String, String> expected, Path tmpRoot) throws IOException {
-        String prefix = "monada-book-recall-";
-        Path copy = tmpRoot == null ? Files.createTempDirectory(prefix) : Files.createTempDirectory(tmpRoot, prefix);
-        try {
-            try (Stream<Path> walk = Files.walk(store)) {
-                for (Path source : walk.filter(p -> !p.equals(store)).toList()) {
-                    Files.copy(source, copy.resolve(store.relativize(source).toString()),
-                            StandardCopyOption.REPLACE_EXISTING, LinkOption.NOFOLLOW_LINKS);
-                }
-            }
+        return onCopy(store, tmpRoot, copy -> {
             MonadaMemory reopened = MonadaMemory.open(copy);
             int hits = 0;
             for (Map.Entry<String, String> entry : expected.entrySet()) {
@@ -471,6 +479,30 @@ public final class BookStoreReadback {
                 }
             }
             return hits;
+        });
+    }
+
+    /** Work done on a throwaway Store copy. */
+    @FunctionalInterface
+    interface CopyTask<T> {
+        T run(Path copy) throws IOException;
+    }
+
+    /**
+     * Runs {@code task} on a throwaway copy of {@code store} (under {@code tmpRoot}, or the default temp directory
+     * when null) and deletes the copy afterwards, so nothing that opens {@code MonadaMemory} changes the Store itself.
+     */
+    static <T> T onCopy(Path store, Path tmpRoot, CopyTask<T> task) throws IOException {
+        String prefix = "monada-book-recall-";
+        Path copy = tmpRoot == null ? Files.createTempDirectory(prefix) : Files.createTempDirectory(tmpRoot, prefix);
+        try {
+            try (Stream<Path> walk = Files.walk(store)) {
+                for (Path source : walk.filter(p -> !p.equals(store)).toList()) {
+                    Files.copy(source, copy.resolve(store.relativize(source).toString()),
+                            StandardCopyOption.REPLACE_EXISTING, LinkOption.NOFOLLOW_LINKS);
+                }
+            }
+            return task.run(copy);
         } finally {
             try (Stream<Path> walk = Files.walk(copy)) {
                 for (Path path : walk.sorted(Comparator.reverseOrder()).toList()) {
