@@ -194,6 +194,8 @@ class BookQueryDatasetRejectionTest {
         reject(m -> m.setProperty("split.digest", "e".repeat(64)), "split.digest does not match");
         reject(m -> m.setProperty("split.method", "random-v2"), "unsupported split method random-v2");
         reject(m -> m.setProperty("datasetVersion", "2"), "unsupported datasetVersion 2");
+        reject(m -> m.remove("judgment.grades"), "manifest is missing judgment.grades");
+        reject(m -> m.setProperty("judgment.grades", "1=relevant"), "unsupported judgment.grades 1=relevant");
         reject(m -> m.setProperty("judgment.protocol", "MODEL_GENERATED"), "unsupported judgment.protocol MODEL_GENERATED");
         reject(m -> m.setProperty("judgments.sha256", "e".repeat(64)), "judgments.sha256 does not match the file");
         reject(m -> m.setProperty("chunkMap.sha256", "e".repeat(64)), "chunkMap.sha256 does not match the file");
@@ -265,6 +267,7 @@ class BookQueryDatasetRejectionTest {
         m.setProperty("judgments.file", "judgments.psv");
         m.setProperty("judgments.sha256", BookQueryDataset.sha256(j));
         m.setProperty("judgment.protocol", BookQueryDataset.PROTOCOL);
+        m.setProperty("judgment.grades", BookQueryDataset.GRADES);
         m.setProperty("judgment.draftedBy", "test");
         m.setProperty("judgment.reviewStatus", "PENDING_HUMAN_REVIEW");
         m.setProperty("judgment.retrievalRunsBeforeFreeze", "0");

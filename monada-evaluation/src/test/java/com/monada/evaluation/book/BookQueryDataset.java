@@ -32,6 +32,9 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
     static final String RESOURCE_ROOT = "/com/monada/evaluation/book/book-queries-v1/";
     static final String DATASET = "book-queries-v1";
     static final String PROTOCOL = "MANUAL_READING_OF_NORMALIZED_BODY_NO_RETRIEVAL";
+    /** Grade semantics enforced by {@link #judgments}; the manifest must declare exactly these. */
+    static final String GRADES =
+            "0=judged non-relevant confounder,1=partial or supporting evidence,2=directly answers";
     static final String SPLIT_METHOD = "per-category-sha256-rank-last-third-holdout-v1";
     static final String QUERIES_HEADER = "id|split|category|answerable|text|rationale";
     static final String JUDGMENTS_HEADER = "queryId|chunkKey|byteStart|byteEnd|spanSha256|grade|role|note";
@@ -42,7 +45,8 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
             "corpus", "corpusVersion", "corpusManifest.sha256", "source.sizeBytes", "source.sha256",
             "chunking.policy", "chunkMap.file", "chunkMap.sha256", "chunksFile.sha256", "queries.file",
             "queries.sha256", "judgments.file", "judgments.sha256", "judgment.protocol", "judgment.draftedBy",
-            "judgment.reviewStatus", "judgment.retrievalRunsBeforeFreeze", "split.method", "split.salt",
+            "judgment.grades", "judgment.reviewStatus", "judgment.retrievalRunsBeforeFreeze", "split.method",
+            "split.salt",
             "split.digest", "counts.queries", "counts.judgments", "counts.DEV", "counts.HOLDOUT");
 
     enum Split { DEV, HOLDOUT }
@@ -120,6 +124,8 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
                 "unsupported datasetVersion " + manifest.getProperty("datasetVersion"));
         check(PROTOCOL.equals(manifest.getProperty("judgment.protocol")),
                 "unsupported judgment.protocol " + manifest.getProperty("judgment.protocol"));
+        check(GRADES.equals(manifest.getProperty("judgment.grades")),
+                "unsupported judgment.grades " + manifest.getProperty("judgment.grades"));
         check("0".equals(manifest.getProperty("judgment.retrievalRunsBeforeFreeze")),
                 "labels must be frozen before any retrieval run");
         String review = manifest.getProperty("judgment.reviewStatus");
