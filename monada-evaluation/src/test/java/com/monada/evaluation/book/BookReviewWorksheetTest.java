@@ -46,6 +46,10 @@ class BookReviewWorksheetTest {
             assertEquals(1, count(sheet, "## " + p.pairId() + "\n"), p.pairId());
             assertFalse(sheet.contains(p.score()), "score of " + p.pairId() + " leaks");
             assertFalse(sheet.contains(p.atomId()), "atom id of " + p.pairId() + " leaks");
+            // A repeated chunk key would expose hub chunks; offsets would expose the story position.
+            assertFalse(sheet.contains(p.chunkKey()), "chunk key of " + p.pairId() + " leaks");
+            ChunkRef chunk = BASE.chunkMap().get(p.chunkKey());
+            assertFalse(sheet.contains("[" + chunk.byteStart() + ","), "byte range of " + p.pairId() + " leaks");
         }
         for (String hidden : List.of("TOP1", "TOP3", "HUB", "SAMPLE", "rank", "score", "stratum", "chunkDevUnjudged")) {
             assertFalse(Pattern.compile("(?i)\\b" + hidden + "\\b").matcher(sheet).find(),

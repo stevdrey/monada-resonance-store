@@ -19,8 +19,8 @@ import java.util.stream.Collectors;
 /**
  * The score-blind human review of {@code book-queries-v2} (issue #177). {@link #render} writes a local worksheet that
  * shows, per selected pair, only a neutral pair id, the query, whether v1 declares it answerable, and the verified
- * chunk text. Rank, score, hub frequency, stratum and any proposed label are never shown, and the order is a seeded
- * shuffle. The worksheet holds book text, so it must stay outside Git.
+ * chunk text. Rank, score, hub frequency, stratum, chunk key, byte offsets and any proposed label are never shown,
+ * and the order is a seeded shuffle. The worksheet holds book text, so it must stay outside Git.
  *
  * <p>{@link #apply} reads the filled worksheet and produces {@code review.psv} rows without book text: each quoted
  * span is located in its chunk (whitespace runs match any whitespace run; it must occur exactly once) and turned
@@ -65,8 +65,8 @@ final class BookReviewWorksheet {
             out.append("query: ").append(c.text()).append('\n');
             out.append("declared: ").append(c.answerable() ? "answerable" : "NO_ANSWER (v1: the book does not answer it)")
                     .append('\n');
-            out.append("chunk: ").append(p.chunkKey()).append(" bytes [").append(chunk.byteStart()).append(',')
-                    .append(chunk.byteEnd()).append(")\n\n~~~text\n").append(chunkText(body, chunk)).append("\n~~~\n\n");
+            // No chunk key or byte range: a repeated key would reveal hub chunks, an offset the story position.
+            out.append("\n~~~text\n").append(chunkText(body, chunk)).append("\n~~~\n\n");
             out.append("decision: \ngrade: \nquote: \nnote: \n\n");
         }
         return out.toString();

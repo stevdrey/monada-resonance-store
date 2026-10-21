@@ -73,8 +73,13 @@ The receipt is re-derived and compared byte for byte by `BookUnjudgedSelectionTe
    - whether v1 declares the query answerable;
    - the verified chunk text.
 
-   It shows no rank, score, hub frequency, stratum or proposed label, and the order is a seeded shuffle. Do not open
-   `selection.psv` or the coverage report until the review is done.
+   It shows no rank, score, hub frequency, stratum, chunk key, byte offsets or proposed label, and the order is a
+   seeded shuffle. Do not open `selection.psv` or the coverage report until the review is done.
+
+   **Protocol deviation in the committed review.** The worksheet behind the committed `review.psv` also printed
+   each pair's chunk key and byte range. It showed no rank, score, stratum or label, but a repeated key could
+   reveal a recurring (hub) chunk, and an offset reveals the story position. The renderer no longer prints either.
+   Whether to re-review the 60 pairs with a blinded worksheet is the reviewer's decision.
 2. For each pair, fill in `decision`:
 
    | Decision | Grade | Effect |
