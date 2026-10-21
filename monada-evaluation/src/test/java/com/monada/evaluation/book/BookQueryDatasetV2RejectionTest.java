@@ -232,6 +232,18 @@ class BookQueryDatasetV2RejectionTest {
     }
 
     @Test
+    void rejectsAReclassificationPolicyThatIsNotAVersionedId() {
+        review.add(row(ANSWERABLE, "EVIDENCE", "2", 10, 40));
+        review.add(row(NO_ANSWER, "NO_ANSWER_CONTRADICTED", "2", 0, 20));
+        for (String policy : List.of("yes", "report-only-v1 ", "Report-Only-v1", "report-only")) {
+            reject("reclassification.policy must be NONE or a versioned policy id", m -> {
+                signOff(m);
+                m.setProperty("reclassification.policy", policy);
+            });
+        }
+    }
+
+    @Test
     void unresolvedStaysUnjudgedAndCarriesNoGrade() {
         review.add(String.join("|", ANSWERABLE.pairId(), ANSWERABLE.queryId(), ANSWERABLE.chunkKey(), "UNRESOLVED",
                 "-", "-", "-", "-", "chunk mentions the topic but not the asked fact"));

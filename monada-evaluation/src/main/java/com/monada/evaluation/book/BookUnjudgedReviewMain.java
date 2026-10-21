@@ -155,8 +155,7 @@ public final class BookUnjudgedReviewMain {
         // Validate everything, sign-off included, before anything is written.
         BookQueryDatasetV2 checked = BookQueryDatasetV2.parse(properties(updated), base, baseManifest, selection,
                 reviewBytes);
-        BookRecallMain.write(dir.resolve("review.psv"), review);
-        BookRecallMain.write(manifestPath, updated);
+        writeTogether(dir.resolve("review.psv"), review, manifestPath, updated);
         out.println("wrote review.psv: " + checked.reviews().size() + " decided, " + checked.pending().size()
                 + " pending, " + checked.addedJudgments().size() + " added judgments, " + checked.findings().size()
                 + " findings; review status unchanged (" + checked.manifest().getProperty("judgment.reviewStatus")
@@ -215,6 +214,29 @@ public final class BookUnjudgedReviewMain {
                 && !newReviewSha256.equals(manifest.getProperty("review.sha256"))) {
             throw new IllegalStateException("the dataset is REVIEWED and these decisions differ from the signed-off"
                     + " review.psv; reset judgment.reviewStatus to PENDING_HUMAN_REVIEW and clear the sign-off first");
+        }
+    }
+
+    /**
+     * Replaces {@code review} and then {@code manifest}, each atomically. If the manifest cannot be written, the
+     * previous review (or its absence) is restored, so the pair never ends up with a digest that does not match.
+     */
+    static void writeTogether(Path review, String reviewText, Path manifest, String manifestText) throws IOException {
+        byte[] previous = Files.exists(review) ? Files.readAllBytes(review) : null;
+        BookRecallMain.write(review, reviewText);
+        try {
+            BookRecallMain.write(manifest, manifestText);
+        } catch (IOException | RuntimeException e) {
+            try {
+                if (previous == null) {
+                    Files.deleteIfExists(review);
+                } else {
+                    BookRecallMain.write(review, new String(previous, StandardCharsets.UTF_8));
+                }
+            } catch (IOException | RuntimeException restore) {
+                e.addSuppressed(restore);
+            }
+            throw e;
         }
     }
 

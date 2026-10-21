@@ -129,6 +129,22 @@ class BookReviewWorksheetTest {
     }
 
     @Test
+    void rejectsAWorksheetWithAMissingOrRepeatedEntry() {
+        String sheet = BookReviewWorksheet.render(BODY, BASE, SELECTION);
+        String id = SELECTION.getFirst().pairId();
+        // A mistyped heading drops the entry: its recorded decision must not silently become pending.
+        String mistyped = sheet.replace("## " + id + "\n", "## " + id.toUpperCase() + "\n");
+        var missing = assertThrows(IllegalStateException.class,
+                () -> BookReviewWorksheet.apply(mistyped, BODY, BASE, SELECTION));
+        assertEquals("worksheet is missing 1 selected entries: [" + id + "]", missing.getMessage());
+        int at = sheet.indexOf("## " + id + "\n");
+        String section = sheet.substring(at, sheet.indexOf("\n## ", at) + 1);
+        var twice = assertThrows(IllegalStateException.class,
+                () -> BookReviewWorksheet.apply(sheet + section, BODY, BASE, SELECTION));
+        assertEquals(id + ": worksheet has this entry twice", twice.getMessage());
+    }
+
+    @Test
     void ignoresFieldLikeLinesInsideTheChunkText() {
         Pair p = SELECTION.getFirst();
         String sheet = BookReviewWorksheet.render(BODY, BASE, SELECTION);

@@ -47,6 +47,8 @@ record BookQueryDatasetV2(Properties manifest, BookQueryDataset base, List<Pair>
     static final String NO_POLICY = "NONE";
 
     private static final Pattern SHA256 = Pattern.compile("[0-9a-f]{64}");
+    /** An accepted reclassification policy is a versioned id such as {@code report-only-v1}. */
+    private static final Pattern POLICY = Pattern.compile("[a-z][a-z0-9]*(?:-[a-z0-9]+)*-v[1-9][0-9]*");
     private static final List<String> REQUIRED_KEYS = List.of("dataset", "datasetVersion", "format", "formatVersion",
             "extends", "base.manifest.sha256", "base.queries.sha256", "base.judgments.sha256", "base.chunkMap.sha256",
             "provenance", "selection.baselineReport", "selection.baselineReport.sha256", "selection.rule",
@@ -268,6 +270,8 @@ record BookQueryDatasetV2(Properties manifest, BookQueryDataset base, List<Pair>
         String status = manifest.getProperty("judgment.reviewStatus");
         check(status.equals("REVIEWED") || status.equals("PENDING_HUMAN_REVIEW"), "unknown review status " + status);
         String policy = manifest.getProperty("reclassification.policy");
+        check(NO_POLICY.equals(policy) || POLICY.matcher(policy).matches(), "reclassification.policy must be "
+                + NO_POLICY + " or a versioned policy id like report-only-v1, not \"" + policy + "\"");
         if (!status.equals("REVIEWED")) {
             return;
         }

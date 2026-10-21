@@ -7,9 +7,11 @@ import com.monada.evaluation.book.BookUnjudgedSelection.Pair;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.regex.Matcher;
@@ -77,6 +79,7 @@ final class BookReviewWorksheet {
         Map<String, Pair> pairs = selection.stream()
                 .collect(Collectors.toMap(Pair::pairId, Function.identity(), (a, b) -> a, LinkedHashMap::new));
         Map<String, String> rows = new TreeMap<>();
+        Set<String> seen = new HashSet<>();
         Matcher entry = ENTRY.matcher(worksheet);
         int start = entry.find() ? entry.start() : -1;
         while (start >= 0) {
@@ -86,6 +89,7 @@ final class BookReviewWorksheet {
             start = next;
             Pair pair = pairs.get(id);
             check(pair != null, id + ": worksheet entry is not in selection.psv");
+            check(seen.add(id), id + ": worksheet has this entry twice");
             // Fields come after the chunk text, so a field-like line of book text cannot be read as a decision.
             int fence = section.lastIndexOf("\n~~~\n");
             Map<String, String> fields = fields(fence < 0 ? section : section.substring(fence));
@@ -110,6 +114,10 @@ final class BookReviewWorksheet {
             }
             check(rows.put(id, row) == null, id + ": worksheet decides this pair twice");
         }
+        // apply rewrites review.psv rather than merging it: a truncated sheet or a mistyped heading would otherwise
+        // silently turn recorded decisions back into pending pairs.
+        List<String> missing = pairs.keySet().stream().filter(id -> !seen.contains(id)).toList();
+        check(missing.isEmpty(), "worksheet is missing " + missing.size() + " selected entries: " + missing);
         StringBuilder out = new StringBuilder(BookQueryDatasetV2.REVIEW_HEADER).append('\n');
         rows.values().forEach(r -> out.append(r).append('\n'));
         return out.toString();

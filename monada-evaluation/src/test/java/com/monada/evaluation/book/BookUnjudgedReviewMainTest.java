@@ -102,6 +102,22 @@ class BookUnjudgedReviewMainTest {
     }
 
     @Test
+    void aFailedManifestWriteRestoresThePreviousReview() throws Exception {
+        Path review = Files.writeString(tmp.resolve("review.psv"), "old review\n");
+        // A non-empty directory cannot be replaced by the atomic move, so the manifest write fails.
+        Path manifest = Files.createDirectories(tmp.resolve("manifest.properties"));
+        Files.writeString(manifest.resolve("blocker"), "x");
+        assertThrows(java.io.IOException.class,
+                () -> BookUnjudgedReviewMain.writeTogether(review, "new review\n", manifest, "m=1\n"));
+        assertEquals("old review\n", Files.readString(review));
+
+        Path absent = tmp.resolve("absent-review.psv");
+        assertThrows(java.io.IOException.class,
+                () -> BookUnjudgedReviewMain.writeTogether(absent, "new review\n", manifest, "m=1\n"));
+        assertFalse(Files.exists(absent), "a review that did not exist before is removed again");
+    }
+
+    @Test
     void manifestUpdatesReplaceExactlyOneExistingKey() {
         String manifest = "# c\ncounts.pending=60\ncounts.pending.x=1\n";
         assertEquals("# c\ncounts.pending=59\ncounts.pending.x=1\n",
