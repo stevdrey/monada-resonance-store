@@ -36,7 +36,9 @@ Exit codes:
 - `1`: one of these failures:
   - the inputs are not the judged corpus;
   - the recall result no longer reproduces `--baseline` byte for byte ("pinned input changed");
-  - score parity failed.
+  - the chunk files or the Store changed between the evaluation and the probe;
+  - score parity failed;
+  - reading the inputs failed unexpectedly ("diagnostic failed").
 - `2`: usage error, missing file, unsafe work directory or I/O failure.
 
 The committed report was produced on OpenJDK 27 (Zulu 27.28+101, build 27+35).
@@ -52,7 +54,9 @@ The committed report was produced on OpenJDK 27 (Zulu 27.28+101, build 27+35).
    - readback;
    - two identical runs on a throwaway Store copy.
 
-   The user's Store is never written; its tree digest is compared before and after.
+   The user's Store is never written. Its tree digest is taken before the evaluation and compared again after
+   the probe has copied the vectors. The chunk files the probe reads must carry the same hashes as the evaluated
+   ones, so every number is bound to the baseline's inputs.
 2. **Parity.** The probe reads the stored vectors from a throwaway copy and scores every query against all 87 atoms
    with a verbatim copy of the production cosine. Before anything else is reported, the recomputed top-10 must equal
    production exactly: the same atoms, the same order including atom-id ties, and bit-identical scores (tolerance
@@ -64,7 +68,7 @@ The committed report was produced on OpenJDK 27 (Zulu 27.28+101, build 27+35).
 
    | Control | Rule | Chunk |
    | --- | --- | --- |
-   | HUB | Most DEV top-1 appearances | `s009/c0001` |
+   | HUB | Most DEV top-1 appearances (at least one, else absent) | `s009/c0001` |
    | RUNNER_UP | Next chunk in the same DEV order | `s009/c0006` |
    | TOP1_EVIDENCE | Judged evidence ranked #1 for a DEV query | `s004/c0004` (CON-04) |
    | JUDGED_EVIDENCE | Grade-2 evidence judged for the most DEV queries | `s006/c0005` |
@@ -77,6 +81,7 @@ All numbers come from [`book-hub-diagnostics-v1-report.txt`](book-hub-diagnostic
   queries are AMB-02, AMB-03, LIT-03, LIT-05, NOA-01 and NOA-02, all labelled `U`.
   - The chunk appears in 18/32 top-10 lists.
   - The next most frequent top-1 chunks reach 2/32.
+  - HOLDOUT has no single most frequent top-1: its 8 top-1 positions go to 8 different atoms.
   - The 32 top-1 positions are spread over 23 distinct atoms.
 - **Length is not extreme.** The hub ranks #25 of 87 atoms by UTF-8 bytes, #26 by original tokens and #40 by
   distinct tokens. Two evidence controls of similar or larger length rarely rank first:
@@ -92,7 +97,9 @@ All numbers come from [`book-hub-diagnostics-v1-report.txt`](book-hub-diagnostic
   - Two different normalized tokens, `alice` and `is`, hash to bucket 73.
   - The hub contains 19 occurrences of these two tokens and no other token in that bucket (`m=19 o=0`).
   - The controls contain 5–6 of them (`m=5`/`m=6`).
-  - AMB-03 and NOA-04 reach that bucket through `is` alone.
+  - Among the six, AMB-03 reaches that bucket through `is` alone.
+
+  Outside the six, NOA-04 (hub rank 3) also reaches bucket 73 through `is` alone.
 - **Function-like tokens survive normalization.** Tokens such as `is`, `what`, `s`, `it`, `at` and `that` appear as
   query tokens and as top contributing buckets, so the stop-word list does not remove them.
 - **The hub's DEV profile.** Median rank 5.5 and mean score 0.228 over the 24 DEV queries, against 15.0 and 0.189

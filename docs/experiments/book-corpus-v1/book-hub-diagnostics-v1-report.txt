@@ -58,7 +58,7 @@ reencode=87/87 stored vectors equal the production encoding of their chunk text
 -- DEV: queries 24, zero-hit 0; top-1 occurrences 24 over 17 distinct atoms; top-3 occurrences 72 over 37 distinct atoms; top-10 occurrences 240 over 74 distinct atoms
    most frequent top-1: book-corpus-v1/book-chunking-v1/s009/c0001 6/24 (0.2500)
 -- HOLDOUT: queries 8, zero-hit 0; top-1 occurrences 8 over 8 distinct atoms; top-3 occurrences 24 over 22 distinct atoms; top-10 occurrences 80 over 50 distinct atoms
-   most frequent top-1: book-corpus-v1/book-chunking-v1/s009/c0003 1/8 (0.1250)
+   no single most frequent top-1: 8 atoms tie at 1/8
 -- ALL: queries 32, zero-hit 0; top-1 occurrences 32 over 23 distinct atoms; top-3 occurrences 96 over 48 distinct atoms; top-10 occurrences 320 over 79 distinct atoms
    most frequent top-1: book-corpus-v1/book-chunking-v1/s009/c0001 6/32 (0.1875)
 
@@ -202,7 +202,7 @@ book-corpus-v1/book-chunking-v1/s007/c0002 top-1 1/32:
   MUL-05 DEV     MULTI_EVIDENCE #1 0.166718 U
 
 == Controls (predeclared rules, DEV only) ==
-HUB = book-corpus-v1/book-chunking-v1/s009/c0001  [rule: most DEV top-1 appearances (ties: DEV top-3, DEV top-10 descending, key ascending)]
+HUB = book-corpus-v1/book-chunking-v1/s009/c0001  [rule: most DEV top-1 appearances, at least one (ties: DEV top-3, DEV top-10 descending, key ascending), else absent]
   in top-10: AMB-01 HOLDOUT AMBIGUOUS #4 0.202107 U
   in top-10: AMB-02 DEV     AMBIGUOUS #1 0.295196 U
   in top-10: AMB-03 DEV     AMBIGUOUS #1 0.316288 U

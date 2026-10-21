@@ -10,7 +10,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Opt-in check on the real seeded Store (Issue #176): the diagnostic reproduces the observed {@code s009/c0001}
@@ -22,9 +21,6 @@ class BookHubDiagnosticsRealCorpusTest {
     private static final String WORK_ENV = "MONADA_BOOK_STORE_READBACK_V1_WORK";
     static final String REPORT = "docs/experiments/book-corpus-v1/book-hub-diagnostics-v1-report.txt";
     private static final String HUB = "book-corpus-v1/book-chunking-v1/s009/c0001";
-
-    @TempDir
-    Path dir;
 
     private static Path repo(String relative) {
         // Gradle runs tests with the module directory as working directory.
@@ -48,11 +44,7 @@ class BookHubDiagnosticsRealCorpusTest {
                 .filter(o -> o.rank() == 1 && !o.answerable()).map(Occurrence::queryId).toList());
         assertEquals(HUB, result.controls().getFirst().key(), "the DEV-only HUB rule picks the same chunk");
 
-        Path out = dir.resolve("hub.txt");
-        assertEquals(0, BookHubDiagnosticsMain.run(new String[] {"--work", work, "--baseline",
-                repo(BookRecallRealCorpusTest.REPORT).toString(), "--out", out.toString()}, System.out, System.err));
-        assertEquals(Files.readString(repo(REPORT), StandardCharsets.UTF_8),
-                Files.readString(out, StandardCharsets.UTF_8),
+        assertEquals(Files.readString(repo(REPORT), StandardCharsets.UTF_8), BookHubReport.render(result),
                 "regenerate " + REPORT + " with runBookHubDiagnostics if an input changed on purpose");
     }
 }

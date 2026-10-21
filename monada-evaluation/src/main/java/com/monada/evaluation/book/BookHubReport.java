@@ -109,11 +109,13 @@ final class BookHubReport {
             }
             line(out, s.toString());
             List<Chunk> ordered = d.chunks().stream().sorted(BookHubConcentration.order(partition)).toList();
-            if (!ordered.isEmpty() && ordered.getFirst().count(partition, 1) > 0) {
-                Chunk top = ordered.getFirst();
-                int count = top.count(partition, 1);
-                line(out, "   most frequent top-1: " + top.key() + " " + count + "/" + queries + " ("
+            int count = ordered.isEmpty() ? 0 : ordered.getFirst().count(partition, 1);
+            long tied = ordered.stream().filter(c -> c.count(partition, 1) == count).count();
+            if (count > 0 && tied == 1) {
+                line(out, "   most frequent top-1: " + ordered.getFirst().key() + " " + count + "/" + queries + " ("
                         + fmt(queries == 0 ? 0.0 : (double) count / queries, 4) + ")");
+            } else if (count > 0) {
+                line(out, "   no single most frequent top-1: " + tied + " atoms tie at " + count + "/" + queries);
             }
         }
         line(out, "");

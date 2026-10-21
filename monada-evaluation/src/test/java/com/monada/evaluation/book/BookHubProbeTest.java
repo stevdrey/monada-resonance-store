@@ -14,6 +14,7 @@ import com.monada.evaluation.book.BookRecallEvaluator.RetrieverFactory;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -112,6 +113,17 @@ class BookHubProbeTest {
                 }
             }
         }
+    }
+
+    @Test
+    void absentControlRendersAsAbsent() throws Exception {
+        Result result = diagnose();
+        Result absent = new Result(result.recall(), result.baselineSha256(), result.distribution(),
+                result.metrics(), List.of(new Control("HUB", "test rule", null, List.of())), result.parity());
+
+        String report = BookHubReport.render(absent);
+        assertTrue(report.contains("HUB = absent"), report);
+        assertTrue(report.contains("HUB: absent"), report);
     }
 
     @Test

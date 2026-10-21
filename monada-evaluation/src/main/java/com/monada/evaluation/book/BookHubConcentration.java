@@ -4,6 +4,7 @@ import com.monada.evaluation.book.BookQueryDataset.Split;
 import com.monada.evaluation.book.BookRecallEvaluator.CaseResult;
 import com.monada.evaluation.book.BookRecallEvaluator.RankedHit;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -41,6 +42,7 @@ final class BookHubConcentration {
                  int top1NoAnswer, List<Occurrence> occurrences) {
         Chunk {
             aliases = List.copyOf(aliases);
+            counts = nested(counts);
             occurrences = List.copyOf(occurrences);
         }
 
@@ -62,6 +64,10 @@ final class BookHubConcentration {
                         Map<String, Map<Integer, Integer>> occurrences, Map<String, Map<Integer, Integer>> distinct,
                         List<Chunk> chunks) {
         Distribution {
+            queries = Map.copyOf(queries);
+            zeroHit = Map.copyOf(zeroHit);
+            occurrences = nested(occurrences);
+            distinct = nested(distinct);
             chunks = List.copyOf(chunks);
         }
 
@@ -131,6 +137,13 @@ final class BookHubConcentration {
         return order.thenComparing(Chunk::key);
     }
 
+    /** An immutable copy of a partition-to-cut-off map. */
+    private static Map<String, Map<Integer, Integer>> nested(Map<String, Map<Integer, Integer>> map) {
+        Map<String, Map<Integer, Integer>> copy = new LinkedHashMap<>();
+        map.forEach((k, v) -> copy.put(k, Map.copyOf(v)));
+        return Collections.unmodifiableMap(copy);
+    }
+
     private static Map<Integer, Integer> zeros() {
         Map<Integer, Integer> counts = new TreeMap<>();
         CUTS.forEach(k -> counts.put(k, 0));
@@ -155,9 +168,7 @@ final class BookHubConcentration {
         }
 
         Chunk build() {
-            Map<String, Map<Integer, Integer>> frozen = new LinkedHashMap<>();
-            counts.forEach((p, m) -> frozen.put(p, Map.copyOf(m)));
-            return new Chunk(key, atomId, aliases, frozen, top1NoAnswer, occurrences);
+            return new Chunk(key, atomId, aliases, counts, top1NoAnswer, occurrences);
         }
     }
 }

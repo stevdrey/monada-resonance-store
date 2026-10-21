@@ -3,12 +3,10 @@ package com.monada.evaluation.book;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.Map;
 import java.util.Set;
 
@@ -26,7 +24,8 @@ import java.util.Set;
  * {@code --out} (written atomically, outside the work directory).
  *
  * <p>Exit 0 when the report was produced, 1 when the inputs are not the judged corpus, the baseline is not
- * reproduced or score parity fails, 2 on a usage error, a missing file, an unsafe work directory or an I/O failure.
+ * reproduced, score parity fails, the inputs change during the run or reading them fails unexpectedly, 2 on a usage
+ * error, a missing file, an unsafe work directory or an I/O failure.
  */
 public final class BookHubDiagnosticsMain {
     private static final String USAGE = "usage: --work <seeded experiment dir> --baseline <book-recall report>"
@@ -66,7 +65,7 @@ public final class BookHubDiagnosticsMain {
             if (target == null) {
                 out.print(report);
             } else {
-                write(target, report);
+                BookRecallMain.write(target, report);
                 out.println("wrote " + target);
             }
             return 0;
@@ -85,17 +84,10 @@ public final class BookHubDiagnosticsMain {
         } catch (IOException | UncheckedIOException e) {
             err.println("I/O failure: " + e);
             return 2;
-        }
-    }
-
-    private static void write(Path target, String report) throws IOException {
-        Path parent = target.toAbsolutePath().getParent();
-        Path tmp = Files.createTempFile(parent, ".book-hub-", ".tmp");
-        try {
-            Files.writeString(tmp, report, StandardCharsets.UTF_8);
-            Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } finally {
-            Files.deleteIfExists(tmp);
+        } catch (RuntimeException e) {
+            // Unexpected failures while reading the copied Store still end with a message and exit 1.
+            err.println("diagnostic failed: " + e);
+            return 1;
         }
     }
 }

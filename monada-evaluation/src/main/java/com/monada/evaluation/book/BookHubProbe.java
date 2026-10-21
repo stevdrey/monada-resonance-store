@@ -23,6 +23,7 @@ import com.monada.storage.StoredVector;
 import com.monada.storage.audit.StorageIntegrityAuditor;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -132,6 +133,9 @@ final class BookHubProbe {
     static Result diagnose(Path work, BookQueryDataset dataset, byte[] baseline,
                            BookRecallEvaluator.RetrieverFactory retriever, Path tmpRoot)
             throws IOException, BookInputException {
+        Path store = work.resolve(ExperimentDirectoryGuard.STORE_DIR);
+        // Taken before the evaluation: the vectors read below must be the ones the baseline was measured on.
+        String digest = BookStoreInventory.treeDigest(store);
         BookRecallEvaluator.Result recall = BookRecallEvaluator.evaluate(work, dataset, retriever, tmpRoot);
         byte[] rendered = BookRecallReport.render(recall).getBytes(StandardCharsets.UTF_8);
         if (!Arrays.equals(rendered, baseline)) {
@@ -140,14 +144,22 @@ final class BookHubProbe {
                     + VerifiedBookSource.sha256(baseline) + "; the diagnostic only explains the committed baseline");
         }
 
-        Path store = work.resolve(ExperimentDirectoryGuard.STORE_DIR);
-        BookChunkFiles.Loaded chunks = BookChunkFiles.load(work.resolve(ExperimentDirectoryGuard.CHUNKS_DIR));
+        Path chunkDir = work.resolve(ExperimentDirectoryGuard.CHUNKS_DIR);
+        BookChunkFiles.Loaded chunks = BookChunkFiles.load(chunkDir);
+        Map<String, String> evaluated = recall.identity().fields();
+        String sidecar = VerifiedBookSource.sha256(Files.readAllBytes(
+                chunkDir.resolve(BookChunkOutputWriter.SIDECAR_FILE)));
+        if (!chunks.chunksFileSha256().equals(evaluated.get("chunksFile.sha256"))
+                || !sidecar.equals(evaluated.get("sidecar.sha256"))) {
+            throw new IllegalStateException("inputs changed during the diagnostic: the chunk files are not the ones"
+                    + " the baseline was evaluated on");
+        }
         Manifest manifest = new StorageIntegrityAuditor().audit(store).manifest();
-        String digest = BookStoreInventory.treeDigest(store);
         List<StoredVector> stored = BookStoreReadback.onCopy(store, tmpRoot, copy -> FileFrequencyStore
                 .openExisting(copy, manifest.vectorSegment(), manifest.vectorFormatProfile()).findAll());
         if (!digest.equals(BookStoreInventory.treeDigest(store))) {
-            throw new IllegalStateException("the Store changed while it was probed");
+            throw new IllegalStateException("inputs changed during the diagnostic: the Store is not the one the"
+                    + " baseline was evaluated on");
         }
 
         // Atom id -> chunk entries with that text, in chunk order; the first is the relevance key.
@@ -239,13 +251,15 @@ final class BookHubProbe {
     // ---------------------------------------------------------------- controls
 
     /** The rules are fixed before any score is read and use DEV queries only. */
-    static final List<String[]> CONTROL_RULES = List.of(
-            new String[]{"HUB", "most DEV top-1 appearances (ties: DEV top-3, DEV top-10 descending, key ascending)"},
-            new String[]{"RUNNER_UP", "next chunk in the same DEV order"},
-            new String[]{"TOP1_EVIDENCE", "judged evidence ranked #1 for a DEV query (first by query id), else"
-                    + " absent"},
-            new String[]{"JUDGED_EVIDENCE", "grade-2 evidence judged for the most DEV queries (ties: key"
-                    + " ascending)"});
+    record Rule(String role, String text) {
+    }
+
+    static final List<Rule> CONTROL_RULES = List.of(
+            new Rule("HUB", "most DEV top-1 appearances, at least one (ties: DEV top-3, DEV top-10 descending, key"
+                    + " ascending), else absent"),
+            new Rule("RUNNER_UP", "next chunk in the same DEV order"),
+            new Rule("TOP1_EVIDENCE", "judged evidence ranked #1 for a DEV query (first by query id), else absent"),
+            new Rule("JUDGED_EVIDENCE", "grade-2 evidence judged for the most DEV queries (ties: key ascending)"));
 
     record Selected(String role, String rule, String key) {
     }
@@ -277,21 +291,22 @@ final class BookHubProbe {
 
         Set<String> taken = new LinkedHashSet<>();
         List<Selected> selected = new ArrayList<>();
-        pick(selected, taken, CONTROL_RULES.get(0), devOrder);
+        pick(selected, taken, CONTROL_RULES.get(0), devOrder.stream()
+                .filter(k -> distribution.chunk(k).count("DEV", 1) > 0).limit(1).toList());
         pick(selected, taken, CONTROL_RULES.get(1), devOrder);
         pick(selected, taken, CONTROL_RULES.get(2), topEvidence);
         pick(selected, taken, CONTROL_RULES.get(3), judgedOrder);
         return selected;
     }
 
-    private static void pick(List<Selected> into, Set<String> taken, String[] rule, List<String> candidates) {
+    private static void pick(List<Selected> into, Set<String> taken, Rule rule, List<String> candidates) {
         for (String key : candidates) {
             if (taken.add(key)) {
-                into.add(new Selected(rule[0], rule[1], key));
+                into.add(new Selected(rule.role(), rule.text(), key));
                 return;
             }
         }
-        into.add(new Selected(rule[0], rule[1], null));
+        into.add(new Selected(rule.role(), rule.text(), null));
     }
 
     // ---------------------------------------------------------------- scoring

@@ -148,6 +148,38 @@ class BookHubConcentrationTest {
     }
 
     @Test
+    void hubIsAbsentWithoutAnyDevTop1() throws Exception {
+        // Only HOLDOUT queries retrieve anything, so no DEV query has a top-1 hit.
+        Map<String, List<String>> script = new HashMap<>();
+        for (BookQueryDataset.Case c : dataset.cases()) {
+            if (c.split() == BookQueryDataset.Split.HOLDOUT) {
+                script.put(c.text(), List.of("s001/c0001"));
+            }
+        }
+        Result result = BookRecallEvaluator.evaluate(work, dataset, ranked(script), dir);
+        Distribution d = BookHubConcentration.of(result.cases());
+
+        assertEquals(0, d.occurrences().get("DEV").get(1));
+        assertNull(BookHubProbe.controls(d, result.cases(), Map.of()).getFirst().key(),
+                "a chunk with no DEV top-1 is never called the hub");
+    }
+
+    @Test
+    void summaryNamesNoHubWhenTop1CountsTie() throws Exception {
+        Map<String, List<String>> script = Map.of(
+                "How many gulls circled the breakwater?", List.of("s000/c0000"),
+                "Where does a lantern appear?", List.of("s001/c0000"));
+        Result result = BookRecallEvaluator.evaluate(work, dataset, ranked(script), dir);
+        Distribution d = BookHubConcentration.of(result.cases());
+        BookHubProbe.Result probe = new BookHubProbe.Result(result, "x", d, List.of(), List.of(),
+                new BookHubProbe.Parity(0, 0, 0.0, 0, 0));
+
+        String report = BookHubReport.render(probe);
+        assertTrue(report.contains("   no single most frequent top-1: 2 atoms tie at 1/6"), report);
+        assertTrue(!report.contains("most frequent top-1: " + BookRecallFixture.KEY), report);
+    }
+
+    @Test
     void controlsFollowTheDevOnlyRules() throws Exception {
         Result result = BookRecallEvaluator.evaluate(work, dataset, ranked(hubScript()), dir);
         Distribution d = BookHubConcentration.of(result.cases());
