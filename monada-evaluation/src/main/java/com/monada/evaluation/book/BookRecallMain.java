@@ -104,7 +104,8 @@ public final class BookRecallMain {
         return resolved.normalize().startsWith(realWork);
     }
 
-    private static void write(Path target, String report) throws IOException {
+    /** Writes {@code report} to {@code target} atomically (temporary file in the same directory, then a move). */
+    static void write(Path target, String report) throws IOException {
         Path parent = target.toAbsolutePath().getParent();
         Path tmp = Files.createTempFile(parent, ".book-recall-", ".tmp");
         try {
