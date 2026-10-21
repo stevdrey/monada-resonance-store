@@ -1,0 +1,56 @@
+queryId|chunkKey|byteStart|byteEnd|spanSha256|grade|role|note
+LIT-01|book-corpus-v1/book-chunking-v1/s001/c0004|8079|8300|15873ae65356fd957750a6cc00248dbe78e31a2c5043e1bfa512c909ceea600c|2|EVIDENCE|bottle label in the hall
+LIT-02|book-corpus-v1/book-chunking-v1/s001/c0001|2723|2925|c0d2346100309728a60642a4e598d5973047fe1ed28d38b50cdc3e381b247b92|2|EVIDENCE|jar label during the fall
+LIT-03|book-corpus-v1/book-chunking-v1/s001/c0002|4816|4963|f4756fc66b0cb4a2106c4c9df2a968b3969c4743b73c3d94d2f7ae4dffb0f8a7|2|EVIDENCE|narrator names the cat
+LIT-04|book-corpus-v1/book-chunking-v1/s004/c0000|34164|34304|4a328ebc31bfe79d6b0cbe6c87b901eacf3de1087c2b01d149ec439f0c76f8a1|2|EVIDENCE|first time the Rabbit uses the maid's name
+LIT-04|book-corpus-v1/book-chunking-v1/s004/c0003|38587|38666|99637a060f2d24025d4490816cfc8c86fd26fb38b5ca30392a5337637503a287|2|EVIDENCE|the Rabbit calls the maid's name again
+LIT-05|book-corpus-v1/book-chunking-v1/s004/c0008|47470|47755|46eef12919dddd53a04712ba6662804773e872618e1124df84fd28976e57d308|2|EVIDENCE|first meeting with the Caterpillar
+PAR-01|book-corpus-v1/book-chunking-v1/s006/c0007|73883|74224|e9b12401eecbcf2a5ca9c6da339e2e740338e468a9a6e5c8d773cf33479860f9|2|EVIDENCE|slow vanishing that leaves the grin
+PAR-01|book-corpus-v1/book-chunking-v1/s008/c0004|97256|97407|37a1d27a5a9cbe577fa19e12ca763619748f4ef6b5cc52e307cecbb685ea17a5|1|EVIDENCE|the grin appears first and Alice identifies the Cat
+PAR-02|book-corpus-v1/book-chunking-v1/s002/c0003|17817|18162|f95651f48e84c429fca8c18e3dc09f4eb456e521c564313f7e5a565e91363bd5|2|EVIDENCE|Alice identifies the cause of shrinking
+PAR-02|book-corpus-v1/book-chunking-v1/s002/c0001|14927|15069|b9f934b21da3ce374d9e2781f810b70fd5eb00ca94da5b29eed624be379f822d|1|EVIDENCE|Alice picks up the dropped items
+PAR-03|book-corpus-v1/book-chunking-v1/s008/c0003|95267|95543|8fed67e6ba03e944776fad55a893f2b1de3ed4b908ceb3f346b3290a228ba07b|2|EVIDENCE|croquet ground with live animals
+PAR-04|book-corpus-v1/book-chunking-v1/s007/c0000|74804|75190|3639ab6862a19a13fbfb4539c831c0b48b25b149dbeb833de82573d23460eae8|2|EVIDENCE|tea-table scene
+PAR-05|book-corpus-v1/book-chunking-v1/s009/c0005|113563|113746|ab7dcba1b7074b195169a6e56528730d6a40865bdea5c7df30bfb229a7a4b4c9|2|EVIDENCE|list of subjects
+PAR-06|book-corpus-v1/book-chunking-v1/s003/c0002|28117|28657|1b5b91a6da5a0ec6e9d30b684c69d956dcd66cbdbfcac07848b730aa3012c245|2|EVIDENCE|everybody wins; comfits handed round
+NAR-01|book-corpus-v1/book-chunking-v1/s001/c0005|9429|9586|84ffe3e455ff231b1b97a28f2460aa3901fe85ff8d654215c0ba90ab2ff0eedd|2|EVIDENCE|shrinks right after drinking
+NAR-02|book-corpus-v1/book-chunking-v1/s001/c0002|5596|5760|ad9b674b23b884b174a642cc7745fc5897e78fe606dea71ef6ae4ca62fbfd720|2|EVIDENCE|end of the fall
+NAR-03|book-corpus-v1/book-chunking-v1/s006/c0007|74226|74434|3bc589206785091467f7407d4f0ccb5516210a6bb4960db2106e9274195704e3|2|EVIDENCE|arrives at the March Hare's house
+NAR-03|book-corpus-v1/book-chunking-v1/s006/c0005|71585|71791|1f14a142107a03ec7167bab72fe3d42d79cc134744431ed327835d92bd84bc2a|1|EVIDENCE|the Cat gives directions earlier
+NAR-04|book-corpus-v1/book-chunking-v1/s012/c0004|147520|147989|1380454814d397a91ae4dbf96bdc2beaef48c441b05d6ab14d276dfc008600fb|2|EVIDENCE|cards fly up; she wakes
+MUL-01|book-corpus-v1/book-chunking-v1/s001/c0006|11302|11727|661b08cafadab5ed7450461b185a4c2b6ad1000c852272969ce3d8c6243ee87f|2|EVIDENCE|cake marked EAT ME
+MUL-01|book-corpus-v1/book-chunking-v1/s002/c0000|12406|12627|c72eb73aac8ba04335c5bd34b917d944b46eb6974d36ceb1635ed72946e1344d|1|EVIDENCE|effect of the cake: she opens out
+MUL-01|book-corpus-v1/book-chunking-v1/s004/c0001|36209|36604|5e6986c50407c2d22fca8abec94fbd9269d4e12f0f0d295bb640bdd43908aa83|2|EVIDENCE|bottle in the Rabbit's house
+MUL-01|book-corpus-v1/book-chunking-v1/s005/c0003|53901|53989|a10a675f92b610e9c1c8dcc17459fb7dfd8ae2060ade8f10d3e5143657b6af9d|2|EVIDENCE|Caterpillar on the mushroom's effect
+MUL-02|book-corpus-v1/book-chunking-v1/s011/c0002|131781|132028|649572989daf4298bc297ae4a78dc56436207e63518db3c13012fe00414f2297|2|EVIDENCE|first witness
+MUL-02|book-corpus-v1/book-chunking-v1/s011/c0004|137330|137542|26a2a7da919c8c77f88e683615737df0e44e79c12d0c559c7a1a1f58a4915233|2|EVIDENCE|next witness
+MUL-02|book-corpus-v1/book-chunking-v1/s011/c0005|138813|138915|cb692eccebcce7f1df475a4943284b24153a2c4d0220fe5ac1ad12d5ffc23cf3|2|EVIDENCE|Alice is called
+MUL-03|book-corpus-v1/book-chunking-v1/s002/c0002|16286|16673|7df9921e193103f29e0d35979055488e144f7753bdf27d1df077662af68b0db8|2|EVIDENCE|crocodile verse
+MUL-03|book-corpus-v1/book-chunking-v1/s005/c0001|50680|50847|076ddf73153e8d03b5f7ceb00080a365132bfb995e411041f60bf980604b2d83|2|EVIDENCE|Father William
+MUL-03|book-corpus-v1/book-chunking-v1/s010/c0004|124070|124346|7588ec526cc7c92aed17bd49a55191b082a2214fa4d61c5a5fd37cb940ec0787|2|EVIDENCE|voice of the Lobster
+MUL-04|book-corpus-v1/book-chunking-v1/s006/c0002|64501|64792|77ff083fab91677da343a0115ec57245b37f048159473b8fd2f7c082d09ba69c|2|EVIDENCE|on the kitchen hearth
+MUL-04|book-corpus-v1/book-chunking-v1/s006/c0005|70480|70626|2ac6aa565f217ac9d31f956c1facc2d0c2b7242e28a6ebdc2adb927287d6b3b8|2|EVIDENCE|on a bough in the wood
+MUL-04|book-corpus-v1/book-chunking-v1/s008/c0004|97256|97407|37a1d27a5a9cbe577fa19e12ca763619748f4ef6b5cc52e307cecbb685ea17a5|2|EVIDENCE|in the air over the croquet ground
+MUL-05|book-corpus-v1/book-chunking-v1/s007/c0000|74804|74945|81c40ef0aafc55d7458c221f425ec68d5195d80b8f26f273e5144a59d7be3eb5|2|EVIDENCE|at the tea party
+MUL-05|book-corpus-v1/book-chunking-v1/s011/c0002|131781|131919|d91142de88890f683f68f32d9c7db392b3359c066afdad4b91f4dae76f78b2e8|2|EVIDENCE|first witness at the trial
+MUL-05|book-corpus-v1/book-chunking-v1/s006/c0005|71585|71733|5fae4a66902d97983c9ee68a11445c853da1d3941344d9d9d4b77ceb1fe2b348|1|EVIDENCE|the Cat mentions where he lives
+CON-01|book-corpus-v1/book-chunking-v1/s006/c0005|69838|70118|411f51bc3c2c8f749db736e8d45f6299930f9f51440c6368e5a068de6871520e|2|EVIDENCE|transformation in the wood
+CON-01|book-corpus-v1/book-chunking-v1/s006/c0006|73071|73146|8666092b37fbb236a54bd3a3b491f52e55d0cfb2c7789642363dc9ed34dc5fc8|2|EVIDENCE|Alice tells the Cat
+CON-01|book-corpus-v1/book-chunking-v1/s011/c0004|135924|136241|2e1ebfbb4da647dcca0c2ecc771d5e5e573435948ce9179cdbd6ae6700896324|0|CONFOUNDER|guinea-pigs suppressed at the trial: same word, unrelated
+CON-02|book-corpus-v1/book-chunking-v1/s011/c0001|131331|131476|731e92f8453ca6247676276ba05869eb312a95153d51d78526a958338671aece|2|EVIDENCE|the accusation is read
+CON-02|book-corpus-v1/book-chunking-v1/s008/c0001|90828|91019|d74ca28136dd71cd00ce938c7f9af0991dc08996cadf32186d72c79fb2e6401b|0|CONFOUNDER|Knave in the procession: same character, no theft
+CON-03|book-corpus-v1/book-chunking-v1/s009/c0004|111281|111367|37671b6d30fda6289fda68ea4925ffa30c9195c82fe51bffe6a0b8d5497bf76b|2|EVIDENCE|start of his story
+CON-03|book-corpus-v1/book-chunking-v1/s009/c0003|108742|108917|7e736db8e5ff58c6d9f21288f3df40f253fe47f2bc62876edba747aada3cfdda|0|CONFOUNDER|the Queen's soup remark: names him, does not answer
+CON-04|book-corpus-v1/book-chunking-v1/s004/c0004|41938|42253|924b9575fc19c5bc361cb13ff3825e6c26771ada4a4b38efe61f8ef45b325d1e|2|EVIDENCE|Alice kicks
+CON-04|book-corpus-v1/book-chunking-v1/s004/c0005|42255|42401|5ae9145ae7a2aff2455191c839e0f52fb4f42fe219b837e769e8acb71dd5d22c|1|EVIDENCE|chorus as he flies out
+CON-04|book-corpus-v1/book-chunking-v1/s011/c0001|130886|131097|19aed22f3033ce1a71a60d3865d903b810245512ec545d043948833dc0eedd8a|0|CONFOUNDER|Bill as a juror: same character, unrelated scene
+AMB-01|book-corpus-v1/book-chunking-v1/s001/c0003|6041|6189|2e96852fb73b1f1f10880cf835b666feaca591d456507287298fb17bd42bfe8a|1|EVIDENCE|late, no reason given
+AMB-01|book-corpus-v1/book-chunking-v1/s002/c0001|14494|14640|ffed3e1fbbba859b11c38b1f256a12289582c6b1914a252ba53323d6d4b54fa2|2|EVIDENCE|afraid of keeping the Duchess waiting
+AMB-02|book-corpus-v1/book-chunking-v1/s003/c0003|29866|29949|a38b8a256689aee3808738972c33d51d3640d1d846de3dffd7bb2a67b5f99c2c|2|EVIDENCE|the Mouse's long and sad tale
+AMB-02|book-corpus-v1/book-chunking-v1/s009/c0004|111281|111367|37671b6d30fda6289fda68ea4925ffa30c9195c82fe51bffe6a0b8d5497bf76b|2|EVIDENCE|the Mock Turtle's story
+AMB-03|book-corpus-v1/book-chunking-v1/s006/c0005|71585|71791|1f14a142107a03ec7167bab72fe3d42d79cc134744431ed327835d92bd84bc2a|2|EVIDENCE|the Hatter and the March Hare are mad
+AMB-03|book-corpus-v1/book-chunking-v1/s006/c0006|71859|71941|b10500277bf48f8165dc30cd66ce6d2321127d7191eb6e43626b85a807ca8667|2|EVIDENCE|we're all mad here
+NOA-01|book-corpus-v1/book-chunking-v1/s001/c0000|626|823|e9874f9ea06e27acbdb337d3613e06c42b3b05cedbc91bb3e9909bfd858c19d9|0|CONFOUNDER|sister mentioned, unnamed
+NOA-01|book-corpus-v1/book-chunking-v1/s012/c0004|147991|148077|816384021d1421a1ca316fc1dd2a691f463ec78086369f0e4490ce562510aea7|0|CONFOUNDER|sister speaks, unnamed
+NOA-02|book-corpus-v1/book-chunking-v1/s002/c0001|15425|15557|78f032b558612e6bb54cb2ca8d96b41bc33d0ab3af9a9a65c5352d1436b69f5e|0|CONFOUNDER|children of the same age, no number
+NOA-04|book-corpus-v1/book-chunking-v1/s008/c0001|90967|91019|2d6a92a24ed381d36be4b5e91cb94b93ce9ca374fdb75061aa8c22e5e5cbe16f|0|CONFOUNDER|KING AND QUEEN OF HEARTS in the procession

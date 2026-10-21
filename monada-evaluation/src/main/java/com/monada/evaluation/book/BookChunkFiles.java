@@ -95,9 +95,9 @@ public final class BookChunkFiles {
 
     /**
      * The sidecar header is flat except for the nested {@code policy} object, which is lifted out and its fields
-     * prefixed with {@code policy.}.
+     * prefixed with {@code policy.}. Package-private so the judged query set reuses the same parser.
      */
-    private static Map<String, String> header(String line) throws BookInputException {
+    static Map<String, String> header(String line) throws BookInputException {
         String marker = "\"policy\":{";
         int start = line.indexOf(marker);
         require(start >= 0, "sidecar header has no policy object");
