@@ -129,6 +129,19 @@ class BookReviewWorksheetTest {
     }
 
     @Test
+    void recordsTheProtocolTheWorksheetWasProducedUnder() {
+        String sheet = BookReviewWorksheet.render(BODY, BASE, SELECTION);
+        assertTrue(sheet.contains("\nprotocol: " + BookQueryDatasetV2.REVIEW_PROTOCOL + "\n"));
+        assertEquals(BookQueryDatasetV2.REVIEW_PROTOCOL, BookReviewWorksheet.protocolOf(sheet));
+        // The first renderer wrote no protocol line (and showed chunk keys): such a sheet is the legacy protocol.
+        String legacy = sheet.replace("protocol: " + BookQueryDatasetV2.REVIEW_PROTOCOL + "\n\n", "");
+        assertEquals(BookQueryDatasetV2.LEGACY_REVIEW_PROTOCOL, BookReviewWorksheet.protocolOf(legacy));
+        String forged = sheet.replace(BookQueryDatasetV2.REVIEW_PROTOCOL, "FULLY_BLIND_V9");
+        var e = assertThrows(IllegalStateException.class, () -> BookReviewWorksheet.protocolOf(forged));
+        assertEquals("unknown worksheet protocol FULLY_BLIND_V9", e.getMessage());
+    }
+
+    @Test
     void rejectsAWorksheetWithAMissingOrRepeatedEntry() {
         String sheet = BookReviewWorksheet.render(BODY, BASE, SELECTION);
         String id = SELECTION.getFirst().pairId();

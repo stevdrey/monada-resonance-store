@@ -129,6 +129,13 @@ class BookQueryDatasetV2RejectionTest {
     }
 
     @Test
+    void acceptsOnlyTheKnownReviewProtocols() {
+        load(m -> m.setProperty("review.protocol", BookQueryDatasetV2.REVIEW_PROTOCOL));
+        load(m -> m.setProperty("review.protocol", BookQueryDatasetV2.LEGACY_REVIEW_PROTOCOL));
+        reject("unsupported review.protocol FULLY_BLIND", m -> m.setProperty("review.protocol", "FULLY_BLIND"));
+    }
+
+    @Test
     void rejectsAnEditedV1Manifest() {
         byte[] edited = (new String(BASE_MANIFEST, StandardCharsets.UTF_8) + "# edited\n")
                 .getBytes(StandardCharsets.UTF_8);

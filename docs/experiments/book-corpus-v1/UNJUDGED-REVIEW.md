@@ -79,7 +79,10 @@ The receipt is re-derived and compared byte for byte by `BookUnjudgedSelectionTe
    **Protocol deviation in the committed review.** The worksheet behind the committed `review.psv` also printed
    each pair's chunk key and byte range. It showed no rank, score, stratum or label, but a repeated key could
    reveal a recurring (hub) chunk, and an offset reveals the story position. The renderer no longer prints either.
-   Whether to re-review the 60 pairs with a blinded worksheet is the reviewer's decision.
+   The reviewer chose to keep the signed labels. The manifest records what was actually used:
+   `review.protocol=SCORE_BLIND_WORKSHEET_QUERY_CHUNK_TEXT_KEY_AND_BYTE_RANGE`. New worksheets carry a
+   `protocol: SCORE_BLIND_WORKSHEET_QUERY_AND_CHUNK_TEXT_ONLY` line, and `apply` copies the protocol of the sheet
+   into the manifest whenever the decisions change; a sheet without that line is recorded as the legacy protocol.
 2. For each pair, fill in `decision`:
 
    | Decision | Grade | Effect |

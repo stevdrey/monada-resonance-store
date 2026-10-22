@@ -42,7 +42,13 @@ record BookQueryDatasetV2(Properties manifest, BookQueryDataset base, List<Pair>
     static final String DATASET = "book-queries-v2";
     static final String FORMAT = "monada-book-queries-extension";
     static final String PROVENANCE = "POST_HOC_RETRIEVAL_SAMPLED_DEV";
+    /** The current worksheet: pair id, query, answerability and chunk text only. */
     static final String REVIEW_PROTOCOL = "SCORE_BLIND_WORKSHEET_QUERY_AND_CHUNK_TEXT_ONLY";
+    /**
+     * The first worksheet, which also printed each pair's chunk key and byte range (no rank, score, stratum or
+     * label): a repeated key could reveal a hub chunk. The committed book-queries-v2 review used it.
+     */
+    static final String LEGACY_REVIEW_PROTOCOL = "SCORE_BLIND_WORKSHEET_QUERY_CHUNK_TEXT_KEY_AND_BYTE_RANGE";
     static final String REVIEW_HEADER = "pairId|queryId|chunkKey|decision|grade|byteStart|byteEnd|spanSha256|note";
     static final String NO_POLICY = "NONE";
 
@@ -95,6 +101,8 @@ record BookQueryDatasetV2(Properties manifest, BookQueryDataset base, List<Pair>
             manifest.load(new StringReader(new String(resource("manifest.properties"), StandardCharsets.UTF_8)));
         } catch (IOException e) {
             throw new IllegalStateException("cannot read book-queries-v2 manifest.properties", e);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException("malformed book-queries-v2 manifest.properties: " + e.getMessage(), e);
         }
         return parse(manifest, BookQueryDataset.load(), BookQueryDataset.resource("manifest.properties"),
                 resource(require(manifest, "selection.file")), resource(require(manifest, "review.file")));
@@ -132,7 +140,8 @@ record BookQueryDatasetV2(Properties manifest, BookQueryDataset base, List<Pair>
         check(PROVENANCE.equals(manifest.getProperty("provenance")),
                 "provenance must be " + PROVENANCE + ", the labels are post-hoc");
         check(BookQueryDataset.GRADES.equals(manifest.getProperty("judgment.grades")), "unsupported judgment.grades");
-        check(REVIEW_PROTOCOL.equals(manifest.getProperty("review.protocol")), "unsupported review.protocol");
+        check(List.of(REVIEW_PROTOCOL, LEGACY_REVIEW_PROTOCOL).contains(manifest.getProperty("review.protocol")),
+                "unsupported review.protocol " + manifest.getProperty("review.protocol"));
 
         // v1 is pinned, never copied: any change to its manifest or files is drift, not a v2 edit.
         checkDigest(manifest, "base.manifest.sha256", baseManifest);

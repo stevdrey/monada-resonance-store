@@ -142,13 +142,17 @@ public final class BookUnjudgedReviewMain {
         byte[] selection = Files.readAllBytes(dir.resolve("selection.psv"));
         BookQueryDataset base = BookQueryDataset.load();
         List<Pair> pairs = BookUnjudgedSelection.parse(selection);
-        String review = BookReviewWorksheet.apply(
-                Files.readString(Path.of(options.get("--worksheet")), StandardCharsets.UTF_8), body, base, pairs);
+        String sheet = Files.readString(Path.of(options.get("--worksheet")), StandardCharsets.UTF_8);
+        String review = BookReviewWorksheet.apply(sheet, body, base, pairs);
         byte[] reviewBytes = review.getBytes(StandardCharsets.UTF_8);
         byte[] baseManifest = BookQueryDataset.resource("manifest.properties");
         requireUnsignedChange(properties(manifestText), BookQueryDataset.sha256(reviewBytes));
 
         String updated = replace(manifestText, "review.sha256", BookQueryDataset.sha256(reviewBytes));
+        // New decisions carry the protocol of the sheet they came from; re-applying a signed review keeps its record.
+        if (!BookQueryDataset.sha256(reviewBytes).equals(properties(manifestText).getProperty("review.sha256"))) {
+            updated = replace(updated, "review.protocol", BookReviewWorksheet.protocolOf(sheet));
+        }
         BookQueryDatasetV2 built = BookQueryDatasetV2.build(properties(updated), base, baseManifest, selection,
                 reviewBytes);
         for (var e : BookQueryDatasetV2.expectedCounts(built).entrySet()) {
@@ -274,12 +278,15 @@ public final class BookUnjudgedReviewMain {
         return String.join("\n", lines);
     }
 
-    private static Properties properties(String text) {
+    static Properties properties(String text) {
         Properties properties = new Properties();
         try {
             properties.load(new StringReader(text));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        } catch (IllegalArgumentException e) {
+            // A hand edit with a backslash before "user" in a value is a malformed Unicode escape: exit 1, not a crash.
+            throw new IllegalStateException("malformed manifest.properties: " + e.getMessage(), e);
         }
         return properties;
     }

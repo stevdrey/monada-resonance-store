@@ -60,6 +60,8 @@ class BookQueryDatasetV2Test {
     @Test
     void declaresPostHocProvenanceAndAConsistentReviewState() {
         assertEquals(BookQueryDatasetV2.PROVENANCE, V2.manifest().getProperty("provenance"));
+        // The committed review used the first worksheet, which showed chunk keys and byte ranges.
+        assertEquals(BookQueryDatasetV2.LEGACY_REVIEW_PROTOCOL, V2.manifest().getProperty("review.protocol"));
         String status = V2.manifest().getProperty("judgment.reviewStatus");
         if (!V2.pending().isEmpty()) {
             assertEquals("PENDING_HUMAN_REVIEW", status, "a partially reviewed v2 is never REVIEWED");

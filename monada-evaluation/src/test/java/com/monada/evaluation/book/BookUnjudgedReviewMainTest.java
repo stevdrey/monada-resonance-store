@@ -135,6 +135,14 @@ class BookUnjudgedReviewMainTest {
     }
 
     @Test
+    void aMalformedManifestEscapeIsAValidationFailure() {
+        // A Windows-style account name puts a backslash before "user": an invalid Unicode escape for Properties.
+        String manifest = "judgment.reviewer=DOMAIN" + '\\' + "user\n";
+        var e = assertThrows(IllegalStateException.class, () -> BookUnjudgedReviewMain.properties(manifest));
+        assertTrue(e.getMessage().startsWith("malformed manifest.properties: "), e.getMessage());
+    }
+
+    @Test
     void manifestUpdatesReplaceExactlyOneExistingKey() {
         String manifest = "# c\ncounts.pending=60\ncounts.pending.x=1\n";
         assertEquals("# c\ncounts.pending=59\ncounts.pending.x=1\n",

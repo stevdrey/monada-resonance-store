@@ -32,6 +32,9 @@ import java.util.stream.Collectors;
 final class BookReviewWorksheet {
     static final String TITLE = "# book-queries-v2 review worksheet (issue #177) - LOCAL ONLY, DO NOT COMMIT";
 
+    static final String PROTOCOL_LINE = "protocol: ";
+
+    private static final Pattern PROTOCOL = Pattern.compile("(?m)^protocol: (\\S+)$");
     private static final Pattern ENTRY = Pattern.compile("(?m)^## (UJ-[0-9a-f]{8})$");
     private static final Pattern FIELD = Pattern.compile("(?m)^(decision|grade|quote|note):[ \\t]*(.*)$");
 
@@ -41,6 +44,7 @@ final class BookReviewWorksheet {
     static String render(byte[] body, BookQueryDataset base, List<Pair> selection) {
         Map<String, Case> cases = cases(base);
         StringBuilder out = new StringBuilder(TITLE).append("\n\n");
+        out.append(PROTOCOL_LINE).append(BookQueryDatasetV2.REVIEW_PROTOCOL).append("\n\n");
         out.append("""
                 Decide each pair from the query and the chunk text alone. For every entry fill in:
 
@@ -72,6 +76,20 @@ final class BookReviewWorksheet {
             out.append("decision: \ngrade: \nquote: \nnote: \n\n");
         }
         return out.toString();
+    }
+
+    /**
+     * The review protocol a filled worksheet was produced under: its {@code protocol:} line, or the legacy protocol
+     * for a sheet from the first renderer, which had none and printed chunk keys and byte ranges.
+     */
+    static String protocolOf(String worksheet) {
+        int firstEntry = worksheet.indexOf("\n## ");
+        Matcher m = PROTOCOL.matcher(firstEntry < 0 ? worksheet : worksheet.substring(0, firstEntry));
+        if (!m.find()) {
+            return BookQueryDatasetV2.LEGACY_REVIEW_PROTOCOL;
+        }
+        check(BookQueryDatasetV2.REVIEW_PROTOCOL.equals(m.group(1)), "unknown worksheet protocol " + m.group(1));
+        return m.group(1);
     }
 
     /** The {@code review.psv} bytes for every decided entry of {@code worksheet}, sorted by pair id. */
