@@ -62,6 +62,9 @@ class BookQueryDatasetV2Test {
         assertEquals(BookQueryDatasetV2.PROVENANCE, V2.manifest().getProperty("provenance"));
         // The committed review used the first worksheet, which showed chunk keys and byte ranges.
         assertEquals(BookQueryDatasetV2.LEGACY_REVIEW_PROTOCOL, V2.manifest().getProperty("review.protocol"));
+        // The committed decisions were drafted by Codex and verified one by one by the human reviewer.
+        assertEquals("codex", V2.manifest().getProperty("judgment.draftedBy"));
+        assertEquals(BookQueryDatasetV2.DRAFT_VERIFICATION, V2.manifest().getProperty("judgment.verification"));
         String status = V2.manifest().getProperty("judgment.reviewStatus");
         if (!V2.pending().isEmpty()) {
             assertEquals("PENDING_HUMAN_REVIEW", status, "a partially reviewed v2 is never REVIEWED");

@@ -30,6 +30,27 @@ The pairs come from a published run of the system being evaluated. Two consequen
 
 A genuinely independent held-out evaluation needs new queries that are reviewed prospectively, in another Issue.
 
+### Label drafting (`judgment.draftedBy=codex`)
+
+The 60 committed decisions were **drafted by Codex**, an AI model, as an AI-assisted proposal on 2026-10-21. The
+filled worksheet's preamble records this. The reviewer, Steven Rey Sequeira, states that each of the 60 proposals
+was independently reviewed and approved before sign-off. The manifest records this:
+
+| Key | Value |
+| --- | --- |
+| `judgment.draftedBy` | `codex` |
+| `judgment.draftedAt` | `2026-10-21` |
+| `judgment.verification` | `EACH_DRAFTED_DECISION_REVIEWED_AND_APPROVED_BY_REVIEWER` |
+
+The relevance labels therefore rest on that human verification, not on the model's proposal alone. Readers should
+weigh them as **model-drafted, human-verified** labels, a further reason they are not an independent prospective
+gold standard. A dataset whose labels were drafted by anyone but the reviewer is `REVIEWED` only with a dated draft
+and that verification value, and neither the reviewer nor the approver may be a drafter. `judgment.draftedBy=NONE`
+means the reviewer decided directly.
+
+Because of the added provenance line, that worksheet no longer passes `apply`'s check for an unedited preamble. The
+committed `review.psv` came from it unchanged, and it is not re-applied.
+
 ## Selection (predeclared, before any new label)
 
 Rule `dev-unjudged-top1-top3-hub-seeded-v1`, seed `book-queries-v2|unjudged-review-v1|`, target 60.
@@ -115,7 +136,9 @@ The receipt is re-derived and compared byte for byte by `BookUnjudgedSelectionTe
    - the reviewer or approver is missing, or equals the drafter (`selection.draftedBy=claude`);
    - the date is not ISO.
 
-   An AI-authored claim of approval is not a sign-off. A partially reviewed v2 stays `PENDING_HUMAN_REVIEW`.
+   An AI-authored claim of approval is not a sign-off. A partially reviewed v2 stays `PENDING_HUMAN_REVIEW`. If
+   anyone other than the reviewer proposed the decisions, record it in `judgment.draftedBy`, `judgment.draftedAt`
+   and `judgment.verification` (see [Label drafting](#label-drafting-judgmentdraftedbycodex)).
 5. Regenerate the report:
 
    ```bash

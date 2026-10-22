@@ -51,6 +51,10 @@ record BookQueryDatasetV2(Properties manifest, BookQueryDataset base, List<Pair>
     static final String LEGACY_REVIEW_PROTOCOL = "SCORE_BLIND_WORKSHEET_QUERY_CHUNK_TEXT_KEY_AND_BYTE_RANGE";
     static final String REVIEW_HEADER = "pairId|queryId|chunkKey|decision|grade|byteStart|byteEnd|spanSha256|note";
     static final String NO_POLICY = "NONE";
+    /** {@code judgment.draftedBy} value for decisions the reviewer made directly, without any proposed draft. */
+    static final String NO_DRAFT = "NONE";
+    /** The only accepted {@code judgment.verification} for drafted decisions: every one checked by the reviewer. */
+    static final String DRAFT_VERIFICATION = "EACH_DRAFTED_DECISION_REVIEWED_AND_APPROVED_BY_REVIEWER";
     static final String SELECTION_FILE = "selection.psv";
     static final String REVIEW_FILE = "review.psv";
 
@@ -61,6 +65,7 @@ record BookQueryDatasetV2(Properties manifest, BookQueryDataset base, List<Pair>
             "extends", "base.manifest.sha256", "base.queries.sha256", "base.judgments.sha256", "base.chunkMap.sha256",
             "provenance", "selection.baselineReport", "selection.baselineReport.sha256", "selection.rule",
             "selection.seed", "selection.target", "selection.draftedBy", "selection.file", "selection.sha256",
+            "judgment.draftedBy",
             "review.protocol", "review.file", "review.sha256", "judgment.grades", "judgment.reviewStatus",
             "reclassification.policy");
 
@@ -294,11 +299,24 @@ record BookQueryDatasetV2(Properties manifest, BookQueryDataset base, List<Pair>
             return;
         }
         check(d.pending().isEmpty(), "REVIEWED, but " + d.pending().size() + " selected pairs have no decision");
-        String drafter = manifest.getProperty("selection.draftedBy").trim();
         String reviewer = require(manifest, "judgment.reviewer").trim();
         String approver = require(manifest, "judgment.approvedBy").trim();
-        check(!reviewer.equalsIgnoreCase(drafter) && !approver.equalsIgnoreCase(drafter),
-                "REVIEWED needs a human reviewer and approver other than the drafter " + drafter);
+        for (String drafter : List.of(manifest.getProperty("selection.draftedBy").trim(),
+                manifest.getProperty("judgment.draftedBy").trim())) {
+            check(!reviewer.equalsIgnoreCase(drafter) && !approver.equalsIgnoreCase(drafter),
+                    "REVIEWED needs a human reviewer and approver other than the drafter " + drafter);
+        }
+        // Drafted labels (e.g. proposed by a model) are REVIEWED only with a dated draft and per-decision verification.
+        if (!NO_DRAFT.equals(manifest.getProperty("judgment.draftedBy").trim())) {
+            try {
+                LocalDate.parse(require(manifest, "judgment.draftedAt"));
+            } catch (DateTimeParseException e) {
+                throw new IllegalStateException("judgment.draftedAt is not an ISO date: "
+                        + manifest.getProperty("judgment.draftedAt"));
+            }
+            check(DRAFT_VERIFICATION.equals(manifest.getProperty("judgment.verification")),
+                    "drafted labels are REVIEWED only with judgment.verification=" + DRAFT_VERIFICATION);
+        }
         try {
             LocalDate.parse(require(manifest, "judgment.reviewedAt"));
         } catch (DateTimeParseException e) {

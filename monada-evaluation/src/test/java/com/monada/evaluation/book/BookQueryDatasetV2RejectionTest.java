@@ -102,6 +102,40 @@ class BookQueryDatasetV2RejectionTest {
     }
 
     @Test
+    void rejectsAnApprovalByTheLabelDrafter() {
+        decideBoth();
+        reject("REVIEWED needs a human reviewer and approver other than the drafter codex", m -> {
+            signOff(m);
+            m.setProperty("judgment.approvedBy", "Codex");
+        });
+    }
+
+    @Test
+    void rejectsDraftedLabelsWithoutPerDecisionVerificationOrDraftDate() {
+        decideBoth();
+        reject("drafted labels are REVIEWED only with judgment.verification=", m -> {
+            signOff(m);
+            m.setProperty("judgment.verification", "SPOT_CHECKED");
+        });
+        reject("judgment.draftedAt is not an ISO date: soon", m -> {
+            signOff(m);
+            m.setProperty("judgment.draftedAt", "soon");
+        });
+        reject("manifest is missing judgment.draftedBy", m -> m.setProperty("judgment.draftedBy", ""));
+    }
+
+    @Test
+    void undraftedLabelsNeedNoDraftMetadata() {
+        decideBoth();
+        load(m -> {
+            signOff(m);
+            m.setProperty("judgment.draftedBy", BookQueryDatasetV2.NO_DRAFT);
+            m.remove("judgment.draftedAt");
+            m.remove("judgment.verification");
+        });
+    }
+
+    @Test
     void rejectsAReviewDateThatIsNotIso() {
         decideBoth();
         reject("judgment.reviewedAt is not an ISO date: yesterday", m -> {
