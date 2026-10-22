@@ -10,6 +10,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Properties;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -81,6 +82,15 @@ class BookUnjudgedReviewMainTest {
         assertTrue(inside.err().contains("outside any Git work tree"), inside.err());
         assertTrue(BookUnjudgedReviewMain.insideGitWorkTree(ROOT.resolve("no/such/dir/sheet.md")));
         assertFalse(BookUnjudgedReviewMain.insideGitWorkTree(tmp.resolve("sheet.md")));
+        // Only a real marker counts: an empty .git directory is not a repository.
+        Path empty = Files.createDirectories(tmp.resolve("empty/.git")).getParent();
+        assertFalse(BookUnjudgedReviewMain.insideGitWorkTree(empty.resolve("sheet.md")));
+        Path repo = Files.createDirectories(tmp.resolve("repo/.git")).getParent();
+        Files.writeString(repo.resolve(".git/HEAD"), "ref: refs/heads/main\n");
+        assertTrue(BookUnjudgedReviewMain.insideGitWorkTree(repo.resolve("sub/sheet.md")));
+        Path worktree = Files.createDirectories(tmp.resolve("worktree"));
+        Files.writeString(worktree.resolve(".git"), "gitdir: /elsewhere/.git/worktrees/w\n");
+        assertTrue(BookUnjudgedReviewMain.insideGitWorkTree(worktree.resolve("sheet.md")));
 
         Path existing = Files.writeString(tmp.resolve("sheet.md"), "review work");
         Result overwrite = run("worksheet", "--input", "body.txt", "--out", existing.toString());
@@ -96,8 +106,15 @@ class BookUnjudgedReviewMainTest {
         BookUnjudgedReviewMain.requireUnsignedChange(signed, "a".repeat(64));
         var e = assertThrows(IllegalStateException.class,
                 () -> BookUnjudgedReviewMain.requireUnsignedChange(signed, "b".repeat(64)));
-        assertTrue(e.getMessage().contains("reset judgment.reviewStatus to PENDING_HUMAN_REVIEW"), e.getMessage());
+        assertTrue(e.getMessage().contains("set judgment.reviewStatus to PENDING_HUMAN_REVIEW"), e.getMessage());
+        // A status-only reset keeps a stale approval that a later status edit would re-attach to the new digest.
         signed.setProperty("judgment.reviewStatus", "PENDING_HUMAN_REVIEW");
+        for (String key : List.of("judgment.reviewer", "judgment.approvedBy", "judgment.reviewedAt")) {
+            signed.setProperty(key, "stale");
+            assertThrows(IllegalStateException.class,
+                    () -> BookUnjudgedReviewMain.requireUnsignedChange(signed, "b".repeat(64)), key);
+            signed.setProperty(key, "");
+        }
         BookUnjudgedReviewMain.requireUnsignedChange(signed, "b".repeat(64));
     }
 
