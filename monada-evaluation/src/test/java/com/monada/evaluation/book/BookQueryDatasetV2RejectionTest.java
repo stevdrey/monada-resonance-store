@@ -14,13 +14,15 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /**
- * Invalid v2 extensions are rejected. Each case starts from the real, unchanged v1 and the bundled v2 manifest with a
- * two-pair selection (one answerable DEV pair, one DEV NO_ANSWER pair, both from the committed receipt); digests and
- * counts are recomputed after the mutation, so only the intended defect remains. Span digests are synthetic.
+ * Invalid v2 extensions are rejected. Each case starts from the real, unchanged v1, the bundled v2 manifest and the
+ * committed 60-pair receipt, with no decision yet; {@link #decideRest} decides the remaining pairs for cases that need
+ * a complete review. Digests and counts are recomputed after the mutation, so only the intended defect remains. Span
+ * digests are synthetic.
  */
 class BookQueryDatasetV2RejectionTest {
     private static final String KEY = "book-corpus-v1/book-chunking-v1/";
@@ -30,6 +32,7 @@ class BookQueryDatasetV2RejectionTest {
     private static Properties MANIFEST;
     private static Pair ANSWERABLE;
     private static Pair NO_ANSWER;
+    private static List<Pair> COMMITTED;
 
     private final List<String> selection = new ArrayList<>();
     private final List<String> review = new ArrayList<>(List.of(BookQueryDatasetV2.REVIEW_HEADER));
@@ -42,20 +45,21 @@ class BookQueryDatasetV2RejectionTest {
         MANIFEST.load(new StringReader(new String(BookQueryDatasetV2.resource("manifest.properties"),
                 StandardCharsets.UTF_8)));
         List<Pair> committed = BookUnjudgedSelection.parse(BookQueryDatasetV2.resource("selection.psv"));
+        COMMITTED = committed;
         ANSWERABLE = committed.stream().filter(p -> p.category() != Category.NO_ANSWER).findFirst().orElseThrow();
         NO_ANSWER = committed.stream().filter(p -> p.category() == Category.NO_ANSWER).findFirst().orElseThrow();
     }
 
     BookQueryDatasetV2RejectionTest() {
         selection.add(BookUnjudgedSelection.HEADER);
-        String receipt = BookUnjudgedSelection.render(List.of(ANSWERABLE, NO_ANSWER));
-        selection.addAll(List.of(receipt.split("\n")).subList(1, 3));
+        String receipt = new String(BookQueryDatasetV2.resource("selection.psv"), StandardCharsets.UTF_8);
+        selection.addAll(List.of(receipt.split("\n")).subList(1, BookUnjudgedSelection.TARGET + 1));
     }
 
     @Test
     void aPendingSelectionLoadsWithoutLabels() {
         BookQueryDatasetV2 v2 = load(m -> { });
-        assertEquals(2, v2.pending().size());
+        assertEquals(BookUnjudgedSelection.TARGET, v2.pending().size());
         assertTrue(v2.addedJudgments().isEmpty());
     }
 
@@ -63,10 +67,12 @@ class BookQueryDatasetV2RejectionTest {
     void aFullyReviewedSignedOffSelectionLoadsAndAppendsJudgments() {
         review.add(row(ANSWERABLE, "EVIDENCE", "2", 10, 40));
         review.add(row(NO_ANSWER, "CONFOUNDER", "0", 0, 20));
+        decideRest();
         BookQueryDatasetV2 v2 = load(BookQueryDatasetV2RejectionTest::signOff);
-        assertEquals(2, v2.addedJudgments().size());
+        assertEquals(BookUnjudgedSelection.TARGET, v2.addedJudgments().size());
         Case extended = v2.cases().stream().filter(c -> c.id().equals(ANSWERABLE.queryId())).findFirst().orElseThrow();
-        assertEquals(ANSWERABLE.chunkKey(), extended.judgments().getLast().chunkKey());
+        assertTrue(extended.judgments().stream().anyMatch(j -> j.chunkKey().equals(ANSWERABLE.chunkKey())
+                && j.role() == BookQueryDataset.Role.EVIDENCE && j.grade() == 2));
     }
 
     // ---- sign-off
@@ -74,7 +80,7 @@ class BookQueryDatasetV2RejectionTest {
     @Test
     void rejectsReviewedWhilePairsArePending() {
         review.add(row(ANSWERABLE, "EVIDENCE", "2", 10, 40));
-        reject("REVIEWED, but 1 selected pairs have no decision", BookQueryDatasetV2RejectionTest::signOff);
+        reject("REVIEWED, but 59 selected pairs have no decision", BookQueryDatasetV2RejectionTest::signOff);
     }
 
     @Test
@@ -174,6 +180,12 @@ class BookQueryDatasetV2RejectionTest {
     // ---- selection
 
     @Test
+    void rejectsATruncatedSelection() {
+        selection.removeLast();
+        reject("selection.psv has 59 pairs; the predeclared rule selects exactly 60", m -> { });
+    }
+
+    @Test
     void rejectsAHoldoutPair() {
         selection.add(selectionRow("LIT-02", "HOLDOUT", "LITERAL", "s001/c0003"));
         reject("LIT-02 is not DEV; HOLDOUT hits must never be selected", m -> { });
@@ -234,13 +246,14 @@ class BookQueryDatasetV2RejectionTest {
     void aNoAnswerFindingBlocksSignOffUntilAPolicyIsAcceptedAndIsNeverALabel() {
         review.add(row(ANSWERABLE, "EVIDENCE", "2", 10, 40));
         review.add(row(NO_ANSWER, "NO_ANSWER_CONTRADICTED", "2", 0, 20));
+        decideRest();
         reject("REVIEWED is blocked by 1 NO_ANSWER_CONTRADICTED findings", BookQueryDatasetV2RejectionTest::signOff);
         BookQueryDatasetV2 v2 = load(m -> {
             signOff(m);
             m.setProperty("reclassification.policy", "report-only-v1");
         });
         assertEquals(1, v2.findings().size());
-        assertEquals(1, v2.addedJudgments().size(), "a finding never becomes a judgment");
+        assertEquals(BookUnjudgedSelection.TARGET - 1, v2.addedJudgments().size(), "a finding never becomes a judgment");
         Case noAnswer = v2.cases().stream().filter(c -> c.id().equals(NO_ANSWER.queryId())).findFirst().orElseThrow();
         assertTrue(noAnswer.evidence().isEmpty() && !noAnswer.answerable());
     }
@@ -249,6 +262,7 @@ class BookQueryDatasetV2RejectionTest {
     void rejectsAReclassificationPolicyThatIsNotAVersionedId() {
         review.add(row(ANSWERABLE, "EVIDENCE", "2", 10, 40));
         review.add(row(NO_ANSWER, "NO_ANSWER_CONTRADICTED", "2", 0, 20));
+        decideRest();
         for (String policy : List.of("yes", "report-only-v1 ", "Report-Only-v1", "report-only")) {
             reject("reclassification.policy must be NONE or a versioned policy id", m -> {
                 signOff(m);
@@ -289,12 +303,20 @@ class BookQueryDatasetV2RejectionTest {
     @Test
     void rejectsStaleCounts() {
         review.add(row(ANSWERABLE, "EVIDENCE", "2", 10, 40));
-        reject("counts.pending is 2 but the data has 1", m -> m.setProperty("counts.pending", "2"));
+        reject("counts.pending is 60 but the data has 59", m -> m.setProperty("counts.pending", "60"));
     }
 
     private void decideBoth() {
         review.add(row(ANSWERABLE, "EVIDENCE", "2", 10, 40));
         review.add(row(NO_ANSWER, "CONFOUNDER", "0", 0, 20));
+        decideRest();
+    }
+
+    /** Decides every selected pair without a review row as a synthetic CONFOUNDER, completing the review. */
+    private void decideRest() {
+        var decided = review.stream().map(r -> r.split("\\|")[0]).collect(Collectors.toSet());
+        COMMITTED.stream().filter(p -> !decided.contains(p.pairId()))
+                .forEach(p -> review.add(row(p, "CONFOUNDER", "0", 0, 10)));
     }
 
     private static void signOff(Properties m) {

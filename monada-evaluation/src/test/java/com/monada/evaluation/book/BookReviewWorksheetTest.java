@@ -139,7 +139,19 @@ class BookReviewWorksheetTest {
         assertEquals(BookQueryDatasetV2.LEGACY_REVIEW_PROTOCOL, BookReviewWorksheet.protocolOf(legacy));
         String forged = sheet.replace(BookQueryDatasetV2.REVIEW_PROTOCOL, "FULLY_BLIND_V9");
         var e = assertThrows(IllegalStateException.class, () -> BookReviewWorksheet.protocolOf(forged));
-        assertEquals("unknown worksheet protocol FULLY_BLIND_V9", e.getMessage());
+        assertEquals("worksheet title, protocol line or instructions were edited", e.getMessage());
+    }
+
+    @Test
+    void rejectsDecisionsMadeUnderEditedInstructions() {
+        String sheet = BookReviewWorksheet.render(BODY, BASE, SELECTION);
+        // Swapping the meaning of the two labels would make the recorded protocol untrue.
+        String swapped = sheet.replaceFirst("`EVIDENCE` \\(the chunk answers the query\\)",
+                "`EVIDENCE` (judged non-relevant)");
+        assertNotEquals(sheet, swapped);
+        var e = assertThrows(IllegalStateException.class,
+                () -> BookReviewWorksheet.apply(swapped, BODY, BASE, SELECTION));
+        assertEquals("worksheet title, protocol line or instructions were edited", e.getMessage());
     }
 
     @Test

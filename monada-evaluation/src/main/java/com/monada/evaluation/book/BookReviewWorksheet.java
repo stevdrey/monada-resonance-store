@@ -33,8 +33,22 @@ final class BookReviewWorksheet {
     static final String TITLE = "# book-queries-v2 review worksheet (issue #177) - LOCAL ONLY, DO NOT COMMIT";
 
     static final String PROTOCOL_LINE = "protocol: ";
+    private static final String INSTRUCTIONS = """
+        Decide each pair from the query and the chunk text alone. For every entry fill in:
 
-    private static final Pattern PROTOCOL = Pattern.compile("(?m)^protocol: (\\S+)$");
+        - `decision:` one of `EVIDENCE` (the chunk answers the query), `CONFOUNDER` (judged non-relevant),
+          `UNRESOLVED` (evidence insufficient to decide) or `NO_ANSWER_CONTRADICTED` (only for a query that
+          book-queries-v1 declares NO_ANSWER, when this chunk does answer it). Leave it blank to keep the pair
+          pending.
+        - `grade:` `2` answers directly, `1` partial or supporting (EVIDENCE, NO_ANSWER_CONTRADICTED); `0` for
+          CONFOUNDER; empty for UNRESOLVED.
+        - `quote:` the exact passage of the chunk the decision rests on (copy it; line breaks may be written as
+          spaces). It must occur once in the chunk. For CONFOUNDER quote the misleading passage. Empty for
+          UNRESOLVED.
+        - `note:` a short paraphrase or, for UNRESOLVED, the reason. No `|` and no book quotation.
+
+        """;
+
     private static final Pattern ENTRY = Pattern.compile("(?m)^## (UJ-[0-9a-f]{8})$");
     private static final Pattern FIELD = Pattern.compile("(?m)^(decision|grade|quote|note):[ \\t]*(.*)$");
 
@@ -43,23 +57,7 @@ final class BookReviewWorksheet {
 
     static String render(byte[] body, BookQueryDataset base, List<Pair> selection) {
         Map<String, Case> cases = cases(base);
-        StringBuilder out = new StringBuilder(TITLE).append("\n\n");
-        out.append(PROTOCOL_LINE).append(BookQueryDatasetV2.REVIEW_PROTOCOL).append("\n\n");
-        out.append("""
-                Decide each pair from the query and the chunk text alone. For every entry fill in:
-
-                - `decision:` one of `EVIDENCE` (the chunk answers the query), `CONFOUNDER` (judged non-relevant),
-                  `UNRESOLVED` (evidence insufficient to decide) or `NO_ANSWER_CONTRADICTED` (only for a query that
-                  book-queries-v1 declares NO_ANSWER, when this chunk does answer it). Leave it blank to keep the pair
-                  pending.
-                - `grade:` `2` answers directly, `1` partial or supporting (EVIDENCE, NO_ANSWER_CONTRADICTED); `0` for
-                  CONFOUNDER; empty for UNRESOLVED.
-                - `quote:` the exact passage of the chunk the decision rests on (copy it; line breaks may be written as
-                  spaces). It must occur once in the chunk. For CONFOUNDER quote the misleading passage. Empty for
-                  UNRESOLVED.
-                - `note:` a short paraphrase or, for UNRESOLVED, the reason. No `|` and no book quotation.
-
-                """);
+        StringBuilder out = new StringBuilder(preamble(false));
         List<Pair> order = selection.stream()
                 .sorted(Comparator.comparing(p -> BookQueryDataset.sha256(
                         (BookUnjudgedSelection.SEED + "worksheet|" + p.pairId()).getBytes(StandardCharsets.UTF_8))))
@@ -71,6 +69,15 @@ final class BookReviewWorksheet {
             out.append("decision: \ngrade: \nquote: \nnote: \n\n");
         }
         return out.toString();
+    }
+
+    /**
+     * The immutable head of a worksheet: title, protocol line and instructions. The first renderer ({@code legacy})
+     * wrote no protocol line; its instructions were the same.
+     */
+    static String preamble(boolean legacy) {
+        String protocol = legacy ? "" : PROTOCOL_LINE + BookQueryDatasetV2.REVIEW_PROTOCOL + "\n\n";
+        return TITLE + "\n\n" + protocol + INSTRUCTIONS;
     }
 
     /**
@@ -91,23 +98,23 @@ final class BookReviewWorksheet {
     }
 
     /**
-     * The review protocol a filled worksheet was produced under: its {@code protocol:} line, or the legacy protocol
-     * for a sheet from the first renderer, which had none and printed chunk keys and byte ranges.
+     * The review protocol a filled worksheet was produced under, from its unedited preamble: the current one, or the
+     * legacy one (no protocol line; that renderer printed chunk keys and byte ranges). Edited instructions, such as
+     * swapped decision meanings, are rejected, since the decisions would not follow the recorded protocol.
      */
     static String protocolOf(String worksheet) {
-        int firstEntry = worksheet.indexOf("\n## ");
-        Matcher m = PROTOCOL.matcher(firstEntry < 0 ? worksheet : worksheet.substring(0, firstEntry));
-        if (!m.find()) {
-            return BookQueryDatasetV2.LEGACY_REVIEW_PROTOCOL;
+        if (worksheet.startsWith(preamble(false))) {
+            return BookQueryDatasetV2.REVIEW_PROTOCOL;
         }
-        check(BookQueryDatasetV2.REVIEW_PROTOCOL.equals(m.group(1)), "unknown worksheet protocol " + m.group(1));
-        return m.group(1);
+        check(worksheet.startsWith(preamble(true)), "worksheet title, protocol line or instructions were edited");
+        return BookQueryDatasetV2.LEGACY_REVIEW_PROTOCOL;
     }
 
     /** The {@code review.psv} bytes for every decided entry of {@code worksheet}, sorted by pair id. */
     static String apply(String worksheet, byte[] body, BookQueryDataset base, List<Pair> selection) {
         Map<String, Pair> pairs = selection.stream()
                 .collect(Collectors.toMap(Pair::pairId, Function.identity(), (a, b) -> a, LinkedHashMap::new));
+        protocolOf(worksheet);
         Map<String, Case> cases = cases(base);
         Map<String, String> rows = new TreeMap<>();
         Set<String> seen = new HashSet<>();
