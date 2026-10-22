@@ -50,6 +50,7 @@ final class BookReviewWorksheet {
         """;
 
     private static final Pattern ENTRY = Pattern.compile("(?m)^## (UJ-[0-9a-f]{8})$");
+    private static final List<String> FIELDS = List.of("decision", "grade", "quote", "note");
     private static final Pattern FIELD = Pattern.compile("(?m)^(decision|grade|quote|note):[ \\t]*(.*)$");
 
     private BookReviewWorksheet() {
@@ -139,6 +140,10 @@ final class BookReviewWorksheet {
             // Fields come after the chunk text, so a field-like line of book text cannot be read as a decision.
             int fence = section.lastIndexOf("\n~~~\n");
             Map<String, String> fields = fields(fence < 0 ? section : section.substring(fence));
+            // Only a present, empty decision means pending: a deleted or misspelled field would otherwise silently drop a
+            // recorded decision when review.psv is rewritten.
+            List<String> absent = FIELDS.stream().filter(f -> !fields.containsKey(f)).toList();
+            check(absent.isEmpty(), id + ": worksheet entry is missing its " + String.join(", ", absent) + " field");
             String decision = fields.getOrDefault("decision", "");
             if (decision.isEmpty()) {
                 continue;

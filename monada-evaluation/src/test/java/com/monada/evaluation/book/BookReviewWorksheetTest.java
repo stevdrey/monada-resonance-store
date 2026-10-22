@@ -155,6 +155,20 @@ class BookReviewWorksheetTest {
     }
 
     @Test
+    void rejectsAnEntryWithADeletedOrMisspelledField() {
+        Pair p = SELECTION.getFirst();
+        String sheet = BookReviewWorksheet.render(BODY, BASE, SELECTION);
+        int at = sheet.indexOf("decision: \n", sheet.indexOf("## " + p.pairId() + "\n"));
+        String deleted = sheet.substring(0, at) + sheet.substring(at + "decision: \n".length());
+        String misspelled = sheet.substring(0, at) + "decison: \n" + sheet.substring(at + "decision: \n".length());
+        for (String edited : List.of(deleted, misspelled)) {
+            var e = assertThrows(IllegalStateException.class,
+                    () -> BookReviewWorksheet.apply(edited, BODY, BASE, SELECTION));
+            assertEquals(p.pairId() + ": worksheet entry is missing its decision field", e.getMessage());
+        }
+    }
+
+    @Test
     void rejectsAWorksheetWithAMissingOrRepeatedEntry() {
         String sheet = BookReviewWorksheet.render(BODY, BASE, SELECTION);
         String id = SELECTION.getFirst().pairId();
