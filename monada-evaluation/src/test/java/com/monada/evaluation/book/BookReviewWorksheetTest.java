@@ -165,6 +165,25 @@ class BookReviewWorksheetTest {
     }
 
     @Test
+    void rejectsTextInsertedAmongAnEntrysFields() {
+        Pair p = SELECTION.getFirst();
+        String sheet = BookReviewWorksheet.render(BODY, BASE, SELECTION);
+        int fields = sheet.indexOf("decision: \n", sheet.indexOf("## " + p.pairId() + "\n"));
+        for (String inserted : List.of(
+                sheet.substring(0, fields) + "EVIDENCE now means non-relevant.\n" + sheet.substring(fields),
+                sheet.substring(0, fields) + "decision: \ngrade: \nquote: \nnote: \nreminder: swap labels\n"
+                        + sheet.substring(fields + "decision: \ngrade: \nquote: \nnote: \n".length()))) {
+            var e = assertThrows(IllegalStateException.class,
+                    () -> BookReviewWorksheet.apply(inserted, BODY, BASE, SELECTION));
+            assertEquals(p.pairId() + ": worksheet entry has text outside its decision, grade, quote and note lines",
+                    e.getMessage());
+        }
+        // An editor that drops the final blank line is fine.
+        assertEquals(BookQueryDatasetV2.REVIEW_HEADER + "\n",
+                BookReviewWorksheet.apply(sheet.substring(0, sheet.length() - 1), BODY, BASE, SELECTION));
+    }
+
+    @Test
     void rejectsAnEntryWithADeletedOrMisspelledField() {
         Pair p = SELECTION.getFirst();
         String sheet = BookReviewWorksheet.render(BODY, BASE, SELECTION);

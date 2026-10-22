@@ -52,6 +52,9 @@ final class BookReviewWorksheet {
     private static final Pattern ENTRY = Pattern.compile("(?m)^## (UJ-[0-9a-f]{8})$");
     /** Consecutive chunk words a note may not reproduce; the committed notes share at most 3. */
     static final int COPIED_WORDS = 6;
+    /** The editable remainder of an entry, exactly as rendered apart from the four field values. */
+    private static final Pattern LAYOUT = Pattern.compile(
+            "\\ndecision:[^\\n]*\\ngrade:[^\\n]*\\nquote:[^\\n]*\\nnote:[^\\n]*\\n*");
     private static final List<String> FIELDS = List.of("decision", "grade", "quote", "note");
     private static final Pattern FIELD = Pattern.compile("(?m)^(decision|grade|quote|note):[ \\t]*(.*)$");
 
@@ -127,7 +130,17 @@ final class BookReviewWorksheet {
         boolean legacy = BookQueryDatasetV2.LEGACY_REVIEW_PROTOCOL.equals(protocolOf(worksheet));
         Map<String, Case> cases = cases(base);
         Map<String, String> rows = new TreeMap<>();
+        // The set of entries first: unknown, repeated or missing headings (a truncated sheet, a mistyped heading) are
+        // reported as such before any entry is read, since apply rewrites review.psv rather than merging it.
         Set<String> seen = new HashSet<>();
+        Matcher heading = ENTRY.matcher(worksheet);
+        while (heading.find()) {
+            String id = heading.group(1);
+            check(pairs.containsKey(id), id + ": worksheet entry is not in selection.psv");
+            check(seen.add(id), id + ": worksheet has this entry twice");
+        }
+        List<String> missing = pairs.keySet().stream().filter(id -> !seen.contains(id)).toList();
+        check(missing.isEmpty(), "worksheet is missing " + missing.size() + " selected entries: " + missing);
         Matcher entry = ENTRY.matcher(worksheet);
         int start = entry.find() ? entry.start() : -1;
         while (start >= 0) {
@@ -136,21 +149,24 @@ final class BookReviewWorksheet {
             String section = worksheet.substring(start, next < 0 ? worksheet.length() : next);
             start = next;
             Pair pair = pairs.get(id);
-            check(pair != null, id + ": worksheet entry is not in selection.psv");
-            check(seen.add(id), id + ": worksheet has this entry twice");
             // The decision must be about the context the renderer showed: an edited query, answerability or chunk text
             // (or two swapped entries) would attach it to a pair the reviewer did not see.
             Case c = cases.get(pair.queryId());
             ChunkRef chunk = base.chunkMap().get(pair.chunkKey());
-            check(section.startsWith(context(pair, c, chunk, body, legacy)),
+            String context = context(pair, c, chunk, body, legacy);
+            check(section.startsWith(context),
                     id + ": worksheet entry context (query, answerability or chunk text) was edited");
             // Fields come after the chunk text, so a field-like line of book text cannot be read as a decision.
-            int fence = section.lastIndexOf("\n~~~\n");
-            Map<String, String> fields = fields(fence < 0 ? section : section.substring(fence));
+            String rest = section.substring(context.length());
+            Map<String, String> fields = fields(rest);
             // Only a present, empty decision means pending: a deleted or misspelled field would otherwise silently drop a
             // recorded decision when review.psv is rewritten.
             List<String> absent = FIELDS.stream().filter(f -> !fields.containsKey(f)).toList();
             check(absent.isEmpty(), id + ": worksheet entry is missing its " + String.join(", ", absent) + " field");
+            // Nothing but the four field lines may follow the context: an inserted line (say, redefining a label) would
+            // be guidance the recorded protocol does not contain.
+            check(LAYOUT.matcher(rest).matches(),
+                    id + ": worksheet entry has text outside its decision, grade, quote and note lines");
             String decision = fields.getOrDefault("decision", "");
             if (decision.isEmpty()) {
                 continue;
@@ -175,10 +191,6 @@ final class BookReviewWorksheet {
             }
             check(rows.put(id, row) == null, id + ": worksheet decides this pair twice");
         }
-        // apply rewrites review.psv rather than merging it: a truncated sheet or a mistyped heading would otherwise
-        // silently turn recorded decisions back into pending pairs.
-        List<String> missing = pairs.keySet().stream().filter(id -> !seen.contains(id)).toList();
-        check(missing.isEmpty(), "worksheet is missing " + missing.size() + " selected entries: " + missing);
         StringBuilder out = new StringBuilder(BookQueryDatasetV2.REVIEW_HEADER).append('\n');
         rows.values().forEach(r -> out.append(r).append('\n'));
         return out.toString();
