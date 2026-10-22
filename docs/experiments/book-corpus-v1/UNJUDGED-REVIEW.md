@@ -131,7 +131,10 @@ The receipt is re-derived and compared byte for byte by `BookUnjudgedSelectionTe
    to change the decisions of a signed dataset: set the status back to `PENDING_HUMAN_REVIEW` and clear the
    reviewer, approver, date, `judgment.draftedAt` and `judgment.verification` first, so neither a sign-off nor a
    draft verification ever covers labels that nobody approved. Until the dataset is `REVIEWED`, applied decisions
-   are review progress only: the loader does not merge them into the v2 judgments.
+   are review progress only: the loader does not merge them into the v2 judgments. The `counts.*` that `apply`
+   writes already describe the judgments after sign-off, so the manual switch to `REVIEWED` needs no re-apply.
+   `apply` refuses to run unless the current manifest and `review.psv` validate, and it decides whether decisions
+   changed by comparing with the `review.psv` on disk.
 4. **Sign-off is manual and human.** The reviewer edits `judgment.reviewStatus=REVIEWED`, `judgment.reviewer`,
    `judgment.approvedBy` and `judgment.reviewedAt` (ISO date). The loader rejects `REVIEWED` in these cases:
    - any selected pair is still pending;

@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -230,6 +231,8 @@ record BookQueryDatasetV2(Properties manifest, BookQueryDataset base, List<Pair>
     private static List<Review> reviews(byte[] bytes, Map<String, Pair> selection, Map<String, Case> cases,
                                         Map<String, ChunkRef> chunks) {
         String text = new String(bytes, StandardCharsets.UTF_8);
+        // A lenient decode would turn invalid bytes into U+FFFD, so the parsed notes would differ from the pinned bytes.
+        check(Arrays.equals(text.getBytes(StandardCharsets.UTF_8), bytes), "review.psv is not valid UTF-8");
         check(text.endsWith("\n") && !text.contains("\r"), "review.psv must use LF line ends and end with one");
         String[] lines = text.substring(0, text.length() - 1).split("\n", -1);
         check(REVIEW_HEADER.equals(lines[0]), "review.psv header must be " + REVIEW_HEADER);
@@ -294,9 +297,12 @@ record BookQueryDatasetV2(Properties manifest, BookQueryDataset base, List<Pair>
             counts.put("counts.decision." + decision,
                     String.valueOf(d.reviews().stream().filter(r -> r.decision() == decision).count()));
         }
-        counts.put("counts.added.judgments", String.valueOf(d.addedJudgments().size()));
+        // Counted at sign-off, independent of the current status: signing off (a manual status edit) must not make the
+        // stored counts stale, so they describe the judgments the decisions add once REVIEWED.
+        long labels = d.reviews().stream().filter(Review::labels).count();
+        counts.put("counts.added.judgments", String.valueOf(labels));
         counts.put("counts.judgments",
-                String.valueOf(d.cases().stream().mapToInt(c -> c.judgments().size()).sum()));
+                String.valueOf(d.base().cases().stream().mapToInt(c -> c.judgments().size()).sum() + labels));
         return counts;
     }
 

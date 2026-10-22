@@ -5,6 +5,7 @@ import com.monada.evaluation.book.BookQueryDataset.Category;
 import com.monada.evaluation.book.BookQueryDataset.Split;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -176,6 +177,8 @@ final class BookUnjudgedSelection {
     /** Parses a receipt; structural checks only, the dataset cross-checks live in {@link BookQueryDatasetV2}. */
     static List<Pair> parse(byte[] bytes) {
         String text = new String(bytes, StandardCharsets.UTF_8);
+        // A lenient decode would turn invalid bytes into U+FFFD, so the parsed notes would differ from the pinned bytes.
+        check(Arrays.equals(text.getBytes(StandardCharsets.UTF_8), bytes), "selection.psv is not valid UTF-8");
         check(text.endsWith("\n") && !text.contains("\r"), "selection.psv must use LF line ends and end with one");
         String[] lines = text.substring(0, text.length() - 1).split("\n", -1);
         check(HEADER.equals(lines[0]), "selection.psv header must be " + HEADER);

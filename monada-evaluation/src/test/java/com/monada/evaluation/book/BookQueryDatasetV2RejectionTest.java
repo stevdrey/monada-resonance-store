@@ -36,6 +36,8 @@ class BookQueryDatasetV2RejectionTest {
 
     private final List<String> selection = new ArrayList<>();
     private final List<String> review = new ArrayList<>(List.of(BookQueryDatasetV2.REVIEW_HEADER));
+    /** Raw review bytes that replace {@link #review} when set (for byte-level defects). */
+    private byte[] rawReview;
 
     @BeforeAll
     static void loadBase() throws Exception {
@@ -72,6 +74,20 @@ class BookQueryDatasetV2RejectionTest {
         assertEquals(BASE.cases(), pending.cases(), "before sign-off v2 exposes the v1 labels only");
         BookQueryDatasetV2 signed = load(BookQueryDatasetV2RejectionTest::signOff);
         assertEquals(BookUnjudgedSelection.TARGET, signed.addedJudgments().size());
+        // Counts stored while unsigned stay valid after the manual sign-off edit.
+        assertEquals(pending.manifest().getProperty("counts.added.judgments"),
+                signed.manifest().getProperty("counts.added.judgments"));
+        assertEquals("115", signed.manifest().getProperty("counts.judgments"));
+    }
+
+    @Test
+    void rejectsAReviewThatIsNotValidUtf8() {
+        review.add(row(ANSWERABLE, "EVIDENCE", "2", 10, 40));
+        byte[] valid = bytes(review);
+        // Corrupt one byte of the note into an invalid UTF-8 lead byte; digests are refreshed for these exact bytes.
+        rawReview = valid.clone();
+        rawReview[rawReview.length - 3] = (byte) 0xFF;
+        reject("review.psv is not valid UTF-8", m -> { });
     }
 
     @Test
@@ -396,7 +412,7 @@ class BookQueryDatasetV2RejectionTest {
 
     private BookQueryDatasetV2 parse(byte[] baseManifest, BookQueryDataset base, Consumer<Properties> mutate) {
         byte[] sel = bytes(selection);
-        byte[] rev = bytes(review);
+        byte[] rev = rawReview != null ? rawReview : bytes(review);
         Properties m = new Properties();
         m.putAll(MANIFEST);
         // Fixtures start unsigned, whatever the bundled dataset's sign-off; tests sign off explicitly.
@@ -404,15 +420,8 @@ class BookQueryDatasetV2RejectionTest {
         List.of("judgment.reviewer", "judgment.approvedBy", "judgment.reviewedAt").forEach(k -> m.setProperty(k, ""));
         m.setProperty("selection.sha256", BookQueryDataset.sha256(sel));
         m.setProperty("review.sha256", BookQueryDataset.sha256(rev));
-        // Counts depend on the review status (decisions merge only once REVIEWED), so compute them under the status
-        // the mutation ends with; a mutation that edits counts still overrides them afterwards.
-        Properties probe = new Properties();
-        probe.putAll(m);
-        mutate.accept(probe);
-        Properties forCounts = new Properties();
-        forCounts.putAll(m);
-        forCounts.setProperty("judgment.reviewStatus", probe.getProperty("judgment.reviewStatus", ""));
-        BookQueryDatasetV2.expectedCounts(BookQueryDatasetV2.build(forCounts, base, baseManifest, sel, rev))
+        // Counts are computed while unsigned, as apply does; signing off in the mutation must not make them stale.
+        BookQueryDatasetV2.expectedCounts(BookQueryDatasetV2.build(m, base, baseManifest, sel, rev))
                 .forEach(m::setProperty);
         mutate.accept(m);
         return BookQueryDatasetV2.parse(m, base, baseManifest, sel, rev);

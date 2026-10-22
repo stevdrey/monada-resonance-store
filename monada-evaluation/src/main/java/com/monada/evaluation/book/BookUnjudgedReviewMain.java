@@ -147,11 +147,21 @@ public final class BookUnjudgedReviewMain {
         String review = BookReviewWorksheet.apply(sheet, body, base, pairs);
         byte[] reviewBytes = review.getBytes(StandardCharsets.UTF_8);
         byte[] baseManifest = BookQueryDataset.resource("manifest.properties");
-        requireUnsignedChange(properties(manifestText), BookQueryDataset.sha256(reviewBytes));
+        // "Changed" is decided against the review actually on disk, after the current manifest/review pair validates:
+        // a hand-edited manifest digest must not make different decisions look like a re-apply of the signed ones.
+        byte[] current = Files.readAllBytes(dir.resolve(BookQueryDatasetV2.REVIEW_FILE));
+        try {
+            BookQueryDatasetV2.parse(properties(manifestText), base, baseManifest, selection, current);
+        } catch (IllegalStateException e) {
+            throw new IllegalStateException("the current manifest and review.psv do not validate (" + e.getMessage()
+                    + "); restore them before applying a worksheet", e);
+        }
+        boolean changed = !Arrays.equals(reviewBytes, current);
+        requireUnsignedChange(properties(manifestText), changed);
 
         String updated = replace(manifestText, "review.sha256", BookQueryDataset.sha256(reviewBytes));
         // New decisions carry the protocol of the sheet they came from; re-applying a signed review keeps its record.
-        if (!BookQueryDataset.sha256(reviewBytes).equals(properties(manifestText).getProperty("review.sha256"))) {
+        if (changed) {
             updated = replace(updated, "review.protocol", BookReviewWorksheet.protocolOf(sheet));
         }
         BookQueryDatasetV2 built = BookQueryDatasetV2.build(properties(updated), base, baseManifest, selection,
@@ -224,10 +234,10 @@ public final class BookUnjudgedReviewMain {
     /**
      * A sign-off and a draft verification cover one review digest: changing the decisions would keep a stale
      * reviewer, approver, date or "each drafted decision verified" claim on labels nobody approved. Re-applying the same
-     * decisions stays allowed.
+     * decisions stays allowed. {@code changed} compares the new review with the one on disk.
      */
-    static void requireUnsignedChange(Properties manifest, String newReviewSha256) {
-        if (newReviewSha256.equals(manifest.getProperty("review.sha256"))) {
+    static void requireUnsignedChange(Properties manifest, boolean changed) {
+        if (!changed) {
             return;
         }
         // Status alone is not enough: a leftover reviewer, approver, date or draft verification would be re-attached to

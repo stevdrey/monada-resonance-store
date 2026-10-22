@@ -128,6 +128,14 @@ class BookUnjudgedSelectionTest {
     }
 
     @Test
+    void rejectsAReceiptThatIsNotValidUtf8() {
+        byte[] bytes = BookQueryDatasetV2.resource("selection.psv").clone();
+        bytes[bytes.length - 2] = (byte) 0xFF;
+        var e = assertThrows(IllegalStateException.class, () -> BookUnjudgedSelection.parse(bytes));
+        assertEquals("selection.psv is not valid UTF-8", e.getMessage());
+    }
+
+    @Test
     void rejectsAReceiptWithAForgedPairId() {
         List<String> rows = new ArrayList<>(List.of(new String(BookQueryDatasetV2.resource("selection.psv"),
                 StandardCharsets.UTF_8).split("\n")));

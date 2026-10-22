@@ -102,10 +102,9 @@ class BookUnjudgedReviewMainTest {
     void applyNeverCarriesASignOffOverToChangedDecisions() {
         Properties signed = new Properties();
         signed.setProperty("judgment.reviewStatus", "REVIEWED");
-        signed.setProperty("review.sha256", "a".repeat(64));
-        BookUnjudgedReviewMain.requireUnsignedChange(signed, "a".repeat(64));
+        BookUnjudgedReviewMain.requireUnsignedChange(signed, false);
         var e = assertThrows(IllegalStateException.class,
-                () -> BookUnjudgedReviewMain.requireUnsignedChange(signed, "b".repeat(64)));
+                () -> BookUnjudgedReviewMain.requireUnsignedChange(signed, true));
         assertTrue(e.getMessage().contains("set judgment.reviewStatus to PENDING_HUMAN_REVIEW"), e.getMessage());
         // A status-only reset keeps a stale approval that a later status edit would re-attach to the new digest.
         signed.setProperty("judgment.reviewStatus", "PENDING_HUMAN_REVIEW");
@@ -113,10 +112,10 @@ class BookUnjudgedReviewMainTest {
                 "judgment.draftedAt", "judgment.verification")) {
             signed.setProperty(key, "stale");
             assertThrows(IllegalStateException.class,
-                    () -> BookUnjudgedReviewMain.requireUnsignedChange(signed, "b".repeat(64)), key);
+                    () -> BookUnjudgedReviewMain.requireUnsignedChange(signed, true), key);
             signed.setProperty(key, "");
         }
-        BookUnjudgedReviewMain.requireUnsignedChange(signed, "b".repeat(64));
+        BookUnjudgedReviewMain.requireUnsignedChange(signed, true);
     }
 
     @Test
