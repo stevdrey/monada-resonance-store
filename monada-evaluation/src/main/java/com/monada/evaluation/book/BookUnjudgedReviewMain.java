@@ -144,20 +144,22 @@ public final class BookUnjudgedReviewMain {
         String manifestText = new String(manifestBytes, StandardCharsets.UTF_8);
         byte[] selection = Files.readAllBytes(dir.resolve(BookQueryDatasetV2.SELECTION_FILE));
         BookQueryDataset base = BookQueryDataset.load();
-        List<Pair> pairs = BookUnjudgedSelection.parse(selection);
-        String sheet = Files.readString(Path.of(options.get("--worksheet")), StandardCharsets.UTF_8);
-        String review = BookReviewWorksheet.apply(sheet, body, base, pairs);
-        byte[] reviewBytes = review.getBytes(StandardCharsets.UTF_8);
         byte[] baseManifest = BookQueryDataset.resource("manifest.properties");
-        // "Changed" is decided against the review actually on disk, after the current manifest/review pair validates:
-        // a hand-edited manifest digest must not make different decisions look like a re-apply of the signed ones.
+        // The current dataset validates first, so the worksheet is only ever read against known queries and chunks.
+        // "Changed" is then decided against the review actually on disk: a hand-edited manifest digest must not make
+        // different decisions look like a re-apply of the signed ones.
         byte[] current = Files.readAllBytes(dir.resolve(BookQueryDatasetV2.REVIEW_FILE));
+        List<Pair> pairs;
         try {
-            BookQueryDatasetV2.parse(properties(manifestText), base, baseManifest, selection, current);
+            pairs = BookQueryDatasetV2.parse(properties(manifestText), base, baseManifest, selection, current)
+                    .selection();
         } catch (IllegalStateException e) {
             throw new IllegalStateException("the current manifest and review.psv do not validate (" + e.getMessage()
                     + "); restore them before applying a worksheet", e);
         }
+        String sheet = Files.readString(Path.of(options.get("--worksheet")), StandardCharsets.UTF_8);
+        String review = BookReviewWorksheet.apply(sheet, body, base, pairs);
+        byte[] reviewBytes = review.getBytes(StandardCharsets.UTF_8);
         boolean changed = !Arrays.equals(reviewBytes, current);
         requireUnsignedChange(properties(manifestText), changed);
 

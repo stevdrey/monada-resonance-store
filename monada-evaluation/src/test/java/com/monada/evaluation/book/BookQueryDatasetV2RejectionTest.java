@@ -67,6 +67,15 @@ class BookQueryDatasetV2RejectionTest {
     }
 
     @Test
+    void theValidatedStatusCannotBeChangedThroughTheManifestAccessor() {
+        decideBoth();
+        BookQueryDatasetV2 pending = load(m -> { });
+        pending.manifest().setProperty("judgment.reviewStatus", "REVIEWED");
+        assertEquals("PENDING_HUMAN_REVIEW", pending.manifest().getProperty("judgment.reviewStatus"));
+        assertTrue(pending.addedJudgments().isEmpty(), "a caller's edit must not promote unapproved decisions");
+    }
+
+    @Test
     void decisionsBecomeJudgmentsOnlyAfterSignOff() {
         decideBoth();
         BookQueryDatasetV2 pending = load(m -> { });

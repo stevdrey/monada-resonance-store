@@ -83,9 +83,24 @@ record BookQueryDatasetV2(Properties manifest, BookQueryDataset base, List<Pair>
     }
 
     BookQueryDatasetV2 {
+        // A private snapshot: the validated status decides what cases() and addedJudgments() expose, so no caller may
+        // change it afterwards.
+        manifest = copy(manifest);
         selection = List.copyOf(selection);
         reviews = List.copyOf(reviews);
         cases = List.copyOf(cases);
+    }
+
+    /** A copy of the validated manifest; editing it does not change this dataset. */
+    @Override
+    public Properties manifest() {
+        return copy(manifest);
+    }
+
+    private static Properties copy(Properties source) {
+        Properties copy = new Properties();
+        copy.putAll(source);
+        return copy;
     }
 
     /** Judgments added by v2 (in review order), each tagged with its query id. */

@@ -143,6 +143,16 @@ class BookReviewWorksheetTest {
     }
 
     @Test
+    void rejectsInstructionsAppendedAfterTheCanonicalPreamble() {
+        String sheet = BookReviewWorksheet.render(BODY, BASE, SELECTION);
+        String preamble = BookReviewWorksheet.preamble(false);
+        String appended = preamble + "Note: here EVIDENCE means non-relevant.\n\n" + sheet.substring(preamble.length());
+        var e = assertThrows(IllegalStateException.class,
+                () -> BookReviewWorksheet.apply(appended, BODY, BASE, SELECTION));
+        assertEquals("worksheet title, protocol line or instructions were edited", e.getMessage());
+    }
+
+    @Test
     void rejectsDecisionsMadeUnderEditedInstructions() {
         String sheet = BookReviewWorksheet.render(BODY, BASE, SELECTION);
         // Swapping the meaning of the two labels would make the recorded protocol untrue.

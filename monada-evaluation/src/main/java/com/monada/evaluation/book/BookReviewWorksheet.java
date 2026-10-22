@@ -106,11 +106,16 @@ final class BookReviewWorksheet {
      * swapped decision meanings, are rejected, since the decisions would not follow the recorded protocol.
      */
     static String protocolOf(String worksheet) {
-        if (worksheet.startsWith(preamble(false))) {
+        if (headedBy(worksheet, preamble(false))) {
             return BookQueryDatasetV2.REVIEW_PROTOCOL;
         }
-        check(worksheet.startsWith(preamble(true)), "worksheet title, protocol line or instructions were edited");
+        check(headedBy(worksheet, preamble(true)), "worksheet title, protocol line or instructions were edited");
         return BookQueryDatasetV2.LEGACY_REVIEW_PROTOCOL;
+    }
+
+    /** The whole head up to the first entry must be {@code preamble}: text appended after it is rejected too. */
+    private static boolean headedBy(String worksheet, String preamble) {
+        return worksheet.startsWith(preamble) && worksheet.startsWith("## ", preamble.length());
     }
 
     /** The {@code review.psv} bytes for every decided entry of {@code worksheet}, sorted by pair id. */
