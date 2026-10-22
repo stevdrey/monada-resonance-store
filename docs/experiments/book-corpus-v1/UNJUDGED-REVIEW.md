@@ -129,7 +129,9 @@ The receipt is re-derived and compared byte for byte by `BookUnjudgedSelectionTe
 
    Nothing is written unless the whole dataset validates. `apply` never sets the review status, and it refuses
    to change the decisions of a signed dataset: set the status back to `PENDING_HUMAN_REVIEW` and clear the
-   reviewer, approver and date first, so a sign-off never covers labels that nobody approved.
+   reviewer, approver, date, `judgment.draftedAt` and `judgment.verification` first, so neither a sign-off nor a
+   draft verification ever covers labels that nobody approved. Until the dataset is `REVIEWED`, applied decisions
+   are review progress only: the loader does not merge them into the v2 judgments.
 4. **Sign-off is manual and human.** The reviewer edits `judgment.reviewStatus=REVIEWED`, `judgment.reviewer`,
    `judgment.approvedBy` and `judgment.reviewedAt` (ISO date). The loader rejects `REVIEWED` in these cases:
    - any selected pair is still pending;

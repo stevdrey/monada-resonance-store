@@ -109,7 +109,8 @@ class BookUnjudgedReviewMainTest {
         assertTrue(e.getMessage().contains("set judgment.reviewStatus to PENDING_HUMAN_REVIEW"), e.getMessage());
         // A status-only reset keeps a stale approval that a later status edit would re-attach to the new digest.
         signed.setProperty("judgment.reviewStatus", "PENDING_HUMAN_REVIEW");
-        for (String key : List.of("judgment.reviewer", "judgment.approvedBy", "judgment.reviewedAt")) {
+        for (String key : List.of("judgment.reviewer", "judgment.approvedBy", "judgment.reviewedAt",
+                "judgment.draftedAt", "judgment.verification")) {
             signed.setProperty(key, "stale");
             assertThrows(IllegalStateException.class,
                     () -> BookUnjudgedReviewMain.requireUnsignedChange(signed, "b".repeat(64)), key);

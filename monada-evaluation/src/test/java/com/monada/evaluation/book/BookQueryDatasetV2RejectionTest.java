@@ -64,6 +64,17 @@ class BookQueryDatasetV2RejectionTest {
     }
 
     @Test
+    void decisionsBecomeJudgmentsOnlyAfterSignOff() {
+        decideBoth();
+        BookQueryDatasetV2 pending = load(m -> { });
+        assertEquals(BookUnjudgedSelection.TARGET, pending.reviews().size(), "decisions are kept as review progress");
+        assertTrue(pending.addedJudgments().isEmpty(), "unapproved decisions are not gold");
+        assertEquals(BASE.cases(), pending.cases(), "before sign-off v2 exposes the v1 labels only");
+        BookQueryDatasetV2 signed = load(BookQueryDatasetV2RejectionTest::signOff);
+        assertEquals(BookUnjudgedSelection.TARGET, signed.addedJudgments().size());
+    }
+
+    @Test
     void aFullyReviewedSignedOffSelectionLoadsAndAppendsJudgments() {
         review.add(row(ANSWERABLE, "EVIDENCE", "2", 10, 40));
         review.add(row(NO_ANSWER, "CONFOUNDER", "0", 0, 20));
@@ -393,7 +404,15 @@ class BookQueryDatasetV2RejectionTest {
         List.of("judgment.reviewer", "judgment.approvedBy", "judgment.reviewedAt").forEach(k -> m.setProperty(k, ""));
         m.setProperty("selection.sha256", BookQueryDataset.sha256(sel));
         m.setProperty("review.sha256", BookQueryDataset.sha256(rev));
-        BookQueryDatasetV2.expectedCounts(BookQueryDatasetV2.build(m, base, baseManifest, sel, rev))
+        // Counts depend on the review status (decisions merge only once REVIEWED), so compute them under the status
+        // the mutation ends with; a mutation that edits counts still overrides them afterwards.
+        Properties probe = new Properties();
+        probe.putAll(m);
+        mutate.accept(probe);
+        Properties forCounts = new Properties();
+        forCounts.putAll(m);
+        forCounts.setProperty("judgment.reviewStatus", probe.getProperty("judgment.reviewStatus", ""));
+        BookQueryDatasetV2.expectedCounts(BookQueryDatasetV2.build(forCounts, base, baseManifest, sel, rev))
                 .forEach(m::setProperty);
         mutate.accept(m);
         return BookQueryDatasetV2.parse(m, base, baseManifest, sel, rev);

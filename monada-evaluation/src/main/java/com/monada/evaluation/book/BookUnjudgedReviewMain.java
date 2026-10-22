@@ -48,8 +48,9 @@ public final class BookUnjudgedReviewMain {
             "worksheet", Set.of("--input", "--out", "--manifest"),
             "apply", Set.of("--input", "--worksheet", "--dataset", "--manifest"),
             "report", Set.of("--baseline", "--out"));
+    /** Fields that attest to one review digest; all must be cleared before different decisions are applied. */
     private static final List<String> SIGN_OFF = List.of("judgment.reviewer", "judgment.approvedBy",
-            "judgment.reviewedAt");
+            "judgment.reviewedAt", "judgment.draftedAt", "judgment.verification");
     private static final Map<String, Set<String>> REQUIRED = Map.of(
             "select", Set.of(), "worksheet", Set.of("--input", "--out"),
             "apply", Set.of("--input", "--worksheet", "--dataset"), "report", Set.of());
@@ -221,15 +222,16 @@ public final class BookUnjudgedReviewMain {
     }
 
     /**
-     * A sign-off covers one review digest: changing the decisions of a {@code REVIEWED} dataset would keep a stale
-     * reviewer, approver and date on labels nobody approved. Re-applying the same decisions stays allowed.
+     * A sign-off and a draft verification cover one review digest: changing the decisions would keep a stale
+     * reviewer, approver, date or "each drafted decision verified" claim on labels nobody approved. Re-applying the same
+     * decisions stays allowed.
      */
     static void requireUnsignedChange(Properties manifest, String newReviewSha256) {
         if (newReviewSha256.equals(manifest.getProperty("review.sha256"))) {
             return;
         }
-        // Status alone is not enough: a leftover reviewer, approver or date would be re-attached to the new digest by
-        // a later status-only edit back to REVIEWED.
+        // Status alone is not enough: a leftover reviewer, approver, date or draft verification would be re-attached to
+        // the new digest by a later status-only edit back to REVIEWED; they must be re-entered for the new decisions.
         boolean signed = "REVIEWED".equals(manifest.getProperty("judgment.reviewStatus"))
                 || SIGN_OFF.stream().anyMatch(key -> !manifest.getProperty(key, "").isBlank());
         if (signed) {

@@ -29,7 +29,8 @@ import java.util.stream.Collectors;
  * {@value #PROVENANCE}: the pairs were sampled from a published run of the evaluated system, so these labels are not
  * an independent prospective gold standard.
  *
- * <p>Only {@link Decision#EVIDENCE} and {@link Decision#CONFOUNDER} decisions become judgments.
+ * <p>Only {@link Decision#EVIDENCE} and {@link Decision#CONFOUNDER} decisions become judgments, and only once the
+ * dataset is {@code REVIEWED}.
  * {@link Decision#UNRESOLVED} pairs stay unjudged, and {@link Decision#NO_ANSWER_CONTRADICTED} is a review finding
  * that never rewrites a v1 NO_ANSWER case. A dataset is {@code REVIEWED} only with every selected pair decided, a
  * named human reviewer and approver distinct from the drafter, and no open finding unless an explicit reclassification
@@ -88,7 +89,19 @@ record BookQueryDatasetV2(Properties manifest, BookQueryDataset base, List<Pair>
 
     /** Judgments added by v2 (in review order), each tagged with its query id. */
     List<Map.Entry<String, Judgment>> addedJudgments() {
+        if (!reviewed(manifest)) {
+            return List.of();
+        }
         return reviews.stream().filter(Review::labels).map(r -> Map.entry(r.queryId(), toJudgment(r))).toList();
+    }
+
+    /**
+     * Decisions become judgments only after sign-off: before it, {@link #reviews()} holds them as review progress,
+     * but {@link #cases()} and {@link #addedJudgments()} expose v1 labels only, so unapproved (or model-drafted,
+     * unverified) rows are never consumed as gold.
+     */
+    private static boolean reviewed(Properties manifest) {
+        return "REVIEWED".equals(manifest.getProperty("judgment.reviewStatus"));
     }
 
     List<Review> findings() {
@@ -189,7 +202,7 @@ record BookQueryDatasetV2(Properties manifest, BookQueryDataset base, List<Pair>
         List<Review> reviews = reviews(reviewBytes, byId, cases, base.chunkMap());
 
         Map<String, List<Judgment>> added = new LinkedHashMap<>();
-        reviews.stream().filter(Review::labels)
+        reviews.stream().filter(r -> reviewed(manifest) && r.labels())
                 .forEach(r -> added.computeIfAbsent(r.queryId(), k -> new ArrayList<>()).add(toJudgment(r)));
         List<Case> merged = cases.values().stream().map(c -> {
             List<Judgment> all = new ArrayList<>(c.judgments());
