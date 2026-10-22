@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
  * the real body's length) so the real chunk map applies without any book text.
  */
 class BookReviewWorksheetTest {
+    private static final String KEY_OTHER = "book-corpus-v1/book-chunking-v1/s000/c0000";
     private static BookQueryDataset BASE;
     private static List<Pair> SELECTION;
     private static byte[] BODY;
@@ -159,12 +160,50 @@ class BookReviewWorksheetTest {
 
     @Test
     void ignoresFieldLikeLinesInsideTheChunkText() {
+        // Book text that looks like a field (same byte length, so the chunk map still applies) is not a decision.
+        byte[] body = BODY.clone();
+        ChunkRef chunk = BASE.chunkMap().get(SELECTION.getFirst().chunkKey());
+        byte[] line = "decision: EVIDENCE\n".getBytes(StandardCharsets.UTF_8);
+        System.arraycopy(line, 0, body, (int) chunk.byteStart(), line.length);
+        String sheet = BookReviewWorksheet.render(body, BASE, SELECTION);
+        assertTrue(sheet.contains("~~~text\ndecision: EVIDENCE\n"));
+        assertEquals(BookQueryDatasetV2.REVIEW_HEADER + "\n", BookReviewWorksheet.apply(sheet, body, BASE, SELECTION));
+    }
+
+    @Test
+    void rejectsADecisionOnEditedOrSwappedContext() {
         Pair p = SELECTION.getFirst();
         String sheet = BookReviewWorksheet.render(BODY, BASE, SELECTION);
-        int at = sheet.indexOf("~~~text\n", sheet.indexOf("## " + p.pairId())) + 8;
-        String planted = sheet.substring(0, at) + "decision: EVIDENCE\n" + sheet.substring(at);
-        assertEquals(BookQueryDatasetV2.REVIEW_HEADER + "\n", BookReviewWorksheet.apply(planted, BODY, BASE,
-                SELECTION));
+        int at = sheet.indexOf("## " + p.pairId() + "\n");
+        int end = sheet.indexOf("\n## ", at);
+        String section = sheet.substring(at, end);
+        String query = section.substring(section.indexOf("query: "), section.indexOf('\n', section.indexOf("query: ")));
+        String declared = section.substring(section.indexOf("declared: "),
+                section.indexOf('\n', section.indexOf("declared: ")));
+        int text = section.indexOf("~~~text\n") + 8;
+        for (String edited : List.of(
+                section.replace(query, query + " (edited)"),
+                section.replace(declared, declared.contains("NO_ANSWER") ? "declared: answerable"
+                        : "declared: NO_ANSWER (v1: the book does not answer it)"),
+                section.substring(0, text) + "x" + section.substring(text + 1),
+                section.replace("\n\n~~~text", "\nchunk: " + KEY_OTHER + " bytes [0,1)\n\n~~~text"))) {
+            String sheetWithEdit = sheet.substring(0, at) + edited + sheet.substring(end);
+            var e = assertThrows(IllegalStateException.class,
+                    () -> BookReviewWorksheet.apply(sheetWithEdit, BODY, BASE, SELECTION));
+            assertEquals(p.pairId() + ": worksheet entry context (query, answerability or chunk text) was edited",
+                    e.getMessage());
+        }
+    }
+
+    @Test
+    void acceptsAnUneditedLegacyEntryWithItsChunkLine() {
+        Pair p = SELECTION.getFirst();
+        ChunkRef chunk = BASE.chunkMap().get(p.chunkKey());
+        String sheet = BookReviewWorksheet.render(BODY, BASE, SELECTION);
+        int at = sheet.indexOf("~~~text", sheet.indexOf("## " + p.pairId() + "\n")) - 1;
+        String legacy = sheet.substring(0, at) + "chunk: " + p.chunkKey() + " bytes [" + chunk.byteStart() + ","
+                + chunk.byteEnd() + ")\n" + sheet.substring(at);
+        assertEquals(BookQueryDatasetV2.REVIEW_HEADER + "\n", BookReviewWorksheet.apply(legacy, BODY, BASE, SELECTION));
     }
 
     private static String fill(String sheet, String pairId, String decision, String grade, String quote,

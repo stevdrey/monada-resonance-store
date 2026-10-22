@@ -67,15 +67,27 @@ final class BookReviewWorksheet {
         for (Pair p : order) {
             Case c = cases.get(p.queryId());
             ChunkRef chunk = base.chunkMap().get(p.chunkKey());
-            out.append("## ").append(p.pairId()).append("\n\n");
-            out.append("query: ").append(c.text()).append('\n');
-            out.append("declared: ").append(c.answerable() ? "answerable" : "NO_ANSWER (v1: the book does not answer it)")
-                    .append('\n');
-            // No chunk key or byte range: a repeated key would reveal hub chunks, an offset the story position.
-            out.append("\n~~~text\n").append(chunkText(body, chunk)).append("\n~~~\n\n");
+            out.append(context(p, c, chunk, body, false)).append('\n');
             out.append("decision: \ngrade: \nquote: \nnote: \n\n");
         }
         return out.toString();
+    }
+
+    /**
+     * The read-only part of one entry: heading, query, answerability and chunk text. The first renderer
+     * ({@code legacy}) also printed a {@code chunk:} line with the key and byte range; the current one does not, since
+     * a repeated key would reveal hub chunks and an offset the story position.
+     */
+    private static String context(Pair p, Case c, ChunkRef chunk, byte[] body, boolean legacy) {
+        StringBuilder out = new StringBuilder("## ").append(p.pairId()).append("\n\n");
+        out.append("query: ").append(c.text()).append('\n');
+        out.append("declared: ").append(c.answerable() ? "answerable" : "NO_ANSWER (v1: the book does not answer it)")
+                .append('\n');
+        if (legacy) {
+            out.append("chunk: ").append(p.chunkKey()).append(" bytes [").append(chunk.byteStart()).append(',')
+                    .append(chunk.byteEnd()).append(")\n");
+        }
+        return out.append("\n~~~text\n").append(chunkText(body, chunk)).append("\n~~~\n").toString();
     }
 
     /**
@@ -96,6 +108,7 @@ final class BookReviewWorksheet {
     static String apply(String worksheet, byte[] body, BookQueryDataset base, List<Pair> selection) {
         Map<String, Pair> pairs = selection.stream()
                 .collect(Collectors.toMap(Pair::pairId, Function.identity(), (a, b) -> a, LinkedHashMap::new));
+        Map<String, Case> cases = cases(base);
         Map<String, String> rows = new TreeMap<>();
         Set<String> seen = new HashSet<>();
         Matcher entry = ENTRY.matcher(worksheet);
@@ -108,6 +121,13 @@ final class BookReviewWorksheet {
             Pair pair = pairs.get(id);
             check(pair != null, id + ": worksheet entry is not in selection.psv");
             check(seen.add(id), id + ": worksheet has this entry twice");
+            // The decision must be about the context the renderer showed: an edited query, answerability or chunk text
+            // (or two swapped entries) would attach it to a pair the reviewer did not see.
+            Case c = cases.get(pair.queryId());
+            ChunkRef chunk = base.chunkMap().get(pair.chunkKey());
+            check(section.startsWith(context(pair, c, chunk, body, false))
+                            || section.startsWith(context(pair, c, chunk, body, true)),
+                    id + ": worksheet entry context (query, answerability or chunk text) was edited");
             // Fields come after the chunk text, so a field-like line of book text cannot be read as a decision.
             int fence = section.lastIndexOf("\n~~~\n");
             Map<String, String> fields = fields(fence < 0 ? section : section.substring(fence));

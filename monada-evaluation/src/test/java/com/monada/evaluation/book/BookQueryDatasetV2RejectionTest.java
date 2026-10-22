@@ -136,6 +136,13 @@ class BookQueryDatasetV2RejectionTest {
     }
 
     @Test
+    void rejectsRenamedSelectionOrReviewFiles() {
+        String expected = "selection.file and review.file must be selection.psv and review.psv";
+        reject(expected, m -> m.setProperty("review.file", "review-v2.psv"));
+        reject(expected, m -> m.setProperty("selection.file", "receipt.psv"));
+    }
+
+    @Test
     void rejectsAnEditedV1Manifest() {
         byte[] edited = (new String(BASE_MANIFEST, StandardCharsets.UTF_8) + "# edited\n")
                 .getBytes(StandardCharsets.UTF_8);

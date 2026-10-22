@@ -51,6 +51,8 @@ record BookQueryDatasetV2(Properties manifest, BookQueryDataset base, List<Pair>
     static final String LEGACY_REVIEW_PROTOCOL = "SCORE_BLIND_WORKSHEET_QUERY_CHUNK_TEXT_KEY_AND_BYTE_RANGE";
     static final String REVIEW_HEADER = "pairId|queryId|chunkKey|decision|grade|byteStart|byteEnd|spanSha256|note";
     static final String NO_POLICY = "NONE";
+    static final String SELECTION_FILE = "selection.psv";
+    static final String REVIEW_FILE = "review.psv";
 
     private static final Pattern SHA256 = Pattern.compile("[0-9a-f]{64}");
     /** An accepted reclassification policy is a versioned id such as {@code report-only-v1}. */
@@ -160,6 +162,10 @@ record BookQueryDatasetV2(Properties manifest, BookQueryDataset base, List<Pair>
                         && BookUnjudgedSelection.SEED.equals(manifest.getProperty("selection.seed"))
                         && String.valueOf(BookUnjudgedSelection.TARGET).equals(manifest.getProperty("selection.target")),
                 "unsupported selection rule, seed or target");
+        // Fixed names: apply writes review.psv next to selection.psv, so a renamed file would be skipped by load().
+        check(SELECTION_FILE.equals(manifest.getProperty("selection.file"))
+                        && REVIEW_FILE.equals(manifest.getProperty("review.file")),
+                "selection.file and review.file must be " + SELECTION_FILE + " and " + REVIEW_FILE);
         checkDigest(manifest, "selection.sha256", selectionBytes);
         checkDigest(manifest, "review.sha256", reviewBytes);
 

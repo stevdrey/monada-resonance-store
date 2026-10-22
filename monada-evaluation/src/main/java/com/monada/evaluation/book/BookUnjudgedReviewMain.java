@@ -139,7 +139,7 @@ public final class BookUnjudgedReviewMain {
         Path dir = Path.of(options.get("--dataset"));
         Path manifestPath = dir.resolve("manifest.properties");
         String manifestText = Files.readString(manifestPath, StandardCharsets.UTF_8);
-        byte[] selection = Files.readAllBytes(dir.resolve("selection.psv"));
+        byte[] selection = Files.readAllBytes(dir.resolve(BookQueryDatasetV2.SELECTION_FILE));
         BookQueryDataset base = BookQueryDataset.load();
         List<Pair> pairs = BookUnjudgedSelection.parse(selection);
         String sheet = Files.readString(Path.of(options.get("--worksheet")), StandardCharsets.UTF_8);
@@ -161,7 +161,7 @@ public final class BookUnjudgedReviewMain {
         // Validate everything, sign-off included, before anything is written.
         BookQueryDatasetV2 checked = BookQueryDatasetV2.parse(properties(updated), base, baseManifest, selection,
                 reviewBytes);
-        writeTogether(dir.resolve("review.psv"), review, manifestPath, updated);
+        writeTogether(dir.resolve(BookQueryDatasetV2.REVIEW_FILE), review, manifestPath, updated);
         out.println("wrote review.psv: " + checked.reviews().size() + " decided, " + checked.pending().size()
                 + " pending, " + checked.addedJudgments().size() + " added judgments, " + checked.findings().size()
                 + " findings; review status unchanged (" + checked.manifest().getProperty("judgment.reviewStatus")
