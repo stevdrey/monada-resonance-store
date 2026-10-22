@@ -57,6 +57,11 @@ record BookQueryDatasetV2(Properties manifest, BookQueryDataset base, List<Pair>
     static final String NO_DRAFT = "NONE";
     /** The only accepted {@code judgment.verification} for drafted decisions: every one checked by the reviewer. */
     static final String DRAFT_VERIFICATION = "EACH_DRAFTED_DECISION_REVIEWED_AND_APPROVED_BY_REVIEWER";
+    /**
+     * Accepted {@code judgment.draftBlinding} values for drafted decisions: whether the drafter is known to have seen
+     * only the worksheet, is not known to, or is known to have seen ranking metadata.
+     */
+    static final List<String> DRAFT_BLINDING = List.of("WORKSHEET_ONLY_VERIFIED", "UNVERIFIED", "NOT_BLIND");
     static final String SELECTION_FILE = "selection.psv";
     static final String REVIEW_FILE = "review.psv";
 
@@ -355,6 +360,9 @@ record BookQueryDatasetV2(Properties manifest, BookQueryDataset base, List<Pair>
         }
         // Drafted labels (e.g. proposed by a model) are REVIEWED only with a dated draft and per-decision verification.
         if (!NO_DRAFT.equals(manifest.getProperty("judgment.draftedBy").trim())) {
+            check(DRAFT_BLINDING.contains(manifest.getProperty("judgment.draftBlinding", "")),
+                    "drafted labels need judgment.draftBlinding, one of " + DRAFT_BLINDING
+                            + " (what the drafter could see)");
             try {
                 LocalDate.parse(require(manifest, "judgment.draftedAt"));
             } catch (DateTimeParseException e) {

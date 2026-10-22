@@ -65,6 +65,8 @@ class BookQueryDatasetV2Test {
         // The committed decisions were drafted by Codex and verified one by one by the human reviewer.
         assertEquals("codex", V2.manifest().getProperty("judgment.draftedBy"));
         assertEquals(BookQueryDatasetV2.DRAFT_VERIFICATION, V2.manifest().getProperty("judgment.verification"));
+        // What Codex could see while drafting is unknown, so the drafting is not claimed to be score-blind.
+        assertEquals("UNVERIFIED", V2.manifest().getProperty("judgment.draftBlinding"));
         String status = V2.manifest().getProperty("judgment.reviewStatus");
         if (!V2.pending().isEmpty()) {
             assertEquals("PENDING_HUMAN_REVIEW", status, "a partially reviewed v2 is never REVIEWED");

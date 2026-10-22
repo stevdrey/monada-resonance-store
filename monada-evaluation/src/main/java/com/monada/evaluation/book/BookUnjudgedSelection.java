@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -135,31 +136,37 @@ final class BookUnjudgedSelection {
 
     /** The predeclared selection over {@code hits} (see the class comment). */
     static List<Pair> select(List<Hit> hits) {
+        return select(hits, BookUnjudgedSelection::pairId);
+    }
+
+    /** {@link #select(List)} with another pair-id function; tests use it to force an id collision. */
+    static List<Pair> select(List<Hit> hits, BiFunction<String, String, String> ids) {
         List<Hit> eligible = hits.stream().filter(h -> h.split() == Split.DEV && h.unjudged())
                 .sorted(Comparator.comparing(Hit::queryId).thenComparing(Hit::chunkKey)).toList();
         Map<String, Integer> perChunk = new TreeMap<>();
         eligible.forEach(h -> perChunk.merge(h.chunkKey(), 1, Integer::sum));
 
+        // Keyed by (query, chunk), not by pair id: two distinct pairs whose ids collide must fail, not be skipped.
         Map<String, Pair> chosen = new LinkedHashMap<>();
         // TOP1: every rank-1 unjudged DEV pair.
-        eligible.stream().filter(h -> h.rank() == 1).forEach(h -> take(chosen, h, Stratum.TOP1, perChunk));
+        eligible.stream().filter(h -> h.rank() == 1).forEach(h -> take(chosen, h, Stratum.TOP1, perChunk, ids));
         // TOP3: per DEV query, its best remaining pair at rank 2 or 3.
         eligible.stream().map(Hit::queryId).distinct().forEach(q -> eligible.stream()
                 .filter(h -> h.queryId().equals(q) && h.rank() >= 2 && h.rank() <= 3 && open(chosen, h))
                 .min(Comparator.comparingInt(Hit::rank))
-                .ifPresent(h -> take(chosen, h, Stratum.TOP3, perChunk)));
+                .ifPresent(h -> take(chosen, h, Stratum.TOP3, perChunk, ids)));
         // HUB: one remaining pair for each of the most frequent unjudged DEV chunks; none left means none taken.
         perChunk.entrySet().stream()
                 .sorted(Map.Entry.<String, Integer>comparingByValue().reversed().thenComparing(Map.Entry.comparingByKey()))
                 .limit(HUB_CHUNKS)
                 .forEach(e -> eligible.stream().filter(h -> h.chunkKey().equals(e.getKey()) && open(chosen, h))
                         .min(Comparator.comparing(h -> sampleKey(h.queryId(), h.chunkKey())))
-                        .ifPresent(h -> take(chosen, h, Stratum.HUB, perChunk)));
+                        .ifPresent(h -> take(chosen, h, Stratum.HUB, perChunk, ids)));
         // SAMPLE: seeded fill of the rest.
         eligible.stream().filter(h -> open(chosen, h))
                 .sorted(Comparator.comparing(h -> sampleKey(h.queryId(), h.chunkKey())))
                 .limit(Math.max(0, TARGET - chosen.size()))
-                .forEach(h -> take(chosen, h, Stratum.SAMPLE, perChunk));
+                .forEach(h -> take(chosen, h, Stratum.SAMPLE, perChunk, ids));
         return List.copyOf(chosen.values());
     }
 
@@ -206,13 +213,17 @@ final class BookUnjudgedSelection {
     }
 
     private static boolean open(Map<String, Pair> chosen, Hit h) {
-        return !chosen.containsKey(pairId(h.queryId(), h.chunkKey()));
+        return !chosen.containsKey(h.queryId() + "|" + h.chunkKey());
     }
 
-    private static void take(Map<String, Pair> chosen, Hit h, Stratum stratum, Map<String, Integer> perChunk) {
-        String id = pairId(h.queryId(), h.chunkKey());
-        check(chosen.put(id, new Pair(id, h.queryId(), h.split(), h.category(), h.chunkKey(), h.atomId(), stratum,
-                h.rank(), h.score(), perChunk.get(h.chunkKey()))) == null, "pair selected twice: " + id);
+    private static void take(Map<String, Pair> chosen, Hit h, Stratum stratum, Map<String, Integer> perChunk,
+                             BiFunction<String, String, String> ids) {
+        String id = ids.apply(h.queryId(), h.chunkKey());
+        check(chosen.values().stream().noneMatch(p -> p.pairId().equals(id)),
+                "pair id collision: " + id + " for " + h.queryId() + " " + h.chunkKey());
+        check(chosen.put(h.queryId() + "|" + h.chunkKey(), new Pair(id, h.queryId(), h.split(), h.category(),
+                h.chunkKey(), h.atomId(), stratum, h.rank(), h.score(), perChunk.get(h.chunkKey()))) == null,
+                "pair selected twice: " + id);
     }
 
     private static byte[] utf8(String text) {

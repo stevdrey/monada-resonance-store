@@ -175,8 +175,7 @@ class BookReviewWorksheetTest {
                         + sheet.substring(fields + "decision: \ngrade: \nquote: \nnote: \n".length()))) {
             var e = assertThrows(IllegalStateException.class,
                     () -> BookReviewWorksheet.apply(inserted, BODY, BASE, SELECTION));
-            assertEquals(p.pairId() + ": worksheet entry has text outside its decision, grade, quote and note lines",
-                    e.getMessage());
+            assertEquals(p.pairId() + ": worksheet entry must end with its decision, grade, quote and note lines", e.getMessage());
         }
         // An editor that drops the final blank line is fine.
         assertEquals(BookQueryDatasetV2.REVIEW_HEADER + "\n",
@@ -193,7 +192,7 @@ class BookReviewWorksheetTest {
         for (String edited : List.of(deleted, misspelled)) {
             var e = assertThrows(IllegalStateException.class,
                     () -> BookReviewWorksheet.apply(edited, BODY, BASE, SELECTION));
-            assertEquals(p.pairId() + ": worksheet entry is missing its decision field", e.getMessage());
+            assertEquals(p.pairId() + ": worksheet entry must end with its decision, grade, quote and note lines", e.getMessage());
         }
     }
 
@@ -208,6 +207,8 @@ class BookReviewWorksheetTest {
                 "the passage says " + quote);
         var e = assertThrows(IllegalStateException.class, () -> BookReviewWorksheet.apply(sheet, BODY, BASE, SELECTION));
         assertTrue(e.getMessage().contains("note reproduces 6 or more consecutive words of the chunk"), e.getMessage());
+        // Changing case or punctuation does not hide a copy.
+        assertTrue(BookReviewWorksheet.copiesChunkText(quote.toUpperCase().replace(" ", ", ") + ".", text));
         // A shorter shared run (a name, a short phrase) is a paraphrase and stays allowed.
         String shortRun = String.join(" ", Arrays.copyOfRange(words, 2, 2 + BookReviewWorksheet.COPIED_WORDS - 1));
         assertFalse(BookReviewWorksheet.copiesChunkText("mentions " + shortRun, text));
@@ -273,8 +274,7 @@ class BookReviewWorksheetTest {
             String sheetWithEdit = sheet.substring(0, at) + edited + sheet.substring(end);
             var e = assertThrows(IllegalStateException.class,
                     () -> BookReviewWorksheet.apply(sheetWithEdit, BODY, BASE, SELECTION));
-            assertEquals(p.pairId() + ": worksheet entry context (query, answerability or chunk text) was edited",
-                    e.getMessage());
+            assertEdited(e);
         }
     }
 
@@ -293,15 +293,20 @@ class BookReviewWorksheetTest {
         Pair p = SELECTION.getFirst();
         String mixed = withChunkLine(current, p);
         var e = assertThrows(IllegalStateException.class, () -> BookReviewWorksheet.apply(mixed, BODY, BASE, SELECTION));
-        assertEquals(p.pairId() + ": worksheet entry context (query, answerability or chunk text) was edited",
-                e.getMessage());
+        assertEdited(e);
         // And a legacy sheet must not drop the chunk line from an entry either.
         int line = legacy.indexOf("\nchunk: ", legacy.indexOf("## " + p.pairId() + "\n"));
         String stripped = legacy.substring(0, line) + legacy.substring(legacy.indexOf('\n', line + 1));
         var missing = assertThrows(IllegalStateException.class,
                 () -> BookReviewWorksheet.apply(stripped, BODY, BASE, SELECTION));
-        assertEquals(p.pairId() + ": worksheet entry context (query, answerability or chunk text) was edited",
-                missing.getMessage());
+        assertEdited(missing);
+    }
+
+    /** The whole-sheet check: anything but a field value differs from the rendering. */
+    private static void assertEdited(IllegalStateException e) {
+        assertTrue(e.getMessage().startsWith("worksheet differs from its rendering at line ")
+                && e.getMessage().endsWith("only the decision, grade, quote and note values may be edited"),
+                e.getMessage());
     }
 
     private static String withChunkLine(String sheet, Pair p) {

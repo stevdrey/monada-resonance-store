@@ -20,6 +20,7 @@ review.sha256=37dc4627c26edd9a0ff49d1f766672cb2c91293025ab8d9ef64bd415d13b40e6
 judgment.draftedBy=codex
 judgment.draftedAt=2026-10-21
 judgment.verification=EACH_DRAFTED_DECISION_REVIEWED_AND_APPROVED_BY_REVIEWER
+judgment.draftBlinding=UNVERIFIED
 judgment.reviewStatus=REVIEWED
 judgment.reviewer=Steven Rey Sequeira
 judgment.reviewedAt=2026-10-21

@@ -92,6 +92,16 @@ class BookUnjudgedSelectionTest {
     }
 
     @Test
+    void aPairIdCollisionFailsInsteadOfSkippingAPair() {
+        // Two distinct eligible pairs mapped to the same id must not make the second look already chosen.
+        List<Hit> hits = List.of(hit("LIT-01", Split.DEV, 1, "U", "s001/c0001"),
+                hit("LIT-03", Split.DEV, 1, "U", "s002/c0001"));
+        var e = assertThrows(IllegalStateException.class,
+                () -> BookUnjudgedSelection.select(hits, (query, chunk) -> "UJ-00000000"));
+        assertTrue(e.getMessage().startsWith("pair id collision: UJ-00000000"), e.getMessage());
+    }
+
+    @Test
     void aSameTextAliasIsSelectedUnderItsFirstKey() {
         String line = firstHitLine(REPORT, "LIT-01");
         String key = line.substring(line.indexOf(KEY), line.indexOf(" atom="));

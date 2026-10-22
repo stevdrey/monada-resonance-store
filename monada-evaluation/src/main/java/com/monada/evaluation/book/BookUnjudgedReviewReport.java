@@ -43,7 +43,7 @@ final class BookUnjudgedReviewReport {
         for (String key : List.of("dataset", "extends", "provenance", "base.manifest.sha256", "base.judgments.sha256",
                 "selection.baselineReport", "selection.baselineReport.sha256", "selection.rule", "selection.seed",
                 "selection.target", "selection.sha256", "review.protocol", "review.sha256", "judgment.draftedBy",
-                "judgment.draftedAt", "judgment.verification", "judgment.reviewStatus",
+                "judgment.draftedAt", "judgment.verification", "judgment.draftBlinding", "judgment.reviewStatus",
                 "judgment.reviewer", "judgment.reviewedAt", "judgment.approvedBy", "reclassification.policy")) {
             line(out, key + "=" + v2.manifest().getProperty(key, ""));
         }

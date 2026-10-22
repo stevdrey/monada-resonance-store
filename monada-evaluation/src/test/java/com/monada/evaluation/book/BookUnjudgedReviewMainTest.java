@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -81,6 +82,8 @@ class BookUnjudgedReviewMainTest {
         assertEquals(2, inside.code());
         assertTrue(inside.err().contains("outside any Git work tree"), inside.err());
         assertTrue(BookUnjudgedReviewMain.insideGitWorkTree(ROOT.resolve("no/such/dir/sheet.md")));
+        // The negative cases need a temp dir outside any repository; some machines put it inside one.
+        assumeFalse(BookUnjudgedReviewMain.insideGitWorkTree(tmp), "the temp dir is inside a Git work tree");
         assertFalse(BookUnjudgedReviewMain.insideGitWorkTree(tmp.resolve("sheet.md")));
         // Only a real marker counts: an empty .git directory is not a repository.
         Path empty = Files.createDirectories(tmp.resolve("empty/.git")).getParent();
@@ -109,7 +112,7 @@ class BookUnjudgedReviewMainTest {
         // A status-only reset keeps a stale approval that a later status edit would re-attach to the new digest.
         signed.setProperty("judgment.reviewStatus", "PENDING_HUMAN_REVIEW");
         for (String key : List.of("judgment.reviewer", "judgment.approvedBy", "judgment.reviewedAt",
-                "judgment.draftedAt", "judgment.verification")) {
+                "judgment.draftedAt", "judgment.verification", "judgment.draftBlinding")) {
             signed.setProperty(key, "stale");
             assertThrows(IllegalStateException.class,
                     () -> BookUnjudgedReviewMain.requireUnsignedChange(signed, true), key);
@@ -124,22 +127,55 @@ class BookUnjudgedReviewMainTest {
         // A non-empty directory cannot be replaced by the atomic move, so the manifest write fails.
         Path manifest = Files.createDirectories(tmp.resolve("manifest.properties"));
         Files.writeString(manifest.resolve("blocker"), "x");
+        Path backup = tmp.resolve("sheet.md.review-backup.psv");
         assertThrows(java.io.IOException.class,
-                () -> BookUnjudgedReviewMain.writeTogether(review, "new review\n", manifest, "m=1\n"));
+                () -> BookUnjudgedReviewMain.writeTogether(review, "new review\n", manifest, "m=1\n", backup));
         assertEquals("old review\n", Files.readString(review));
+        assertFalse(Files.exists(backup), "the backup is removed once the review is restored");
 
         Path absent = tmp.resolve("absent-review.psv");
         assertThrows(java.io.IOException.class,
-                () -> BookUnjudgedReviewMain.writeTogether(absent, "new review\n", manifest, "m=1\n"));
+                () -> BookUnjudgedReviewMain.writeTogether(absent, "new review\n", manifest, "m=1\n", backup));
         assertFalse(Files.exists(absent), "a review that did not exist before is removed again");
+    }
+
+    @Test
+    void aSuccessfulWriteReplacesBothFilesAndDropsTheBackup() throws Exception {
+        Path review = Files.writeString(tmp.resolve("review.psv"), "old review\n");
+        Path manifest = Files.writeString(tmp.resolve("manifest.properties"), "m=0\n");
+        Path backup = tmp.resolve("sheet.md.review-backup.psv");
+        BookUnjudgedReviewMain.writeTogether(review, "new review\n", manifest, "m=1\n", backup);
+        assertEquals("new review\n", Files.readString(review));
+        assertEquals("m=1\n", Files.readString(manifest));
+        assertFalse(Files.exists(backup));
+    }
+
+    @Test
+    void anIncrementalReviewKeepsTheWeakerProtocol() {
+        String legacy = BookQueryDatasetV2.LEGACY_REVIEW_PROTOCOL;
+        String current = BookQueryDatasetV2.REVIEW_PROTOCOL;
+        // Decisions made on the legacy sheet stay legacy even when the next sheet is the current one.
+        assertEquals(legacy, BookUnjudgedReviewMain.weakerProtocol(legacy, current));
+        assertEquals(legacy, BookUnjudgedReviewMain.weakerProtocol(current, legacy));
+        assertEquals(current, BookUnjudgedReviewMain.weakerProtocol(current, current));
+        assertThrows(IllegalStateException.class, () -> BookUnjudgedReviewMain.weakerProtocol("OTHER", current));
+        // The weaker record applies only when an earlier decision row is carried over unchanged.
+        String header = BookQueryDatasetV2.REVIEW_HEADER + "\n";
+        byte[] earlier = (header + "UJ-1|a\nUJ-2|b\n").getBytes(StandardCharsets.UTF_8);
+        assertTrue(BookUnjudgedReviewMain.carriesDecisions(earlier,
+                (header + "UJ-1|a\nUJ-3|c\n").getBytes(StandardCharsets.UTF_8)));
+        assertFalse(BookUnjudgedReviewMain.carriesDecisions(earlier,
+                (header + "UJ-1|changed\n").getBytes(StandardCharsets.UTF_8)));
+        assertFalse(BookUnjudgedReviewMain.carriesDecisions(earlier, header.getBytes(StandardCharsets.UTF_8)));
     }
 
     @Test
     void aMalformedManifestEscapeIsAValidationFailure() {
         // A Windows-style account name puts a backslash before "user": an invalid Unicode escape for Properties.
         String manifest = "judgment.reviewer=DOMAIN" + '\\' + "user\n";
-        var e = assertThrows(IllegalStateException.class, () -> BookUnjudgedReviewMain.properties(manifest));
-        assertTrue(e.getMessage().startsWith("malformed manifest.properties: "), e.getMessage());
+        var e = assertThrows(IllegalStateException.class,
+                () -> BookQueryDatasetV2.readManifest(manifest.getBytes(StandardCharsets.UTF_8)));
+        assertTrue(e.getMessage().startsWith("malformed book-queries-v2 manifest.properties: "), e.getMessage());
     }
 
     @Test

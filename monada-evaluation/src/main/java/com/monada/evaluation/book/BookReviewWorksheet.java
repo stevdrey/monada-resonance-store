@@ -10,6 +10,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -50,29 +51,40 @@ final class BookReviewWorksheet {
         """;
 
     private static final Pattern ENTRY = Pattern.compile("(?m)^## (UJ-[0-9a-f]{8})$");
-    /** Consecutive chunk words a note may not reproduce; the committed notes share at most 3. */
+    /** Consecutive (normalized) chunk words a note may not reproduce; the committed notes share at most 4. */
     static final int COPIED_WORDS = 6;
-    /** The editable remainder of an entry, exactly as rendered apart from the four field values. */
-    private static final Pattern LAYOUT = Pattern.compile(
-            "\\ndecision:[^\\n]*\\ngrade:[^\\n]*\\nquote:[^\\n]*\\nnote:[^\\n]*\\n*");
-    private static final List<String> FIELDS = List.of("decision", "grade", "quote", "note");
-    private static final Pattern FIELD = Pattern.compile("(?m)^(decision|grade|quote|note):[ \\t]*(.*)$");
+    /** The editable tail of an entry: the closing fence, a blank line and the four field lines, values captured. */
+    private static final Pattern TAIL = Pattern.compile(
+            "\\n~~~\\n\\ndecision:([^\\n]*)\\ngrade:([^\\n]*)\\nquote:([^\\n]*)\\nnote:([^\\n]*)\\n*\\z");
+    /** Raw field values (text after each {@code name:}) of an unfilled entry. */
+    private static final List<String> BLANK = List.of(" ", " ", " ", " ");
 
     private BookReviewWorksheet() {
     }
 
     static String render(byte[] body, BookQueryDataset base, List<Pair> selection) {
+        return render(body, base, selection, false, Map.of());
+    }
+
+    /**
+     * The worksheet with {@code values} (per pair id: the raw text after {@code decision:}, {@code grade:},
+     * {@code quote:} and {@code note:}) filled in, in the current or the {@code legacy} layout. A filled sheet is valid
+     * only if it equals this rendering of its own values.
+     */
+    private static String render(byte[] body, BookQueryDataset base, List<Pair> selection, boolean legacy,
+                                 Map<String, List<String>> values) {
         Map<String, Case> cases = cases(base);
-        StringBuilder out = new StringBuilder(preamble(false));
+        StringBuilder out = new StringBuilder(preamble(legacy));
         List<Pair> order = selection.stream()
                 .sorted(Comparator.comparing(p -> BookQueryDataset.sha256(
                         (BookUnjudgedSelection.SEED + "worksheet|" + p.pairId()).getBytes(StandardCharsets.UTF_8))))
                 .toList();
         for (Pair p : order) {
-            Case c = cases.get(p.queryId());
-            ChunkRef chunk = base.chunkMap().get(p.chunkKey());
-            out.append(context(p, c, chunk, body, false)).append('\n');
-            out.append("decision: \ngrade: \nquote: \nnote: \n\n");
+            List<String> v = values.getOrDefault(p.pairId(), BLANK);
+            out.append(context(p, cases.get(p.queryId()), base.chunkMap().get(p.chunkKey()), body, legacy))
+                    .append('\n');
+            out.append("decision:").append(v.get(0)).append("\ngrade:").append(v.get(1)).append("\nquote:")
+                    .append(v.get(2)).append("\nnote:").append(v.get(3)).append("\n\n");
         }
         return out.toString();
     }
@@ -128,7 +140,6 @@ final class BookReviewWorksheet {
         // The entry layout must match the protocol the preamble declares: a legacy entry (chunk key and byte range) in a
         // current-protocol sheet would claim the stricter blinding while exposing those identifiers.
         boolean legacy = BookQueryDatasetV2.LEGACY_REVIEW_PROTOCOL.equals(protocolOf(worksheet));
-        Map<String, Case> cases = cases(base);
         Map<String, String> rows = new TreeMap<>();
         // The set of entries first: unknown, repeated or missing headings (a truncated sheet, a mistyped heading) are
         // reported as such before any entry is read, since apply rewrites review.psv rather than merging it.
@@ -141,37 +152,32 @@ final class BookReviewWorksheet {
         }
         List<String> missing = pairs.keySet().stream().filter(id -> !seen.contains(id)).toList();
         check(missing.isEmpty(), "worksheet is missing " + missing.size() + " selected entries: " + missing);
+        // Each entry ends in its four field lines; their raw values are all a reviewer may change.
+        Map<String, List<String>> values = new LinkedHashMap<>();
         Matcher entry = ENTRY.matcher(worksheet);
         int start = entry.find() ? entry.start() : -1;
         while (start >= 0) {
             String id = entry.group(1);
             int next = entry.find() ? entry.start() : -1;
-            String section = worksheet.substring(start, next < 0 ? worksheet.length() : next);
+            Matcher tail = TAIL.matcher(worksheet.substring(start, next < 0 ? worksheet.length() : next));
+            check(tail.find(), id + ": worksheet entry must end with its decision, grade, quote and note lines");
+            values.put(id, List.of(tail.group(1), tail.group(2), tail.group(3), tail.group(4)));
             start = next;
+        }
+        // One invariant instead of piecemeal checks: the sheet must be exactly the rendering of its own values, so any
+        // edit to the preamble, a query, the answerability, the chunk text, the order or the layout is rejected.
+        requireRendering(worksheet, render(body, base, selection, legacy, values));
+
+        for (Map.Entry<String, List<String>> e : values.entrySet()) {
+            String id = e.getKey();
             Pair pair = pairs.get(id);
-            // The decision must be about the context the renderer showed: an edited query, answerability or chunk text
-            // (or two swapped entries) would attach it to a pair the reviewer did not see.
-            Case c = cases.get(pair.queryId());
             ChunkRef chunk = base.chunkMap().get(pair.chunkKey());
-            String context = context(pair, c, chunk, body, legacy);
-            check(section.startsWith(context),
-                    id + ": worksheet entry context (query, answerability or chunk text) was edited");
-            // Fields come after the chunk text, so a field-like line of book text cannot be read as a decision.
-            String rest = section.substring(context.length());
-            Map<String, String> fields = fields(rest);
-            // Only a present, empty decision means pending: a deleted or misspelled field would otherwise silently drop a
-            // recorded decision when review.psv is rewritten.
-            List<String> absent = FIELDS.stream().filter(f -> !fields.containsKey(f)).toList();
-            check(absent.isEmpty(), id + ": worksheet entry is missing its " + String.join(", ", absent) + " field");
-            // Nothing but the four field lines may follow the context: an inserted line (say, redefining a label) would
-            // be guidance the recorded protocol does not contain.
-            check(LAYOUT.matcher(rest).matches(),
-                    id + ": worksheet entry has text outside its decision, grade, quote and note lines");
-            String decision = fields.getOrDefault("decision", "");
+            List<String> v = e.getValue();
+            String decision = v.get(0).trim();
             if (decision.isEmpty()) {
                 continue;
             }
-            String note = fields.getOrDefault("note", "");
+            String note = v.get(3).trim();
             check(!note.isBlank() && !note.contains("|"), id + ": note must be non-blank and contain no |");
             // review.psv is committed and must hold no book text: a note may name things, not copy a passage.
             check(!copiesChunkText(note, chunkText(body, chunk)), id + ": note reproduces " + COPIED_WORDS
@@ -179,37 +185,47 @@ final class BookReviewWorksheet {
             String row;
             Decision d = parseDecision(decision, id);
             if (d == Decision.UNRESOLVED) {
-                check(fields.getOrDefault("grade", "").isEmpty() && fields.getOrDefault("quote", "").isEmpty(),
+                check(v.get(1).isBlank() && v.get(2).isBlank(),
                         id + ": UNRESOLVED takes no grade and no quote");
                 row = String.join("|", id, pair.queryId(), pair.chunkKey(), d.name(), "-", "-", "-", "-", note);
             } else {
-                String grade = fields.getOrDefault("grade", "");
-                long[] span = locate(body, base.chunkMap().get(pair.chunkKey()), fields.getOrDefault("quote", ""), id);
+                String grade = v.get(1).trim();
+                long[] span = locate(body, chunk, v.get(2).trim(), id);
                 byte[] bytes = Arrays.copyOfRange(body, (int) span[0], (int) span[1]);
                 row = String.join("|", id, pair.queryId(), pair.chunkKey(), d.name(), grade, String.valueOf(span[0]),
                         String.valueOf(span[1]), BookQueryDataset.sha256(bytes), note);
             }
-            check(rows.put(id, row) == null, id + ": worksheet decides this pair twice");
+            rows.put(id, row);
         }
         StringBuilder out = new StringBuilder(BookQueryDatasetV2.REVIEW_HEADER).append('\n');
         rows.values().forEach(r -> out.append(r).append('\n'));
         return out.toString();
     }
 
-    /** Whether {@code note} shares a run of {@value #COPIED_WORDS} or more whitespace-separated words with {@code text}. */
+    /**
+     * Whether {@code note} shares a run of {@value #COPIED_WORDS} or more words with {@code text}. Words are compared
+     * normalized (lowercase, letters and digits only), so a copy with changed case or punctuation still counts.
+     */
     static boolean copiesChunkText(String note, String text) {
-        String[] chunkWords = text.trim().split("\\s+");
-        Set<String> runs = new HashSet<>();
-        for (int i = 0; i + COPIED_WORDS <= chunkWords.length; i++) {
-            runs.add(String.join(" ", Arrays.copyOfRange(chunkWords, i, i + COPIED_WORDS)));
+        List<String> chunkWords = normalizedWords(text);
+        Set<List<String>> runs = new HashSet<>();
+        for (int i = 0; i + COPIED_WORDS <= chunkWords.size(); i++) {
+            runs.add(chunkWords.subList(i, i + COPIED_WORDS));
         }
-        String[] noteWords = note.trim().split("\\s+");
-        for (int i = 0; i + COPIED_WORDS <= noteWords.length; i++) {
-            if (runs.contains(String.join(" ", Arrays.copyOfRange(noteWords, i, i + COPIED_WORDS)))) {
+        List<String> noteWords = normalizedWords(note);
+        for (int i = 0; i + COPIED_WORDS <= noteWords.size(); i++) {
+            if (runs.contains(noteWords.subList(i, i + COPIED_WORDS))) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static List<String> normalizedWords(String text) {
+        return Arrays.stream(text.toLowerCase(Locale.ROOT).split("\\s+"))
+                .map(w -> w.codePoints().filter(Character::isLetterOrDigit)
+                        .collect(StringBuilder::new, StringBuilder::appendCodePoint, StringBuilder::append).toString())
+                .filter(w -> !w.isEmpty()).toList();
     }
 
     /** The byte span of {@code quote} inside {@code chunk}; whitespace runs in the quote match any whitespace run. */
@@ -235,13 +251,21 @@ final class BookReviewWorksheet {
                 StandardCharsets.UTF_8);
     }
 
-    private static Map<String, String> fields(String section) {
-        Map<String, String> fields = new LinkedHashMap<>();
-        Matcher m = FIELD.matcher(section);
-        while (m.find()) {
-            check(fields.put(m.group(1), m.group(2).trim()) == null, "field " + m.group(1) + " appears twice");
+    /** Equality up to trailing newlines; otherwise names the first differing line (1-based). */
+    private static void requireRendering(String worksheet, String rendered) {
+        String actual = worksheet.stripTrailing();
+        String expected = rendered.stripTrailing();
+        if (actual.equals(expected)) {
+            return;
         }
-        return fields;
+        String[] a = actual.split("\n", -1);
+        String[] b = expected.split("\n", -1);
+        int line = 0;
+        while (line < Math.min(a.length, b.length) && a[line].equals(b[line])) {
+            line++;
+        }
+        throw new IllegalStateException("worksheet differs from its rendering at line " + (line + 1)
+                + "; only the decision, grade, quote and note values may be edited");
     }
 
     private static Decision parseDecision(String value, String id) {

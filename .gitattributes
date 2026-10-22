@@ -1,3 +1,0 @@
-# Byte-exact inputs pinned by SHA-256 or compared byte for byte: never convert line endings.
-# docs/experiments/book-corpus-v1 may track only its contract files, so its rule lives here.
-docs/experiments/book-corpus-v1/*.txt -text

@@ -170,6 +170,12 @@ class BookQueryDatasetV2RejectionTest {
             m.setProperty("judgment.draftedAt", "soon");
         });
         reject("manifest is missing judgment.draftedBy", m -> m.setProperty("judgment.draftedBy", ""));
+        for (String blinding : List.of("", "BLIND", "unverified")) {
+            reject("drafted labels need judgment.draftBlinding", m -> {
+                signOff(m);
+                m.setProperty("judgment.draftBlinding", blinding);
+            });
+        }
     }
 
     @Test
@@ -180,6 +186,7 @@ class BookQueryDatasetV2RejectionTest {
             m.setProperty("judgment.draftedBy", BookQueryDatasetV2.NO_DRAFT);
             m.remove("judgment.draftedAt");
             m.remove("judgment.verification");
+            m.remove("judgment.draftBlinding");
         });
     }
 

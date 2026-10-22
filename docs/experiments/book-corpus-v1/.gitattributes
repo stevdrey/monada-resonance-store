@@ -1,0 +1,2 @@
+# Byte-exact inputs pinned by SHA-256 or compared byte for byte: never convert line endings.
+*.txt -text

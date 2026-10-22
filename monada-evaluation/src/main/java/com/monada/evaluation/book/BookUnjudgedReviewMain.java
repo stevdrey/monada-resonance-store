@@ -3,7 +3,6 @@ package com.monada.evaluation.book;
 import com.monada.evaluation.book.BookUnjudgedSelection.Pair;
 import java.io.IOException;
 import java.io.PrintStream;
-import java.io.StringReader;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -50,7 +49,7 @@ public final class BookUnjudgedReviewMain {
             "report", Set.of("--baseline", "--out"));
     /** Fields that attest to one review digest; all must be cleared before different decisions are applied. */
     private static final List<String> SIGN_OFF = List.of("judgment.reviewer", "judgment.approvedBy",
-            "judgment.reviewedAt", "judgment.draftedAt", "judgment.verification");
+            "judgment.reviewedAt", "judgment.draftedAt", "judgment.verification", "judgment.draftBlinding");
     private static final Map<String, Set<String>> REQUIRED = Map.of(
             "select", Set.of(), "worksheet", Set.of("--input", "--out"),
             "apply", Set.of("--input", "--worksheet", "--dataset"), "report", Set.of());
@@ -140,7 +139,8 @@ public final class BookUnjudgedReviewMain {
         Path dir = Path.of(options.get("--dataset"));
         Path manifestPath = dir.resolve("manifest.properties");
         byte[] manifestBytes = Files.readAllBytes(manifestPath);
-        BookQueryDatasetV2.readManifest(manifestBytes); // strict UTF-8 and escapes: a defect exits 1, not an I/O error
+        // Strict UTF-8 and escapes: a defect is a validation failure (exit 1), not an I/O error.
+        Properties currentManifest = BookQueryDatasetV2.readManifest(manifestBytes);
         String manifestText = new String(manifestBytes, StandardCharsets.UTF_8);
         byte[] selection = Files.readAllBytes(dir.resolve(BookQueryDatasetV2.SELECTION_FILE));
         BookQueryDataset base = BookQueryDataset.load();
@@ -148,35 +148,44 @@ public final class BookUnjudgedReviewMain {
         // The current dataset validates first, so the worksheet is only ever read against known queries and chunks.
         // "Changed" is then decided against the review actually on disk: a hand-edited manifest digest must not make
         // different decisions look like a re-apply of the signed ones.
-        byte[] current = Files.readAllBytes(dir.resolve(BookQueryDatasetV2.REVIEW_FILE));
-        List<Pair> pairs;
+        Path reviewPath = dir.resolve(BookQueryDatasetV2.REVIEW_FILE);
+        byte[] current = Files.readAllBytes(reviewPath);
+        BookQueryDatasetV2 before;
         try {
-            pairs = BookQueryDatasetV2.parse(properties(manifestText), base, baseManifest, selection, current)
-                    .selection();
+            before = BookQueryDatasetV2.parse(currentManifest, base, baseManifest, selection, current);
         } catch (IllegalStateException e) {
             throw new IllegalStateException("the current manifest and review.psv do not validate (" + e.getMessage()
                     + "); restore them before applying a worksheet", e);
         }
-        String sheet = Files.readString(Path.of(options.get("--worksheet")), StandardCharsets.UTF_8);
-        String review = BookReviewWorksheet.apply(sheet, body, base, pairs);
+        Path sheetPath = Path.of(options.get("--worksheet"));
+        // The worksheet holds book text and the review backup is written next to it, so both stay outside Git.
+        check(!insideGitWorkTree(sheetPath), "--worksheet must be outside any Git work tree: " + sheetPath);
+        String sheet = Files.readString(sheetPath, StandardCharsets.UTF_8);
+        String review = BookReviewWorksheet.apply(sheet, body, base, before.selection());
         byte[] reviewBytes = review.getBytes(StandardCharsets.UTF_8);
         boolean changed = !Arrays.equals(reviewBytes, current);
-        requireUnsignedChange(properties(manifestText), changed);
+        requireUnsignedChange(currentManifest, changed);
 
         String updated = replace(manifestText, "review.sha256", BookQueryDataset.sha256(reviewBytes));
-        // New decisions carry the protocol of the sheet they came from; re-applying a signed review keeps its record.
         if (changed) {
-            updated = replace(updated, "review.protocol", BookReviewWorksheet.protocolOf(sheet));
+            // A decision carried over unchanged from the review on disk keeps the protocol it was made under, so the
+            // record is then the weaker of the two; otherwise every decision comes from this sheet.
+            String sheetProtocol = BookReviewWorksheet.protocolOf(sheet);
+            boolean carried = carriesDecisions(current, reviewBytes);
+            String protocol = carried ? weakerProtocol(currentManifest.getProperty("review.protocol"), sheetProtocol)
+                    : sheetProtocol;
+            updated = replace(updated, "review.protocol", protocol);
         }
-        BookQueryDatasetV2 built = BookQueryDatasetV2.build(properties(updated), base, baseManifest, selection,
+        BookQueryDatasetV2 built = BookQueryDatasetV2.build(manifestOf(updated), base, baseManifest, selection,
                 reviewBytes);
         for (var e : BookQueryDatasetV2.expectedCounts(built).entrySet()) {
             updated = replace(updated, e.getKey(), e.getValue());
         }
         // Validate everything, sign-off included, before anything is written.
-        BookQueryDatasetV2 checked = BookQueryDatasetV2.parse(properties(updated), base, baseManifest, selection,
+        BookQueryDatasetV2 checked = BookQueryDatasetV2.parse(manifestOf(updated), base, baseManifest, selection,
                 reviewBytes);
-        writeTogether(dir.resolve(BookQueryDatasetV2.REVIEW_FILE), review, manifestPath, updated);
+        writeTogether(reviewPath, review, manifestPath, updated,
+                sheetPath.resolveSibling(sheetPath.getFileName() + ".review-backup.psv"));
         out.println("wrote review.psv: " + checked.reviews().size() + " decided, " + checked.pending().size()
                 + " pending, " + checked.addedJudgments().size() + " added judgments, " + checked.findings().size()
                 + " findings; review status unchanged (" + checked.manifest().getProperty("judgment.reviewStatus")
@@ -256,11 +265,16 @@ public final class BookUnjudgedReviewMain {
     }
 
     /**
-     * Replaces {@code review} and then {@code manifest}, each atomically. If the manifest cannot be written, the
-     * previous review (or its absence) is restored, so the pair never ends up with a digest that does not match.
+     * Replaces {@code review} and then {@code manifest}, each atomically. The previous review is first copied to
+     * {@code backup} (next to the worksheet, so outside Git): if the manifest write fails it is restored, and if the
+     * process dies between the two moves the copy survives for recovery. The backup is removed once both are written.
      */
-    static void writeTogether(Path review, String reviewText, Path manifest, String manifestText) throws IOException {
+    static void writeTogether(Path review, String reviewText, Path manifest, String manifestText, Path backup)
+            throws IOException {
         byte[] previous = Files.exists(review) ? Files.readAllBytes(review) : null;
+        if (previous != null) {
+            Files.write(backup, previous);
+        }
         BookRecallMain.write(review, reviewText);
         try {
             BookRecallMain.write(manifest, manifestText);
@@ -269,13 +283,31 @@ public final class BookUnjudgedReviewMain {
                 if (previous == null) {
                     Files.deleteIfExists(review);
                 } else {
-                    BookRecallMain.write(review, new String(previous, StandardCharsets.UTF_8));
+                    Files.write(review, previous);
                 }
             } catch (IOException | RuntimeException restore) {
                 e.addSuppressed(restore);
+                e.addSuppressed(new IOException("the previous review.psv is kept at " + backup));
+                throw e;
             }
+            Files.deleteIfExists(backup);
             throw e;
         }
+        Files.deleteIfExists(backup);
+    }
+
+    /** Whether {@code next} keeps any decision row of {@code previous} unchanged (headers excluded). */
+    static boolean carriesDecisions(byte[] previous, byte[] next) {
+        List<String> before = List.of(new String(previous, StandardCharsets.UTF_8).split("\n"));
+        return List.of(new String(next, StandardCharsets.UTF_8).split("\n")).stream().skip(1)
+                .anyMatch(row -> before.subList(1, before.size()).contains(row));
+    }
+
+    /** {@code protocol} values ordered from weakest blinding to strongest: the legacy sheet showed chunk keys. */
+    static String weakerProtocol(String a, String b) {
+        List<String> order = List.of(BookQueryDatasetV2.LEGACY_REVIEW_PROTOCOL, BookQueryDatasetV2.REVIEW_PROTOCOL);
+        check(order.contains(a) && order.contains(b), "unknown review protocol " + (order.contains(a) ? b : a));
+        return order.indexOf(a) <= order.indexOf(b) ? a : b;
     }
 
     /** Replaces the value of exactly one existing {@code key=} line. */
@@ -294,16 +326,13 @@ public final class BookUnjudgedReviewMain {
         return String.join("\n", lines);
     }
 
-    static Properties properties(String text) {
-        Properties properties = new Properties();
-        try {
-            properties.load(new StringReader(text));
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        } catch (IllegalArgumentException e) {
-            // A hand edit with a backslash before "user" in a value is a malformed Unicode escape: exit 1, not a crash.
-            throw new IllegalStateException("malformed manifest.properties: " + e.getMessage(), e);
+    private static Properties manifestOf(String text) {
+        return BookQueryDatasetV2.readManifest(text.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void check(boolean condition, String message) {
+        if (!condition) {
+            throw new IllegalStateException(message);
         }
-        return properties;
     }
 }

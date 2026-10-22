@@ -41,6 +41,12 @@ was independently reviewed and approved before sign-off. The manifest records th
 | `judgment.draftedBy` | `codex` |
 | `judgment.draftedAt` | `2026-10-21` |
 | `judgment.verification` | `EACH_DRAFTED_DECISION_REVIEWED_AND_APPROVED_BY_REVIEWER` |
+| `judgment.draftBlinding` | `UNVERIFIED` |
+
+**The drafting step is not shown to be score-blind.** What Codex could see while drafting is unknown; it may have
+had repository access, where `selection.psv` holds each pair's rank and score and the coverage report lists the
+selected pairs. `review.protocol` describes the worksheet only. `judgment.draftBlinding` records this:
+`WORKSHEET_ONLY_VERIFIED`, `UNVERIFIED` or `NOT_BLIND`, required whenever labels were drafted.
 
 The relevance labels therefore rest on that human verification, not on the model's proposal alone. Readers should
 weigh them as **model-drafted, human-verified** labels, a further reason they are not an independent prospective
