@@ -181,6 +181,9 @@ record BookQueryDatasetV2(Properties manifest, BookQueryDataset base, List<Pair>
         // The pinned baseline has 229 eligible DEV pairs, so the rule always fills its target: fewer means truncated.
         check(selection.size() == BookUnjudgedSelection.TARGET, "selection.psv has " + selection.size()
                 + " pairs; the predeclared rule selects exactly " + BookUnjudgedSelection.TARGET + " from the pinned baseline");
+        check(BookUnjudgedSelection.RECEIPT_SHA256.equals(BookQueryDataset.sha256(selectionBytes)),
+                "selection.psv is not the receipt that " + BookUnjudgedSelection.RULE + " and its seed produce from the"
+                        + " pinned baseline");
         Map<String, Pair> byId = selection.stream()
                 .collect(Collectors.toMap(Pair::pairId, Function.identity(), (a, b) -> a, LinkedHashMap::new));
         List<Review> reviews = reviews(reviewBytes, byId, cases, base.chunkMap());

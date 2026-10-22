@@ -208,14 +208,36 @@ class BookReviewWorksheetTest {
     }
 
     @Test
-    void acceptsAnUneditedLegacyEntryWithItsChunkLine() {
-        Pair p = SELECTION.getFirst();
-        ChunkRef chunk = BASE.chunkMap().get(p.chunkKey());
-        String sheet = BookReviewWorksheet.render(BODY, BASE, SELECTION);
-        int at = sheet.indexOf("~~~text", sheet.indexOf("## " + p.pairId() + "\n")) - 1;
-        String legacy = sheet.substring(0, at) + "chunk: " + p.chunkKey() + " bytes [" + chunk.byteStart() + ","
-                + chunk.byteEnd() + ")\n" + sheet.substring(at);
+    void acceptsALegacySheetOnlyWithLegacyEntriesThroughout() {
+        String current = BookReviewWorksheet.render(BODY, BASE, SELECTION);
+        String legacy = current.replace(BookReviewWorksheet.PROTOCOL_LINE + BookQueryDatasetV2.REVIEW_PROTOCOL + "\n\n",
+                "");
+        for (Pair p : SELECTION) {
+            legacy = withChunkLine(legacy, p);
+        }
+        assertEquals(BookQueryDatasetV2.LEGACY_REVIEW_PROTOCOL, BookReviewWorksheet.protocolOf(legacy));
         assertEquals(BookQueryDatasetV2.REVIEW_HEADER + "\n", BookReviewWorksheet.apply(legacy, BODY, BASE, SELECTION));
+
+        // A current-protocol sheet with a legacy entry would claim the stricter blinding while exposing the key.
+        Pair p = SELECTION.getFirst();
+        String mixed = withChunkLine(current, p);
+        var e = assertThrows(IllegalStateException.class, () -> BookReviewWorksheet.apply(mixed, BODY, BASE, SELECTION));
+        assertEquals(p.pairId() + ": worksheet entry context (query, answerability or chunk text) was edited",
+                e.getMessage());
+        // And a legacy sheet must not drop the chunk line from an entry either.
+        int line = legacy.indexOf("\nchunk: ", legacy.indexOf("## " + p.pairId() + "\n"));
+        String stripped = legacy.substring(0, line) + legacy.substring(legacy.indexOf('\n', line + 1));
+        var missing = assertThrows(IllegalStateException.class,
+                () -> BookReviewWorksheet.apply(stripped, BODY, BASE, SELECTION));
+        assertEquals(p.pairId() + ": worksheet entry context (query, answerability or chunk text) was edited",
+                missing.getMessage());
+    }
+
+    private static String withChunkLine(String sheet, Pair p) {
+        ChunkRef chunk = BASE.chunkMap().get(p.chunkKey());
+        int at = sheet.indexOf("~~~text", sheet.indexOf("## " + p.pairId() + "\n")) - 1;
+        return sheet.substring(0, at) + "chunk: " + p.chunkKey() + " bytes [" + chunk.byteStart() + ","
+                + chunk.byteEnd() + ")\n" + sheet.substring(at);
     }
 
     private static String fill(String sheet, String pairId, String decision, String grade, String quote,

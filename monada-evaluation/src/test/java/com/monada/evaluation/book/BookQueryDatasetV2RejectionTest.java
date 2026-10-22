@@ -214,6 +214,14 @@ class BookQueryDatasetV2RejectionTest {
     // ---- selection
 
     @Test
+    void rejectsAReceiptTheRuleDidNotProduce() {
+        // Same 60 valid DEV pairs, other order: digests and counts refreshed, still not the predeclared receipt.
+        String first = selection.remove(1);
+        selection.add(first);
+        reject("selection.psv is not the receipt that " + BookUnjudgedSelection.RULE, m -> { });
+    }
+
+    @Test
     void rejectsATruncatedSelection() {
         selection.removeLast();
         reject("selection.psv has 59 pairs; the predeclared rule selects exactly 60", m -> { });

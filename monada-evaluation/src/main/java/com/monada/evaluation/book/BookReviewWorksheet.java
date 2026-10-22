@@ -114,7 +114,9 @@ final class BookReviewWorksheet {
     static String apply(String worksheet, byte[] body, BookQueryDataset base, List<Pair> selection) {
         Map<String, Pair> pairs = selection.stream()
                 .collect(Collectors.toMap(Pair::pairId, Function.identity(), (a, b) -> a, LinkedHashMap::new));
-        protocolOf(worksheet);
+        // The entry layout must match the protocol the preamble declares: a legacy entry (chunk key and byte range) in a
+        // current-protocol sheet would claim the stricter blinding while exposing those identifiers.
+        boolean legacy = BookQueryDatasetV2.LEGACY_REVIEW_PROTOCOL.equals(protocolOf(worksheet));
         Map<String, Case> cases = cases(base);
         Map<String, String> rows = new TreeMap<>();
         Set<String> seen = new HashSet<>();
@@ -132,8 +134,7 @@ final class BookReviewWorksheet {
             // (or two swapped entries) would attach it to a pair the reviewer did not see.
             Case c = cases.get(pair.queryId());
             ChunkRef chunk = base.chunkMap().get(pair.chunkKey());
-            check(section.startsWith(context(pair, c, chunk, body, false))
-                            || section.startsWith(context(pair, c, chunk, body, true)),
+            check(section.startsWith(context(pair, c, chunk, body, legacy)),
                     id + ": worksheet entry context (query, answerability or chunk text) was edited");
             // Fields come after the chunk text, so a field-like line of book text cannot be read as a decision.
             int fence = section.lastIndexOf("\n~~~\n");

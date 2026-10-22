@@ -44,6 +44,8 @@ class BookUnjudgedSelectionTest {
         String receipt = BookUnjudgedSelection.render(
                 BookUnjudgedSelection.select(BookUnjudgedSelection.parseTrace(REPORT, BASE)));
         assertArrayEquals(BookQueryDatasetV2.resource("selection.psv"), receipt.getBytes(StandardCharsets.UTF_8));
+        assertEquals(BookUnjudgedSelection.RECEIPT_SHA256, BookQueryDataset.sha256(receipt.getBytes(StandardCharsets.UTF_8)),
+                "the receipt digest pinned in code must be the one the rule reproduces");
     }
 
     @Test

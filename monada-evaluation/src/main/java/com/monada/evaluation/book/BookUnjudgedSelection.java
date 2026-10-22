@@ -33,6 +33,12 @@ final class BookUnjudgedSelection {
     static final String SEED = "book-queries-v2|unjudged-review-v1|";
     static final String BASELINE_REPORT = "docs/experiments/book-corpus-v1/book-recall-v1-report.txt";
     static final String BASELINE_SHA256 = "86501f764e985835487a90b05ce5dbbdc2821455c94a97aaf5d443bba1a2ffd2";
+    /**
+     * SHA-256 of the receipt this rule and seed produce from the pinned baseline. It is pinned here, not only in the
+     * editable manifest, so a different receipt cannot be accepted by refreshing digests; the selection test re-derives
+     * the receipt and checks this value.
+     */
+    static final String RECEIPT_SHA256 = "c095247df3d57b568afc15fa12eee9b5efa9bc9ac74f9f7dedd6ecfa9463418d";
     static final int TARGET = 60;
     static final int HUB_CHUNKS = 4;
     static final String HEADER = "pairId|queryId|split|category|chunkKey|atomId|stratum|rank|score|chunkDevUnjudged";
