@@ -139,7 +139,9 @@ public final class BookUnjudgedReviewMain {
         byte[] body = body(options);
         Path dir = Path.of(options.get("--dataset"));
         Path manifestPath = dir.resolve("manifest.properties");
-        String manifestText = Files.readString(manifestPath, StandardCharsets.UTF_8);
+        byte[] manifestBytes = Files.readAllBytes(manifestPath);
+        BookQueryDatasetV2.readManifest(manifestBytes); // strict UTF-8 and escapes: a defect exits 1, not an I/O error
+        String manifestText = new String(manifestBytes, StandardCharsets.UTF_8);
         byte[] selection = Files.readAllBytes(dir.resolve(BookQueryDatasetV2.SELECTION_FILE));
         BookQueryDataset base = BookQueryDataset.load();
         List<Pair> pairs = BookUnjudgedSelection.parse(selection);

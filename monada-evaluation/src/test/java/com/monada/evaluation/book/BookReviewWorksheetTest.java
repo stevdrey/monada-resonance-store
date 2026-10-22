@@ -169,6 +169,34 @@ class BookReviewWorksheetTest {
     }
 
     @Test
+    void rejectsANoteThatCopiesChunkText() {
+        Pair p = SELECTION.getFirst();
+        ChunkRef chunk = BASE.chunkMap().get(p.chunkKey());
+        String text = new String(BODY, (int) chunk.byteStart(), 200, StandardCharsets.UTF_8);
+        String[] words = text.trim().split("\\s+");
+        String quote = String.join(" ", Arrays.copyOfRange(words, 2, 2 + BookReviewWorksheet.COPIED_WORDS));
+        String sheet = fill(BookReviewWorksheet.render(BODY, BASE, SELECTION), p.pairId(), "CONFOUNDER", "0", quote,
+                "the passage says " + quote);
+        var e = assertThrows(IllegalStateException.class, () -> BookReviewWorksheet.apply(sheet, BODY, BASE, SELECTION));
+        assertTrue(e.getMessage().contains("note reproduces 6 or more consecutive words of the chunk"), e.getMessage());
+        // A shorter shared run (a name, a short phrase) is a paraphrase and stays allowed.
+        String shortRun = String.join(" ", Arrays.copyOfRange(words, 2, 2 + BookReviewWorksheet.COPIED_WORDS - 1));
+        assertFalse(BookReviewWorksheet.copiesChunkText("mentions " + shortRun, text));
+    }
+
+    @Test
+    void anOverlappingRepeatIsAnAmbiguousQuote() {
+        byte[] repeated = BODY.clone();
+        ChunkRef chunk = BASE.chunkMap().get(SELECTION.getFirst().chunkKey());
+        byte[] run = "a a a".getBytes(StandardCharsets.UTF_8);
+        System.arraycopy(run, 0, repeated, (int) chunk.byteStart() + 1, run.length);
+        // "a a" occurs at offsets 0-3 and 2-5 of the run: the second match overlaps the first.
+        var e = assertThrows(IllegalStateException.class,
+                () -> BookReviewWorksheet.locate(repeated, chunk, "a a", "UJ-x"));
+        assertTrue(e.getMessage().contains("occurs more than once"), e.getMessage());
+    }
+
+    @Test
     void rejectsAWorksheetWithAMissingOrRepeatedEntry() {
         String sheet = BookReviewWorksheet.render(BODY, BASE, SELECTION);
         String id = SELECTION.getFirst().pairId();

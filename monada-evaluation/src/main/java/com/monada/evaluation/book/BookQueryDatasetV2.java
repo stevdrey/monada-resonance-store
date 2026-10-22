@@ -117,16 +117,26 @@ record BookQueryDatasetV2(Properties manifest, BookQueryDataset base, List<Pair>
 
     /** Loads the bundled v2 over the bundled, unchanged v1. */
     static BookQueryDatasetV2 load() {
+        Properties manifest = readManifest(resource("manifest.properties"));
+        return parse(manifest, BookQueryDataset.load(), BookQueryDataset.resource("manifest.properties"),
+                resource(require(manifest, "selection.file")), resource(require(manifest, "review.file")));
+    }
+
+    /** Strict UTF-8 then {@link Properties#load}; every defect is an {@link IllegalStateException}. */
+    static Properties readManifest(byte[] bytes) {
+        String text = new String(bytes, StandardCharsets.UTF_8);
+        // A lenient decode would turn an invalid byte in, say, the reviewer name into U+FFFD and still pass sign-off.
+        check(Arrays.equals(text.getBytes(StandardCharsets.UTF_8), bytes),
+                "book-queries-v2 manifest.properties is not valid UTF-8");
         Properties manifest = new Properties();
         try {
-            manifest.load(new StringReader(new String(resource("manifest.properties"), StandardCharsets.UTF_8)));
+            manifest.load(new StringReader(text));
         } catch (IOException e) {
             throw new IllegalStateException("cannot read book-queries-v2 manifest.properties", e);
         } catch (IllegalArgumentException e) {
             throw new IllegalStateException("malformed book-queries-v2 manifest.properties: " + e.getMessage(), e);
         }
-        return parse(manifest, BookQueryDataset.load(), BookQueryDataset.resource("manifest.properties"),
-                resource(require(manifest, "selection.file")), resource(require(manifest, "review.file")));
+        return manifest;
     }
 
     static byte[] resource(String name) {

@@ -113,7 +113,8 @@ The receipt is re-derived and compared byte for byte by `BookUnjudgedSelectionTe
    | `UNRESOLVED` | none (give a reason) | The pair stays unjudged; no fake grade-0 row is written |
    | `NO_ANSWER_CONTRADICTED` | the grade the chunk would get | Only for a v1 NO_ANSWER query; recorded as a finding (see below) |
 
-   Also fill in `quote`, the exact passage the decision rests on, and a short `note`. A blank decision keeps the pair
+   Also fill in `quote`, the exact passage the decision rests on, and a short `note`. The quote stays in the local
+   sheet; the note is committed, so `apply` rejects a note that copies 6 or more consecutive words of the chunk. A blank decision keeps the pair
    pending.
 3. Apply the decisions:
 

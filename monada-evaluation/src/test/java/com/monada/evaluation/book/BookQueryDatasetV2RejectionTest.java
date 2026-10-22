@@ -11,6 +11,7 @@ import com.monada.evaluation.book.BookUnjudgedSelection.Pair;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
 import java.util.function.Consumer;
@@ -78,6 +79,17 @@ class BookQueryDatasetV2RejectionTest {
         assertEquals(pending.manifest().getProperty("counts.added.judgments"),
                 signed.manifest().getProperty("counts.added.judgments"));
         assertEquals("115", signed.manifest().getProperty("counts.judgments"));
+    }
+
+    @Test
+    void rejectsAManifestThatIsNotValidUtf8() {
+        byte[] bytes = "judgment.reviewer=Ste\n".getBytes(StandardCharsets.UTF_8);
+        byte[] broken = Arrays.copyOf(bytes, bytes.length + 1);
+        broken[bytes.length - 1] = (byte) 0xFF;
+        broken[bytes.length] = '\n';
+        var e = assertThrows(IllegalStateException.class, () -> BookQueryDatasetV2.readManifest(broken));
+        assertEquals("book-queries-v2 manifest.properties is not valid UTF-8", e.getMessage());
+        assertEquals("Ste", BookQueryDatasetV2.readManifest(bytes).getProperty("judgment.reviewer"));
     }
 
     @Test

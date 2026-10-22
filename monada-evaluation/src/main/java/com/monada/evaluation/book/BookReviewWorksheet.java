@@ -50,6 +50,8 @@ final class BookReviewWorksheet {
         """;
 
     private static final Pattern ENTRY = Pattern.compile("(?m)^## (UJ-[0-9a-f]{8})$");
+    /** Consecutive chunk words a note may not reproduce; the committed notes share at most 3. */
+    static final int COPIED_WORDS = 6;
     private static final List<String> FIELDS = List.of("decision", "grade", "quote", "note");
     private static final Pattern FIELD = Pattern.compile("(?m)^(decision|grade|quote|note):[ \\t]*(.*)$");
 
@@ -150,6 +152,9 @@ final class BookReviewWorksheet {
             }
             String note = fields.getOrDefault("note", "");
             check(!note.isBlank() && !note.contains("|"), id + ": note must be non-blank and contain no |");
+            // review.psv is committed and must hold no book text: a note may name things, not copy a passage.
+            check(!copiesChunkText(note, chunkText(body, chunk)), id + ": note reproduces " + COPIED_WORDS
+                    + " or more consecutive words of the chunk; paraphrase it, the quote stays local");
             String row;
             Decision d = parseDecision(decision, id);
             if (d == Decision.UNRESOLVED) {
@@ -174,6 +179,22 @@ final class BookReviewWorksheet {
         return out.toString();
     }
 
+    /** Whether {@code note} shares a run of {@value #COPIED_WORDS} or more whitespace-separated words with {@code text}. */
+    static boolean copiesChunkText(String note, String text) {
+        String[] chunkWords = text.trim().split("\\s+");
+        Set<String> runs = new HashSet<>();
+        for (int i = 0; i + COPIED_WORDS <= chunkWords.length; i++) {
+            runs.add(String.join(" ", Arrays.copyOfRange(chunkWords, i, i + COPIED_WORDS)));
+        }
+        String[] noteWords = note.trim().split("\\s+");
+        for (int i = 0; i + COPIED_WORDS <= noteWords.length; i++) {
+            if (runs.contains(String.join(" ", Arrays.copyOfRange(noteWords, i, i + COPIED_WORDS)))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** The byte span of {@code quote} inside {@code chunk}; whitespace runs in the quote match any whitespace run. */
     static long[] locate(byte[] body, ChunkRef chunk, String quote, String id) {
         String[] words = quote.trim().split("\\s+");
@@ -184,7 +205,8 @@ final class BookReviewWorksheet {
         check(m.find(), id + ": quote does not occur in " + chunk.key());
         int from = m.start();
         int to = m.end();
-        check(!m.find(), id + ": quote occurs more than once in " + chunk.key() + "; quote a longer passage");
+        // Search again from just after the first match's start, so an overlapping repetition also counts.
+        check(!m.find(from + 1), id + ": quote occurs more than once in " + chunk.key() + "; quote a longer passage");
         long start = chunk.byteStart() + text.substring(0, from).getBytes(StandardCharsets.UTF_8).length;
         long end = chunk.byteStart() + text.substring(0, to).getBytes(StandardCharsets.UTF_8).length;
         return new long[] {start, end};
