@@ -256,6 +256,17 @@ public final class BookUnjudgedReviewMain {
         if (aliases(target, baseline)) {
             return "--out must not be the --baseline input or an alias of it, which is only read: " + target;
         }
+        return protectedOutput("--out", target, root, allowed);
+    }
+
+    /**
+     * Why {@code target}, the value of {@code option}, would replace a committed, frozen evaluation artifact, or
+     * {@code null} when it is safe: any path inside a {@link #PROTECTED_DIRS} directory (compared on real paths, so a
+     * symbolic-linked parent is caught) and any existing file that is the same file as a protected one (a symbolic or
+     * hard link). {@code allowed}, when given, is the single protected file this option may regenerate. Shared by the
+     * book commands that write into the repository.
+     */
+    static String protectedOutput(String option, Path target, Path root, Path allowed) throws IOException {
         if (allowed != null && sameLocation(target, allowed)) {
             return null;
         }
@@ -265,12 +276,13 @@ public final class BookUnjudgedReviewMain {
                 continue;
             }
             if (BookRecallMain.insideWork(target, protectedDir)) {
-                return "--out must not be inside the frozen evaluation inputs " + dir + ": " + target;
+                return option + " must not be inside the frozen evaluation inputs " + dir + ": " + target;
             }
             try (var files = Files.walk(protectedDir)) {
                 for (Path file : (Iterable<Path>) files.filter(Files::isRegularFile)::iterator) {
                     if (aliases(target, file)) {
-                        return "--out must not be an alias of the frozen evaluation input " + file + ": " + target;
+                        return option + " must not be an alias of the frozen evaluation input " + file + ": "
+                                + target;
                     }
                 }
             }

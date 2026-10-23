@@ -1,0 +1,544 @@
+package com.monada.evaluation.book;
+
+import com.monada.api.MonadaMemory;
+import com.monada.api.MonadaMemoryOptions;
+import com.monada.core.ResonanceResult;
+import com.monada.encoder.SimpleFrequencyEncoder;
+import com.monada.encoder.TextNormalizer;
+import com.monada.evaluation.book.BookRecallEvaluator.Hit;
+import com.monada.storage.Manifest;
+import com.monada.storage.audit.StorageIntegrityAuditor;
+import java.io.IOException;
+import java.lang.management.ManagementFactory;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
+
+/**
+ * Measures how long the book chunks take to ingest, how long a Store of them takes to open and how long the judged
+ * book queries take to recall, at every scale of a declared data-size ladder (Issue #168, Book 6/8; evaluation only,
+ * exploratory, informational timings, no threshold or gate on them).
+ *
+ * <p>Per scale, in a fixed order and each on its own Store directory under the scratch directory:
+ * <ol>
+ *   <li><b>parity baseline</b> (untimed): a dedicated Store is seeded and every query's top-K recorded on a new
+ *   instance; every later query of the scale, in this JVM or a child JVM, must return exactly these hits;</li>
+ *   <li><b>ingest</b>: per trial a new empty directory, {@code MonadaMemory.open} (timed as {@code create}) and
+ *   {@code rememberAll(texts)} (encode + persist through the public API, timed as {@code rememberAll});</li>
+ *   <li><b>open, in process</b>: repeated {@code MonadaMemory.open} of the last ingested Store, each followed by one
+ *   timed first query on that new instance (the instance loads nothing eagerly, so that cost is not hidden);</li>
+ *   <li><b>query, in process</b>: warm passes over every query on one instance, API calls only; then, in a loop of
+ *   its own, a standalone query-encoding diagnostic (the same normalizer and encoder as the API, never
+ *   subtracted);</li>
+ *   <li><b>fresh process</b>: sequential child JVMs ({@link BookLatencyChild}), started with the parent's
+ *   allowlisted heap, GC and JIT options (none taken from the environment) and reporting their own JVM
+ *   configuration, open the same Store and run one pass;
+ *   the first process and the later ones are reported apart. The OS page cache is never dropped, so no condition
+ *   here is an OS cold-cache measurement;</li>
+ *   <li><b>parity after profiling</b> (untimed): the baseline Store is reopened and queried again.</li>
+ * </ol>
+ * Chunking, verification, parity passes, directory setup and cleanup and report writing are outside every timing.
+ * Nothing here changes ranking: queries use {@link MonadaMemoryOptions#defaults()} on feedback-free Stores.
+ */
+final class BookLatencyBenchmark {
+    static final String API = "MonadaMemory.resonate(query).topK(" + BookLatencyChild.K + ").threshold(-Infinity)";
+    /** Mismatch details kept per run; the count is always complete. */
+    private static final int MAX_MISMATCH_DETAILS = 20;
+    /** Upper bound of every repetition count: far beyond a bounded local run, far below int overflow. */
+    static final int MAX_COUNT = 100_000;
+    private static final long CHILD_TIMEOUT_MINUTES = 5;
+    /** Every field a child must print; its JVM metadata included, so it is never recorded as {@code null}. */
+    static final Set<String> CHILD_FIELDS = Set.of("openNanos", "queryNanos", "resultsDigest", "jvm.maxHeapMiB",
+            "jvm.gc", "jvm.args");
+    private static final long CHILD_KILL_WAIT_SECONDS = 30;
+    /**
+     * Variables the JVM or its launcher read options from. They are removed from every child's environment, otherwise
+     * a file-writing diagnostic set there (a flight recording, a log) would reach all children and bypass the
+     * allowlist; their allowlisted options are still forwarded, since the parent's input arguments include them.
+     */
+    static final List<String> CLEARED_CHILD_ENV = List.of("JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS");
+
+    private BookLatencyBenchmark() {
+    }
+
+    /**
+     * Repetition counts; warmup samples are taken exactly like measured ones and then discarded. Every count is
+     * bounded by {@value #MAX_COUNT}, so warmup + measured totals can never overflow an {@code int} loop bound.
+     */
+    record Config(List<BookLatencyScale> ladder, int ingestWarmups, int ingestTrials, int openWarmups,
+                  int openTrials, int queryWarmupPasses, int queryPasses, int processes) {
+        Config {
+            ladder = List.copyOf(ladder);
+            if (ladder.isEmpty()) {
+                throw new IllegalArgumentException("the ladder has no scale");
+            }
+            requireRange("ingestWarmups", ingestWarmups, 0);
+            requireRange("ingestTrials", ingestTrials, 1);
+            requireRange("openWarmups", openWarmups, 0);
+            requireRange("openTrials", openTrials, 1);
+            requireRange("queryWarmupPasses", queryWarmupPasses, 0);
+            requireRange("queryPasses", queryPasses, 1);
+            requireRange("processes", processes, 0);
+        }
+
+        static Config defaults() {
+            return new Config(BookLatencyScale.parseLadder(BookLatencyScale.DEFAULT_LADDER), 1, 5, 2, 20, 2, 10, 5);
+        }
+
+        private static void requireRange(String name, int value, int min) {
+            if (value < min || value > MAX_COUNT) {
+                throw new IllegalArgumentException(name + " must be in " + min + ".." + MAX_COUNT + ", got " + value);
+            }
+        }
+    }
+
+    /** Execution conditions, named so a fresh JVM is never mistaken for an OS cold cache. */
+    enum Condition {
+        /** In the benchmark JVM, on a new empty directory. */
+        IN_PROCESS,
+        /** In the benchmark JVM after earlier opens of the same Store: warm JIT, warm page cache. */
+        IN_PROCESS_REPEATED,
+        /** The first query on a Store instance that was just opened in the benchmark JVM. */
+        IN_PROCESS_NEW_INSTANCE,
+        /** Queries on one instance after warmup passes in the benchmark JVM. */
+        IN_PROCESS_WARM,
+        /** Query encoding alone, outside the API call (diagnostic; not subtracted from anything). */
+        STANDALONE_DIAGNOSTIC,
+        /** The first child JVM of the scale: new JVM, page cache warm from the parent's writes and reads. */
+        FRESH_PROCESS_FIRST,
+        /** Later child JVMs of the scale: new JVM each, page cache warm from earlier processes. */
+        FRESH_PROCESS_REPEATED
+    }
+
+    /** One latency series: what was timed, under which condition, the raw nanos in measurement order. */
+    record Series(String phase, Condition condition, String timed, List<Long> nanos) {
+        Series {
+            nanos = List.copyOf(nanos);
+        }
+
+        BookLatencyStats stats() {
+            return BookLatencyStats.of(nanos);
+        }
+
+        String key() {
+            return phase + "." + condition;
+        }
+    }
+
+    /**
+     * One measured scale.
+     *
+     * @param resultsDigest  {@link BookLatencyChild#digest} of the parity baseline (deterministic)
+     * @param storeBytes     on-disk bytes of the last ingested Store (its atom log holds creation times)
+     * @param freshProcess   {@code RUN} or why the fresh-process condition was not run
+     */
+    record ScaleResult(BookLatencyScale.Selected selected, String resultsDigest, int dimensions, long storeBytes,
+                       List<Series> series, String freshProcess) {
+        ScaleResult {
+            series = List.copyOf(series);
+        }
+    }
+
+    /**
+     * Result-id parity, counted in query result lists (the denominator of {@code mismatches}).
+     *
+     * @param checks        top-K lists verified: one per direct comparison plus every query a process digest covers
+     * @param mismatches    lists that differed; a differing digest counts every query of its pass
+     * @param direct        lists compared one by one in this JVM
+     * @param digests       child-JVM digests compared, each over a whole pass
+     * @param digestQueries the query lists those digests cover
+     */
+    record Parity(int checks, int mismatches, int direct, int digests, int digestQueries, List<String> details) {
+        Parity {
+            details = List.copyOf(details);
+        }
+
+        boolean passed() {
+            return mismatches == 0;
+        }
+    }
+
+    record Result(Map<String, String> inputs, List<String> queries, Config config, String childClasspathStatus,
+                  Map<String, String> host, List<ScaleResult> scales, Parity parity) {
+        Result {
+            inputs = Collections.unmodifiableMap(new LinkedHashMap<>(inputs));
+            queries = List.copyOf(queries);
+            host = Collections.unmodifiableMap(new LinkedHashMap<>(host));
+            scales = List.copyOf(scales);
+        }
+    }
+
+    /**
+     * Runs the benchmark over {@code chunks} (texts in ordinal order) with {@code queries} (fixed order) in the
+     * existing, empty directory {@code scratch}. {@code childClasspath} null skips the fresh-process condition.
+     */
+    static Result run(List<String> chunks, List<String> queries, Map<String, String> inputs, Config config,
+                      Path scratch, String childClasspath) throws IOException {
+        if (chunks.isEmpty() || queries.isEmpty()) {
+            throw new IllegalArgumentException("the benchmark needs chunks and queries");
+        }
+        ParityLog parity = new ParityLog();
+        Set<String> childJvms = new LinkedHashSet<>();
+        List<ScaleResult> scales = new ArrayList<>();
+        for (BookLatencyScale scale : config.ladder()) {
+            scales.add(runScale(scale.select(chunks), queries, config, scratch.resolve("scale-" + scale.id()),
+                    childClasspath, parity, childJvms));
+        }
+        String childStatus = childClasspath == null ? "NOT_RUN (no child classpath)"
+                : config.processes() == 0 ? "NOT_RUN (processes=0)"
+                : "RUN (" + config.processes() + " sequential child JVMs per scale)";
+        Map<String, String> host = BookLatencyHost.describe(scratch);
+        // Children get exactly the allowlisted options shown in "jvm args", and none from the environment.
+        host.put("child jvm environment", String.join(", ", CLEARED_CHILD_ENV) + " cleared");
+        // What each child JVM reported about itself: the fresh-process series ran under this, not the parent's.
+        host.put("child jvm", childJvms.isEmpty() ? "NOT_RUN" : childJvms.size() == 1 ? childJvms.iterator().next()
+                : "VARIED: " + String.join(" | ", childJvms));
+        return new Result(inputs, queries, config, childStatus, host, scales, parity.result());
+    }
+
+    private static ScaleResult runScale(BookLatencyScale.Selected selected, List<String> queries, Config config,
+                                        Path dir, String childClasspath, ParityLog parity, Set<String> childJvms)
+            throws IOException {
+        Files.createDirectory(dir);
+        String id = selected.scale().id();
+        Set<String> atoms = selected.atomIds();
+
+        // 1. Parity baseline, untimed, on its own Store.
+        Path parityStore = dir.resolve("parity");
+        MonadaMemory.open(parityStore).rememberAll(selected.texts());
+        List<List<Hit>> baseline = new ArrayList<>();
+        MonadaMemory baselineInstance = MonadaMemory.open(parityStore);
+        for (int q = 0; q < queries.size(); q++) {
+            List<Hit> hits = BookLatencyChild.hits(BookLatencyChild.query(baselineInstance, queries.get(q)));
+            BookRecallEvaluator.validateHits(id + " q" + q, hits, atoms);
+            baseline.add(hits);
+        }
+        String baselineDigest = BookLatencyChild.digest(baseline);
+
+        // 2. Ingest: encode + persist through the public API, one new directory per trial.
+        List<Long> create = new ArrayList<>();
+        List<Long> remember = new ArrayList<>();
+        Path store = null;
+        for (int t = 0; t < config.ingestWarmups() + config.ingestTrials(); t++) {
+            Path trial = dir.resolve("ingest-" + t);
+            long start = System.nanoTime();
+            MonadaMemory memory = MonadaMemory.open(trial);
+            long opened = System.nanoTime();
+            List<?> stored = memory.rememberAll(selected.texts());
+            long done = System.nanoTime();
+            if (stored.size() != selected.texts().size()) {
+                // The API did not store what it was given: an environment fault (exit 2), not an invalid result.
+                throw new IOException(id + ": rememberAll returned " + stored.size() + " atoms for "
+                        + selected.texts().size() + " texts");
+            }
+            if (t >= config.ingestWarmups()) {
+                create.add(opened - start);
+                remember.add(done - opened);
+            }
+            store = trial;
+        }
+        // Untimed and after the whole loop, so no deletion's file-system work runs into a timed trial; only the last
+        // trial's Store is kept for the open and query phases.
+        for (int t = 0; t < config.ingestWarmups() + config.ingestTrials() - 1; t++) {
+            deleteTree(dir.resolve("ingest-" + t));
+        }
+        long storeBytes = treeBytes(store);
+        Manifest manifest = new StorageIntegrityAuditor().audit(store).manifest();
+        if (manifest == null) {
+            throw new IOException(id + ": the ingested Store has no readable manifest");
+        }
+
+        // 3. Open in process, each new instance followed by one timed first query (rotating through the queries).
+        List<Long> open = new ArrayList<>();
+        List<Long> firstQuery = new ArrayList<>();
+        for (int t = 0; t < config.openWarmups() + config.openTrials(); t++) {
+            int q = t % queries.size();
+            long start = System.nanoTime();
+            MonadaMemory memory = MonadaMemory.open(store);
+            long opened = System.nanoTime();
+            List<ResonanceResult> results = BookLatencyChild.query(memory, queries.get(q));
+            long done = System.nanoTime();
+            parity.compare(id + " open trial " + t + " q" + q, baseline.get(q), BookLatencyChild.hits(results));
+            if (t >= config.openWarmups()) {
+                open.add(opened - start);
+                firstQuery.add(done - opened);
+            }
+        }
+
+        // 4. Warm query passes on one instance: API calls only, back to back.
+        MonadaMemory memory = MonadaMemory.open(store);
+        List<Long> query = new ArrayList<>();
+        for (int pass = 0; pass < config.queryWarmupPasses() + config.queryPasses(); pass++) {
+            for (int q = 0; q < queries.size(); q++) {
+                long start = System.nanoTime();
+                List<ResonanceResult> results = BookLatencyChild.query(memory, queries.get(q));
+                long done = System.nanoTime();
+                parity.compare(id + " pass " + pass + " q" + q, baseline.get(q), BookLatencyChild.hits(results));
+                if (pass >= config.queryWarmupPasses()) {
+                    query.add(done - start);
+                }
+            }
+        }
+
+        // 4b. Standalone encoding diagnostic, its own loop after the query passes so it cannot warm caches for, or
+        // add allocation pressure to, the timed API calls.
+        MonadaMemoryOptions options = MonadaMemoryOptions.defaults();
+        TextNormalizer normalizer = options.textNormalizer();
+        SimpleFrequencyEncoder encoder = new SimpleFrequencyEncoder(manifest.dimensions());
+        List<Long> encode = new ArrayList<>();
+        for (int pass = 0; pass < config.queryWarmupPasses() + config.queryPasses(); pass++) {
+            for (String text : queries) {
+                long start = System.nanoTime();
+                var normalized = normalizer.normalize(text);
+                if (!normalized.enrichedText().isBlank()) {
+                    encoder.encode(normalized.toWeightedText(options.expansionOptions()));
+                }
+                long done = System.nanoTime();
+                if (pass >= config.queryWarmupPasses()) {
+                    encode.add(done - start);
+                }
+            }
+        }
+
+        List<Series> series = new ArrayList<>(List.of(
+                new Series("ingest.create", Condition.IN_PROCESS, "MonadaMemory.open(new empty dir)", create),
+                new Series("ingest.rememberAll", Condition.IN_PROCESS,
+                        "rememberAll(texts): encode + persist via the public API", remember),
+                new Series("open", Condition.IN_PROCESS_REPEATED, "MonadaMemory.open(store)", open),
+                new Series("firstQuery", Condition.IN_PROCESS_NEW_INSTANCE, "first query after open, " + API,
+                        firstQuery),
+                new Series("query", Condition.IN_PROCESS_WARM, API, query),
+                new Series("queryEncode", Condition.STANDALONE_DIAGNOSTIC,
+                        "normalize + encode only, same pipeline as the API, separate loop, not subtracted",
+                        encode)));
+
+        // 5. Fresh processes, sequential, on the same Store.
+        String freshProcess;
+        if (childClasspath == null || config.processes() == 0) {
+            freshProcess = childClasspath == null ? "NOT_RUN (no child classpath)" : "NOT_RUN (processes=0)";
+        } else {
+            series.addAll(freshProcesses(id, store, dir, queries, baselineDigest, config.processes(),
+                    childClasspath, parity, childJvms));
+            freshProcess = "RUN";
+        }
+
+        // 6. Parity after profiling, untimed, on the baseline Store.
+        MonadaMemory after = MonadaMemory.open(parityStore);
+        for (int q = 0; q < queries.size(); q++) {
+            parity.compare(id + " after profiling q" + q, baseline.get(q),
+                    BookLatencyChild.hits(BookLatencyChild.query(after, queries.get(q))));
+        }
+        return new ScaleResult(selected, baselineDigest, manifest.dimensions(), storeBytes, series, freshProcess);
+    }
+
+    private static List<Series> freshProcesses(String id, Path store, Path dir, List<String> queries,
+                                               String baselineDigest, int processes, String classpath,
+                                               ParityLog parity, Set<String> childJvms) throws IOException {
+        Path queryFile = dir.resolve("queries.txt");
+        Files.write(queryFile, queries, StandardCharsets.UTF_8);
+        String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+        Map<Condition, List<Long>> open = new LinkedHashMap<>();
+        Map<Condition, List<Long>> first = new LinkedHashMap<>();
+        Map<Condition, List<Long>> rest = new LinkedHashMap<>();
+        Map<Condition, List<Long>> wall = new LinkedHashMap<>();
+        for (int p = 0; p < processes; p++) {
+            Condition condition = p == 0 ? Condition.FRESH_PROCESS_FIRST : Condition.FRESH_PROCESS_REPEATED;
+            Path outFile = dir.resolve("child-" + p + ".out");
+            Path errFile = dir.resolve("child-" + p + ".err");
+            long start = System.nanoTime();
+            Process process = childProcess(java, classpath, store, queryFile).redirectOutput(outFile.toFile())
+                    .redirectError(errFile.toFile()).start();
+            boolean exited;
+            try {
+                exited = process.waitFor(CHILD_TIMEOUT_MINUTES, TimeUnit.MINUTES);
+            } catch (InterruptedException e) {
+                terminate(process);
+                Thread.currentThread().interrupt();
+                throw new IOException("interrupted while waiting for child JVM " + p, e);
+            }
+            long elapsed = System.nanoTime() - start;
+            // A child that cannot run (timeout, unreadable Store, I/O error) is an environment failure, not an
+            // invalid result: it surfaces as an IOException, so the command exits 2, never 1.
+            if (!exited) {
+                terminate(process);
+                throw new IOException(id + ": child JVM " + p + " timed out after " + CHILD_TIMEOUT_MINUTES
+                        + " minutes");
+            }
+            if (process.exitValue() != 0) {
+                throw new IOException(id + ": child JVM " + p + " exited " + process.exitValue() + ": "
+                        + Files.readString(errFile, StandardCharsets.UTF_8).strip());
+            }
+            Map<String, String> fields = new LinkedHashMap<>();
+            for (String line : Files.readAllLines(outFile, StandardCharsets.UTF_8)) {
+                int eq = line.indexOf('=');
+                if (eq > 0) {
+                    fields.put(line.substring(0, eq), line.substring(eq + 1));
+                }
+            }
+            // A truncated or garbled child report is an environment failure (exit 2), like a nonzero child exit.
+            if (!fields.keySet().containsAll(CHILD_FIELDS)) {
+                throw new IOException(id + ": child JVM " + p + " printed an incomplete report: " + fields);
+            }
+            List<Long> nanos = new ArrayList<>();
+            for (String value : fields.get("queryNanos").split(",", -1)) {
+                if (!value.isEmpty()) {
+                    nanos.add(childNanos(id + " child JVM " + p + " queryNanos", value));
+                }
+            }
+            long openNanos = childNanos(id + " child JVM " + p + " openNanos", fields.get("openNanos"));
+            if (nanos.size() != queries.size()) {
+                throw new IOException(id + ": child JVM " + p + " reported " + nanos.size() + " query timings for "
+                        + queries.size() + " queries");
+            }
+            parity.compareDigest(id + " child JVM " + p, baselineDigest, fields.get("resultsDigest"),
+                    queries.size());
+            childJvms.add("max heap " + fields.get("jvm.maxHeapMiB") + " MiB; gc " + fields.get("jvm.gc")
+                    + "; jvm args " + fields.get("jvm.args"));
+            open.computeIfAbsent(condition, c -> new ArrayList<>()).add(openNanos);
+            first.computeIfAbsent(condition, c -> new ArrayList<>()).add(nanos.getFirst());
+            rest.computeIfAbsent(condition, c -> new ArrayList<>()).addAll(nanos.subList(1, nanos.size()));
+            wall.computeIfAbsent(condition, c -> new ArrayList<>()).add(elapsed);
+        }
+        List<Series> series = new ArrayList<>();
+        for (Condition condition : open.keySet()) {
+            series.add(new Series("open", condition, "MonadaMemory.open(store) in the child, JVM startup excluded",
+                    open.get(condition)));
+            series.add(new Series("firstQuery", condition, "first query of the child's pass, " + API,
+                    first.get(condition)));
+            series.add(new Series("query", condition, "remaining queries of the child's single pass, " + API,
+                    rest.get(condition)));
+            series.add(new Series("processWall", condition,
+                    "whole child process seen by the parent: JVM startup, open, one pass, output", wall.get(condition)));
+        }
+        return series;
+    }
+
+    /** A non-negative nanosecond count printed by a child, or an {@link IOException} naming what was malformed. */
+    static long childNanos(String what, String value) throws IOException {
+        try {
+            long nanos = Long.parseLong(value);
+            if (nanos < 0) {
+                throw new IOException(what + " is negative: " + value);
+            }
+            return nanos;
+        } catch (NumberFormatException e) {
+            throw new IOException(what + " is not a nanosecond count: '" + value + "'", e);
+        }
+    }
+
+    /**
+     * The child JVM command: the allowlisted options ({@link #childOptions()}) on the command line, and the
+     * {@link #CLEARED_CHILD_ENV} variables removed from its environment.
+     */
+    static ProcessBuilder childProcess(String java, String classpath, Path store, Path queryFile) {
+        List<String> command = new ArrayList<>(List.of(java));
+        command.addAll(childOptions());
+        command.addAll(List.of("-cp", classpath, BookLatencyChild.class.getName(), "--store", store.toString(),
+                "--queries", queryFile.toString()));
+        ProcessBuilder builder = new ProcessBuilder(command);
+        CLEARED_CHILD_ENV.forEach(builder.environment()::remove);
+        return builder;
+    }
+
+    /**
+     * The parent's allowlisted heap, stack, GC and JIT options ({@link BookLatencyHost#performanceArgs}), forwarded
+     * to every child JVM so the fresh-process series run under the same memory and GC settings. Output-producing
+     * diagnostics (flight recordings, logs, heap dumps) and system properties are never forwarded; each child still
+     * reports its own configuration.
+     */
+    static List<String> childOptions() {
+        return BookLatencyHost.performanceArgs(ManagementFactory.getRuntimeMXBean().getInputArguments());
+    }
+
+    /**
+     * Kills {@code process} and waits for it to end, so it cannot race the scratch cleanup with the Store open or
+     * outlive the command; forced destruction is asynchronous. A pending interrupt is kept for the caller.
+     */
+    static void terminate(Process process) {
+        process.destroyForcibly();
+        boolean interrupted = Thread.interrupted();
+        try {
+            process.waitFor(CHILD_KILL_WAIT_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            interrupted = true;
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    /** Collects parity comparisons across the whole run. */
+    private static final class ParityLog {
+        private int checks;
+        private int mismatches;
+        private int direct;
+        private int digests;
+        private int digestQueries;
+        private final List<String> details = new ArrayList<>();
+
+        void compare(String where, List<Hit> expected, List<Hit> actual) {
+            direct++;
+            record(where, 1, expected.equals(actual), () -> "expected " + expected + " got " + actual);
+        }
+
+        /** One digest over a whole pass of {@code queries} result lists. */
+        void compareDigest(String where, String expected, String actual, int queries) {
+            digests++;
+            digestQueries += queries;
+            record(where, queries, expected.equals(actual),
+                    () -> "expected digest " + expected + " got " + actual + " (whole pass of " + queries + ")");
+        }
+
+        private void record(String where, int lists, boolean same, Supplier<String> detail) {
+            checks += lists;
+            if (!same) {
+                mismatches += lists;
+                if (details.size() < MAX_MISMATCH_DETAILS) {
+                    details.add(where + ": " + detail.get());
+                }
+            }
+        }
+
+        Parity result() {
+            return new Parity(checks, mismatches, direct, digests, digestQueries, details);
+        }
+    }
+
+    /** Sum of regular file sizes below {@code root}. */
+    static long treeBytes(Path root) throws IOException {
+        try (Stream<Path> walk = Files.walk(root)) {
+            long total = 0;
+            for (Path path : walk.toList()) {
+                if (Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+                    total += Files.size(path);
+                }
+            }
+            return total;
+        }
+    }
+
+    /** Deletes {@code root} and everything below it, deepest first; symbolic links are removed, never followed. */
+    static void deleteTree(Path root) throws IOException {
+        if (Files.notExists(root, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        try (Stream<Path> walk = Files.walk(root)) {
+            for (Path path : walk.sorted(Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(path);
+            }
+        }
+    }
+}
