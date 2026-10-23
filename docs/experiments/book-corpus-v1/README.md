@@ -16,6 +16,7 @@ verifies it offline against the checksums in [`manifest.properties`](manifest.pr
 | [`STORE-READBACK.md`](STORE-READBACK.md) | Persist the chunks, reopen the Store and verify exact readback (issue #165, Book 3/8). |
 | [`QUERIES.md`](QUERIES.md) | Judged query set `book-queries-v1` with frozen spans, chunk keys and dev/holdout split (issue #166, Book 4/8). |
 | [`RECALL.md`](RECALL.md) | Exploratory recall quality against the judged evidence, failure taxonomy and versioned report (issue #167, Book 5/8). |
+| [`UNJUDGED-REVIEW.md`](UNJUDGED-REVIEW.md) | Score-blind human review of predeclared unjudged DEV hits, frozen as the append-only `book-queries-v2` (issue #177). |
 
 ## Pinned edition
 

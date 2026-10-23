@@ -1,0 +1,133 @@
+Monada book unjudged-hit review report (Issue #177)
+format=monada-book-unjudged-review-report
+formatVersion=1
+status=LABEL COVERAGE ONLY: no ranking was run or changed; v1 and v2 metrics use different judgment coverage and must not be compared as a retrieval improvement
+
+== Inputs ==
+dataset=book-queries-v2
+extends=book-queries-v1
+provenance=POST_HOC_RETRIEVAL_SAMPLED_DEV
+base.manifest.sha256=ec4efab61f53dfdaf15e31304e2d39d9815e821042224cc806c8d8a3b7ea3bbc
+base.judgments.sha256=5f129b6e0b8cb0565d9ba13cb6a57c67238403e7cde77e45c702068d6b163968
+selection.baselineReport=docs/experiments/book-corpus-v1/book-recall-v1-report.txt
+selection.baselineReport.sha256=86501f764e985835487a90b05ce5dbbdc2821455c94a97aaf5d443bba1a2ffd2
+selection.rule=dev-unjudged-top1-top3-hub-seeded-v1
+selection.seed=book-queries-v2|unjudged-review-v1|
+selection.target=60
+selection.sha256=c095247df3d57b568afc15fa12eee9b5efa9bc9ac74f9f7dedd6ecfa9463418d
+review.protocol=SCORE_BLIND_WORKSHEET_QUERY_CHUNK_TEXT_KEY_AND_BYTE_RANGE
+review.sha256=37dc4627c26edd9a0ff49d1f766672cb2c91293025ab8d9ef64bd415d13b40e6
+judgment.draftedBy=codex
+judgment.draftedAt=2026-10-21
+judgment.verification=EACH_DRAFTED_DECISION_REVIEWED_AND_APPROVED_BY_REVIEWER
+judgment.draftBlinding=UNVERIFIED
+judgment.reviewStatus=REVIEWED
+judgment.reviewer=Steven Rey Sequeira
+judgment.reviewedAt=2026-10-21
+judgment.approvedBy=stevdrey
+reclassification.policy=NONE
+
+== Definitions ==
+occurrence = one ranked top-10 hit of one query in the frozen trace; pair = a distinct (query, canonical chunk) of those hits; the trace ranks an atom at most once per query, so per query they coincide
+U = unjudged for that query: unknown, not a false positive
+bias = POST_HOC_RETRIEVAL_SAMPLED_DEV: pairs were sampled from a published run of the evaluated system; the review is score-blind but the labels are not an independent prospective gold
+
+== Unjudged occurrences, frozen v1 labels -> v2 labels ==
+partition queries       hits   v1 U   v2 U  newly
+DEV       answerable     200    190    139     51
+DEV       NO_ANSWER       40     39     30      9
+HOLDOUT   answerable      70     66     66      0
+HOLDOUT   NO_ANSWER       10     10     10      0
+ALL       answerable     270    256    205     51
+ALL       NO_ANSWER       50     49     40      9
+
+== Selection (DEV only; HOLDOUT hits are never selected) ==
+eligible DEV U: occurrences 229, distinct pairs 229
+selected pairs 60 (= occurrences 60), target 60
+  stratum TOP1 22
+  stratum TOP3 24
+  stratum HUB 4
+  stratum SAMPLE 10
+coverage of DEV U at rank<=1: 22/22
+coverage of DEV U at rank<=3: 46/66
+coverage of DEV U at rank<=10: 60/229
+by category (selected/eligible pairs, DEV queries with a selected pair):
+  LITERAL              10/39  queries 4/4
+  PARAPHRASE           11/39  queries 4/4
+  NARRATIVE_TEMPORAL    6/29  queries 3/3
+  MULTI_EVIDENCE       13/37  queries 4/4
+  CONFOUNDER            7/27  queries 3/3
+  AMBIGUOUS             4/19  queries 2/2
+  NO_ANSWER             9/39  queries 4/4
+
+== Human review outcome ==
+reviewed 60/60, pending 0
+EVIDENCE grade 2 0, EVIDENCE grade 1 1, CONFOUNDER grade 0 59, UNRESOLVED 0 (stay unjudged)
+NO_ANSWER_CONTRADICTED findings 0 (not applied; v1 NO_ANSWER cases are never rewritten)
+judgments: v1 55 unchanged + added 60 (HOLDOUT added 0)
+
+== Selected pairs (decision only; rank and score stay in selection.psv) ==
+UJ-ef6f3f2c AMB-02 book-corpus-v1/book-chunking-v1/s002/c0000 CONFOUNDER 0
+UJ-a14629ca AMB-02 book-corpus-v1/book-chunking-v1/s009/c0001 CONFOUNDER 0
+UJ-4e87c635 AMB-03 book-corpus-v1/book-chunking-v1/s007/c0001 CONFOUNDER 0
+UJ-8533e75c AMB-03 book-corpus-v1/book-chunking-v1/s009/c0001 CONFOUNDER 0
+UJ-a0835731 CON-01 book-corpus-v1/book-chunking-v1/s006/c0002 CONFOUNDER 0
+UJ-c4c3a1b4 CON-01 book-corpus-v1/book-chunking-v1/s008/c0007 CONFOUNDER 0
+UJ-176ef279 CON-01 book-corpus-v1/book-chunking-v1/s009/c0002 CONFOUNDER 0
+UJ-cb8020d7 CON-03 book-corpus-v1/book-chunking-v1/s009/c0005 CONFOUNDER 0
+UJ-460319f2 CON-03 book-corpus-v1/book-chunking-v1/s009/c0006 CONFOUNDER 0
+UJ-31ec4b9e CON-04 book-corpus-v1/book-chunking-v1/s001/c0005 CONFOUNDER 0
+UJ-d7b9eb4a CON-04 book-corpus-v1/book-chunking-v1/s008/c0001 CONFOUNDER 0
+UJ-f7680c5c LIT-01 book-corpus-v1/book-chunking-v1/s007/c0004 CONFOUNDER 0
+UJ-189e3d62 LIT-01 book-corpus-v1/book-chunking-v1/s009/c0004 CONFOUNDER 0
+UJ-6cd2710a LIT-01 book-corpus-v1/book-chunking-v1/s009/c0005 CONFOUNDER 0
+UJ-4d5c7d5c LIT-03 book-corpus-v1/book-chunking-v1/s009/c0001 CONFOUNDER 0
+UJ-955f8e99 LIT-03 book-corpus-v1/book-chunking-v1/s009/c0003 CONFOUNDER 0
+UJ-978652bd LIT-04 book-corpus-v1/book-chunking-v1/s001/c0000 CONFOUNDER 0
+UJ-e4139562 LIT-04 book-corpus-v1/book-chunking-v1/s002/c0005 CONFOUNDER 0
+UJ-2986eb8c LIT-04 book-corpus-v1/book-chunking-v1/s011/c0005 CONFOUNDER 0
+UJ-f699c9a0 LIT-05 book-corpus-v1/book-chunking-v1/s007/c0001 CONFOUNDER 0
+UJ-0f8f1be6 LIT-05 book-corpus-v1/book-chunking-v1/s009/c0001 CONFOUNDER 0
+UJ-d5eb607b MUL-01 book-corpus-v1/book-chunking-v1/s008/c0001 CONFOUNDER 0
+UJ-ae075d60 MUL-01 book-corpus-v1/book-chunking-v1/s009/c0001 CONFOUNDER 0
+UJ-726c2525 MUL-01 book-corpus-v1/book-chunking-v1/s009/c0006 CONFOUNDER 0
+UJ-352b3364 MUL-03 book-corpus-v1/book-chunking-v1/s004/c0007 CONFOUNDER 0
+UJ-35d4f93a MUL-03 book-corpus-v1/book-chunking-v1/s005/c0000 CONFOUNDER 0
+UJ-2e301448 MUL-03 book-corpus-v1/book-chunking-v1/s009/c0001 CONFOUNDER 0
+UJ-05ce5321 MUL-03 book-corpus-v1/book-chunking-v1/s011/c0002 CONFOUNDER 0
+UJ-36155ef4 MUL-04 book-corpus-v1/book-chunking-v1/s010/c0000 CONFOUNDER 0
+UJ-29219143 MUL-04 book-corpus-v1/book-chunking-v1/s011/c0004 CONFOUNDER 0
+UJ-1c0914eb MUL-04 book-corpus-v1/book-chunking-v1/s012/c0000 CONFOUNDER 0
+UJ-68e602e6 MUL-05 book-corpus-v1/book-chunking-v1/s007/c0002 EVIDENCE 1
+UJ-f8a9318b MUL-05 book-corpus-v1/book-chunking-v1/s009/c0002 CONFOUNDER 0
+UJ-20436371 MUL-05 book-corpus-v1/book-chunking-v1/s010/c0006 CONFOUNDER 0
+UJ-a32f0380 NAR-01 book-corpus-v1/book-chunking-v1/s001/c0001 CONFOUNDER 0
+UJ-24df0713 NAR-01 book-corpus-v1/book-chunking-v1/s004/c0003 CONFOUNDER 0
+UJ-510fd96a NAR-02 book-corpus-v1/book-chunking-v1/s006/c0002 CONFOUNDER 0
+UJ-a0bb40e9 NAR-02 book-corpus-v1/book-chunking-v1/s009/c0002 CONFOUNDER 0
+UJ-11492eba NAR-04 book-corpus-v1/book-chunking-v1/s009/c0001 CONFOUNDER 0
+UJ-f6409795 NAR-04 book-corpus-v1/book-chunking-v1/s009/c0003 CONFOUNDER 0
+UJ-8f010b51 NOA-01 book-corpus-v1/book-chunking-v1/s009/c0001 CONFOUNDER 0
+UJ-9708928e NOA-01 book-corpus-v1/book-chunking-v1/s009/c0003 CONFOUNDER 0
+UJ-c1034501 NOA-01 book-corpus-v1/book-chunking-v1/s009/c0006 CONFOUNDER 0
+UJ-d369c247 NOA-02 book-corpus-v1/book-chunking-v1/s007/c0001 CONFOUNDER 0
+UJ-04c33d50 NOA-02 book-corpus-v1/book-chunking-v1/s009/c0001 CONFOUNDER 0
+UJ-10a6ec92 NOA-02 book-corpus-v1/book-chunking-v1/s009/c0003 CONFOUNDER 0
+UJ-0f325a71 NOA-04 book-corpus-v1/book-chunking-v1/s007/c0001 CONFOUNDER 0
+UJ-9329c7c5 NOA-05 book-corpus-v1/book-chunking-v1/s008/c0002 CONFOUNDER 0
+UJ-f944b26f NOA-05 book-corpus-v1/book-chunking-v1/s011/c0001 CONFOUNDER 0
+UJ-92c51709 PAR-03 book-corpus-v1/book-chunking-v1/s006/c0000 CONFOUNDER 0
+UJ-41c27630 PAR-03 book-corpus-v1/book-chunking-v1/s007/c0001 CONFOUNDER 0
+UJ-3c385169 PAR-03 book-corpus-v1/book-chunking-v1/s009/c0003 CONFOUNDER 0
+UJ-cf3f2c54 PAR-04 book-corpus-v1/book-chunking-v1/s003/c0002 CONFOUNDER 0
+UJ-4059c088 PAR-04 book-corpus-v1/book-chunking-v1/s008/c0007 CONFOUNDER 0
+UJ-848d2c1a PAR-04 book-corpus-v1/book-chunking-v1/s009/c0002 CONFOUNDER 0
+UJ-1aceb444 PAR-05 book-corpus-v1/book-chunking-v1/s008/c0007 CONFOUNDER 0
+UJ-aaad6800 PAR-05 book-corpus-v1/book-chunking-v1/s011/c0001 CONFOUNDER 0
+UJ-76280208 PAR-06 book-corpus-v1/book-chunking-v1/s002/c0004 CONFOUNDER 0
+UJ-3953a263 PAR-06 book-corpus-v1/book-chunking-v1/s003/c0000 CONFOUNDER 0
+UJ-7af8681d PAR-06 book-corpus-v1/book-chunking-v1/s009/c0006 CONFOUNDER 0
+
+== Not claimed ==
+- no retrieval quality change: the ranking, encoder, Store and v1 report are unchanged
+- a re-evaluation of the unchanged ranking on v2 labels is a separate follow-up, reported as different judgment coverage; HOLDOUT keeps v1 labels only
