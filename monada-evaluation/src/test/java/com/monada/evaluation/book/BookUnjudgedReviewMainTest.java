@@ -1,5 +1,6 @@
 package com.monada.evaluation.book;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -65,6 +66,70 @@ class BookUnjudgedReviewMainTest {
         Result r = run("select", "--baseline", edited.toString());
         assertEquals(1, r.code());
         assertTrue(r.err().startsWith("baseline report SHA-256 is "), r.err());
+    }
+
+    // ---- frozen inputs are never an output
+
+    @Test
+    void selectRefusesToOverwriteTheBaselineOrAnyAliasOfIt() throws Exception {
+        Path baseline = Files.copy(Path.of(BASELINE), tmp.resolve("baseline.txt"));
+        Path symlink = Files.createSymbolicLink(tmp.resolve("symlink.txt"), baseline);
+        Path hardLink = Files.createLink(tmp.resolve("hardlink.txt"), baseline);
+        Path dotted = tmp.resolve("sub/../baseline.txt");
+        for (Path out : List.of(baseline, symlink, hardLink, dotted)) {
+            assertRefusedWithoutWriting(baseline, "select", "--baseline", baseline.toString(), "--out", out.toString());
+        }
+    }
+
+    @Test
+    void theDefaultBaselineAndOtherFrozenInputsAreProtected() throws Exception {
+        Path frozen = ROOT.resolve(BookUnjudgedSelection.BASELINE_REPORT);
+        Path equivalent = ROOT.resolve("docs/experiments/../experiments/book-corpus-v1/book-recall-v1-report.txt");
+        assertRefusedWithoutWriting(frozen, "select", "--out", equivalent.toString());
+        Path resources = ROOT.resolve("monada-evaluation/src/main/resources/com/monada/evaluation/book");
+        for (Path target : List.of(resources.resolve("book-queries-v2/selection.psv"),
+                resources.resolve("book-queries-v1/judgments.psv"), resources.resolve("book-queries-v1/manifest.properties"),
+                ROOT.resolve("docs/experiments/book-corpus-v1/book-hub-diagnostics-v1-report.txt"))) {
+            assertRefusedWithoutWriting(target, "select", "--out", target.toString());
+            assertRefusedWithoutWriting(target, "report", "--out", target.toString());
+            // An alias from outside the protected directories is refused too.
+            Path link = Files.createSymbolicLink(tmp.resolve("alias-" + target.getFileName()), target);
+            assertRefusedWithoutWriting(target, "report", "--out", link.toString());
+        }
+        // A new file inside a protected directory is refused as well.
+        Path fresh = ROOT.resolve("docs/experiments/book-corpus-v1/new-output.txt");
+        assertEquals(2, runAt("select", "--out", fresh.toString()).code());
+        assertFalse(Files.exists(fresh));
+    }
+
+    @Test
+    void onlyTheCoverageReportMayBeRegeneratedInPlace() throws Exception {
+        Path coverage = ROOT.resolve(BookUnjudgedReviewMain.COVERAGE_REPORT);
+        Path baseline = ROOT.resolve(BookUnjudgedSelection.BASELINE_REPORT);
+        assertEquals(null, BookUnjudgedReviewMain.unsafeOutput(coverage, baseline, ROOT, coverage));
+        // Without the allowance (select has none) the coverage report is a protected file like any other.
+        assertTrue(BookUnjudgedReviewMain.unsafeOutput(coverage, baseline, ROOT, null)
+                .startsWith("--out must not be inside the frozen evaluation inputs"));
+        assertEquals(null, BookUnjudgedReviewMain.unsafeOutput(tmp.resolve("out.txt"), baseline, ROOT, null));
+    }
+
+    private void assertRefusedWithoutWriting(Path protectedFile, String... args) throws Exception {
+        byte[] bytes = Files.readAllBytes(protectedFile);
+        var modified = Files.getLastModifiedTime(protectedFile);
+        Result r = runAt(args);
+        assertEquals(2, r.code(), String.join(" ", args) + "\n" + r.err());
+        assertTrue(r.err().startsWith("--out must not be"), r.err());
+        assertArrayEquals(bytes, Files.readAllBytes(protectedFile), "bytes of " + protectedFile + " changed");
+        assertEquals(modified, Files.getLastModifiedTime(protectedFile), "mtime of " + protectedFile + " changed");
+    }
+
+    /** Runs with the repository root as root, as the Gradle task does. */
+    private static Result runAt(String... args) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ByteArrayOutputStream err = new ByteArrayOutputStream();
+        int code = BookUnjudgedReviewMain.run(args, new PrintStream(out, true, StandardCharsets.UTF_8),
+                new PrintStream(err, true, StandardCharsets.UTF_8), ROOT);
+        return new Result(code, out.toString(StandardCharsets.UTF_8), err.toString(StandardCharsets.UTF_8));
     }
 
     @Test

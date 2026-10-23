@@ -34,6 +34,10 @@ import java.util.Set;
  * {@code review.sha256} and {@code counts.*} of the v2 manifest, and writes nothing unless the result validates; it
  * never touches the review status or sign-off. {@code report} renders the coverage report.
  *
+ * <p>{@code select --out} and {@code report --out} never write over a frozen input: not the {@code --baseline} (or
+ * the default one) nor any alias of it, and nothing inside {@link #PROTECTED_DIRS} or aliasing a file there. The only
+ * exception is {@code report --out} onto {@value #COVERAGE_REPORT}, the report it regenerates.
+ *
  * <p>Exit 0 on success, 1 when the inputs fail validation or the receipt is not reproduced, 2 on a usage error, a
  * missing file, an unsafe output path or an I/O failure.
  */
@@ -50,6 +54,11 @@ public final class BookUnjudgedReviewMain {
     /** Fields that attest to one review digest; all must be cleared before different decisions are applied. */
     private static final List<String> SIGN_OFF = List.of("judgment.reviewer", "judgment.approvedBy",
             "judgment.reviewedAt", "judgment.draftedAt", "judgment.verification", "judgment.draftBlinding");
+    /** Committed, frozen evaluation inputs (relative to the repository root); no {@code --out} may land in them. */
+    static final List<String> PROTECTED_DIRS = List.of("docs/experiments/book-corpus-v1",
+            "monada-evaluation/src/main/resources/com/monada/evaluation/book");
+    /** The one protected file a command regenerates: {@code report --out} may replace the v2 coverage report. */
+    static final String COVERAGE_REPORT = "docs/experiments/book-corpus-v1/book-unjudged-review-v2-report.txt";
     private static final Map<String, Set<String>> REQUIRED = Map.of(
             "select", Set.of(), "worksheet", Set.of("--input", "--out"),
             "apply", Set.of("--input", "--worksheet", "--dataset"), "report", Set.of());
@@ -62,6 +71,11 @@ public final class BookUnjudgedReviewMain {
     }
 
     static int run(String[] args, PrintStream out, PrintStream err) {
+        return run(args, out, err, Path.of(""));
+    }
+
+    /** {@code root} is the repository root: the default baseline and the protected inputs resolve against it. */
+    static int run(String[] args, PrintStream out, PrintStream err, Path root) {
         if (args.length == 0 || !OPTIONS.containsKey(args[0])) {
             err.println(USAGE);
             return 2;
@@ -78,10 +92,10 @@ public final class BookUnjudgedReviewMain {
         }
         try {
             return switch (command) {
-                case "select" -> select(options, out, err);
+                case "select" -> select(options, out, err, root);
                 case "worksheet" -> worksheet(options, out, err);
                 case "apply" -> apply(options, out);
-                default -> report(options, out);
+                default -> report(options, out, err, root);
             };
         } catch (InvalidPathException e) {
             err.println("invalid path: " + e.getMessage() + "\n" + USAGE);
@@ -98,8 +112,16 @@ public final class BookUnjudgedReviewMain {
         }
     }
 
-    private static int select(Map<String, String> options, PrintStream out, PrintStream err) throws IOException {
-        String receipt = BookUnjudgedSelection.render(BookUnjudgedSelection.select(trace(options)));
+    private static int select(Map<String, String> options, PrintStream out, PrintStream err, Path root)
+            throws IOException {
+        if (options.containsKey("--out")) {
+            String unsafe = unsafeOutput(Path.of(options.get("--out")), baseline(options, root), root, null);
+            if (unsafe != null) {
+                err.println(unsafe);
+                return 2;
+            }
+        }
+        String receipt = BookUnjudgedSelection.render(BookUnjudgedSelection.select(trace(options, root)));
         if (options.containsKey("--out")) {
             BookRecallMain.write(Path.of(options.get("--out")), receipt);
             out.println("wrote " + options.get("--out"));
@@ -193,8 +215,17 @@ public final class BookUnjudgedReviewMain {
         return 0;
     }
 
-    private static int report(Map<String, String> options, PrintStream out) throws IOException {
-        String report = BookUnjudgedReviewReport.render(trace(options), BookQueryDatasetV2.load());
+    private static int report(Map<String, String> options, PrintStream out, PrintStream err, Path root)
+            throws IOException {
+        if (options.containsKey("--out")) {
+            String unsafe = unsafeOutput(Path.of(options.get("--out")), baseline(options, root), root,
+                    root.resolve(COVERAGE_REPORT));
+            if (unsafe != null) {
+                err.println(unsafe);
+                return 2;
+            }
+        }
+        String report = BookUnjudgedReviewReport.render(trace(options, root), BookQueryDatasetV2.load());
         if (options.containsKey("--out")) {
             BookRecallMain.write(Path.of(options.get("--out")), report);
             out.println("wrote " + options.get("--out"));
@@ -204,10 +235,67 @@ public final class BookUnjudgedReviewMain {
         return 0;
     }
 
-    private static List<BookUnjudgedSelection.Hit> trace(Map<String, String> options) throws IOException {
-        byte[] baseline = Files.readAllBytes(
-                Path.of(options.getOrDefault("--baseline", BookUnjudgedSelection.BASELINE_REPORT)));
-        return BookUnjudgedSelection.parseTrace(baseline, BookQueryDataset.load());
+    private static List<BookUnjudgedSelection.Hit> trace(Map<String, String> options, Path root)
+            throws IOException {
+        return BookUnjudgedSelection.parseTrace(Files.readAllBytes(baseline(options, root)), BookQueryDataset.load());
+    }
+
+    private static Path baseline(Map<String, String> options, Path root) {
+        return options.containsKey("--baseline") ? Path.of(options.get("--baseline"))
+                : root.resolve(BookUnjudgedSelection.BASELINE_REPORT);
+    }
+
+    /**
+     * Why {@code target} must not be written, or {@code null} when it is safe. Outputs are written by atomic
+     * replacement, so the check fails closed on every alias: the {@code baseline} input (same path, a symbolic or a
+     * hard link), any path inside a protected directory (compared on real paths), and any existing file that is the
+     * same file as a protected one. {@code allowed}, when given, is the single protected file the command may
+     * regenerate.
+     */
+    static String unsafeOutput(Path target, Path baseline, Path root, Path allowed) throws IOException {
+        if (aliases(target, baseline)) {
+            return "--out must not be the --baseline input or an alias of it, which is only read: " + target;
+        }
+        if (allowed != null && sameLocation(target, allowed)) {
+            return null;
+        }
+        for (String dir : PROTECTED_DIRS) {
+            Path protectedDir = root.resolve(dir);
+            if (!Files.isDirectory(protectedDir)) {
+                continue;
+            }
+            if (BookRecallMain.insideWork(target, protectedDir)) {
+                return "--out must not be inside the frozen evaluation inputs " + dir + ": " + target;
+            }
+            try (var files = Files.walk(protectedDir)) {
+                for (Path file : (Iterable<Path>) files.filter(Files::isRegularFile)::iterator) {
+                    if (aliases(target, file)) {
+                        return "--out must not be an alias of the frozen evaluation input " + file + ": " + target;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Whether {@code target}, as given or lexically normalized ({@code sub/../x} even when {@code sub} does not exist),
+     * is the same file as the existing {@code file}: same path, symbolic or hard link.
+     */
+    private static boolean aliases(Path target, Path file) throws IOException {
+        if (!Files.exists(file)) {
+            return false;
+        }
+        for (Path candidate : List.of(target, target.toAbsolutePath().normalize())) {
+            if (Files.exists(candidate) && Files.isSameFile(candidate, file)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean sameLocation(Path a, Path b) throws IOException {
+        return aliases(a, b) || a.toAbsolutePath().normalize().equals(b.toAbsolutePath().normalize());
     }
 
     private static byte[] body(Map<String, String> options) throws IOException, BookInputException {

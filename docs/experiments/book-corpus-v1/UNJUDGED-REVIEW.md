@@ -79,6 +79,11 @@ because the trace ranks an atom at most once per query.
 | `SAMPLE` | Fill to 60 from the rest, by ascending `sha256(seed + query + "\|" + chunk)` | 10 |
 
 **Receipt.** Pair ids are `UJ-` plus 8 hex characters of a content hash, so they reveal neither stratum nor rank.
+`select --out` and `report --out` refuse to write over any frozen input: the baseline report (as given, by
+default, or through a symbolic or hard link), anything in `docs/experiments/book-corpus-v1/` or the book dataset
+resources, and any file aliasing one of them. They exit 2 and leave the file untouched. The one exception is
+`report --out docs/experiments/book-corpus-v1/book-unjudged-review-v2-report.txt`, which regenerates that report.
+
 The receipt is re-derived and compared byte for byte by `BookUnjudgedSelectionTest` and by:
 
 ```bash
