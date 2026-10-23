@@ -3,6 +3,7 @@ package com.monada.evaluation.book;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.monada.evaluation.book.BookLatencyBenchmark.Condition;
@@ -155,6 +156,27 @@ class BookLatencyBenchmarkTest {
     }
 
     @Test
+    void aChildJvmThatCannotRunIsAnIoFailureNotAnInvalidResult() throws Exception {
+        Config config = new Config(BookLatencyScale.parseLadder("100%"), 0, 1, 0, 1, 0, 1, 1);
+        Path scratch = Files.createDirectory(dir.resolve("broken-child"));
+        IOException e = assertThrows(IOException.class,
+                () -> BookLatencyBenchmark.run(fixtureChunks(), QUERIES, INPUTS, config, scratch,
+                        dir.resolve("no-such-classpath").toString()));
+        assertTrue(e.getMessage().contains("child JVM 0 exited"), e.getMessage());
+    }
+
+    @Test
+    void terminateWaitsForTheKilledProcess() throws Exception {
+        String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+        Path sleeper = Files.writeString(dir.resolve("Sleep.java"),
+                "class Sleep { public static void main(String[] a) throws Exception { Thread.sleep(600_000); } }");
+        Process process = new ProcessBuilder(java, sleeper.toString()).start();
+        BookLatencyBenchmark.terminate(process);
+        assertFalse(process.isAlive(), "the child has ended before terminate returns");
+        assertFalse(Thread.currentThread().isInterrupted());
+    }
+
+    @Test
     void resultDigestSeesIdsOrderAndScores() {
         List<List<Hit>> base = List.of(List.of(new Hit("a", 0.5), new Hit("b", 0.25)), List.of());
         String digest = BookLatencyChild.digest(base);
@@ -204,6 +226,12 @@ class BookLatencyBenchmarkTest {
         assertEquals(2, run.exit());
         assertTrue(run.err().contains("outside a Git work tree"), run.err());
         assertFalse(Files.exists(repo.resolve("scratch")));
+
+        Path same = dir.resolve("same.txt");
+        run = cli("--input", "missing.txt", "--scratch", dir.resolve("s").toString(), "--out", same.toString(),
+                "--summary", dir.resolve(".").resolve("same.txt").toString());
+        assertEquals(2, run.exit());
+        assertTrue(run.err().contains("must name different files"), run.err());
 
         Path scratch = dir.resolve("scratch");
         run = cli("--input", "missing.txt", "--scratch", scratch.toString(), "--out",

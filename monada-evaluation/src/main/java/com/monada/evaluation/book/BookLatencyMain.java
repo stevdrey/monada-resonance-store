@@ -34,8 +34,8 @@ import java.util.Set;
  * Markdown summary to {@code --summary} (or standard output after the report), both written atomically.
  *
  * <p>Exit 0 when the report was produced and result-id parity held, 1 when the inputs are not the judged corpus or
- * parity failed (the report is still written), 2 on a usage error, a missing file, an unsafe scratch directory or an
- * I/O failure.
+ * parity failed (the report is still written), 2 on a usage error (a ladder scale that selects no chunk included), a
+ * missing file, an unsafe scratch directory or an I/O failure (a child JVM that times out or fails included).
  */
 public final class BookLatencyMain {
     static final String SCRATCH_MARKER = ".monada-book-latency-scratch";
@@ -99,11 +99,22 @@ public final class BookLatencyMain {
                     .map(BookQueryDataset.Case::text).toList();
             List<String> texts = chunks.entries().stream().map(BookChunkFiles.Entry::text).toList();
 
+            for (BookLatencyScale scale : config.ladder()) {
+                try {
+                    scale.select(texts);
+                } catch (IllegalArgumentException e) {
+                    // Checked against the loaded corpus before scratch exists: a ladder is a usage error.
+                    err.println(e.getMessage() + "\n" + USAGE);
+                    return 2;
+                }
+            }
+
             Files.createDirectory(scratch);
-            Files.writeString(scratch.resolve(SCRATCH_MARKER), "monada-book-latency-scratch v1\n",
-                    StandardCharsets.UTF_8);
             BookLatencyBenchmark.Result result;
             try {
+                // Inside the cleanup scope: a failed marker write must not leave scratch behind to block reruns.
+                Files.writeString(scratch.resolve(SCRATCH_MARKER), "monada-book-latency-scratch v1\n",
+                        StandardCharsets.UTF_8);
                 result = BookLatencyBenchmark.run(texts, queries, inputs, config, scratch,
                         System.getProperty("java.class.path"));
             } finally {
@@ -188,6 +199,10 @@ public final class BookLatencyMain {
             if (Files.exists(dir.resolve(".git"), LinkOption.NOFOLLOW_LINKS)) {
                 return "--scratch must be outside a Git work tree (" + dir + "): " + scratch;
             }
+        }
+        if (report != null && summary != null
+                && report.toAbsolutePath().normalize().equals(summary.toAbsolutePath().normalize())) {
+            return "--out and --summary must name different files: " + report;
         }
         for (Path file : new Path[] {report, summary}) {
             if (file == null) {

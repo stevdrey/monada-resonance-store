@@ -52,6 +52,7 @@ final class BookLatencyBenchmark {
     /** Mismatch details kept per run; the count is always complete. */
     private static final int MAX_MISMATCH_DETAILS = 20;
     private static final long CHILD_TIMEOUT_MINUTES = 5;
+    private static final long CHILD_KILL_WAIT_SECONDS = 30;
 
     private BookLatencyBenchmark() {
     }
@@ -317,17 +318,20 @@ final class BookLatencyBenchmark {
             try {
                 exited = process.waitFor(CHILD_TIMEOUT_MINUTES, TimeUnit.MINUTES);
             } catch (InterruptedException e) {
-                process.destroyForcibly();
+                terminate(process);
                 Thread.currentThread().interrupt();
                 throw new IOException("interrupted while waiting for child JVM " + p, e);
             }
             long elapsed = System.nanoTime() - start;
+            // A child that cannot run (timeout, unreadable Store, I/O error) is an environment failure, not an
+            // invalid result: it surfaces as an IOException, so the command exits 2, never 1.
             if (!exited) {
-                process.destroyForcibly();
-                throw new IllegalStateException(id + ": child JVM " + p + " timed out");
+                terminate(process);
+                throw new IOException(id + ": child JVM " + p + " timed out after " + CHILD_TIMEOUT_MINUTES
+                        + " minutes");
             }
             if (process.exitValue() != 0) {
-                throw new IllegalStateException(id + ": child JVM " + p + " exited " + process.exitValue() + ": "
+                throw new IOException(id + ": child JVM " + p + " exited " + process.exitValue() + ": "
                         + Files.readString(errFile, StandardCharsets.UTF_8).strip());
             }
             Map<String, String> fields = new LinkedHashMap<>();
@@ -360,6 +364,24 @@ final class BookLatencyBenchmark {
                     "whole child process seen by the parent: JVM startup, open, one pass, output", wall.get(condition)));
         }
         return series;
+    }
+
+    /**
+     * Kills {@code process} and waits for it to end, so it cannot race the scratch cleanup with the Store open or
+     * outlive the command; forced destruction is asynchronous. A pending interrupt is kept for the caller.
+     */
+    static void terminate(Process process) {
+        process.destroyForcibly();
+        boolean interrupted = Thread.interrupted();
+        try {
+            process.waitFor(CHILD_KILL_WAIT_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            interrupted = true;
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
     /** Collects parity comparisons across the whole run. */
