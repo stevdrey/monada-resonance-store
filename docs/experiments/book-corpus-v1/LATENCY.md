@@ -93,8 +93,10 @@ compare cold and warm runs.
 
 Every timed query is compared with the parity baseline of its scale: ids, order and score bits. That covers the open
 trials, the warm passes, each child JVM (by SHA-256 over all hits) and the post-profiling pass. Hits must also be
-known atoms in score-descending, then atom-id-ascending order. The committed run made **2215 comparisons with 0
-mismatches**.
+known atoms in score-descending, then atom-id-ascending order. The denominator is one query's top-10 result list: a
+child digest counts every query of its pass, and a differing digest would count all of them as mismatches. The
+committed run verified **2990 result lists with 0 mismatches**: 2190 compared directly and 800 through 25 child-JVM
+digests.
 
 Profiling changed no quality or ranking code. After this branch's changes, `runBookRecall` on the seeded Store
 produces a report byte-identical to the frozen [`book-recall-v1-report.txt`](book-recall-v1-report.txt).
@@ -110,34 +112,34 @@ Medians (p50) in µs unless marked; tails have n = 320 for in-process queries:
 
 | Scale | Kind | Chunks | Ingest p50 ms (run 1 / run 2) | Open in-process p50 | First query on a new instance p50 | Warm query p50 / p95 / p99 (run 1) | Warm query p50 / p95 / p99 (run 2) |
 | --- | --- | --: | --: | --: | --: | --: | --: |
-| 25% | REAL | 21 | 26.5 / 40.7 | 1238 / 1200 | 1505 / 1513 | 209 / 295 / 378 | 228 / 411 / 730 |
-| 50% | REAL | 43 | 34.7 / 38.9 | 633 / 797 | 802 / 973 | 176 / 204 / 222 | 185 / 230 / 284 |
-| 100% | REAL | 87 | 66.6 / 77.0 | 626 / 893 | 1312 / 1652 | 232 / 259 / 286 | 246 / 375 / 450 |
-| x4 | DERIVED | 348 | 259.7 / 265.6 | 998 / 784 | 4069 / 3739 | 840 / 1213 / 1451 | 1072 / 1476 / 1769 |
-| x16 | DERIVED | 1392 | 993.9 / 978.9 | 1432 / 1075 | 18669 / 15213 | 3003 / 4486 / 4952 | 3020 / 3801 / 4839 |
+| 25% | REAL | 21 | 28.0 / 28.5 | 1303 / 1191 | 1073 / 1226 | 176 / 250 / 279 | 180 / 280 / 374 |
+| 50% | REAL | 43 | 43.9 / 32.7 | 930 / 621 | 1037 / 813 | 190 / 300 / 397 | 170 / 217 / 250 |
+| 100% | REAL | 87 | 69.9 / 64.6 | 954 / 744 | 1577 / 1426 | 243 / 360 / 455 | 223 / 265 / 292 |
+| x4 | DERIVED | 348 | 238.7 / 251.6 | 803 / 870 | 3721 / 3544 | 1099 / 1437 / 1628 | 1070 / 1412 / 1660 |
+| x16 | DERIVED | 1392 | 923.1 / 956.6 | 983 / 1032 | 14297 / 14864 | 2963 / 4475 / 5059 | 3262 / 5521 / 5950 |
 
 Fresh process, 100% scale, run 1 / run 2:
 
 | Measure | Value |
 | --- | --- |
-| Child `open`, first JVM (n = 1) | 71.3 / 89.6 ms |
-| Child `open`, repeated JVMs (p50, n = 4) | 62.9 / 74.4 ms |
-| First query of the first JVM (n = 1) | 50.7 / 63.8 ms |
-| Remaining queries, repeated JVMs (p50 / p95, n = 124) | 1104 / 2274 µs and 1223 / 3109 µs |
-| Whole child process, repeated (p50, n = 4) | 193 / 228 ms |
+| Child `open`, first JVM (n = 1) | 82.5 / 69.9 ms |
+| Child `open`, repeated JVMs (p50, n = 4) | 68.0 / 64.4 ms |
+| First query of the first JVM (n = 1) | 49.7 / 48.4 ms |
+| Remaining queries, repeated JVMs (p50 / p95, n = 124) | 1095 / 2429 µs and 1077 / 2295 µs |
+| Whole child process, repeated (p50, n = 4) | 205 / 202 ms |
 
 ### Observations (this host only)
 
-- Warm in-process recall grows roughly linearly with stored atoms. From 87 to 1392 atoms the p50 rises about 13×,
-  consistent with the exact linear scan; the 21–87-chunk REAL scales are too small to separate from fixed per-query
-  overhead. Ingest grows about linearly too: roughly 440–730 chunks/s at 21 chunks (fixed per-call overhead) and
-  1 100–1 400 chunks/s from 43 chunks up.
-- `MonadaMemory.open` alone stays under about 1.5 ms in process at every scale. The first query on a new instance
-  carries the deferred loading: about 1.3–1.7 ms at 87 chunks and 15–19 ms at 1392.
+- Warm in-process recall grows roughly linearly with stored atoms. From 87 to 1392 atoms the p50 rises about
+  12–15×, consistent with the exact linear scan; the 21–87-chunk REAL scales are too small to separate from fixed
+  per-query overhead. Ingest grows about linearly too: roughly 690–720 chunks/s at 21 chunks (fixed per-call
+  overhead) and 970–1 500 chunks/s from 43 chunks up.
+- `MonadaMemory.open` alone stays under about 1.3 ms in process at every scale. The first query on a new instance
+  carries the deferred loading: about 1.4–1.6 ms at 87 chunks and 14–15 ms at 1392.
 - In a fresh JVM, open and the first query cost tens of milliseconds (class loading and an unwarmed JIT), and later
-  queries stay about 5× slower than warm in-process ones for the whole single pass. Run-to-run variation is visible
-  in tails and small series (for example the 25% ingest p50 is 26.5 vs 40.7 ms, and the 25% warm p99 is 378 vs
-  730 µs). Single samples (n = 1) and n = 4 series are indicative only.
+  queries stay about 4.5–5× slower than warm in-process ones for the whole single pass. Run-to-run variation is
+  visible in tails and small series (for example the 50% ingest p50 is 43.9 vs 32.7 ms, and the 50% warm p99 is 397
+  vs 250 µs). Single samples (n = 1) and n = 4 series are indicative only.
 
 ### Caveats
 

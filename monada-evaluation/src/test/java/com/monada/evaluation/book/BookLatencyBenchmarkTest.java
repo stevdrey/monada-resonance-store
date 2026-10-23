@@ -83,9 +83,13 @@ class BookLatencyBenchmarkTest {
         int q = QUERIES.size();
 
         assertTrue(result.parity().passed(), result.parity().details().toString());
-        int perScale = config.openWarmups() + config.openTrials()
-                + (config.queryWarmupPasses() + config.queryPasses()) * q + processes + q;
-        assertEquals(3 * perScale, result.parity().checks(), "every timed and untimed pass is compared");
+        int directPerScale = config.openWarmups() + config.openTrials()
+                + (config.queryWarmupPasses() + config.queryPasses()) * q + q;
+        assertEquals(3 * directPerScale, result.parity().direct(), "every timed and untimed pass is compared");
+        assertEquals(3 * processes, result.parity().digests());
+        assertEquals(3 * processes * q, result.parity().digestQueries(), "a child digest covers its whole pass");
+        assertEquals(3 * (directPerScale + processes * q), result.parity().checks(),
+                "the denominator counts query result lists, digests included");
 
         assertEquals(List.of("p50", "p100", "x2"),
                 result.scales().stream().map(s -> s.selected().scale().id()).toList());

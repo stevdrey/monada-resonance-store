@@ -141,8 +141,16 @@ final class BookLatencyBenchmark {
         }
     }
 
-    /** Result-id parity: every compared top-K list, and the ones that differed from the baseline. */
-    record Parity(int checks, int mismatches, List<String> details) {
+    /**
+     * Result-id parity, counted in query result lists (the denominator of {@code mismatches}).
+     *
+     * @param checks        top-K lists verified: one per direct comparison plus every query a process digest covers
+     * @param mismatches    lists that differed; a differing digest counts every query of its pass
+     * @param direct        lists compared one by one in this JVM
+     * @param digests       child-JVM digests compared, each over a whole pass
+     * @param digestQueries the query lists those digests cover
+     */
+    record Parity(int checks, int mismatches, int direct, int digests, int digestQueries, List<String> details) {
         Parity {
             details = List.copyOf(details);
         }
@@ -375,7 +383,8 @@ final class BookLatencyBenchmark {
             if (!fields.containsKey("openNanos") || nanos.size() != queries.size()) {
                 throw new IllegalStateException(id + ": child JVM " + p + " printed an incomplete report: " + fields);
             }
-            parity.compareDigest(id + " child JVM " + p, baselineDigest, fields.get("resultsDigest"));
+            parity.compareDigest(id + " child JVM " + p, baselineDigest, fields.get("resultsDigest"),
+                    queries.size());
             childJvms.add("max heap " + fields.get("jvm.maxHeapMiB") + " MiB; gc " + fields.get("jvm.gc")
                     + "; jvm args " + fields.get("jvm.args"));
             open.computeIfAbsent(condition, c -> new ArrayList<>()).add(Long.valueOf(fields.get("openNanos")));
@@ -430,20 +439,28 @@ final class BookLatencyBenchmark {
     private static final class ParityLog {
         private int checks;
         private int mismatches;
+        private int direct;
+        private int digests;
+        private int digestQueries;
         private final List<String> details = new ArrayList<>();
 
         void compare(String where, List<Hit> expected, List<Hit> actual) {
-            record(where, expected.equals(actual), () -> "expected " + expected + " got " + actual);
+            direct++;
+            record(where, 1, expected.equals(actual), () -> "expected " + expected + " got " + actual);
         }
 
-        void compareDigest(String where, String expected, String actual) {
-            record(where, expected.equals(actual), () -> "expected digest " + expected + " got " + actual);
+        /** One digest over a whole pass of {@code queries} result lists. */
+        void compareDigest(String where, String expected, String actual, int queries) {
+            digests++;
+            digestQueries += queries;
+            record(where, queries, expected.equals(actual),
+                    () -> "expected digest " + expected + " got " + actual + " (whole pass of " + queries + ")");
         }
 
-        private void record(String where, boolean same, Supplier<String> detail) {
-            checks++;
+        private void record(String where, int lists, boolean same, Supplier<String> detail) {
+            checks += lists;
             if (!same) {
-                mismatches++;
+                mismatches += lists;
                 if (details.size() < MAX_MISMATCH_DETAILS) {
                     details.add(where + ": " + detail.get());
                 }
@@ -451,7 +468,7 @@ final class BookLatencyBenchmark {
         }
 
         Parity result() {
-            return new Parity(checks, mismatches, details);
+            return new Parity(checks, mismatches, direct, digests, digestQueries, details);
         }
     }
 

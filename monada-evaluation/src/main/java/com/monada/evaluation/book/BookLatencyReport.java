@@ -122,8 +122,12 @@ final class BookLatencyReport {
 
         out.append("\n== Parity (top-").append(BookLatencyChild.K).append(" ids, order and scores) ==\n");
         line(out, "parity.status", result.parity().passed() ? "PASS" : "FAIL");
+        line(out, "parity.unit", "one query's top-" + BookLatencyChild.K + " result list");
         line(out, "parity.checks", String.valueOf(result.parity().checks()));
         line(out, "parity.mismatches", String.valueOf(result.parity().mismatches()));
+        line(out, "parity.directComparisons", String.valueOf(result.parity().direct()));
+        line(out, "parity.processDigests", result.parity().digests() + " (covering "
+                + result.parity().digestQueries() + " query lists; a differing digest counts all of them)");
         for (int i = 0; i < result.parity().details().size(); i++) {
             line(out, "parity.mismatch." + i, result.parity().details().get(i));
         }
@@ -144,7 +148,9 @@ final class BookLatencyReport {
                 .append(host.get("scratch file store")).append(".\n\n");
         out.append("Parity: ").append(result.parity().passed() ? "PASS" : "FAIL").append(" (")
                 .append(result.parity().checks()).append(" top-").append(BookLatencyChild.K)
-                .append(" comparisons, ").append(result.parity().mismatches()).append(" mismatches).\n\n");
+                .append(" result lists: ").append(result.parity().direct()).append(" compared directly, ")
+                .append(result.parity().digestQueries()).append(" through ").append(result.parity().digests())
+                .append(" child-JVM digests; ").append(result.parity().mismatches()).append(" mismatches).\n\n");
         out.append("| scale | kind | chunks | text KiB | store KiB | ingest p50 ms | ingest chunks/s | open p50 µs"
                 + " (in-process) | first query p50 µs | query p50 / p95 / p99 µs (n) | fresh open µs first / repeated p50"
                 + " | fresh query p50 / p95 µs (n, repeated) |\n");
