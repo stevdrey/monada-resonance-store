@@ -31,15 +31,23 @@ With the defaults, the command takes about 20 s on the host below. Every count i
 and the summary is then written only with `--summary`; with `--out` and no `--summary`, the summary goes to standard
 output.
 
+`--out` and `--summary` never replace a committed, frozen experiment artifact. They are refused, before anything is
+read or created, when they target anything inside `docs/experiments/book-corpus-v1/` or the `book-queries-v1`/`v2`
+resources (`monada-evaluation/src/main/resources/com/monada/evaluation/book/`). That covers normalized paths,
+symbolic-linked parents and symbolic or hard-link aliases. The guard is the one `runBookUnjudgedReview` uses (#177).
+The only exceptions are this benchmark's own artifacts, each for its own option: `--out` may regenerate
+`book-latency-v1-report.txt` and `--summary` may regenerate `book-latency-v1-summary.md`.
+
 Exit codes:
 - `0`: the report was written and parity held.
 - `1`: the body is not the judged chunk set (foreign corpus), or parity failed. On a parity failure the report is
   still written.
-- `2`: a usage error (including a scale that selects no chunk, `--out` and `--summary` naming the same file, or an
-  output naming `--input` or `--manifest`), a missing file, an unsafe `--scratch`, or an I/O failure (including a
-  child JVM that times out, fails or prints a malformed report, standard output that cannot be written, or a
-  scratch directory that cannot be removed). A cleanup failure never hides the original error: it is attached to it,
-  and after a successful run the report is still written before the cleanup failure is reported.
+- `2`: a usage error (including a scale that selects no chunk, `--out` and `--summary` naming the same file, an
+  output naming `--input` or `--manifest`, or an output that would replace a frozen experiment artifact), a missing
+  file, an unsafe `--scratch`, or an I/O failure (including a child JVM that times out, fails or prints a malformed
+  report, standard output that cannot be written, or a scratch directory that cannot be removed). A cleanup failure
+  never hides the original error: it is attached to it, and after a successful run the report is still written
+  before the cleanup failure is reported.
 
 ## What is measured
 

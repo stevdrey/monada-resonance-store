@@ -32,7 +32,9 @@ import java.util.Set;
  * created under {@code --scratch}, which must not exist yet (it is created with a marker, outside any Git work tree,
  * and deleted afterwards unless {@code --keep yes}). The report goes to {@code --out} (or standard output) and the
  * Markdown summary to {@code --summary}, both written atomically. Without {@code --summary} the summary goes to
- * standard output only when the report went to {@code --out}; standard output never mixes the two.
+ * standard output only when the report went to {@code --out}; standard output never mixes the two. Neither output
+ * may replace a committed, frozen experiment artifact ({@link #refuseProtectedOutputs}) except this benchmark's own
+ * report and summary.
  *
  * <p>Exit 0 when the report was produced and result-id parity held, 1 when the inputs are not the judged corpus or
  * parity failed (the report is still written), 2 on a usage error (a ladder scale that selects no chunk included), a
@@ -41,6 +43,10 @@ import java.util.Set;
  */
 public final class BookLatencyMain {
     static final String SCRATCH_MARKER = ".monada-book-latency-scratch";
+    /** The one frozen-directory file {@code --out} may regenerate: this benchmark's own committed report. */
+    static final String LATENCY_REPORT = "docs/experiments/book-corpus-v1/book-latency-v1-report.txt";
+    /** The one frozen-directory file {@code --summary} may regenerate: this benchmark's own committed summary. */
+    static final String LATENCY_SUMMARY = "docs/experiments/book-corpus-v1/book-latency-v1-summary.md";
     private static final String USAGE = "usage: --input <normalized body.txt> --scratch <new dir> [--out <report.txt>]"
             + " [--summary <summary.md>] [--ladder " + BookLatencyScale.DEFAULT_LADDER + "] [--ingestTrials n]"
             + " [--ingestWarmups n] [--openTrials n] [--openWarmups n] [--queryPasses n] [--queryWarmupPasses n]"
@@ -57,6 +63,11 @@ public final class BookLatencyMain {
     }
 
     static int run(String[] args, PrintStream out, PrintStream err) {
+        return run(args, out, err, Path.of(""));
+    }
+
+    /** {@code root} is the repository root: the protected, frozen experiment artifacts resolve against it. */
+    static int run(String[] args, PrintStream out, PrintStream err, Path root) {
         Map<String, String> options = BookStoreReadbackMain.parseOptions(args, 0, OPTIONS, null, err, USAGE);
         if (options == null) {
             return 2;
@@ -87,6 +98,9 @@ public final class BookLatencyMain {
             String refused = refuseScratch(scratch, report, summary);
             if (refused == null) {
                 refused = refuseOverwritingInputs(List.of(input, manifest), report, summary);
+            }
+            if (refused == null) {
+                refused = refuseProtectedOutputs(root, report, summary);
             }
             if (refused != null) {
                 err.println(refused);
@@ -304,6 +318,24 @@ public final class BookLatencyMain {
             }
         }
         return null;
+    }
+
+    /**
+     * Why an output would replace a committed, frozen experiment artifact (the recall, hub and review reports, the
+     * book-queries v1/v2 resources, the corpus contract), or null: the guard of {@link
+     * BookUnjudgedReviewMain#protectedOutput}, with normalized paths, symbolic-linked parents and symbolic or hard
+     * link aliases all refused. The only exceptions are this benchmark's own artifacts, each for its own option:
+     * {@code --out} may regenerate {@value #LATENCY_REPORT} and {@code --summary} {@value #LATENCY_SUMMARY}. Checked
+     * before anything is read or created.
+     */
+    static String refuseProtectedOutputs(Path root, Path report, Path summary) throws IOException {
+        String refused = report == null ? null
+                : BookUnjudgedReviewMain.protectedOutput("--out", report, root, root.resolve(LATENCY_REPORT));
+        if (refused == null && summary != null) {
+            refused = BookUnjudgedReviewMain.protectedOutput("--summary", summary, root,
+                    root.resolve(LATENCY_SUMMARY));
+        }
+        return refused;
     }
 
     /**

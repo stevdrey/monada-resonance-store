@@ -22,7 +22,10 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -425,6 +428,85 @@ class BookLatencyBenchmarkTest {
         assertEquals(2, run.exit(), run.err());
         assertFalse(Files.exists(scratch));
         assertTrue(Arrays.equals(bodyBytes, Files.readAllBytes(body)), "the body is untouched");
+    }
+
+    /** The repository root (Gradle runs tests in the module directory). */
+    private static final Path ROOT = Path.of(System.getProperty("user.dir")).resolve("..").normalize();
+
+    private static Run cliAt(Path root, String... args) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ByteArrayOutputStream err = new ByteArrayOutputStream();
+        int exit = BookLatencyMain.run(args, new PrintStream(out, true, StandardCharsets.UTF_8),
+                new PrintStream(err, true, StandardCharsets.UTF_8), root);
+        return new Run(exit, out.toString(StandardCharsets.UTF_8), err.toString(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void outputsMayNotReplaceFrozenExperimentArtifacts() throws Exception {
+        Path docs = ROOT.resolve("docs/experiments/book-corpus-v1");
+        Path resources = ROOT.resolve("monada-evaluation/src/main/resources/com/monada/evaluation/book");
+        Path recall = docs.resolve("book-recall-v1-report.txt");
+        List<Path> frozen = List.of(recall, docs.resolve("book-hub-diagnostics-v1-report.txt"),
+                docs.resolve("book-unjudged-review-v2-report.txt"), docs.resolve("manifest.properties"),
+                resources.resolve("book-queries-v1/manifest.properties"),
+                resources.resolve("book-queries-v1/judgments.psv"),
+                resources.resolve("book-queries-v2/manifest.properties"),
+                resources.resolve("book-queries-v2/review.psv"),
+                ROOT.resolve(BookLatencyMain.LATENCY_REPORT), ROOT.resolve(BookLatencyMain.LATENCY_SUMMARY));
+        Map<Path, byte[]> bytes = new LinkedHashMap<>();
+        Map<Path, FileTime> mtimes = new LinkedHashMap<>();
+        for (Path file : frozen) {
+            assertTrue(Files.isRegularFile(file), "missing frozen artifact " + file);
+            bytes.put(file, Files.readAllBytes(file));
+            mtimes.put(file, Files.getLastModifiedTime(file));
+        }
+        Path alias = Files.createSymbolicLink(dir.resolve("docs-alias"), docs);
+        Path link = Files.createSymbolicLink(dir.resolve("recall-link.txt"), recall);
+        Path created = docs.resolve("book-latency-unexpected.txt");
+        List<String[]> refusals = new ArrayList<>(List.of(
+                new String[] {"--out", recall.toString()},
+                new String[] {"--summary", recall.toString()},
+                new String[] {"--out", ROOT.resolve("docs/experiments/../experiments/book-corpus-v1/"
+                        + "book-recall-v1-report.txt").toString()},
+                new String[] {"--out", alias.resolve("book-hub-diagnostics-v1-report.txt").toString()},
+                new String[] {"--summary", link.toString()},
+                new String[] {"--out", resources.resolve("book-queries-v1/manifest.properties").toString()},
+                new String[] {"--summary", resources.resolve("book-queries-v2/review.psv").toString()},
+                new String[] {"--out", created.toString()},
+                // Each allowed artifact is allowed for its own option only.
+                new String[] {"--out", ROOT.resolve(BookLatencyMain.LATENCY_SUMMARY).toString()},
+                new String[] {"--summary", ROOT.resolve(BookLatencyMain.LATENCY_REPORT).toString()}));
+        // A hard link needs the same file system as the repository: make it under the build directory.
+        Path buildTmp = Files.createDirectories(ROOT.resolve("monada-evaluation/build/tmp/book-latency-guard"));
+        Path hard = buildTmp.resolve("recall-hard-link.txt");
+        Files.deleteIfExists(hard);
+        Files.createLink(hard, recall);
+        refusals.add(new String[] {"--out", hard.toString()});
+        Path scratch = dir.resolve("scratch");
+        try {
+            for (String[] output : refusals) {
+                Run run = cliAt(ROOT, "--input", "missing-body.txt", "--scratch", scratch.toString(), output[0],
+                        output[1]);
+                assertEquals(2, run.exit(), output[0] + " " + output[1] + ": " + run.err());
+                assertTrue(run.err().contains("frozen evaluation input"), output[1] + ": " + run.err());
+            }
+        } finally {
+            Files.deleteIfExists(hard);
+        }
+        for (Path file : frozen) {
+            assertTrue(Arrays.equals(bytes.get(file), Files.readAllBytes(file)), "bytes of " + file + " changed");
+            assertEquals(mtimes.get(file), Files.getLastModifiedTime(file), "mtime of " + file + " changed");
+        }
+        assertFalse(Files.exists(created), "no file is created inside the frozen directory");
+        assertFalse(Files.exists(scratch), "a refusal happens before anything is created");
+
+        // Safe paths and this benchmark's own two artifacts stay writable.
+        assertEquals(null, BookLatencyMain.refuseProtectedOutputs(ROOT, dir.resolve("report.txt"),
+                dir.resolve("summary.md")));
+        assertEquals(null, BookLatencyMain.refuseProtectedOutputs(ROOT, ROOT.resolve(BookLatencyMain.LATENCY_REPORT),
+                ROOT.resolve(BookLatencyMain.LATENCY_SUMMARY)));
+        assertEquals(null, BookLatencyMain.refuseProtectedOutputs(ROOT,
+                ROOT.resolve("docs/experiments/../experiments/book-corpus-v1/book-latency-v1-report.txt"), null));
     }
 
     @Test
