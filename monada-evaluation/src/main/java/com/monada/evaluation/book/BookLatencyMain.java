@@ -203,16 +203,16 @@ public final class BookLatencyMain {
                 return "--scratch must be outside a Git work tree (" + dir + "): " + scratch;
             }
         }
-        if (report != null && summary != null
-                && report.toAbsolutePath().normalize().equals(summary.toAbsolutePath().normalize())) {
+        if (report != null && summary != null && directoryEntry(report).equals(directoryEntry(summary))) {
             return "--out and --summary must name different files: " + report;
         }
+        Path scratchEntry = directoryEntry(scratch);
         for (Path file : new Path[] {report, summary}) {
             if (file == null) {
                 continue;
             }
             Path absolute = file.toAbsolutePath().normalize();
-            if (absolute.startsWith(scratch)) {
+            if (absolute.startsWith(scratch) || directoryEntry(file).startsWith(scratchEntry)) {
                 return "output file must not be inside --scratch, which is deleted: " + file;
             }
             if (absolute.getParent() == null || !Files.isDirectory(absolute.getParent())) {
@@ -233,7 +233,7 @@ public final class BookLatencyMain {
                 continue;
             }
             for (Path input : inputs) {
-                boolean same = output.toAbsolutePath().normalize().equals(input.toAbsolutePath().normalize())
+                boolean same = directoryEntry(output).equals(directoryEntry(input))
                         || (Files.exists(output) && Files.exists(input) && Files.isSameFile(output, input));
                 if (same) {
                     return "output file " + output + " would overwrite the benchmark input " + input;
@@ -241,6 +241,21 @@ public final class BookLatencyMain {
             }
         }
         return null;
+    }
+
+    /**
+     * The directory entry an atomic write to {@code file} replaces: the file name under its parent's real path (when
+     * the parent exists), so two spellings through a symbolic-linked or relative parent compare equal even when the
+     * file itself does not exist yet. The file name itself is not resolved: the move replaces the entry, not a link
+     * target.
+     */
+    static Path directoryEntry(Path file) throws IOException {
+        Path absolute = file.toAbsolutePath().normalize();
+        Path parent = absolute.getParent();
+        if (parent == null || absolute.getFileName() == null || !Files.isDirectory(parent)) {
+            return absolute;
+        }
+        return parent.toRealPath().resolve(absolute.getFileName().toString());
     }
 
     /** The chunk set must be the one {@code book-queries-v1} was judged against; returns the report's inputs. */

@@ -240,6 +240,13 @@ class BookLatencyBenchmarkTest {
         assertEquals(2, run.exit());
         assertTrue(run.err().contains("must name different files"), run.err());
 
+        Path real = Files.createDirectory(dir.resolve("real"));
+        Path alias = Files.createSymbolicLink(dir.resolve("alias"), real);
+        run = cli("--input", "missing.txt", "--scratch", dir.resolve("s").toString(), "--out",
+                real.resolve("report").toString(), "--summary", alias.resolve("report").toString());
+        assertEquals(2, run.exit(), "a symlinked parent must not hide that both outputs are one directory entry");
+        assertTrue(run.err().contains("must name different files"), run.err());
+
         Path scratch = dir.resolve("scratch");
         run = cli("--input", "missing.txt", "--scratch", scratch.toString(), "--out",
                 scratch.resolve("report.txt").toString());
