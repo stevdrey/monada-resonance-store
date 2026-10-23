@@ -34,7 +34,8 @@ Exit codes:
 - `1`: the body is not the judged chunk set (foreign corpus), or parity failed. On a parity failure the report is
   still written.
 - `2`: a usage error (including a scale that selects no chunk, `--out` and `--summary` naming the same file, or an
-  output naming `--input` or `--manifest`), a missing file, an unsafe `--scratch`, or an I/O failure (including a child JVM that times out or fails).
+  output naming `--input` or `--manifest`), a missing file, an unsafe `--scratch`, or an I/O failure (including a
+  child JVM that times out or fails, or standard output that cannot be written).
 
 ## What is measured
 

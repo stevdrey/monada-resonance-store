@@ -35,7 +35,8 @@ import java.util.Set;
  *
  * <p>Exit 0 when the report was produced and result-id parity held, 1 when the inputs are not the judged corpus or
  * parity failed (the report is still written), 2 on a usage error (a ladder scale that selects no chunk included), a
- * missing file, an unsafe scratch directory or an I/O failure (a child JVM that times out or fails included).
+ * missing file, an unsafe scratch directory or an I/O failure (a child JVM that times out or fails, and standard
+ * output that cannot be written, included).
  */
 public final class BookLatencyMain {
     static final String SCRATCH_MARKER = ".monada-book-latency-scratch";
@@ -127,17 +128,9 @@ public final class BookLatencyMain {
             }
             String rendering = BookLatencyReport.render(result);
             String summaryText = BookLatencyReport.summary(result);
-            if (report == null) {
-                out.print(rendering);
-            } else {
-                BookRecallMain.write(report, rendering);
-                out.println("wrote " + report);
-            }
-            if (summary == null) {
-                out.print(summaryText);
-            } else {
-                BookRecallMain.write(summary, summaryText);
-                out.println("wrote " + summary);
+            if (!emit(out, report, rendering, summary, summaryText)) {
+                err.println("I/O failure: standard output could not be written; the report or summary is incomplete");
+                return 2;
             }
             if (!result.parity().passed()) {
                 err.println("result-id parity FAILED: " + result.parity().mismatches() + " of "
@@ -162,6 +155,28 @@ public final class BookLatencyMain {
             err.println("I/O failure: " + e);
             return 2;
         }
+    }
+
+    /**
+     * Writes the report and the summary to their files, or to {@code out} when no file was named. Returns false when
+     * {@code out} reported a write failure ({@link PrintStream} swallows it), so a truncated or lost artifact is never
+     * reported as success.
+     */
+    static boolean emit(PrintStream out, Path report, String rendering, Path summary, String summaryText)
+            throws IOException {
+        if (report == null) {
+            out.print(rendering);
+        } else {
+            BookRecallMain.write(report, rendering);
+            out.println("wrote " + report);
+        }
+        if (summary == null) {
+            out.print(summaryText);
+        } else {
+            BookRecallMain.write(summary, summaryText);
+            out.println("wrote " + summary);
+        }
+        return !out.checkError();
     }
 
     private static BookLatencyBenchmark.Config config(Map<String, String> options) {

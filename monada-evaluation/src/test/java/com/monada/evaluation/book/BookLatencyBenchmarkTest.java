@@ -200,6 +200,26 @@ class BookLatencyBenchmarkTest {
     }
 
     @Test
+    void reportsLostOnStandardOutputAreNotSuccess() throws Exception {
+        PrintStream broken = new PrintStream(new OutputStream() {
+            @Override
+            public void write(int b) throws IOException {
+                throw new IOException("broken pipe");
+            }
+        }, true, StandardCharsets.UTF_8);
+        assertFalse(BookLatencyMain.emit(broken, null, "report=1\n", null, "# summary\n"),
+                "a swallowed stdout failure must be detected");
+        Path report = dir.resolve("report.txt");
+        assertFalse(BookLatencyMain.emit(broken, report, "report=1\n", null, "# summary\n"));
+        assertEquals("report=1\n", Files.readString(report, StandardCharsets.UTF_8), "the file itself was written");
+
+        ByteArrayOutputStream ok = new ByteArrayOutputStream();
+        assertTrue(BookLatencyMain.emit(new PrintStream(ok, true, StandardCharsets.UTF_8), null, "report=1\n",
+                null, "# summary\n"));
+        assertEquals("report=1\n# summary\n", ok.toString(StandardCharsets.UTF_8));
+    }
+
+    @Test
     void terminateWaitsForTheKilledProcess() throws Exception {
         String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
         Path sleeper = Files.writeString(dir.resolve("Sleep.java"),
