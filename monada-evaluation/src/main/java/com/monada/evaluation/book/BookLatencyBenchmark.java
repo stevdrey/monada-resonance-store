@@ -9,6 +9,7 @@ import com.monada.evaluation.book.BookRecallEvaluator.Hit;
 import com.monada.storage.Manifest;
 import com.monada.storage.audit.StorageIntegrityAuditor;
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -17,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -37,9 +39,11 @@ import java.util.stream.Stream;
  *   {@code rememberAll(texts)} (encode + persist through the public API, timed as {@code rememberAll});</li>
  *   <li><b>open, in process</b>: repeated {@code MonadaMemory.open} of the last ingested Store, each followed by one
  *   timed first query on that new instance (the instance loads nothing eagerly, so that cost is not hidden);</li>
- *   <li><b>query, in process</b>: warm passes over every query on one instance, with a standalone query-encoding
- *   diagnostic (the same normalizer and encoder as the API, timed separately and never subtracted);</li>
- *   <li><b>fresh process</b>: sequential child JVMs ({@link BookLatencyChild}) open the same Store and run one pass;
+ *   <li><b>query, in process</b>: warm passes over every query on one instance, API calls only; then, in a loop of
+ *   its own, a standalone query-encoding diagnostic (the same normalizer and encoder as the API, never
+ *   subtracted);</li>
+ *   <li><b>fresh process</b>: sequential child JVMs ({@link BookLatencyChild}), started with the parent's heap and
+ *   {@code -XX} options and reporting their own JVM configuration, open the same Store and run one pass;
  *   the first process and the later ones are reported apart. The OS page cache is never dropped, so no condition
  *   here is an OS cold-cache measurement;</li>
  *   <li><b>parity after profiling</b> (untimed): the baseline Store is reopened and queried again.</li>
@@ -163,20 +167,27 @@ final class BookLatencyBenchmark {
             throw new IllegalArgumentException("the benchmark needs chunks and queries");
         }
         ParityLog parity = new ParityLog();
+        Set<String> childJvms = new LinkedHashSet<>();
         List<ScaleResult> scales = new ArrayList<>();
         for (BookLatencyScale scale : config.ladder()) {
             scales.add(runScale(scale.select(chunks), queries, config, scratch.resolve("scale-" + scale.id()),
-                    childClasspath, parity));
+                    childClasspath, parity, childJvms));
         }
         String childStatus = childClasspath == null ? "NOT_RUN (no child classpath)"
                 : config.processes() == 0 ? "NOT_RUN (processes=0)"
                 : "RUN (" + config.processes() + " sequential child JVMs per scale)";
-        return new Result(inputs, queries, config, childStatus, BookLatencyHost.describe(scratch), scales,
-                parity.result());
+        Map<String, String> host = BookLatencyHost.describe(scratch);
+        // What each child JVM reported about itself: the fresh-process series ran under this, not the parent's.
+        List<String> forwarded = childOptions();
+        host.put("child jvm options forwarded", forwarded.isEmpty() ? "(none)" : String.join(" ", forwarded));
+        host.put("child jvm", childJvms.isEmpty() ? "NOT_RUN" : childJvms.size() == 1 ? childJvms.iterator().next()
+                : "VARIED: " + String.join(" | ", childJvms));
+        return new Result(inputs, queries, config, childStatus, host, scales, parity.result());
     }
 
     private static ScaleResult runScale(BookLatencyScale.Selected selected, List<String> queries, Config config,
-                                        Path dir, String childClasspath, ParityLog parity) throws IOException {
+                                        Path dir, String childClasspath, ParityLog parity, Set<String> childJvms)
+            throws IOException {
         Files.createDirectory(dir);
         String id = selected.scale().id();
         Set<String> atoms = selected.atomIds();
@@ -240,28 +251,37 @@ final class BookLatencyBenchmark {
             }
         }
 
-        // 4. Warm query passes on one instance, plus the standalone encoding diagnostic.
-        MonadaMemoryOptions options = MonadaMemoryOptions.defaults();
-        TextNormalizer normalizer = options.textNormalizer();
-        SimpleFrequencyEncoder encoder = new SimpleFrequencyEncoder(manifest.dimensions());
+        // 4. Warm query passes on one instance: API calls only, back to back.
         MonadaMemory memory = MonadaMemory.open(store);
         List<Long> query = new ArrayList<>();
-        List<Long> encode = new ArrayList<>();
         for (int pass = 0; pass < config.queryWarmupPasses() + config.queryPasses(); pass++) {
-            boolean measured = pass >= config.queryWarmupPasses();
             for (int q = 0; q < queries.size(); q++) {
                 long start = System.nanoTime();
-                var normalized = normalizer.normalize(queries.get(q));
-                if (!normalized.enrichedText().isBlank()) {
-                    encoder.encode(normalized.toWeightedText(options.expansionOptions()));
-                }
-                long encoded = System.nanoTime();
                 List<ResonanceResult> results = BookLatencyChild.query(memory, queries.get(q));
                 long done = System.nanoTime();
                 parity.compare(id + " pass " + pass + " q" + q, baseline.get(q), BookLatencyChild.hits(results));
-                if (measured) {
-                    encode.add(encoded - start);
-                    query.add(done - encoded);
+                if (pass >= config.queryWarmupPasses()) {
+                    query.add(done - start);
+                }
+            }
+        }
+
+        // 4b. Standalone encoding diagnostic, its own loop after the query passes so it cannot warm caches for, or
+        // add allocation pressure to, the timed API calls.
+        MonadaMemoryOptions options = MonadaMemoryOptions.defaults();
+        TextNormalizer normalizer = options.textNormalizer();
+        SimpleFrequencyEncoder encoder = new SimpleFrequencyEncoder(manifest.dimensions());
+        List<Long> encode = new ArrayList<>();
+        for (int pass = 0; pass < config.queryWarmupPasses() + config.queryPasses(); pass++) {
+            for (String text : queries) {
+                long start = System.nanoTime();
+                var normalized = normalizer.normalize(text);
+                if (!normalized.enrichedText().isBlank()) {
+                    encoder.encode(normalized.toWeightedText(options.expansionOptions()));
+                }
+                long done = System.nanoTime();
+                if (pass >= config.queryWarmupPasses()) {
+                    encode.add(done - start);
                 }
             }
         }
@@ -275,7 +295,8 @@ final class BookLatencyBenchmark {
                         firstQuery),
                 new Series("query", Condition.IN_PROCESS_WARM, API, query),
                 new Series("queryEncode", Condition.STANDALONE_DIAGNOSTIC,
-                        "normalize + encode only, same pipeline as the API, not subtracted", encode)));
+                        "normalize + encode only, same pipeline as the API, separate loop, not subtracted",
+                        encode)));
 
         // 5. Fresh processes, sequential, on the same Store.
         String freshProcess;
@@ -283,7 +304,7 @@ final class BookLatencyBenchmark {
             freshProcess = childClasspath == null ? "NOT_RUN (no child classpath)" : "NOT_RUN (processes=0)";
         } else {
             series.addAll(freshProcesses(id, store, dir, queries, baselineDigest, config.processes(),
-                    childClasspath, parity));
+                    childClasspath, parity, childJvms));
             freshProcess = "RUN";
         }
 
@@ -298,7 +319,7 @@ final class BookLatencyBenchmark {
 
     private static List<Series> freshProcesses(String id, Path store, Path dir, List<String> queries,
                                                String baselineDigest, int processes, String classpath,
-                                               ParityLog parity) throws IOException {
+                                               ParityLog parity, Set<String> childJvms) throws IOException {
         Path queryFile = dir.resolve("queries.txt");
         Files.write(queryFile, queries, StandardCharsets.UTF_8);
         String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
@@ -311,9 +332,12 @@ final class BookLatencyBenchmark {
             Path outFile = dir.resolve("child-" + p + ".out");
             Path errFile = dir.resolve("child-" + p + ".err");
             long start = System.nanoTime();
-            Process process = new ProcessBuilder(java, "-cp", classpath, BookLatencyChild.class.getName(),
-                    "--store", store.toString(), "--queries", queryFile.toString())
-                    .redirectOutput(outFile.toFile()).redirectError(errFile.toFile()).start();
+            List<String> command = new ArrayList<>(List.of(java));
+            command.addAll(childOptions());
+            command.addAll(List.of("-cp", classpath, BookLatencyChild.class.getName(), "--store", store.toString(),
+                    "--queries", queryFile.toString()));
+            Process process = new ProcessBuilder(command).redirectOutput(outFile.toFile())
+                    .redirectError(errFile.toFile()).start();
             boolean exited;
             try {
                 exited = process.waitFor(CHILD_TIMEOUT_MINUTES, TimeUnit.MINUTES);
@@ -347,6 +371,8 @@ final class BookLatencyBenchmark {
                 throw new IllegalStateException(id + ": child JVM " + p + " printed an incomplete report: " + fields);
             }
             parity.compareDigest(id + " child JVM " + p, baselineDigest, fields.get("resultsDigest"));
+            childJvms.add("max heap " + fields.get("jvm.maxHeapMiB") + " MiB; gc " + fields.get("jvm.gc")
+                    + "; jvm args " + fields.get("jvm.args"));
             open.computeIfAbsent(condition, c -> new ArrayList<>()).add(Long.valueOf(fields.get("openNanos")));
             first.computeIfAbsent(condition, c -> new ArrayList<>()).add(nanos.getFirst());
             rest.computeIfAbsent(condition, c -> new ArrayList<>()).addAll(nanos.subList(1, nanos.size()));
@@ -364,6 +390,17 @@ final class BookLatencyBenchmark {
                     "whole child process seen by the parent: JVM startup, open, one pass, output", wall.get(condition)));
         }
         return series;
+    }
+
+    /**
+     * The parent's heap, stack and {@code -XX} options, forwarded to every child JVM so the fresh-process series run
+     * under the same memory and GC settings; each child still reports its own configuration.
+     */
+    static List<String> childOptions() {
+        return ManagementFactory.getRuntimeMXBean().getInputArguments().stream()
+                .filter(a -> a.startsWith("-Xmx") || a.startsWith("-Xms") || a.startsWith("-Xss")
+                        || a.startsWith("-XX:"))
+                .toList();
     }
 
     /**

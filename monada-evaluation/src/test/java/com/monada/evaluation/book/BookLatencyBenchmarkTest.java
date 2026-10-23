@@ -20,6 +20,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -137,6 +138,8 @@ class BookLatencyBenchmarkTest {
         assertTrue(report.contains("scale.x2.kind=DERIVED (replica-tagged, not real-book shape)"));
         assertTrue(report.contains("scale.p100.query.IN_PROCESS_WARM.p99Micros=n/a (n=12 < 100)"), report);
         assertTrue(report.contains("host.page_cache=WARM_OR_UNKNOWN"), report);
+        assertTrue(report.contains(processes > 0 ? "host.child_jvm=max heap " : "host.child_jvm=NOT_RUN"),
+                "fresh-process timings carry the child's own JVM configuration");
         String summary = BookLatencyReport.summary(result);
         assertTrue(summary.contains("| x2 | DERIVED | 20 |"), summary);
         assertTrue(summary.contains("Parity: PASS"), summary);
@@ -238,6 +241,30 @@ class BookLatencyBenchmarkTest {
                 scratch.resolve("report.txt").toString());
         assertEquals(2, run.exit());
         assertTrue(run.err().contains("inside --scratch"), run.err());
+    }
+
+    @Test
+    void outputsMayNotOverwriteTheInputs() throws Exception {
+        Path inputs = Files.createDirectories(dir.resolve("inputs"));
+        Path manifest = copyFixture(inputs, "manifest.properties");
+        Path body = copyFixture(inputs, "body.txt");
+        byte[] bodyBytes = Files.readAllBytes(body);
+        Path scratch = dir.resolve("scratch");
+        for (String[] args : List.of(
+                new String[] {"--out", body.toString()},
+                new String[] {"--summary", inputs.resolve(".").resolve("body.txt").toString()},
+                new String[] {"--out", manifest.toString()})) {
+            Run run = cli("--input", body.toString(), "--manifest", manifest.toString(), "--scratch",
+                    scratch.toString(), args[0], args[1]);
+            assertEquals(2, run.exit(), run.err());
+            assertTrue(run.err().contains("would overwrite the benchmark input"), run.err());
+        }
+        Path link = Files.createSymbolicLink(dir.resolve("alias.txt"), body);
+        Run run = cli("--input", body.toString(), "--manifest", manifest.toString(), "--scratch", scratch.toString(),
+                "--out", link.toString());
+        assertEquals(2, run.exit(), run.err());
+        assertFalse(Files.exists(scratch));
+        assertTrue(Arrays.equals(bodyBytes, Files.readAllBytes(body)), "the body is untouched");
     }
 
     @Test

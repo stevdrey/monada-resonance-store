@@ -5,6 +5,8 @@ import com.monada.core.ResonanceResult;
 import com.monada.evaluation.book.BookRecallEvaluator.Hit;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.lang.management.GarbageCollectorMXBean;
+import java.lang.management.ManagementFactory;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -28,7 +30,8 @@ import java.util.stream.Collectors;
  * </pre>
  *
  * <p>The query file holds one query per line (UTF-8). Output is {@code key=value} lines: {@code openNanos},
- * {@code queryNanos} (comma-separated, query order) and {@code resultsDigest} ({@link #digest}). Exit 0 on success,
+ * {@code queryNanos} (comma-separated, query order), {@code resultsDigest} ({@link #digest}) and the child's own
+ * {@code jvm.maxHeapMiB}, {@code jvm.gc} and {@code jvm.args}. Exit 0 on success,
  * 2 on a usage or I/O error.
  */
 public final class BookLatencyChild {
@@ -68,6 +71,12 @@ public final class BookLatencyChild {
             out.println("openNanos=" + open);
             out.println("queryNanos=" + nanos.stream().map(String::valueOf).collect(Collectors.joining(",")));
             out.println("resultsDigest=" + digest(results));
+            // The child's own configuration, so the parent never reports its settings for these timings.
+            out.println("jvm.maxHeapMiB=" + Runtime.getRuntime().maxMemory() / (1024 * 1024));
+            out.println("jvm.gc=" + ManagementFactory.getGarbageCollectorMXBeans().stream()
+                    .map(GarbageCollectorMXBean::getName).collect(Collectors.joining(", ")));
+            List<String> jvmArgs = ManagementFactory.getRuntimeMXBean().getInputArguments();
+            out.println("jvm.args=" + (jvmArgs.isEmpty() ? "(none)" : String.join(" ", jvmArgs)));
             return 0;
         } catch (IOException | RuntimeException e) {
             err.println("child failure: " + e);

@@ -83,6 +83,9 @@ public final class BookLatencyMain {
             Path report = options.containsKey("--out") ? Path.of(options.get("--out")) : null;
             Path summary = options.containsKey("--summary") ? Path.of(options.get("--summary")) : null;
             String refused = refuseScratch(scratch, report, summary);
+            if (refused == null) {
+                refused = refuseOverwritingInputs(List.of(input, manifest), report, summary);
+            }
             if (refused != null) {
                 err.println(refused);
                 return 2;
@@ -214,6 +217,27 @@ public final class BookLatencyMain {
             }
             if (absolute.getParent() == null || !Files.isDirectory(absolute.getParent())) {
                 return "output directory does not exist: " + absolute.getParent();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Why an output would replace a benchmark input, or null: {@code --out} and {@code --summary} must not name the
+     * body or the manifest, compared on normalized absolute paths and, where both exist, on the files themselves (so
+     * a symbolic or relative alias is caught too). Checked before anything runs.
+     */
+    static String refuseOverwritingInputs(List<Path> inputs, Path report, Path summary) throws IOException {
+        for (Path output : new Path[] {report, summary}) {
+            if (output == null) {
+                continue;
+            }
+            for (Path input : inputs) {
+                boolean same = output.toAbsolutePath().normalize().equals(input.toAbsolutePath().normalize())
+                        || (Files.exists(output) && Files.exists(input) && Files.isSameFile(output, input));
+                if (same) {
+                    return "output file " + output + " would overwrite the benchmark input " + input;
+                }
             }
         }
         return null;
