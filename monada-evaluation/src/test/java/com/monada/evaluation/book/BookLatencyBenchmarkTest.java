@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.monada.api.MonadaMemory;
 import com.monada.evaluation.book.BookLatencyBenchmark.Condition;
 import com.monada.evaluation.book.BookLatencyBenchmark.Config;
 import com.monada.evaluation.book.BookLatencyBenchmark.Result;
@@ -16,6 +17,7 @@ import com.monada.storage.audit.StorageIntegrityAuditor;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -170,6 +172,31 @@ class BookLatencyBenchmarkTest {
                 () -> BookLatencyBenchmark.run(fixtureChunks(), QUERIES, INPUTS, config, scratch,
                         dir.resolve("no-such-classpath").toString()));
         assertTrue(e.getMessage().contains("child JVM 0 exited"), e.getMessage());
+    }
+
+    @Test
+    void aChildThatCannotWriteItsReportExitsTwo() throws Exception {
+        Path store = dir.resolve("child-store");
+        MonadaMemory.open(store).rememberAll(List.of("The tide turns twice a day."));
+        Path queries = Files.write(dir.resolve("queries.txt"), List.of("tide"), StandardCharsets.UTF_8);
+        PrintStream broken = new PrintStream(new OutputStream() {
+            @Override
+            public void write(int b) throws IOException {
+                throw new IOException("no space left on device");
+            }
+        }, true, StandardCharsets.UTF_8);
+        ByteArrayOutputStream err = new ByteArrayOutputStream();
+        int exit = BookLatencyChild.run(new String[] {"--store", store.toString(), "--queries", queries.toString()},
+                broken, new PrintStream(err, true, StandardCharsets.UTF_8));
+        assertEquals(2, exit, "a lost report is an I/O failure, never success");
+        assertTrue(err.toString(StandardCharsets.UTF_8).contains("could not write its report"));
+
+        ByteArrayOutputStream ok = new ByteArrayOutputStream();
+        assertEquals(0, BookLatencyChild.run(new String[] {"--store", store.toString(), "--queries",
+                queries.toString()}, new PrintStream(ok, true, StandardCharsets.UTF_8), new PrintStream(err)));
+        List<String> keys = ok.toString(StandardCharsets.UTF_8).lines().map(l -> l.substring(0, l.indexOf('=')))
+                .toList();
+        assertTrue(keys.containsAll(BookLatencyBenchmark.CHILD_FIELDS), "the parent requires every field: " + keys);
     }
 
     @Test

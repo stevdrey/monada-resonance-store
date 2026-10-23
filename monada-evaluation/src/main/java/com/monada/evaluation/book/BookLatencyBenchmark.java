@@ -58,6 +58,9 @@ final class BookLatencyBenchmark {
     /** Upper bound of every repetition count: far beyond a bounded local run, far below int overflow. */
     static final int MAX_COUNT = 100_000;
     private static final long CHILD_TIMEOUT_MINUTES = 5;
+    /** Every field a child must print; its JVM metadata included, so it is never recorded as {@code null}. */
+    static final Set<String> CHILD_FIELDS = Set.of("openNanos", "queryNanos", "resultsDigest", "jvm.maxHeapMiB",
+            "jvm.gc", "jvm.args");
     private static final long CHILD_KILL_WAIT_SECONDS = 30;
 
     private BookLatencyBenchmark() {
@@ -380,8 +383,9 @@ final class BookLatencyBenchmark {
             }
             List<Long> nanos = Stream.of(fields.getOrDefault("queryNanos", "").split(","))
                     .filter(s -> !s.isEmpty()).map(Long::valueOf).toList();
-            if (!fields.containsKey("openNanos") || nanos.size() != queries.size()) {
-                throw new IllegalStateException(id + ": child JVM " + p + " printed an incomplete report: " + fields);
+            // A truncated child report is an environment failure (exit 2), like a nonzero child exit.
+            if (!fields.keySet().containsAll(CHILD_FIELDS) || nanos.size() != queries.size()) {
+                throw new IOException(id + ": child JVM " + p + " printed an incomplete report: " + fields);
             }
             parity.compareDigest(id + " child JVM " + p, baselineDigest, fields.get("resultsDigest"),
                     queries.size());

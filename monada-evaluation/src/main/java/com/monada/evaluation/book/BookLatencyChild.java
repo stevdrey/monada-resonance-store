@@ -77,6 +77,11 @@ public final class BookLatencyChild {
                     .map(GarbageCollectorMXBean::getName).collect(Collectors.joining(", ")));
             List<String> jvmArgs = ManagementFactory.getRuntimeMXBean().getInputArguments();
             out.println("jvm.args=" + (jvmArgs.isEmpty() ? "(none)" : String.join(" ", jvmArgs)));
+            // PrintStream swallows write failures (a full scratch file system): never report success over them.
+            if (out.checkError()) {
+                err.println("child failure: could not write its report to standard output");
+                return 2;
+            }
             return 0;
         } catch (IOException | RuntimeException e) {
             err.println("child failure: " + e);
