@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -40,12 +41,40 @@ final class BookLatencyHost {
         host.put("cpu", cpuModel());
         host.put("gc", ManagementFactory.getGarbageCollectorMXBeans().stream().map(GarbageCollectorMXBean::getName)
                 .collect(Collectors.joining(", ")));
-        List<String> jvmArgs = ManagementFactory.getRuntimeMXBean().getInputArguments();
-        host.put("jvm args", jvmArgs.isEmpty() ? "(none)" : String.join(" ", jvmArgs));
+        host.put("jvm args", describeArgs(ManagementFactory.getRuntimeMXBean().getInputArguments()));
         host.put("scratch file store", fileStore(scratch));
         host.put("page cache", PAGE_CACHE);
         host.put("clock", "System.nanoTime() wall-clock, single thread, no CPU pinning or frequency control");
         return host;
+    }
+
+    /**
+     * Performance-relevant JVM options that may be recorded and forwarded: heap, stack, GC choice and sizing, JIT
+     * tiering and processor count. Everything else is left out on purpose: system properties ({@code -D}) can carry
+     * secrets and the report is committed, and diagnostic options such as flight recordings or logs name output files
+     * that sequential child JVMs would overwrite.
+     */
+    private static final Pattern PERFORMANCE_ARG = Pattern.compile(
+            "-Xm[sxn][0-9]+[kKmMgGtT]?|-Xss[0-9]+[kKmMgGtT]?|-Xint|-Xmixed"
+                    + "|-XX:[+-]Use[A-Za-z]*GC|-XX:[+-]UseCompressedOops|-XX:[+-]TieredCompilation"
+                    + "|-XX:(Max|Min|Initial)RAMPercentage=[0-9.]+|-XX:(Max|Min)HeapFreeRatio=[0-9]+"
+                    + "|-XX:MaxGCPauseMillis=[0-9]+|-XX:(Parallel|Conc)GCThreads=[0-9]+"
+                    + "|-XX:TieredStopAtLevel=[0-9]|-XX:ActiveProcessorCount=[0-9]+");
+
+    /** The allowlisted performance options of {@code args}, in order. */
+    static List<String> performanceArgs(List<String> args) {
+        return args.stream().filter(a -> PERFORMANCE_ARG.matcher(a).matches()).toList();
+    }
+
+    /**
+     * {@code args} as they may be reported: the allowlisted options, plus how many others were left out (their
+     * values are never rendered).
+     */
+    static String describeArgs(List<String> args) {
+        List<String> kept = performanceArgs(args);
+        int redacted = args.size() - kept.size();
+        String shown = kept.isEmpty() ? "(none)" : String.join(" ", kept);
+        return redacted == 0 ? shown : shown + " (+" + redacted + " other arguments not recorded)";
     }
 
     /** The first {@code model name} of {@code /proc/cpuinfo}, or {@code unknown} where there is none. */

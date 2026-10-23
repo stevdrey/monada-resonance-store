@@ -220,6 +220,22 @@ class BookLatencyBenchmarkTest {
     }
 
     @Test
+    void onlyAllowlistedPerformanceOptionsAreRecordedOrForwarded() {
+        List<String> args = List.of("-Xmx512m", "-Dservice.token=s3cr3t", "-XX:+UseSerialGC",
+                "-XX:StartFlightRecording=filename=profile.jfr,dumponexit=true", "-Xlog:gc:file=gc.log",
+                "-XX:MaxRAMPercentage=50.0", "-XX:HeapDumpPath=/tmp/dump", "-Xss1m", "-javaagent:/x.jar");
+        assertEquals(List.of("-Xmx512m", "-XX:+UseSerialGC", "-XX:MaxRAMPercentage=50.0", "-Xss1m"),
+                BookLatencyHost.performanceArgs(args));
+        String described = BookLatencyHost.describeArgs(args);
+        assertEquals("-Xmx512m -XX:+UseSerialGC -XX:MaxRAMPercentage=50.0 -Xss1m (+5 other arguments not recorded)",
+                described);
+        assertFalse(described.contains("s3cr3t") || described.contains("profile.jfr"), described);
+        assertEquals("(none) (+1 other arguments not recorded)",
+                BookLatencyHost.describeArgs(List.of("-Dfile.encoding=UTF-8")));
+        assertEquals("(none)", BookLatencyHost.describeArgs(List.of()));
+    }
+
+    @Test
     void terminateWaitsForTheKilledProcess() throws Exception {
         String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
         Path sleeper = Files.writeString(dir.resolve("Sleep.java"),

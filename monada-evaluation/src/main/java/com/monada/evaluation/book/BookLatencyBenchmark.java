@@ -411,14 +411,13 @@ final class BookLatencyBenchmark {
     }
 
     /**
-     * The parent's heap, stack and {@code -XX} options, forwarded to every child JVM so the fresh-process series run
-     * under the same memory and GC settings; each child still reports its own configuration.
+     * The parent's allowlisted heap, stack, GC and JIT options ({@link BookLatencyHost#performanceArgs}), forwarded
+     * to every child JVM so the fresh-process series run under the same memory and GC settings. Output-producing
+     * diagnostics (flight recordings, logs, heap dumps) and system properties are never forwarded; each child still
+     * reports its own configuration.
      */
     static List<String> childOptions() {
-        return ManagementFactory.getRuntimeMXBean().getInputArguments().stream()
-                .filter(a -> a.startsWith("-Xmx") || a.startsWith("-Xms") || a.startsWith("-Xss")
-                        || a.startsWith("-XX:"))
-                .toList();
+        return BookLatencyHost.performanceArgs(ManagementFactory.getRuntimeMXBean().getInputArguments());
     }
 
     /**

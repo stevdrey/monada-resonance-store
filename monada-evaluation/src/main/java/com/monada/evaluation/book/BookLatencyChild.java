@@ -31,7 +31,8 @@ import java.util.stream.Collectors;
  *
  * <p>The query file holds one query per line (UTF-8). Output is {@code key=value} lines: {@code openNanos},
  * {@code queryNanos} (comma-separated, query order), {@code resultsDigest} ({@link #digest}) and the child's own
- * {@code jvm.maxHeapMiB}, {@code jvm.gc} and {@code jvm.args}. Exit 0 on success,
+ * {@code jvm.maxHeapMiB}, {@code jvm.gc} and {@code jvm.args} (allowlisted options only, see
+ * {@link BookLatencyHost#describeArgs}). Exit 0 on success,
  * 2 on a usage or I/O error.
  */
 public final class BookLatencyChild {
@@ -75,8 +76,8 @@ public final class BookLatencyChild {
             out.println("jvm.maxHeapMiB=" + Runtime.getRuntime().maxMemory() / (1024 * 1024));
             out.println("jvm.gc=" + ManagementFactory.getGarbageCollectorMXBeans().stream()
                     .map(GarbageCollectorMXBean::getName).collect(Collectors.joining(", ")));
-            List<String> jvmArgs = ManagementFactory.getRuntimeMXBean().getInputArguments();
-            out.println("jvm.args=" + (jvmArgs.isEmpty() ? "(none)" : String.join(" ", jvmArgs)));
+            out.println("jvm.args=" + BookLatencyHost.describeArgs(ManagementFactory.getRuntimeMXBean()
+                    .getInputArguments()));
             // PrintStream swallows write failures (a full scratch file system): never report success over them.
             if (out.checkError()) {
                 err.println("child failure: could not write its report to standard output");
