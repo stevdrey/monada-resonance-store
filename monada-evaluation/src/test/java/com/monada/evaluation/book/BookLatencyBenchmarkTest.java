@@ -144,6 +144,9 @@ class BookLatencyBenchmarkTest {
         assertTrue(report.contains("scale.x2.kind=DERIVED (replica-tagged, not real-book shape)"));
         assertTrue(report.contains("scale.p100.query.IN_PROCESS_WARM.p99Micros=n/a (n=12 < 100)"), report);
         assertTrue(report.contains("host.page_cache=WARM_OR_UNKNOWN"), report);
+        assertFalse(report.contains("child_jvm_options_forwarded"), "children get exactly the allowlisted jvm_args");
+        assertTrue(report.contains("host.child_jvm_environment=JAVA_TOOL_OPTIONS, JDK_JAVA_OPTIONS, _JAVA_OPTIONS"
+                + " cleared"), report);
         assertTrue(report.contains(processes > 0 ? "host.child_jvm=max heap " : "host.child_jvm=NOT_RUN"),
                 "fresh-process timings carry the child's own JVM configuration");
         String summary = BookLatencyReport.summary(result);
@@ -207,16 +210,95 @@ class BookLatencyBenchmarkTest {
                 throw new IOException("broken pipe");
             }
         }, true, StandardCharsets.UTF_8);
-        assertFalse(BookLatencyMain.emit(broken, null, "report=1\n", null, "# summary\n"),
+        PrintStream quiet = new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8);
+        assertFalse(BookLatencyMain.emit(broken, quiet, null, "report=1\n", null, "# summary\n"),
                 "a swallowed stdout failure must be detected");
         Path report = dir.resolve("report.txt");
-        assertFalse(BookLatencyMain.emit(broken, report, "report=1\n", null, "# summary\n"));
+        assertFalse(BookLatencyMain.emit(broken, quiet, report, "report=1\n", null, "# summary\n"));
         assertEquals("report=1\n", Files.readString(report, StandardCharsets.UTF_8), "the file itself was written");
+    }
 
-        ByteArrayOutputStream ok = new ByteArrayOutputStream();
-        assertTrue(BookLatencyMain.emit(new PrintStream(ok, true, StandardCharsets.UTF_8), null, "report=1\n",
-                null, "# summary\n"));
-        assertEquals("report=1\n# summary\n", ok.toString(StandardCharsets.UTF_8));
+    @Test
+    void standardOutputNeverMixesTheReportWithTheSummary() throws Exception {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ByteArrayOutputStream err = new ByteArrayOutputStream();
+        assertTrue(BookLatencyMain.emit(new PrintStream(out, true, StandardCharsets.UTF_8),
+                new PrintStream(err, true, StandardCharsets.UTF_8), null, "report=1\n", null, "# x (n=1 < 20)\n"));
+        assertEquals("report=1\n", out.toString(StandardCharsets.UTF_8), "stdout holds the key=value report alone");
+        assertTrue(err.toString(StandardCharsets.UTF_8).contains("pass --summary"), err.toString());
+
+        // With the report in a file, the summary may use standard output; with --summary it goes to its file.
+        out.reset();
+        Path report = dir.resolve("r.txt");
+        assertTrue(BookLatencyMain.emit(new PrintStream(out, true, StandardCharsets.UTF_8),
+                new PrintStream(err, true, StandardCharsets.UTF_8), report, "report=1\n", null, "# summary\n"));
+        assertTrue(out.toString(StandardCharsets.UTF_8).endsWith("# summary\n"));
+        Path summary = dir.resolve("s.md");
+        assertTrue(BookLatencyMain.emit(new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8),
+                new PrintStream(err, true, StandardCharsets.UTF_8), null, "report=1\n", summary, "# summary\n"));
+        assertEquals("# summary\n", Files.readString(summary, StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void aCleanupFailureNeverHidesTheBenchmarkFailure() throws Exception {
+        Path scratch = Files.createDirectory(dir.resolve("scratch-fail"));
+        Files.writeString(scratch.resolve("leftover"), "x");
+        IOException failure = assertThrows(IOException.class, () -> BookLatencyMain.runAndClean(scratch, false, () -> {
+            // The task makes scratch undeletable for the cleanup that follows it.
+            assertTrue(scratch.toFile().setWritable(false));
+            throw new IOException("child JVM 0 timed out");
+        }));
+        try {
+            assertEquals("child JVM 0 timed out", failure.getMessage(), "the original cause stays the exception");
+            assertEquals(1, failure.getSuppressed().length, "the cleanup failure is attached, not substituted");
+        } finally {
+            assertTrue(scratch.toFile().setWritable(true));
+        }
+
+        Path removable = Files.createDirectory(dir.resolve("scratch-ok"));
+        assertThrows(IllegalStateException.class, () -> BookLatencyMain.runAndClean(removable, false, () -> {
+            throw new IllegalStateException("parity");
+        }));
+        assertFalse(Files.exists(removable), "scratch is removed after a failure too");
+
+        Path kept = Files.createDirectory(dir.resolve("scratch-kept"));
+        BookLatencyMain.Cleaned<String> done = BookLatencyMain.runAndClean(kept, true, () -> "result");
+        assertEquals("result", done.value());
+        assertTrue(Files.exists(kept) && done.cleanupFailure() == null, "--keep yes keeps scratch");
+
+        Path stuck = Files.createDirectory(dir.resolve("scratch-stuck"));
+        Files.writeString(stuck.resolve("leftover"), "x");
+        assertTrue(stuck.toFile().setWritable(false));
+        try {
+            BookLatencyMain.Cleaned<String> cleaned = BookLatencyMain.runAndClean(stuck, false, () -> "measured");
+            assertEquals("measured", cleaned.value(), "a measured result survives a failed cleanup");
+            assertTrue(cleaned.cleanupFailure() != null);
+        } finally {
+            assertTrue(stuck.toFile().setWritable(true));
+        }
+    }
+
+    @Test
+    void malformedChildNumbersAreIoFailures() throws Exception {
+        assertEquals(42, BookLatencyBenchmark.childNanos("openNanos", "42"));
+        for (String bad : List.of("", "abc", "12x", "-5", "99999999999999999999")) {
+            IOException e = assertThrows(IOException.class, () -> BookLatencyBenchmark.childNanos("openNanos", bad),
+                    bad);
+            assertTrue(e.getMessage().startsWith("openNanos"), e.getMessage());
+        }
+    }
+
+    @Test
+    void childJvmsGetNoOptionsFromTheEnvironment() {
+        ProcessBuilder builder = BookLatencyBenchmark.childProcess("java", "cp", dir.resolve("store"),
+                dir.resolve("q.txt"));
+        for (String variable : BookLatencyBenchmark.CLEARED_CHILD_ENV) {
+            assertFalse(builder.environment().containsKey(variable), variable + " must not reach a child JVM");
+        }
+        List<String> command = builder.command();
+        assertEquals(BookLatencyChild.class.getName(), command.get(command.indexOf("cp") + 1));
+        assertEquals(BookLatencyBenchmark.childOptions(), command.subList(1, command.indexOf("-cp")),
+                "only the allowlisted options precede the classpath");
     }
 
     @Test

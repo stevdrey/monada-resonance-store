@@ -31,12 +31,13 @@ import java.util.Set;
  * must be the one {@code book-queries-v1} was judged against, whose 32 query texts are the workload. Every Store is
  * created under {@code --scratch}, which must not exist yet (it is created with a marker, outside any Git work tree,
  * and deleted afterwards unless {@code --keep yes}). The report goes to {@code --out} (or standard output) and the
- * Markdown summary to {@code --summary} (or standard output after the report), both written atomically.
+ * Markdown summary to {@code --summary}, both written atomically. Without {@code --summary} the summary goes to
+ * standard output only when the report went to {@code --out}; standard output never mixes the two.
  *
  * <p>Exit 0 when the report was produced and result-id parity held, 1 when the inputs are not the judged corpus or
  * parity failed (the report is still written), 2 on a usage error (a ladder scale that selects no chunk included), a
  * missing file, an unsafe scratch directory or an I/O failure (a child JVM that times out or fails, and standard
- * output that cannot be written, included).
+ * output that cannot be written, and a scratch directory that cannot be removed, included).
  */
 public final class BookLatencyMain {
     static final String SCRATCH_MARKER = ".monada-book-latency-scratch";
@@ -105,7 +106,7 @@ public final class BookLatencyMain {
 
             for (BookLatencyScale scale : config.ladder()) {
                 try {
-                    scale.select(texts);
+                    scale.requireSelects(texts.size());
                 } catch (IllegalArgumentException e) {
                     // Checked against the loaded corpus before scratch exists: a ladder is a usage error.
                     err.println(e.getMessage() + "\n" + USAGE);
@@ -114,22 +115,24 @@ public final class BookLatencyMain {
             }
 
             Files.createDirectory(scratch);
-            BookLatencyBenchmark.Result result;
-            try {
+            Cleaned<BookLatencyBenchmark.Result> run = runAndClean(scratch, keep, () -> {
                 // Inside the cleanup scope: a failed marker write must not leave scratch behind to block reruns.
                 Files.writeString(scratch.resolve(SCRATCH_MARKER), "monada-book-latency-scratch v1\n",
                         StandardCharsets.UTF_8);
-                result = BookLatencyBenchmark.run(texts, queries, inputs, config, scratch,
+                return BookLatencyBenchmark.run(texts, queries, inputs, config, scratch,
                         System.getProperty("java.class.path"));
-            } finally {
-                if (!keep) {
-                    BookLatencyBenchmark.deleteTree(scratch);
-                }
-            }
+            });
+            BookLatencyBenchmark.Result result = run.value();
             String rendering = BookLatencyReport.render(result);
             String summaryText = BookLatencyReport.summary(result);
-            if (!emit(out, report, rendering, summary, summaryText)) {
+            if (!emit(out, err, report, rendering, summary, summaryText)) {
                 err.println("I/O failure: standard output could not be written; the report or summary is incomplete");
+                return 2;
+            }
+            if (run.cleanupFailure() != null) {
+                // The measured result was emitted first; only then is the leftover scratch reported.
+                err.println("I/O failure: --scratch could not be removed (delete it before rerunning): "
+                        + run.cleanupFailure());
                 return 2;
             }
             if (!result.parity().passed()) {
@@ -157,24 +160,69 @@ public final class BookLatencyMain {
         }
     }
 
+    /** Benchmark work that may throw any checked failure the command classifies. */
+    @FunctionalInterface
+    interface Task<T> {
+        T run() throws IOException, BookInputException;
+    }
+
+    /** A task's value plus the failure to remove scratch afterwards, if any (null when it was removed or kept). */
+    record Cleaned<T>(T value, IOException cleanupFailure) {
+    }
+
     /**
-     * Writes the report and the summary to their files, or to {@code out} when no file was named. Returns false when
+     * Runs {@code task}, then removes {@code scratch} unless {@code keep}. When the task fails, a cleanup failure is
+     * attached to the task's exception as suppressed, so the real cause is never replaced; when it succeeds, the
+     * cleanup failure is returned instead of thrown, so the measured result is still reported.
+     */
+    static <T> Cleaned<T> runAndClean(Path scratch, boolean keep, Task<T> task)
+            throws IOException, BookInputException {
+        T value;
+        try {
+            value = task.run();
+        } catch (IOException | BookInputException | RuntimeException | Error e) {
+            if (!keep) {
+                try {
+                    BookLatencyBenchmark.deleteTree(scratch);
+                } catch (IOException | RuntimeException cleanup) {
+                    e.addSuppressed(cleanup);
+                }
+            }
+            throw e;
+        }
+        IOException cleanupFailure = null;
+        if (!keep) {
+            try {
+                BookLatencyBenchmark.deleteTree(scratch);
+            } catch (IOException e) {
+                cleanupFailure = e;
+            }
+        }
+        return new Cleaned<>(value, cleanupFailure);
+    }
+
+    /**
+     * Writes the report and the summary to their files, or to {@code out} when no file was named. Standard output
+     * carries the machine-readable report alone: when the report goes there and no summary file was named, the
+     * Markdown summary is skipped (noted on {@code err}) instead of being appended to it. Returns false when
      * {@code out} reported a write failure ({@link PrintStream} swallows it), so a truncated or lost artifact is never
      * reported as success.
      */
-    static boolean emit(PrintStream out, Path report, String rendering, Path summary, String summaryText)
-            throws IOException {
+    static boolean emit(PrintStream out, PrintStream err, Path report, String rendering, Path summary,
+                        String summaryText) throws IOException {
         if (report == null) {
             out.print(rendering);
         } else {
             BookRecallMain.write(report, rendering);
             out.println("wrote " + report);
         }
-        if (summary == null) {
-            out.print(summaryText);
-        } else {
+        if (summary != null) {
             BookRecallMain.write(summary, summaryText);
             out.println("wrote " + summary);
+        } else if (report != null) {
+            out.print(summaryText);
+        } else {
+            err.println("summary not written: standard output holds the key=value report; pass --summary <file>");
         }
         return !out.checkError();
     }

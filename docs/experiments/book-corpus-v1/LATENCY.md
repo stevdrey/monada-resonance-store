@@ -27,7 +27,9 @@ it afterwards (pass `--keep yes` to keep it):
 
 With the defaults, the command takes about 20 s on the host below. Every count is an option: `--ladder`,
 `--ingestTrials`, `--ingestWarmups`, `--openTrials`, `--openWarmups`, `--queryPasses`, `--queryWarmupPasses` and
-`--processes`. Without `--out` or `--summary`, that output goes to standard output.
+`--processes`. Standard output never mixes the two outputs: without `--out` it carries the key=value report alone,
+and the summary is then written only with `--summary`; with `--out` and no `--summary`, the summary goes to standard
+output.
 
 Exit codes:
 - `0`: the report was written and parity held.
@@ -35,7 +37,9 @@ Exit codes:
   still written.
 - `2`: a usage error (including a scale that selects no chunk, `--out` and `--summary` naming the same file, or an
   output naming `--input` or `--manifest`), a missing file, an unsafe `--scratch`, or an I/O failure (including a
-  child JVM that times out or fails, or standard output that cannot be written).
+  child JVM that times out, fails or prints a malformed report, standard output that cannot be written, or a
+  scratch directory that cannot be removed). A cleanup failure never hides the original error: it is attached to it,
+  and after a successful run the report is still written before the cleanup failure is reported.
 
 ## What is measured
 
@@ -56,7 +60,8 @@ chunks file and chunk-map digests must equal the ones `book-queries-v1` was judg
 1. **Parity baseline** (untimed): a dedicated Store is seeded, and every query's top-10 is recorded on a new instance.
 2. **Ingest**: 1 warmup trial and 5 measured trials. Each trial opens a new empty directory, timed as
    `ingest.create`, then calls `rememberAll(texts)`, timed as `ingest.rememberAll`. That call is the public API's
-   encode and persist. Throughput is reported as chunks/s and MiB/s of chunk text.
+   encode and persist. Throughput is reported as chunks/s and MiB/s of chunk text. Earlier trials' Stores are
+   deleted only after the whole loop, so no deletion's file-system work runs into a timed trial.
 3. **Open, in process** (`IN_PROCESS_REPEATED`): 2 warmup opens and 20 measured opens of the last ingested Store.
    Each open is followed by one timed first query on that instance (`firstQuery.IN_PROCESS_NEW_INSTANCE`), so cost
    that the instance defers past `open` is not hidden.
@@ -67,8 +72,9 @@ chunks file and chunk-map digests must equal the ones `book-queries-v1` was judg
 5. **Fresh process**: 5 sequential child JVMs (`BookLatencyChild`) open the same Store and run one pass each. Each
    child starts with the parent's allowlisted performance options (heap, stack, GC choice and sizing, JIT tiering,
    processor count) and reports its own max heap, GC and options; the report records those as `host.child_jvm`.
-   Diagnostics that write files (flight recordings, `-Xlog`, heap dumps) are never forwarded, so children cannot
-   overwrite each other's or the parent's output. The first child is `FRESH_PROCESS_FIRST` and the later ones are
+   Diagnostics that write files (flight recordings, `-Xlog`, heap dumps) are never forwarded, and
+   `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS` and `_JAVA_OPTIONS` are removed from each child's environment
+   (`host.child_jvm_environment`), so children cannot overwrite each other's or the parent's output. The first child is `FRESH_PROCESS_FIRST` and the later ones are
    `FRESH_PROCESS_REPEATED`; the two are reported separately. For each child, the report has `open` with JVM startup
    excluded, the pass's first query, the remaining 31 queries, and `processWall`, which is the whole child as the
    parent sees it, JVM startup included.
@@ -120,34 +126,34 @@ Medians (p50) in µs unless marked; tails have n = 320 for in-process queries:
 
 | Scale | Kind | Chunks | Ingest p50 ms (run 1 / run 2) | Open in-process p50 | First query on a new instance p50 | Warm query p50 / p95 / p99 (run 1) | Warm query p50 / p95 / p99 (run 2) |
 | --- | --- | --: | --: | --: | --: | --: | --: |
-| 25% | REAL | 21 | 30.7 / 28.4 | 1189 / 1217 | 1183 / 1119 | 185 / 248 / 303 | 188 / 332 / 393 |
-| 50% | REAL | 43 | 32.5 / 34.2 | 847 / 607 | 903 / 775 | 167 / 210 / 246 | 167 / 203 / 269 |
-| 100% | REAL | 87 | 62.3 / 64.7 | 599 / 740 | 1272 / 1390 | 215 / 237 / 256 | 230 / 293 / 399 |
-| x4 | DERIVED | 348 | 242.7 / 247.4 | 670 / 1360 | 3275 / 6003 | 1011 / 1310 / 1624 | 1051 / 1364 / 1666 |
-| x16 | DERIVED | 1392 | 904.9 / 928.8 | 920 / 1038 | 13812 / 15493 | 3078 / 4557 / 5618 | 2882 / 4188 / 4910 |
+| 25% | REAL | 21 | 27.1 / 25.2 | 1166 / 1313 | 1220 / 1297 | 231 / 345 / 462 | 198 / 309 / 470 |
+| 50% | REAL | 43 | 37.2 / 40.0 | 860 / 759 | 982 / 946 | 182 / 235 / 292 | 179 / 218 / 284 |
+| 100% | REAL | 87 | 68.1 / 69.0 | 738 / 732 | 1501 / 1501 | 230 / 269 / 369 | 231 / 299 / 362 |
+| x4 | DERIVED | 348 | 251.7 / 270.3 | 1042 / 1036 | 4407 / 4056 | 859 / 1090 / 2381 | 856 / 1132 / 2783 |
+| x16 | DERIVED | 1392 | 970.9 / 976.3 | 1173 / 1194 | 16616 / 17319 | 3054 / 3968 / 5696 | 3038 / 3686 / 4681 |
 
 Fresh process, 100% scale, run 1 / run 2:
 
 | Measure | Value |
 | --- | --- |
-| Child `open`, first JVM (n = 1) | 68.2 / 70.1 ms |
-| Child `open`, repeated JVMs (p50, n = 4) | 61.8 / 65.2 ms |
-| First query of the first JVM (n = 1) | 44.5 / 48.8 ms |
-| Remaining queries, repeated JVMs (p50 / p95, n = 124) | 1098 / 2276 µs and 1120 / 2699 µs |
-| Whole child process, repeated (p50, n = 4) | 194 / 210 ms |
+| Child `open`, first JVM (n = 1) | 70.5 / 80.3 ms |
+| Child `open`, repeated JVMs (p50, n = 4) | 67.6 / 74.2 ms |
+| First query of the first JVM (n = 1) | 52.0 / 50.7 ms |
+| Remaining queries, repeated JVMs (p50 / p95, n = 124) | 1120 / 2417 µs and 1155 / 2650 µs |
+| Whole child process, repeated (p50, n = 4) | 214 / 225 ms |
 
 ### Observations (this host only)
 
-- Warm in-process recall grows roughly linearly with stored atoms. From 87 to 1392 atoms the p50 rises about
-  12–15×, consistent with the exact linear scan; the 21–87-chunk REAL scales are too small to separate from fixed
-  per-query overhead. Ingest grows about linearly too: roughly 680–700 chunks/s at 21 chunks (fixed per-call
-  overhead) and 1 250–1 530 chunks/s from 43 chunks up.
-- `MonadaMemory.open` alone stays under about 1.4 ms in process at every scale. The first query on a new instance
-  carries the deferred loading: about 1.3–1.4 ms at 87 chunks and 14–15.5 ms at 1392.
+- Warm in-process recall grows roughly linearly with stored atoms. From 87 to 1392 atoms the p50 rises about 13×,
+  consistent with the exact linear scan; the 21–87-chunk REAL scales are too small to separate from fixed per-query
+  overhead. Ingest grows about linearly too: roughly 715–730 chunks/s at 21 chunks (fixed per-call overhead) and
+  1 050–1 430 chunks/s from 43 chunks up.
+- `MonadaMemory.open` alone stays under about 1.3 ms in process at every scale. The first query on a new instance
+  carries the deferred loading: about 1.5 ms at 87 chunks and 16.6–17.3 ms at 1392.
 - In a fresh JVM, open and the first query cost tens of milliseconds (class loading and an unwarmed JIT), and later
   queries stay about 5× slower than warm in-process ones for the whole single pass. Run-to-run variation is visible
-  in tails and small series (for example the x4 first query on a new instance is 3275 vs 6003 µs, and the 100% warm
-  p99 is 256 vs 399 µs). Single samples (n = 1) and n = 4 series are indicative only.
+  in tails and small series (for example the x16 warm p99 is 5696 vs 4681 µs, and the x4 warm p99 is 2381 vs
+  2783 µs). Single samples (n = 1) and n = 4 series are indicative only.
 
 ### Caveats
 

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.monada.core.KnowledgeAtom;
 import java.util.List;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
@@ -84,6 +85,45 @@ class BookLatencyScaleTest {
     void selectionIsDeterministic() {
         for (BookLatencyScale scale : BookLatencyScale.parseLadder(BookLatencyScale.DEFAULT_LADDER)) {
             assertEquals(scale.select(CHUNKS), scale.select(List.copyOf(CHUNKS)));
+        }
+    }
+
+    @Test
+    void theAtomIdSetIsComputedOnceAndMatchesTheTexts() {
+        BookLatencyScale.Selected x2 = BookLatencyScale.parse("x2").select(List.of("a", "b", "a"));
+        assertEquals(x2.texts().stream().map(t -> KnowledgeAtom.text(t).id()).distinct().toList(),
+                List.copyOf(x2.atomIds()), "first-occurrence order");
+        assertEquals(x2.atomIds().size(), x2.uniqueAtoms());
+        assertThrows(UnsupportedOperationException.class, () -> x2.atomIds().add("x"));
+    }
+
+    @Test
+    void requireSelectsChecksCountsWithoutBuildingAScale() {
+        BookLatencyScale.parse("25%").requireSelects(4);
+        BookLatencyScale.parse("x16").requireSelects(1);
+        assertThrows(IllegalArgumentException.class, () -> BookLatencyScale.parse("5%").requireSelects(10));
+        assertThrows(IllegalArgumentException.class, () -> BookLatencyScale.parse("100%").requireSelects(0));
+        for (BookLatencyScale scale : BookLatencyScale.parseLadder("1%,5%,25%,50%,100%,x4")) {
+            for (int n = 0; n <= 120; n++) {
+                boolean selects;
+                try {
+                    scale.requireSelects(n);
+                    selects = true;
+                } catch (IllegalArgumentException e) {
+                    selects = false;
+                }
+                List<String> chunks = IntStream.range(0, n).mapToObj(i -> "t" + i).toList();
+                assertEquals(selects, !selectsNothing(scale, chunks),
+                        scale.spec() + " of " + n + ": the count check agrees with the real selection");
+            }
+        }
+    }
+
+    private static boolean selectsNothing(BookLatencyScale scale, List<String> chunks) {
+        try {
+            return scale.select(chunks).texts().isEmpty();
+        } catch (IllegalArgumentException e) {
+            return true;
         }
     }
 

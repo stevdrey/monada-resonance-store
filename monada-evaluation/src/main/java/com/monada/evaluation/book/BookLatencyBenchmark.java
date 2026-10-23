@@ -42,8 +42,9 @@ import java.util.stream.Stream;
  *   <li><b>query, in process</b>: warm passes over every query on one instance, API calls only; then, in a loop of
  *   its own, a standalone query-encoding diagnostic (the same normalizer and encoder as the API, never
  *   subtracted);</li>
- *   <li><b>fresh process</b>: sequential child JVMs ({@link BookLatencyChild}), started with the parent's heap and
- *   {@code -XX} options and reporting their own JVM configuration, open the same Store and run one pass;
+ *   <li><b>fresh process</b>: sequential child JVMs ({@link BookLatencyChild}), started with the parent's
+ *   allowlisted heap, GC and JIT options (none taken from the environment) and reporting their own JVM
+ *   configuration, open the same Store and run one pass;
  *   the first process and the later ones are reported apart. The OS page cache is never dropped, so no condition
  *   here is an OS cold-cache measurement;</li>
  *   <li><b>parity after profiling</b> (untimed): the baseline Store is reopened and queried again.</li>
@@ -62,6 +63,12 @@ final class BookLatencyBenchmark {
     static final Set<String> CHILD_FIELDS = Set.of("openNanos", "queryNanos", "resultsDigest", "jvm.maxHeapMiB",
             "jvm.gc", "jvm.args");
     private static final long CHILD_KILL_WAIT_SECONDS = 30;
+    /**
+     * Variables the JVM or its launcher read options from. They are removed from every child's environment, otherwise
+     * a file-writing diagnostic set there (a flight recording, a log) would reach all children and bypass the
+     * allowlist; their allowlisted options are still forwarded, since the parent's input arguments include them.
+     */
+    static final List<String> CLEARED_CHILD_ENV = List.of("JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS");
 
     private BookLatencyBenchmark() {
     }
@@ -193,9 +200,9 @@ final class BookLatencyBenchmark {
                 : config.processes() == 0 ? "NOT_RUN (processes=0)"
                 : "RUN (" + config.processes() + " sequential child JVMs per scale)";
         Map<String, String> host = BookLatencyHost.describe(scratch);
+        // Children get exactly the allowlisted options shown in "jvm args", and none from the environment.
+        host.put("child jvm environment", String.join(", ", CLEARED_CHILD_ENV) + " cleared");
         // What each child JVM reported about itself: the fresh-process series ran under this, not the parent's.
-        List<String> forwarded = childOptions();
-        host.put("child jvm options forwarded", forwarded.isEmpty() ? "(none)" : String.join(" ", forwarded));
         host.put("child jvm", childJvms.isEmpty() ? "NOT_RUN" : childJvms.size() == 1 ? childJvms.iterator().next()
                 : "VARIED: " + String.join(" | ", childJvms));
         return new Result(inputs, queries, config, childStatus, host, scales, parity.result());
@@ -232,22 +239,25 @@ final class BookLatencyBenchmark {
             List<?> stored = memory.rememberAll(selected.texts());
             long done = System.nanoTime();
             if (stored.size() != selected.texts().size()) {
-                throw new IllegalStateException(id + ": rememberAll returned " + stored.size() + " atoms for "
+                // The API did not store what it was given: an environment fault (exit 2), not an invalid result.
+                throw new IOException(id + ": rememberAll returned " + stored.size() + " atoms for "
                         + selected.texts().size() + " texts");
             }
             if (t >= config.ingestWarmups()) {
                 create.add(opened - start);
                 remember.add(done - opened);
             }
-            if (store != null) {
-                deleteTree(store); // untimed; only the last trial's Store is kept for the open and query phases
-            }
             store = trial;
+        }
+        // Untimed and after the whole loop, so no deletion's file-system work runs into a timed trial; only the last
+        // trial's Store is kept for the open and query phases.
+        for (int t = 0; t < config.ingestWarmups() + config.ingestTrials() - 1; t++) {
+            deleteTree(dir.resolve("ingest-" + t));
         }
         long storeBytes = treeBytes(store);
         Manifest manifest = new StorageIntegrityAuditor().audit(store).manifest();
         if (manifest == null) {
-            throw new IllegalStateException(id + ": the ingested Store has no readable manifest");
+            throw new IOException(id + ": the ingested Store has no readable manifest");
         }
 
         // 3. Open in process, each new instance followed by one timed first query (rotating through the queries).
@@ -348,11 +358,7 @@ final class BookLatencyBenchmark {
             Path outFile = dir.resolve("child-" + p + ".out");
             Path errFile = dir.resolve("child-" + p + ".err");
             long start = System.nanoTime();
-            List<String> command = new ArrayList<>(List.of(java));
-            command.addAll(childOptions());
-            command.addAll(List.of("-cp", classpath, BookLatencyChild.class.getName(), "--store", store.toString(),
-                    "--queries", queryFile.toString()));
-            Process process = new ProcessBuilder(command).redirectOutput(outFile.toFile())
+            Process process = childProcess(java, classpath, store, queryFile).redirectOutput(outFile.toFile())
                     .redirectError(errFile.toFile()).start();
             boolean exited;
             try {
@@ -381,17 +387,26 @@ final class BookLatencyBenchmark {
                     fields.put(line.substring(0, eq), line.substring(eq + 1));
                 }
             }
-            List<Long> nanos = Stream.of(fields.getOrDefault("queryNanos", "").split(","))
-                    .filter(s -> !s.isEmpty()).map(Long::valueOf).toList();
-            // A truncated child report is an environment failure (exit 2), like a nonzero child exit.
-            if (!fields.keySet().containsAll(CHILD_FIELDS) || nanos.size() != queries.size()) {
+            // A truncated or garbled child report is an environment failure (exit 2), like a nonzero child exit.
+            if (!fields.keySet().containsAll(CHILD_FIELDS)) {
                 throw new IOException(id + ": child JVM " + p + " printed an incomplete report: " + fields);
+            }
+            List<Long> nanos = new ArrayList<>();
+            for (String value : fields.get("queryNanos").split(",", -1)) {
+                if (!value.isEmpty()) {
+                    nanos.add(childNanos(id + " child JVM " + p + " queryNanos", value));
+                }
+            }
+            long openNanos = childNanos(id + " child JVM " + p + " openNanos", fields.get("openNanos"));
+            if (nanos.size() != queries.size()) {
+                throw new IOException(id + ": child JVM " + p + " reported " + nanos.size() + " query timings for "
+                        + queries.size() + " queries");
             }
             parity.compareDigest(id + " child JVM " + p, baselineDigest, fields.get("resultsDigest"),
                     queries.size());
             childJvms.add("max heap " + fields.get("jvm.maxHeapMiB") + " MiB; gc " + fields.get("jvm.gc")
                     + "; jvm args " + fields.get("jvm.args"));
-            open.computeIfAbsent(condition, c -> new ArrayList<>()).add(Long.valueOf(fields.get("openNanos")));
+            open.computeIfAbsent(condition, c -> new ArrayList<>()).add(openNanos);
             first.computeIfAbsent(condition, c -> new ArrayList<>()).add(nanos.getFirst());
             rest.computeIfAbsent(condition, c -> new ArrayList<>()).addAll(nanos.subList(1, nanos.size()));
             wall.computeIfAbsent(condition, c -> new ArrayList<>()).add(elapsed);
@@ -408,6 +423,33 @@ final class BookLatencyBenchmark {
                     "whole child process seen by the parent: JVM startup, open, one pass, output", wall.get(condition)));
         }
         return series;
+    }
+
+    /** A non-negative nanosecond count printed by a child, or an {@link IOException} naming what was malformed. */
+    static long childNanos(String what, String value) throws IOException {
+        try {
+            long nanos = Long.parseLong(value);
+            if (nanos < 0) {
+                throw new IOException(what + " is negative: " + value);
+            }
+            return nanos;
+        } catch (NumberFormatException e) {
+            throw new IOException(what + " is not a nanosecond count: '" + value + "'", e);
+        }
+    }
+
+    /**
+     * The child JVM command: the allowlisted options ({@link #childOptions()}) on the command line, and the
+     * {@link #CLEARED_CHILD_ENV} variables removed from its environment.
+     */
+    static ProcessBuilder childProcess(String java, String classpath, Path store, Path queryFile) {
+        List<String> command = new ArrayList<>(List.of(java));
+        command.addAll(childOptions());
+        command.addAll(List.of("-cp", classpath, BookLatencyChild.class.getName(), "--store", store.toString(),
+                "--queries", queryFile.toString()));
+        ProcessBuilder builder = new ProcessBuilder(command);
+        CLEARED_CHILD_ENV.forEach(builder.environment()::remove);
+        return builder;
     }
 
     /**

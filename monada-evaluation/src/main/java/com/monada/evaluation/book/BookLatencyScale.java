@@ -3,6 +3,7 @@ package com.monada.evaluation.book;
 import com.monada.core.KnowledgeAtom;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -33,19 +34,22 @@ record BookLatencyScale(String id, String spec, Kind kind, int percent, int mult
         DERIVED
     }
 
-    /** The texts one scale ingests, in ingest order, plus what they are. */
-    record Selected(BookLatencyScale scale, List<String> texts, List<Integer> ordinals, int uniqueAtoms,
+    /**
+     * The texts one scale ingests, in ingest order, plus what they are.
+     *
+     * @param atomIds every content-derived atom id of {@code texts}, in first-occurrence order (computed once)
+     */
+    record Selected(BookLatencyScale scale, List<String> texts, List<Integer> ordinals, Set<String> atomIds,
                     long textBytes) {
         Selected {
             texts = List.copyOf(texts);
             ordinals = List.copyOf(ordinals);
+            atomIds = Collections.unmodifiableSet(new LinkedHashSet<>(atomIds));
         }
 
-        /** Every content-derived atom id of {@link #texts()}, in first-occurrence order. */
-        Set<String> atomIds() {
-            Set<String> ids = new LinkedHashSet<>();
-            texts.forEach(t -> ids.add(KnowledgeAtom.text(t).id()));
-            return ids;
+        /** Distinct atoms the Store holds after ingesting {@link #texts()}. */
+        int uniqueAtoms() {
+            return atomIds.size();
         }
     }
 
@@ -84,8 +88,19 @@ record BookLatencyScale(String id, String spec, Kind kind, int percent, int mult
         throw new IllegalArgumentException("bad scale '" + spec + "': expected 1%..100% or x2..x9999");
     }
 
+    /**
+     * Fails when this scale would select no chunk of {@code chunkCount}: count arithmetic only, so a ladder can be
+     * checked against a corpus without building any scale.
+     */
+    void requireSelects(int chunkCount) {
+        if ((long) chunkCount * percent / 100 < 1) {
+            throw new IllegalArgumentException("scale " + spec + " selects no chunk of " + chunkCount);
+        }
+    }
+
     /** The texts of this scale over {@code chunks} (ordinal order). */
     Selected select(List<String> chunks) {
+        requireSelects(chunks.size());
         List<String> texts = new ArrayList<>();
         List<Integer> ordinals = new ArrayList<>();
         int n = chunks.size();
@@ -94,9 +109,6 @@ record BookLatencyScale(String id, String spec, Kind kind, int percent, int mult
                 texts.add(chunks.get(i));
                 ordinals.add(i);
             }
-        }
-        if (texts.isEmpty()) {
-            throw new IllegalArgumentException("scale " + spec + " selects no chunk of " + n);
         }
         int base = texts.size();
         for (int r = 1; r < multiplier; r++) {
@@ -111,7 +123,7 @@ record BookLatencyScale(String id, String spec, Kind kind, int percent, int mult
             atoms.add(KnowledgeAtom.text(text).id());
             bytes += text.getBytes(StandardCharsets.UTF_8).length;
         }
-        return new Selected(this, texts, ordinals, atoms.size(), bytes);
+        return new Selected(this, texts, ordinals, atoms, bytes);
     }
 
     static String replica(int r, String text) {
