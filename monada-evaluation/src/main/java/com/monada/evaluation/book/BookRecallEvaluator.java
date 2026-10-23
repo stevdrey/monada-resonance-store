@@ -347,7 +347,7 @@ final class BookRecallEvaluator {
     }
 
     /** Top-K, known atoms only, finite scores, no repeats, score descending then atom id ascending. */
-    private static void validateHits(String id, List<Hit> hits, Set<String> atoms) {
+    static void validateHits(String id, List<Hit> hits, Set<String> atoms) {
         if (hits.size() > MAX_K) {
             throw new IllegalStateException(id + ": " + hits.size() + " hits for top-" + MAX_K);
         }

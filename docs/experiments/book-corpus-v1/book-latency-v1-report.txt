@@ -1,0 +1,766 @@
+Monada book latency report (Issue #168, Book 6/8)
+format=monada-book-latency-report
+formatVersion=1
+status=EXPLORATORY: wall-clock timings from one host; informational only, no threshold, gate or SLA; OS cold cache never measured
+
+== Inputs ==
+corpus=book-corpus-v1
+corpusVersion=1
+source.sha256=b44b499274ef98e0bc12c190ee08d9c63480b7c96946101a540a0cb24b3a944c
+chunking.policy=book-chunking-v1
+chunks.count=87
+chunksFile.sha256=e1f4ea9dd6dfcfb3225a845855b79476f686b8868b526a45d05fd863a2608a04
+chunkMap.sha256=d3c62fe220a5e8b7ec584c06f44469ec887f08a71d8ed87a94d65f4ec709f017
+dataset=book-queries-v1 v1 (query texts only; judgments unused)
+queries.sha256=9b1b0b222f26932622c9fe38a8d4351a0a637bd41f49319d882152a44fe05e14
+queries.count=32
+queries.textsSha256=c48c436bb40735dc2f4ab76ce2abcb928ee80126af4da720a0b3108733adbf19
+queries.order=dataset order by query id; every pass runs all of them in this order
+
+== Config ==
+ladder=25%,50%,100%,x4,x16
+selection=p% keeps ordinals i with floor((i+1)p/100) > floor(ip/100) (evenly spaced); xN keeps every chunk plus N-1 replicas '[replica r] ' + text
+ingest=1 warmup + 5 measured trials, each a new empty Store directory
+open=2 warmup + 20 measured opens of the last ingested Store, each followed by one timed first query
+query=2 warmup + 10 measured passes over every query on one instance
+freshProcess=RUN (5 sequential child JVMs per scale)
+api=MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+profile=MonadaMemoryOptions.defaults() (feedback-free Stores)
+timer=System.nanoTime() around each call; one sample per call
+percentiles=nearest-rank, no interpolation; p50 n>=1, p95 n>=20, p99 n>=100, else n/a; stddev is the sample one (n-1)
+conditions=IN_PROCESS new empty dir; IN_PROCESS_REPEATED repeated opens in this JVM; IN_PROCESS_NEW_INSTANCE first query on a just-opened instance; IN_PROCESS_WARM after warmup passes; STANDALONE_DIAGNOSTIC encode only; FRESH_PROCESS_FIRST first child JVM of a scale; FRESH_PROCESS_REPEATED later child JVMs. Page cache: WARM_OR_UNKNOWN (no OS cache drop performed; files were just written or read; an OS cold-cache condition is never measured or implied)
+excluded=chunking, corpus verification, parity passes, directory setup and cleanup, report writing, JVM startup (except processWall)
+unmeasured=OS cold cache; storage durability beyond what the API itself does; JIT and GC attribution; concurrent queries; ANN or caches (none exist)
+
+== Scales ==
+scale.p25.spec=25%
+scale.p25.kind=REAL (frozen chunks, text unmodified)
+scale.p25.chunks=21
+scale.p25.uniqueAtoms=21
+scale.p25.textBytes=37101
+scale.p25.ordinalsSha256=1d5b42ca9412cee02df91c0d1e7ce6de0700cd327b5b5186e1a6dfd6fed85c53
+scale.p25.dimensions=128
+scale.p25.resultsSha256=1f2b958dc2ff0c5758642d7cd02443cd30542ad56d7570ed06d273882ce6217d
+scale.p25.freshProcess=RUN
+scale.p25.samples=ingest.create.IN_PROCESS=5 ingest.rememberAll.IN_PROCESS=5 open.IN_PROCESS_REPEATED=20 firstQuery.IN_PROCESS_NEW_INSTANCE=20 query.IN_PROCESS_WARM=320 queryEncode.STANDALONE_DIAGNOSTIC=320 open.FRESH_PROCESS_FIRST=1 firstQuery.FRESH_PROCESS_FIRST=1 query.FRESH_PROCESS_FIRST=31 processWall.FRESH_PROCESS_FIRST=1 open.FRESH_PROCESS_REPEATED=4 firstQuery.FRESH_PROCESS_REPEATED=4 query.FRESH_PROCESS_REPEATED=124 processWall.FRESH_PROCESS_REPEATED=4
+scale.p50.spec=50%
+scale.p50.kind=REAL (frozen chunks, text unmodified)
+scale.p50.chunks=43
+scale.p50.uniqueAtoms=43
+scale.p50.textBytes=75233
+scale.p50.ordinalsSha256=0187f018913bec0630759813a4efb612489f8b96cd8289431d5b249400e81f4c
+scale.p50.dimensions=128
+scale.p50.resultsSha256=d28c712c545b346e231950456bcd8921e4f7dfb2fd7231452b4f10b3382eaf52
+scale.p50.freshProcess=RUN
+scale.p50.samples=ingest.create.IN_PROCESS=5 ingest.rememberAll.IN_PROCESS=5 open.IN_PROCESS_REPEATED=20 firstQuery.IN_PROCESS_NEW_INSTANCE=20 query.IN_PROCESS_WARM=320 queryEncode.STANDALONE_DIAGNOSTIC=320 open.FRESH_PROCESS_FIRST=1 firstQuery.FRESH_PROCESS_FIRST=1 query.FRESH_PROCESS_FIRST=31 processWall.FRESH_PROCESS_FIRST=1 open.FRESH_PROCESS_REPEATED=4 firstQuery.FRESH_PROCESS_REPEATED=4 query.FRESH_PROCESS_REPEATED=124 processWall.FRESH_PROCESS_REPEATED=4
+scale.p100.spec=100%
+scale.p100.kind=REAL (frozen chunks, text unmodified)
+scale.p100.chunks=87
+scale.p100.uniqueAtoms=87
+scale.p100.textBytes=150885
+scale.p100.ordinalsSha256=037f5bbc1929801aeddb882b9ca62ba0b4c8ecf4ba7e6e2a4e67716e283ad16c
+scale.p100.dimensions=128
+scale.p100.resultsSha256=01e3d98598cf8f5b178b41225f5bce15b587f557075e4c2abf865460aac4d4d8
+scale.p100.freshProcess=RUN
+scale.p100.samples=ingest.create.IN_PROCESS=5 ingest.rememberAll.IN_PROCESS=5 open.IN_PROCESS_REPEATED=20 firstQuery.IN_PROCESS_NEW_INSTANCE=20 query.IN_PROCESS_WARM=320 queryEncode.STANDALONE_DIAGNOSTIC=320 open.FRESH_PROCESS_FIRST=1 firstQuery.FRESH_PROCESS_FIRST=1 query.FRESH_PROCESS_FIRST=31 processWall.FRESH_PROCESS_FIRST=1 open.FRESH_PROCESS_REPEATED=4 firstQuery.FRESH_PROCESS_REPEATED=4 query.FRESH_PROCESS_REPEATED=124 processWall.FRESH_PROCESS_REPEATED=4
+scale.x4.spec=x4
+scale.x4.kind=DERIVED (replica-tagged, not real-book shape)
+scale.x4.chunks=348
+scale.x4.uniqueAtoms=348
+scale.x4.textBytes=606672
+scale.x4.ordinalsSha256=9fd52593a1eadcf11a2a5926956130314d41c5b95cbe9d31e798285f214de9f1
+scale.x4.dimensions=128
+scale.x4.resultsSha256=f0db4ae26d20e484b6af24c24c3d68ab4ad58033144dfc19d2e8ee1d3b44adee
+scale.x4.freshProcess=RUN
+scale.x4.samples=ingest.create.IN_PROCESS=5 ingest.rememberAll.IN_PROCESS=5 open.IN_PROCESS_REPEATED=20 firstQuery.IN_PROCESS_NEW_INSTANCE=20 query.IN_PROCESS_WARM=320 queryEncode.STANDALONE_DIAGNOSTIC=320 open.FRESH_PROCESS_FIRST=1 firstQuery.FRESH_PROCESS_FIRST=1 query.FRESH_PROCESS_FIRST=31 processWall.FRESH_PROCESS_FIRST=1 open.FRESH_PROCESS_REPEATED=4 firstQuery.FRESH_PROCESS_REPEATED=4 query.FRESH_PROCESS_REPEATED=124 processWall.FRESH_PROCESS_REPEATED=4
+scale.x16.spec=x16
+scale.x16.kind=DERIVED (replica-tagged, not real-book shape)
+scale.x16.chunks=1392
+scale.x16.uniqueAtoms=1392
+scale.x16.textBytes=2430342
+scale.x16.ordinalsSha256=127ca3a1b76d51898ea67a2e0d6e182eef6c47064f8284af51135d5c15b8ae02
+scale.x16.dimensions=128
+scale.x16.resultsSha256=4667717de524ce241b16706d7f932dfdc21f1a7c80a8020a7dedfbbf556859b9
+scale.x16.freshProcess=RUN
+scale.x16.samples=ingest.create.IN_PROCESS=5 ingest.rememberAll.IN_PROCESS=5 open.IN_PROCESS_REPEATED=20 firstQuery.IN_PROCESS_NEW_INSTANCE=20 query.IN_PROCESS_WARM=320 queryEncode.STANDALONE_DIAGNOSTIC=320 open.FRESH_PROCESS_FIRST=1 firstQuery.FRESH_PROCESS_FIRST=1 query.FRESH_PROCESS_FIRST=31 processWall.FRESH_PROCESS_FIRST=1 open.FRESH_PROCESS_REPEATED=4 firstQuery.FRESH_PROCESS_REPEATED=4 query.FRESH_PROCESS_REPEATED=124 processWall.FRESH_PROCESS_REPEATED=4
+
+== Parity (top-10 ids, order and scores) ==
+parity.status=PASS
+parity.checks=2215
+parity.mismatches=0
+
+== Host ==
+host.java.version=27
+host.java.vm=OpenJDK 64-Bit Server VM 27+35
+host.java.vendor=Azul Systems, Inc.
+host.os=Linux 7.2.11-200.fc44.x86_64 amd64
+host.processors=16
+host.max_heap=3832 MiB
+host.cpu=AMD Ryzen 7 7730U with Radeon Graphics
+host.gc=G1 Young Generation, G1 Concurrent GC, G1 Old Generation
+host.jvm_args=-Dfile.encoding=UTF-8 -Duser.country=US -Duser.language=en -Duser.variant
+host.scratch_file_store=btrfs (/dev/nvme0n1p6)
+host.page_cache=WARM_OR_UNKNOWN (no OS cache drop performed; files were just written or read; an OS cold-cache condition is never measured or implied)
+host.clock=System.nanoTime() wall-clock, single thread, no CPU pinning or frequency control
+
+== Timings (informational; microseconds unless named otherwise) ==
+scale.p25.storeBytes=63556
+scale.p25.ingest.create.IN_PROCESS.timed=MonadaMemory.open(new empty dir)
+scale.p25.ingest.create.IN_PROCESS.n=5
+scale.p25.ingest.create.IN_PROCESS.minMicros=2279.9
+scale.p25.ingest.create.IN_PROCESS.p50Micros=2469.7
+scale.p25.ingest.create.IN_PROCESS.p95Micros=n/a (n=5 < 20)
+scale.p25.ingest.create.IN_PROCESS.p99Micros=n/a (n=5 < 100)
+scale.p25.ingest.create.IN_PROCESS.maxMicros=3975.1
+scale.p25.ingest.create.IN_PROCESS.meanMicros=2879.3
+scale.p25.ingest.create.IN_PROCESS.stddevMicros=745.9
+scale.p25.ingest.rememberAll.IN_PROCESS.timed=rememberAll(texts): encode + persist via the public API
+scale.p25.ingest.rememberAll.IN_PROCESS.n=5
+scale.p25.ingest.rememberAll.IN_PROCESS.minMicros=23654.5
+scale.p25.ingest.rememberAll.IN_PROCESS.p50Micros=33405.9
+scale.p25.ingest.rememberAll.IN_PROCESS.p95Micros=n/a (n=5 < 20)
+scale.p25.ingest.rememberAll.IN_PROCESS.p99Micros=n/a (n=5 < 100)
+scale.p25.ingest.rememberAll.IN_PROCESS.maxMicros=43959.6
+scale.p25.ingest.rememberAll.IN_PROCESS.meanMicros=32720.2
+scale.p25.ingest.rememberAll.IN_PROCESS.stddevMicros=7684.9
+scale.p25.ingest.rememberAll.IN_PROCESS.chunksPerSecond=641.8
+scale.p25.ingest.rememberAll.IN_PROCESS.mibPerSecond=1.081
+scale.p25.open.IN_PROCESS_REPEATED.timed=MonadaMemory.open(store)
+scale.p25.open.IN_PROCESS_REPEATED.n=20
+scale.p25.open.IN_PROCESS_REPEATED.minMicros=953.8
+scale.p25.open.IN_PROCESS_REPEATED.p50Micros=1266.3
+scale.p25.open.IN_PROCESS_REPEATED.p95Micros=1826.5
+scale.p25.open.IN_PROCESS_REPEATED.p99Micros=n/a (n=20 < 100)
+scale.p25.open.IN_PROCESS_REPEATED.maxMicros=3452.7
+scale.p25.open.IN_PROCESS_REPEATED.meanMicros=1372.0
+scale.p25.open.IN_PROCESS_REPEATED.stddevMicros=543.0
+scale.p25.firstQuery.IN_PROCESS_NEW_INSTANCE.timed=first query after open, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.p25.firstQuery.IN_PROCESS_NEW_INSTANCE.n=20
+scale.p25.firstQuery.IN_PROCESS_NEW_INSTANCE.minMicros=1024.8
+scale.p25.firstQuery.IN_PROCESS_NEW_INSTANCE.p50Micros=1412.3
+scale.p25.firstQuery.IN_PROCESS_NEW_INSTANCE.p95Micros=1867.9
+scale.p25.firstQuery.IN_PROCESS_NEW_INSTANCE.p99Micros=n/a (n=20 < 100)
+scale.p25.firstQuery.IN_PROCESS_NEW_INSTANCE.maxMicros=2113.3
+scale.p25.firstQuery.IN_PROCESS_NEW_INSTANCE.meanMicros=1474.1
+scale.p25.firstQuery.IN_PROCESS_NEW_INSTANCE.stddevMicros=317.8
+scale.p25.query.IN_PROCESS_WARM.timed=MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.p25.query.IN_PROCESS_WARM.n=320
+scale.p25.query.IN_PROCESS_WARM.minMicros=203.4
+scale.p25.query.IN_PROCESS_WARM.p50Micros=248.9
+scale.p25.query.IN_PROCESS_WARM.p95Micros=329.2
+scale.p25.query.IN_PROCESS_WARM.p99Micros=398.4
+scale.p25.query.IN_PROCESS_WARM.maxMicros=564.2
+scale.p25.query.IN_PROCESS_WARM.meanMicros=255.9
+scale.p25.query.IN_PROCESS_WARM.stddevMicros=44.2
+scale.p25.query.IN_PROCESS_WARM.queriesPerSecond=3907.4
+scale.p25.queryEncode.STANDALONE_DIAGNOSTIC.timed=normalize + encode only, same pipeline as the API, not subtracted
+scale.p25.queryEncode.STANDALONE_DIAGNOSTIC.n=320
+scale.p25.queryEncode.STANDALONE_DIAGNOSTIC.minMicros=20.4
+scale.p25.queryEncode.STANDALONE_DIAGNOSTIC.p50Micros=29.3
+scale.p25.queryEncode.STANDALONE_DIAGNOSTIC.p95Micros=40.8
+scale.p25.queryEncode.STANDALONE_DIAGNOSTIC.p99Micros=72.9
+scale.p25.queryEncode.STANDALONE_DIAGNOSTIC.maxMicros=162.0
+scale.p25.queryEncode.STANDALONE_DIAGNOSTIC.meanMicros=30.8
+scale.p25.queryEncode.STANDALONE_DIAGNOSTIC.stddevMicros=10.1
+scale.p25.open.FRESH_PROCESS_FIRST.timed=MonadaMemory.open(store) in the child, JVM startup excluded
+scale.p25.open.FRESH_PROCESS_FIRST.n=1
+scale.p25.open.FRESH_PROCESS_FIRST.minMicros=74971.5
+scale.p25.open.FRESH_PROCESS_FIRST.p50Micros=74971.5
+scale.p25.open.FRESH_PROCESS_FIRST.p95Micros=n/a (n=1 < 20)
+scale.p25.open.FRESH_PROCESS_FIRST.p99Micros=n/a (n=1 < 100)
+scale.p25.open.FRESH_PROCESS_FIRST.maxMicros=74971.5
+scale.p25.open.FRESH_PROCESS_FIRST.meanMicros=74971.5
+scale.p25.open.FRESH_PROCESS_FIRST.stddevMicros=n/a
+scale.p25.firstQuery.FRESH_PROCESS_FIRST.timed=first query of the child's pass, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.p25.firstQuery.FRESH_PROCESS_FIRST.n=1
+scale.p25.firstQuery.FRESH_PROCESS_FIRST.minMicros=29879.4
+scale.p25.firstQuery.FRESH_PROCESS_FIRST.p50Micros=29879.4
+scale.p25.firstQuery.FRESH_PROCESS_FIRST.p95Micros=n/a (n=1 < 20)
+scale.p25.firstQuery.FRESH_PROCESS_FIRST.p99Micros=n/a (n=1 < 100)
+scale.p25.firstQuery.FRESH_PROCESS_FIRST.maxMicros=29879.4
+scale.p25.firstQuery.FRESH_PROCESS_FIRST.meanMicros=29879.4
+scale.p25.firstQuery.FRESH_PROCESS_FIRST.stddevMicros=n/a
+scale.p25.query.FRESH_PROCESS_FIRST.timed=remaining queries of the child's single pass, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.p25.query.FRESH_PROCESS_FIRST.n=31
+scale.p25.query.FRESH_PROCESS_FIRST.minMicros=491.9
+scale.p25.query.FRESH_PROCESS_FIRST.p50Micros=615.3
+scale.p25.query.FRESH_PROCESS_FIRST.p95Micros=1621.3
+scale.p25.query.FRESH_PROCESS_FIRST.p99Micros=n/a (n=31 < 100)
+scale.p25.query.FRESH_PROCESS_FIRST.maxMicros=2073.0
+scale.p25.query.FRESH_PROCESS_FIRST.meanMicros=816.2
+scale.p25.query.FRESH_PROCESS_FIRST.stddevMicros=371.9
+scale.p25.query.FRESH_PROCESS_FIRST.queriesPerSecond=1225.2
+scale.p25.processWall.FRESH_PROCESS_FIRST.timed=whole child process seen by the parent: JVM startup, open, one pass, output
+scale.p25.processWall.FRESH_PROCESS_FIRST.n=1
+scale.p25.processWall.FRESH_PROCESS_FIRST.minMicros=176859.6
+scale.p25.processWall.FRESH_PROCESS_FIRST.p50Micros=176859.6
+scale.p25.processWall.FRESH_PROCESS_FIRST.p95Micros=n/a (n=1 < 20)
+scale.p25.processWall.FRESH_PROCESS_FIRST.p99Micros=n/a (n=1 < 100)
+scale.p25.processWall.FRESH_PROCESS_FIRST.maxMicros=176859.6
+scale.p25.processWall.FRESH_PROCESS_FIRST.meanMicros=176859.6
+scale.p25.processWall.FRESH_PROCESS_FIRST.stddevMicros=n/a
+scale.p25.open.FRESH_PROCESS_REPEATED.timed=MonadaMemory.open(store) in the child, JVM startup excluded
+scale.p25.open.FRESH_PROCESS_REPEATED.n=4
+scale.p25.open.FRESH_PROCESS_REPEATED.minMicros=62391.7
+scale.p25.open.FRESH_PROCESS_REPEATED.p50Micros=62936.4
+scale.p25.open.FRESH_PROCESS_REPEATED.p95Micros=n/a (n=4 < 20)
+scale.p25.open.FRESH_PROCESS_REPEATED.p99Micros=n/a (n=4 < 100)
+scale.p25.open.FRESH_PROCESS_REPEATED.maxMicros=66840.1
+scale.p25.open.FRESH_PROCESS_REPEATED.meanMicros=63969.6
+scale.p25.open.FRESH_PROCESS_REPEATED.stddevMicros=1988.6
+scale.p25.firstQuery.FRESH_PROCESS_REPEATED.timed=first query of the child's pass, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.p25.firstQuery.FRESH_PROCESS_REPEATED.n=4
+scale.p25.firstQuery.FRESH_PROCESS_REPEATED.minMicros=29158.0
+scale.p25.firstQuery.FRESH_PROCESS_REPEATED.p50Micros=29808.5
+scale.p25.firstQuery.FRESH_PROCESS_REPEATED.p95Micros=n/a (n=4 < 20)
+scale.p25.firstQuery.FRESH_PROCESS_REPEATED.p99Micros=n/a (n=4 < 100)
+scale.p25.firstQuery.FRESH_PROCESS_REPEATED.maxMicros=30245.3
+scale.p25.firstQuery.FRESH_PROCESS_REPEATED.meanMicros=29851.0
+scale.p25.firstQuery.FRESH_PROCESS_REPEATED.stddevMicros=501.3
+scale.p25.query.FRESH_PROCESS_REPEATED.timed=remaining queries of the child's single pass, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.p25.query.FRESH_PROCESS_REPEATED.n=124
+scale.p25.query.FRESH_PROCESS_REPEATED.minMicros=471.6
+scale.p25.query.FRESH_PROCESS_REPEATED.p50Micros=659.5
+scale.p25.query.FRESH_PROCESS_REPEATED.p95Micros=1295.6
+scale.p25.query.FRESH_PROCESS_REPEATED.p99Micros=2016.8
+scale.p25.query.FRESH_PROCESS_REPEATED.maxMicros=2395.6
+scale.p25.query.FRESH_PROCESS_REPEATED.meanMicros=814.3
+scale.p25.query.FRESH_PROCESS_REPEATED.stddevMicros=335.9
+scale.p25.query.FRESH_PROCESS_REPEATED.queriesPerSecond=1228.0
+scale.p25.processWall.FRESH_PROCESS_REPEATED.timed=whole child process seen by the parent: JVM startup, open, one pass, output
+scale.p25.processWall.FRESH_PROCESS_REPEATED.n=4
+scale.p25.processWall.FRESH_PROCESS_REPEATED.minMicros=157550.1
+scale.p25.processWall.FRESH_PROCESS_REPEATED.p50Micros=159235.5
+scale.p25.processWall.FRESH_PROCESS_REPEATED.p95Micros=n/a (n=4 < 20)
+scale.p25.processWall.FRESH_PROCESS_REPEATED.p99Micros=n/a (n=4 < 100)
+scale.p25.processWall.FRESH_PROCESS_REPEATED.maxMicros=167766.7
+scale.p25.processWall.FRESH_PROCESS_REPEATED.meanMicros=161894.0
+scale.p25.processWall.FRESH_PROCESS_REPEATED.stddevMicros=4535.1
+scale.p50.storeBytes=128364
+scale.p50.ingest.create.IN_PROCESS.timed=MonadaMemory.open(new empty dir)
+scale.p50.ingest.create.IN_PROCESS.n=5
+scale.p50.ingest.create.IN_PROCESS.minMicros=1357.2
+scale.p50.ingest.create.IN_PROCESS.p50Micros=1526.7
+scale.p50.ingest.create.IN_PROCESS.p95Micros=n/a (n=5 < 20)
+scale.p50.ingest.create.IN_PROCESS.p99Micros=n/a (n=5 < 100)
+scale.p50.ingest.create.IN_PROCESS.maxMicros=1569.8
+scale.p50.ingest.create.IN_PROCESS.meanMicros=1477.4
+scale.p50.ingest.create.IN_PROCESS.stddevMicros=96.5
+scale.p50.ingest.rememberAll.IN_PROCESS.timed=rememberAll(texts): encode + persist via the public API
+scale.p50.ingest.rememberAll.IN_PROCESS.n=5
+scale.p50.ingest.rememberAll.IN_PROCESS.minMicros=39528.8
+scale.p50.ingest.rememberAll.IN_PROCESS.p50Micros=39679.9
+scale.p50.ingest.rememberAll.IN_PROCESS.p95Micros=n/a (n=5 < 20)
+scale.p50.ingest.rememberAll.IN_PROCESS.p99Micros=n/a (n=5 < 100)
+scale.p50.ingest.rememberAll.IN_PROCESS.maxMicros=41054.7
+scale.p50.ingest.rememberAll.IN_PROCESS.meanMicros=40076.4
+scale.p50.ingest.rememberAll.IN_PROCESS.stddevMicros=693.6
+scale.p50.ingest.rememberAll.IN_PROCESS.chunksPerSecond=1073.0
+scale.p50.ingest.rememberAll.IN_PROCESS.mibPerSecond=1.790
+scale.p50.open.IN_PROCESS_REPEATED.timed=MonadaMemory.open(store)
+scale.p50.open.IN_PROCESS_REPEATED.n=20
+scale.p50.open.IN_PROCESS_REPEATED.minMicros=659.7
+scale.p50.open.IN_PROCESS_REPEATED.p50Micros=782.7
+scale.p50.open.IN_PROCESS_REPEATED.p95Micros=1100.8
+scale.p50.open.IN_PROCESS_REPEATED.p99Micros=n/a (n=20 < 100)
+scale.p50.open.IN_PROCESS_REPEATED.maxMicros=1196.1
+scale.p50.open.IN_PROCESS_REPEATED.meanMicros=816.9
+scale.p50.open.IN_PROCESS_REPEATED.stddevMicros=150.6
+scale.p50.firstQuery.IN_PROCESS_NEW_INSTANCE.timed=first query after open, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.p50.firstQuery.IN_PROCESS_NEW_INSTANCE.n=20
+scale.p50.firstQuery.IN_PROCESS_NEW_INSTANCE.minMicros=837.3
+scale.p50.firstQuery.IN_PROCESS_NEW_INSTANCE.p50Micros=1007.2
+scale.p50.firstQuery.IN_PROCESS_NEW_INSTANCE.p95Micros=1254.2
+scale.p50.firstQuery.IN_PROCESS_NEW_INSTANCE.p99Micros=n/a (n=20 < 100)
+scale.p50.firstQuery.IN_PROCESS_NEW_INSTANCE.maxMicros=2724.9
+scale.p50.firstQuery.IN_PROCESS_NEW_INSTANCE.meanMicros=1088.3
+scale.p50.firstQuery.IN_PROCESS_NEW_INSTANCE.stddevMicros=406.8
+scale.p50.query.IN_PROCESS_WARM.timed=MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.p50.query.IN_PROCESS_WARM.n=320
+scale.p50.query.IN_PROCESS_WARM.minMicros=168.8
+scale.p50.query.IN_PROCESS_WARM.p50Micros=185.9
+scale.p50.query.IN_PROCESS_WARM.p95Micros=218.6
+scale.p50.query.IN_PROCESS_WARM.p99Micros=259.5
+scale.p50.query.IN_PROCESS_WARM.maxMicros=1627.3
+scale.p50.query.IN_PROCESS_WARM.meanMicros=194.9
+scale.p50.query.IN_PROCESS_WARM.stddevMicros=83.0
+scale.p50.query.IN_PROCESS_WARM.queriesPerSecond=5131.7
+scale.p50.queryEncode.STANDALONE_DIAGNOSTIC.timed=normalize + encode only, same pipeline as the API, not subtracted
+scale.p50.queryEncode.STANDALONE_DIAGNOSTIC.n=320
+scale.p50.queryEncode.STANDALONE_DIAGNOSTIC.minMicros=11.9
+scale.p50.queryEncode.STANDALONE_DIAGNOSTIC.p50Micros=16.5
+scale.p50.queryEncode.STANDALONE_DIAGNOSTIC.p95Micros=23.8
+scale.p50.queryEncode.STANDALONE_DIAGNOSTIC.p99Micros=34.2
+scale.p50.queryEncode.STANDALONE_DIAGNOSTIC.maxMicros=84.2
+scale.p50.queryEncode.STANDALONE_DIAGNOSTIC.meanMicros=17.4
+scale.p50.queryEncode.STANDALONE_DIAGNOSTIC.stddevMicros=5.6
+scale.p50.open.FRESH_PROCESS_FIRST.timed=MonadaMemory.open(store) in the child, JVM startup excluded
+scale.p50.open.FRESH_PROCESS_FIRST.n=1
+scale.p50.open.FRESH_PROCESS_FIRST.minMicros=75362.8
+scale.p50.open.FRESH_PROCESS_FIRST.p50Micros=75362.8
+scale.p50.open.FRESH_PROCESS_FIRST.p95Micros=n/a (n=1 < 20)
+scale.p50.open.FRESH_PROCESS_FIRST.p99Micros=n/a (n=1 < 100)
+scale.p50.open.FRESH_PROCESS_FIRST.maxMicros=75362.8
+scale.p50.open.FRESH_PROCESS_FIRST.meanMicros=75362.8
+scale.p50.open.FRESH_PROCESS_FIRST.stddevMicros=n/a
+scale.p50.firstQuery.FRESH_PROCESS_FIRST.timed=first query of the child's pass, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.p50.firstQuery.FRESH_PROCESS_FIRST.n=1
+scale.p50.firstQuery.FRESH_PROCESS_FIRST.minMicros=42775.0
+scale.p50.firstQuery.FRESH_PROCESS_FIRST.p50Micros=42775.0
+scale.p50.firstQuery.FRESH_PROCESS_FIRST.p95Micros=n/a (n=1 < 20)
+scale.p50.firstQuery.FRESH_PROCESS_FIRST.p99Micros=n/a (n=1 < 100)
+scale.p50.firstQuery.FRESH_PROCESS_FIRST.maxMicros=42775.0
+scale.p50.firstQuery.FRESH_PROCESS_FIRST.meanMicros=42775.0
+scale.p50.firstQuery.FRESH_PROCESS_FIRST.stddevMicros=n/a
+scale.p50.query.FRESH_PROCESS_FIRST.timed=remaining queries of the child's single pass, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.p50.query.FRESH_PROCESS_FIRST.n=31
+scale.p50.query.FRESH_PROCESS_FIRST.minMicros=742.8
+scale.p50.query.FRESH_PROCESS_FIRST.p50Micros=998.6
+scale.p50.query.FRESH_PROCESS_FIRST.p95Micros=2274.6
+scale.p50.query.FRESH_PROCESS_FIRST.p99Micros=n/a (n=31 < 100)
+scale.p50.query.FRESH_PROCESS_FIRST.maxMicros=2430.7
+scale.p50.query.FRESH_PROCESS_FIRST.meanMicros=1162.0
+scale.p50.query.FRESH_PROCESS_FIRST.stddevMicros=461.5
+scale.p50.query.FRESH_PROCESS_FIRST.queriesPerSecond=860.6
+scale.p50.processWall.FRESH_PROCESS_FIRST.timed=whole child process seen by the parent: JVM startup, open, one pass, output
+scale.p50.processWall.FRESH_PROCESS_FIRST.n=1
+scale.p50.processWall.FRESH_PROCESS_FIRST.minMicros=199350.2
+scale.p50.processWall.FRESH_PROCESS_FIRST.p50Micros=199350.2
+scale.p50.processWall.FRESH_PROCESS_FIRST.p95Micros=n/a (n=1 < 20)
+scale.p50.processWall.FRESH_PROCESS_FIRST.p99Micros=n/a (n=1 < 100)
+scale.p50.processWall.FRESH_PROCESS_FIRST.maxMicros=199350.2
+scale.p50.processWall.FRESH_PROCESS_FIRST.meanMicros=199350.2
+scale.p50.processWall.FRESH_PROCESS_FIRST.stddevMicros=n/a
+scale.p50.open.FRESH_PROCESS_REPEATED.timed=MonadaMemory.open(store) in the child, JVM startup excluded
+scale.p50.open.FRESH_PROCESS_REPEATED.n=4
+scale.p50.open.FRESH_PROCESS_REPEATED.minMicros=65112.2
+scale.p50.open.FRESH_PROCESS_REPEATED.p50Micros=67140.2
+scale.p50.open.FRESH_PROCESS_REPEATED.p95Micros=n/a (n=4 < 20)
+scale.p50.open.FRESH_PROCESS_REPEATED.p99Micros=n/a (n=4 < 100)
+scale.p50.open.FRESH_PROCESS_REPEATED.maxMicros=69455.8
+scale.p50.open.FRESH_PROCESS_REPEATED.meanMicros=67260.5
+scale.p50.open.FRESH_PROCESS_REPEATED.stddevMicros=1775.3
+scale.p50.firstQuery.FRESH_PROCESS_REPEATED.timed=first query of the child's pass, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.p50.firstQuery.FRESH_PROCESS_REPEATED.n=4
+scale.p50.firstQuery.FRESH_PROCESS_REPEATED.minMicros=37311.3
+scale.p50.firstQuery.FRESH_PROCESS_REPEATED.p50Micros=38829.2
+scale.p50.firstQuery.FRESH_PROCESS_REPEATED.p95Micros=n/a (n=4 < 20)
+scale.p50.firstQuery.FRESH_PROCESS_REPEATED.p99Micros=n/a (n=4 < 100)
+scale.p50.firstQuery.FRESH_PROCESS_REPEATED.maxMicros=39670.0
+scale.p50.firstQuery.FRESH_PROCESS_REPEATED.meanMicros=38764.2
+scale.p50.firstQuery.FRESH_PROCESS_REPEATED.stddevMicros=1027.7
+scale.p50.query.FRESH_PROCESS_REPEATED.timed=remaining queries of the child's single pass, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.p50.query.FRESH_PROCESS_REPEATED.n=124
+scale.p50.query.FRESH_PROCESS_REPEATED.minMicros=634.7
+scale.p50.query.FRESH_PROCESS_REPEATED.p50Micros=968.9
+scale.p50.query.FRESH_PROCESS_REPEATED.p95Micros=2158.1
+scale.p50.query.FRESH_PROCESS_REPEATED.p99Micros=2866.5
+scale.p50.query.FRESH_PROCESS_REPEATED.maxMicros=2944.4
+scale.p50.query.FRESH_PROCESS_REPEATED.meanMicros=1124.7
+scale.p50.query.FRESH_PROCESS_REPEATED.stddevMicros=483.8
+scale.p50.query.FRESH_PROCESS_REPEATED.queriesPerSecond=889.1
+scale.p50.processWall.FRESH_PROCESS_REPEATED.timed=whole child process seen by the parent: JVM startup, open, one pass, output
+scale.p50.processWall.FRESH_PROCESS_REPEATED.n=4
+scale.p50.processWall.FRESH_PROCESS_REPEATED.minMicros=184074.5
+scale.p50.processWall.FRESH_PROCESS_REPEATED.p50Micros=185135.0
+scale.p50.processWall.FRESH_PROCESS_REPEATED.p95Micros=n/a (n=4 < 20)
+scale.p50.processWall.FRESH_PROCESS_REPEATED.p99Micros=n/a (n=4 < 100)
+scale.p50.processWall.FRESH_PROCESS_REPEATED.maxMicros=189532.9
+scale.p50.processWall.FRESH_PROCESS_REPEATED.meanMicros=186242.6
+scale.p50.processWall.FRESH_PROCESS_REPEATED.stddevMicros=2363.2
+scale.p100.storeBytes=257180
+scale.p100.ingest.create.IN_PROCESS.timed=MonadaMemory.open(new empty dir)
+scale.p100.ingest.create.IN_PROCESS.n=5
+scale.p100.ingest.create.IN_PROCESS.minMicros=1174.5
+scale.p100.ingest.create.IN_PROCESS.p50Micros=1297.9
+scale.p100.ingest.create.IN_PROCESS.p95Micros=n/a (n=5 < 20)
+scale.p100.ingest.create.IN_PROCESS.p99Micros=n/a (n=5 < 100)
+scale.p100.ingest.create.IN_PROCESS.maxMicros=1655.9
+scale.p100.ingest.create.IN_PROCESS.meanMicros=1376.4
+scale.p100.ingest.create.IN_PROCESS.stddevMicros=198.2
+scale.p100.ingest.rememberAll.IN_PROCESS.timed=rememberAll(texts): encode + persist via the public API
+scale.p100.ingest.rememberAll.IN_PROCESS.n=5
+scale.p100.ingest.rememberAll.IN_PROCESS.minMicros=69501.0
+scale.p100.ingest.rememberAll.IN_PROCESS.p50Micros=70067.5
+scale.p100.ingest.rememberAll.IN_PROCESS.p95Micros=n/a (n=5 < 20)
+scale.p100.ingest.rememberAll.IN_PROCESS.p99Micros=n/a (n=5 < 100)
+scale.p100.ingest.rememberAll.IN_PROCESS.maxMicros=80636.6
+scale.p100.ingest.rememberAll.IN_PROCESS.meanMicros=72080.3
+scale.p100.ingest.rememberAll.IN_PROCESS.stddevMicros=4806.6
+scale.p100.ingest.rememberAll.IN_PROCESS.chunksPerSecond=1207.0
+scale.p100.ingest.rememberAll.IN_PROCESS.mibPerSecond=1.996
+scale.p100.open.IN_PROCESS_REPEATED.timed=MonadaMemory.open(store)
+scale.p100.open.IN_PROCESS_REPEATED.n=20
+scale.p100.open.IN_PROCESS_REPEATED.minMicros=603.2
+scale.p100.open.IN_PROCESS_REPEATED.p50Micros=745.5
+scale.p100.open.IN_PROCESS_REPEATED.p95Micros=1103.5
+scale.p100.open.IN_PROCESS_REPEATED.p99Micros=n/a (n=20 < 100)
+scale.p100.open.IN_PROCESS_REPEATED.maxMicros=1164.6
+scale.p100.open.IN_PROCESS_REPEATED.meanMicros=782.1
+scale.p100.open.IN_PROCESS_REPEATED.stddevMicros=166.3
+scale.p100.firstQuery.IN_PROCESS_NEW_INSTANCE.timed=first query after open, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.p100.firstQuery.IN_PROCESS_NEW_INSTANCE.n=20
+scale.p100.firstQuery.IN_PROCESS_NEW_INSTANCE.minMicros=1386.5
+scale.p100.firstQuery.IN_PROCESS_NEW_INSTANCE.p50Micros=1497.7
+scale.p100.firstQuery.IN_PROCESS_NEW_INSTANCE.p95Micros=1828.1
+scale.p100.firstQuery.IN_PROCESS_NEW_INSTANCE.p99Micros=n/a (n=20 < 100)
+scale.p100.firstQuery.IN_PROCESS_NEW_INSTANCE.maxMicros=1849.9
+scale.p100.firstQuery.IN_PROCESS_NEW_INSTANCE.meanMicros=1559.3
+scale.p100.firstQuery.IN_PROCESS_NEW_INSTANCE.stddevMicros=160.8
+scale.p100.query.IN_PROCESS_WARM.timed=MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.p100.query.IN_PROCESS_WARM.n=320
+scale.p100.query.IN_PROCESS_WARM.minMicros=238.6
+scale.p100.query.IN_PROCESS_WARM.p50Micros=261.0
+scale.p100.query.IN_PROCESS_WARM.p95Micros=287.9
+scale.p100.query.IN_PROCESS_WARM.p99Micros=317.7
+scale.p100.query.IN_PROCESS_WARM.maxMicros=1738.7
+scale.p100.query.IN_PROCESS_WARM.meanMicros=267.1
+scale.p100.query.IN_PROCESS_WARM.stddevMicros=84.0
+scale.p100.query.IN_PROCESS_WARM.queriesPerSecond=3744.0
+scale.p100.queryEncode.STANDALONE_DIAGNOSTIC.timed=normalize + encode only, same pipeline as the API, not subtracted
+scale.p100.queryEncode.STANDALONE_DIAGNOSTIC.n=320
+scale.p100.queryEncode.STANDALONE_DIAGNOSTIC.minMicros=6.4
+scale.p100.queryEncode.STANDALONE_DIAGNOSTIC.p50Micros=9.0
+scale.p100.queryEncode.STANDALONE_DIAGNOSTIC.p95Micros=11.6
+scale.p100.queryEncode.STANDALONE_DIAGNOSTIC.p99Micros=14.6
+scale.p100.queryEncode.STANDALONE_DIAGNOSTIC.maxMicros=24.0
+scale.p100.queryEncode.STANDALONE_DIAGNOSTIC.meanMicros=9.2
+scale.p100.queryEncode.STANDALONE_DIAGNOSTIC.stddevMicros=1.7
+scale.p100.open.FRESH_PROCESS_FIRST.timed=MonadaMemory.open(store) in the child, JVM startup excluded
+scale.p100.open.FRESH_PROCESS_FIRST.n=1
+scale.p100.open.FRESH_PROCESS_FIRST.minMicros=89291.3
+scale.p100.open.FRESH_PROCESS_FIRST.p50Micros=89291.3
+scale.p100.open.FRESH_PROCESS_FIRST.p95Micros=n/a (n=1 < 20)
+scale.p100.open.FRESH_PROCESS_FIRST.p99Micros=n/a (n=1 < 100)
+scale.p100.open.FRESH_PROCESS_FIRST.maxMicros=89291.3
+scale.p100.open.FRESH_PROCESS_FIRST.meanMicros=89291.3
+scale.p100.open.FRESH_PROCESS_FIRST.stddevMicros=n/a
+scale.p100.firstQuery.FRESH_PROCESS_FIRST.timed=first query of the child's pass, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.p100.firstQuery.FRESH_PROCESS_FIRST.n=1
+scale.p100.firstQuery.FRESH_PROCESS_FIRST.minMicros=58380.9
+scale.p100.firstQuery.FRESH_PROCESS_FIRST.p50Micros=58380.9
+scale.p100.firstQuery.FRESH_PROCESS_FIRST.p95Micros=n/a (n=1 < 20)
+scale.p100.firstQuery.FRESH_PROCESS_FIRST.p99Micros=n/a (n=1 < 100)
+scale.p100.firstQuery.FRESH_PROCESS_FIRST.maxMicros=58380.9
+scale.p100.firstQuery.FRESH_PROCESS_FIRST.meanMicros=58380.9
+scale.p100.firstQuery.FRESH_PROCESS_FIRST.stddevMicros=n/a
+scale.p100.query.FRESH_PROCESS_FIRST.timed=remaining queries of the child's single pass, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.p100.query.FRESH_PROCESS_FIRST.n=31
+scale.p100.query.FRESH_PROCESS_FIRST.minMicros=1039.6
+scale.p100.query.FRESH_PROCESS_FIRST.p50Micros=1537.3
+scale.p100.query.FRESH_PROCESS_FIRST.p95Micros=3011.4
+scale.p100.query.FRESH_PROCESS_FIRST.p99Micros=n/a (n=31 < 100)
+scale.p100.query.FRESH_PROCESS_FIRST.maxMicros=3982.6
+scale.p100.query.FRESH_PROCESS_FIRST.meanMicros=1632.3
+scale.p100.query.FRESH_PROCESS_FIRST.stddevMicros=628.2
+scale.p100.query.FRESH_PROCESS_FIRST.queriesPerSecond=612.6
+scale.p100.processWall.FRESH_PROCESS_FIRST.timed=whole child process seen by the parent: JVM startup, open, one pass, output
+scale.p100.processWall.FRESH_PROCESS_FIRST.n=1
+scale.p100.processWall.FRESH_PROCESS_FIRST.minMicros=248365.3
+scale.p100.processWall.FRESH_PROCESS_FIRST.p50Micros=248365.3
+scale.p100.processWall.FRESH_PROCESS_FIRST.p95Micros=n/a (n=1 < 20)
+scale.p100.processWall.FRESH_PROCESS_FIRST.p99Micros=n/a (n=1 < 100)
+scale.p100.processWall.FRESH_PROCESS_FIRST.maxMicros=248365.3
+scale.p100.processWall.FRESH_PROCESS_FIRST.meanMicros=248365.3
+scale.p100.processWall.FRESH_PROCESS_FIRST.stddevMicros=n/a
+scale.p100.open.FRESH_PROCESS_REPEATED.timed=MonadaMemory.open(store) in the child, JVM startup excluded
+scale.p100.open.FRESH_PROCESS_REPEATED.n=4
+scale.p100.open.FRESH_PROCESS_REPEATED.minMicros=67190.6
+scale.p100.open.FRESH_PROCESS_REPEATED.p50Micros=67419.1
+scale.p100.open.FRESH_PROCESS_REPEATED.p95Micros=n/a (n=4 < 20)
+scale.p100.open.FRESH_PROCESS_REPEATED.p99Micros=n/a (n=4 < 100)
+scale.p100.open.FRESH_PROCESS_REPEATED.maxMicros=80761.1
+scale.p100.open.FRESH_PROCESS_REPEATED.meanMicros=72141.3
+scale.p100.open.FRESH_PROCESS_REPEATED.stddevMicros=6382.7
+scale.p100.firstQuery.FRESH_PROCESS_REPEATED.timed=first query of the child's pass, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.p100.firstQuery.FRESH_PROCESS_REPEATED.n=4
+scale.p100.firstQuery.FRESH_PROCESS_REPEATED.minMicros=45444.7
+scale.p100.firstQuery.FRESH_PROCESS_REPEATED.p50Micros=45896.4
+scale.p100.firstQuery.FRESH_PROCESS_REPEATED.p95Micros=n/a (n=4 < 20)
+scale.p100.firstQuery.FRESH_PROCESS_REPEATED.p99Micros=n/a (n=4 < 100)
+scale.p100.firstQuery.FRESH_PROCESS_REPEATED.maxMicros=53680.7
+scale.p100.firstQuery.FRESH_PROCESS_REPEATED.meanMicros=48669.0
+scale.p100.firstQuery.FRESH_PROCESS_REPEATED.stddevMicros=3837.2
+scale.p100.query.FRESH_PROCESS_REPEATED.timed=remaining queries of the child's single pass, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.p100.query.FRESH_PROCESS_REPEATED.n=124
+scale.p100.query.FRESH_PROCESS_REPEATED.minMicros=870.6
+scale.p100.query.FRESH_PROCESS_REPEATED.p50Micros=1115.9
+scale.p100.query.FRESH_PROCESS_REPEATED.p95Micros=2369.8
+scale.p100.query.FRESH_PROCESS_REPEATED.p99Micros=3264.0
+scale.p100.query.FRESH_PROCESS_REPEATED.maxMicros=3434.7
+scale.p100.query.FRESH_PROCESS_REPEATED.meanMicros=1276.1
+scale.p100.query.FRESH_PROCESS_REPEATED.stddevMicros=483.0
+scale.p100.query.FRESH_PROCESS_REPEATED.queriesPerSecond=783.6
+scale.p100.processWall.FRESH_PROCESS_REPEATED.timed=whole child process seen by the parent: JVM startup, open, one pass, output
+scale.p100.processWall.FRESH_PROCESS_REPEATED.n=4
+scale.p100.processWall.FRESH_PROCESS_REPEATED.minMicros=192542.3
+scale.p100.processWall.FRESH_PROCESS_REPEATED.p50Micros=196815.4
+scale.p100.processWall.FRESH_PROCESS_REPEATED.p95Micros=n/a (n=4 < 20)
+scale.p100.processWall.FRESH_PROCESS_REPEATED.p99Micros=n/a (n=4 < 100)
+scale.p100.processWall.FRESH_PROCESS_REPEATED.maxMicros=214090.5
+scale.p100.processWall.FRESH_PROCESS_REPEATED.meanMicros=203122.4
+scale.p100.processWall.FRESH_PROCESS_REPEATED.stddevMicros=10116.9
+scale.x4.storeBytes=1030822
+scale.x4.ingest.create.IN_PROCESS.timed=MonadaMemory.open(new empty dir)
+scale.x4.ingest.create.IN_PROCESS.n=5
+scale.x4.ingest.create.IN_PROCESS.minMicros=1384.9
+scale.x4.ingest.create.IN_PROCESS.p50Micros=1456.8
+scale.x4.ingest.create.IN_PROCESS.p95Micros=n/a (n=5 < 20)
+scale.x4.ingest.create.IN_PROCESS.p99Micros=n/a (n=5 < 100)
+scale.x4.ingest.create.IN_PROCESS.maxMicros=4957.1
+scale.x4.ingest.create.IN_PROCESS.meanMicros=2269.8
+scale.x4.ingest.create.IN_PROCESS.stddevMicros=1529.8
+scale.x4.ingest.rememberAll.IN_PROCESS.timed=rememberAll(texts): encode + persist via the public API
+scale.x4.ingest.rememberAll.IN_PROCESS.n=5
+scale.x4.ingest.rememberAll.IN_PROCESS.minMicros=274396.5
+scale.x4.ingest.rememberAll.IN_PROCESS.p50Micros=365633.0
+scale.x4.ingest.rememberAll.IN_PROCESS.p95Micros=n/a (n=5 < 20)
+scale.x4.ingest.rememberAll.IN_PROCESS.p99Micros=n/a (n=5 < 100)
+scale.x4.ingest.rememberAll.IN_PROCESS.maxMicros=511056.6
+scale.x4.ingest.rememberAll.IN_PROCESS.meanMicros=377353.4
+scale.x4.ingest.rememberAll.IN_PROCESS.stddevMicros=101539.6
+scale.x4.ingest.rememberAll.IN_PROCESS.chunksPerSecond=922.2
+scale.x4.ingest.rememberAll.IN_PROCESS.mibPerSecond=1.533
+scale.x4.open.IN_PROCESS_REPEATED.timed=MonadaMemory.open(store)
+scale.x4.open.IN_PROCESS_REPEATED.n=20
+scale.x4.open.IN_PROCESS_REPEATED.minMicros=842.8
+scale.x4.open.IN_PROCESS_REPEATED.p50Micros=1125.3
+scale.x4.open.IN_PROCESS_REPEATED.p95Micros=2426.3
+scale.x4.open.IN_PROCESS_REPEATED.p99Micros=n/a (n=20 < 100)
+scale.x4.open.IN_PROCESS_REPEATED.maxMicros=2900.8
+scale.x4.open.IN_PROCESS_REPEATED.meanMicros=1301.8
+scale.x4.open.IN_PROCESS_REPEATED.stddevMicros=519.1
+scale.x4.firstQuery.IN_PROCESS_NEW_INSTANCE.timed=first query after open, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.x4.firstQuery.IN_PROCESS_NEW_INSTANCE.n=20
+scale.x4.firstQuery.IN_PROCESS_NEW_INSTANCE.minMicros=4093.2
+scale.x4.firstQuery.IN_PROCESS_NEW_INSTANCE.p50Micros=4856.5
+scale.x4.firstQuery.IN_PROCESS_NEW_INSTANCE.p95Micros=6431.4
+scale.x4.firstQuery.IN_PROCESS_NEW_INSTANCE.p99Micros=n/a (n=20 < 100)
+scale.x4.firstQuery.IN_PROCESS_NEW_INSTANCE.maxMicros=6556.9
+scale.x4.firstQuery.IN_PROCESS_NEW_INSTANCE.meanMicros=5054.6
+scale.x4.firstQuery.IN_PROCESS_NEW_INSTANCE.stddevMicros=648.7
+scale.x4.query.IN_PROCESS_WARM.timed=MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.x4.query.IN_PROCESS_WARM.n=320
+scale.x4.query.IN_PROCESS_WARM.minMicros=707.9
+scale.x4.query.IN_PROCESS_WARM.p50Micros=972.5
+scale.x4.query.IN_PROCESS_WARM.p95Micros=1380.5
+scale.x4.query.IN_PROCESS_WARM.p99Micros=2446.3
+scale.x4.query.IN_PROCESS_WARM.maxMicros=4312.5
+scale.x4.query.IN_PROCESS_WARM.meanMicros=1026.4
+scale.x4.query.IN_PROCESS_WARM.stddevMicros=326.0
+scale.x4.query.IN_PROCESS_WARM.queriesPerSecond=974.2
+scale.x4.queryEncode.STANDALONE_DIAGNOSTIC.timed=normalize + encode only, same pipeline as the API, not subtracted
+scale.x4.queryEncode.STANDALONE_DIAGNOSTIC.n=320
+scale.x4.queryEncode.STANDALONE_DIAGNOSTIC.minMicros=4.6
+scale.x4.queryEncode.STANDALONE_DIAGNOSTIC.p50Micros=11.0
+scale.x4.queryEncode.STANDALONE_DIAGNOSTIC.p95Micros=23.1
+scale.x4.queryEncode.STANDALONE_DIAGNOSTIC.p99Micros=32.7
+scale.x4.queryEncode.STANDALONE_DIAGNOSTIC.maxMicros=55.0
+scale.x4.queryEncode.STANDALONE_DIAGNOSTIC.meanMicros=12.4
+scale.x4.queryEncode.STANDALONE_DIAGNOSTIC.stddevMicros=5.6
+scale.x4.open.FRESH_PROCESS_FIRST.timed=MonadaMemory.open(store) in the child, JVM startup excluded
+scale.x4.open.FRESH_PROCESS_FIRST.n=1
+scale.x4.open.FRESH_PROCESS_FIRST.minMicros=80510.3
+scale.x4.open.FRESH_PROCESS_FIRST.p50Micros=80510.3
+scale.x4.open.FRESH_PROCESS_FIRST.p95Micros=n/a (n=1 < 20)
+scale.x4.open.FRESH_PROCESS_FIRST.p99Micros=n/a (n=1 < 100)
+scale.x4.open.FRESH_PROCESS_FIRST.maxMicros=80510.3
+scale.x4.open.FRESH_PROCESS_FIRST.meanMicros=80510.3
+scale.x4.open.FRESH_PROCESS_FIRST.stddevMicros=n/a
+scale.x4.firstQuery.FRESH_PROCESS_FIRST.timed=first query of the child's pass, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.x4.firstQuery.FRESH_PROCESS_FIRST.n=1
+scale.x4.firstQuery.FRESH_PROCESS_FIRST.minMicros=83917.1
+scale.x4.firstQuery.FRESH_PROCESS_FIRST.p50Micros=83917.1
+scale.x4.firstQuery.FRESH_PROCESS_FIRST.p95Micros=n/a (n=1 < 20)
+scale.x4.firstQuery.FRESH_PROCESS_FIRST.p99Micros=n/a (n=1 < 100)
+scale.x4.firstQuery.FRESH_PROCESS_FIRST.maxMicros=83917.1
+scale.x4.firstQuery.FRESH_PROCESS_FIRST.meanMicros=83917.1
+scale.x4.firstQuery.FRESH_PROCESS_FIRST.stddevMicros=n/a
+scale.x4.query.FRESH_PROCESS_FIRST.timed=remaining queries of the child's single pass, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.x4.query.FRESH_PROCESS_FIRST.n=31
+scale.x4.query.FRESH_PROCESS_FIRST.minMicros=2098.0
+scale.x4.query.FRESH_PROCESS_FIRST.p50Micros=2974.0
+scale.x4.query.FRESH_PROCESS_FIRST.p95Micros=4174.8
+scale.x4.query.FRESH_PROCESS_FIRST.p99Micros=n/a (n=31 < 100)
+scale.x4.query.FRESH_PROCESS_FIRST.maxMicros=5163.2
+scale.x4.query.FRESH_PROCESS_FIRST.meanMicros=3116.7
+scale.x4.query.FRESH_PROCESS_FIRST.stddevMicros=680.0
+scale.x4.query.FRESH_PROCESS_FIRST.queriesPerSecond=320.8
+scale.x4.processWall.FRESH_PROCESS_FIRST.timed=whole child process seen by the parent: JVM startup, open, one pass, output
+scale.x4.processWall.FRESH_PROCESS_FIRST.n=1
+scale.x4.processWall.FRESH_PROCESS_FIRST.minMicros=318132.2
+scale.x4.processWall.FRESH_PROCESS_FIRST.p50Micros=318132.2
+scale.x4.processWall.FRESH_PROCESS_FIRST.p95Micros=n/a (n=1 < 20)
+scale.x4.processWall.FRESH_PROCESS_FIRST.p99Micros=n/a (n=1 < 100)
+scale.x4.processWall.FRESH_PROCESS_FIRST.maxMicros=318132.2
+scale.x4.processWall.FRESH_PROCESS_FIRST.meanMicros=318132.2
+scale.x4.processWall.FRESH_PROCESS_FIRST.stddevMicros=n/a
+scale.x4.open.FRESH_PROCESS_REPEATED.timed=MonadaMemory.open(store) in the child, JVM startup excluded
+scale.x4.open.FRESH_PROCESS_REPEATED.n=4
+scale.x4.open.FRESH_PROCESS_REPEATED.minMicros=69110.2
+scale.x4.open.FRESH_PROCESS_REPEATED.p50Micros=74194.2
+scale.x4.open.FRESH_PROCESS_REPEATED.p95Micros=n/a (n=4 < 20)
+scale.x4.open.FRESH_PROCESS_REPEATED.p99Micros=n/a (n=4 < 100)
+scale.x4.open.FRESH_PROCESS_REPEATED.maxMicros=80749.3
+scale.x4.open.FRESH_PROCESS_REPEATED.meanMicros=75799.3
+scale.x4.open.FRESH_PROCESS_REPEATED.stddevMicros=5260.2
+scale.x4.firstQuery.FRESH_PROCESS_REPEATED.timed=first query of the child's pass, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.x4.firstQuery.FRESH_PROCESS_REPEATED.n=4
+scale.x4.firstQuery.FRESH_PROCESS_REPEATED.minMicros=75616.7
+scale.x4.firstQuery.FRESH_PROCESS_REPEATED.p50Micros=79890.1
+scale.x4.firstQuery.FRESH_PROCESS_REPEATED.p95Micros=n/a (n=4 < 20)
+scale.x4.firstQuery.FRESH_PROCESS_REPEATED.p99Micros=n/a (n=4 < 100)
+scale.x4.firstQuery.FRESH_PROCESS_REPEATED.maxMicros=86914.5
+scale.x4.firstQuery.FRESH_PROCESS_REPEATED.meanMicros=81481.0
+scale.x4.firstQuery.FRESH_PROCESS_REPEATED.stddevMicros=4848.8
+scale.x4.query.FRESH_PROCESS_REPEATED.timed=remaining queries of the child's single pass, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.x4.query.FRESH_PROCESS_REPEATED.n=124
+scale.x4.query.FRESH_PROCESS_REPEATED.minMicros=1697.2
+scale.x4.query.FRESH_PROCESS_REPEATED.p50Micros=2533.0
+scale.x4.query.FRESH_PROCESS_REPEATED.p95Micros=4709.5
+scale.x4.query.FRESH_PROCESS_REPEATED.p99Micros=5680.5
+scale.x4.query.FRESH_PROCESS_REPEATED.maxMicros=5767.9
+scale.x4.query.FRESH_PROCESS_REPEATED.meanMicros=2830.0
+scale.x4.query.FRESH_PROCESS_REPEATED.stddevMicros=906.9
+scale.x4.query.FRESH_PROCESS_REPEATED.queriesPerSecond=353.4
+scale.x4.processWall.FRESH_PROCESS_REPEATED.timed=whole child process seen by the parent: JVM startup, open, one pass, output
+scale.x4.processWall.FRESH_PROCESS_REPEATED.n=4
+scale.x4.processWall.FRESH_PROCESS_REPEATED.minMicros=290716.2
+scale.x4.processWall.FRESH_PROCESS_REPEATED.p50Micros=292102.8
+scale.x4.processWall.FRESH_PROCESS_REPEATED.p95Micros=n/a (n=4 < 20)
+scale.x4.processWall.FRESH_PROCESS_REPEATED.p99Micros=n/a (n=4 < 100)
+scale.x4.processWall.FRESH_PROCESS_REPEATED.maxMicros=305115.3
+scale.x4.processWall.FRESH_PROCESS_REPEATED.meanMicros=295368.8
+scale.x4.processWall.FRESH_PROCESS_REPEATED.stddevMicros=6599.2
+scale.x16.storeBytes=4126666
+scale.x16.ingest.create.IN_PROCESS.timed=MonadaMemory.open(new empty dir)
+scale.x16.ingest.create.IN_PROCESS.n=5
+scale.x16.ingest.create.IN_PROCESS.minMicros=903.4
+scale.x16.ingest.create.IN_PROCESS.p50Micros=978.2
+scale.x16.ingest.create.IN_PROCESS.p95Micros=n/a (n=5 < 20)
+scale.x16.ingest.create.IN_PROCESS.p99Micros=n/a (n=5 < 100)
+scale.x16.ingest.create.IN_PROCESS.maxMicros=1333.4
+scale.x16.ingest.create.IN_PROCESS.meanMicros=1080.6
+scale.x16.ingest.create.IN_PROCESS.stddevMicros=188.6
+scale.x16.ingest.rememberAll.IN_PROCESS.timed=rememberAll(texts): encode + persist via the public API
+scale.x16.ingest.rememberAll.IN_PROCESS.n=5
+scale.x16.ingest.rememberAll.IN_PROCESS.minMicros=944025.6
+scale.x16.ingest.rememberAll.IN_PROCESS.p50Micros=961687.7
+scale.x16.ingest.rememberAll.IN_PROCESS.p95Micros=n/a (n=5 < 20)
+scale.x16.ingest.rememberAll.IN_PROCESS.p99Micros=n/a (n=5 < 100)
+scale.x16.ingest.rememberAll.IN_PROCESS.maxMicros=1042477.7
+scale.x16.ingest.rememberAll.IN_PROCESS.meanMicros=976388.6
+scale.x16.ingest.rememberAll.IN_PROCESS.stddevMicros=40392.5
+scale.x16.ingest.rememberAll.IN_PROCESS.chunksPerSecond=1425.7
+scale.x16.ingest.rememberAll.IN_PROCESS.mibPerSecond=2.374
+scale.x16.open.IN_PROCESS_REPEATED.timed=MonadaMemory.open(store)
+scale.x16.open.IN_PROCESS_REPEATED.n=20
+scale.x16.open.IN_PROCESS_REPEATED.minMicros=850.4
+scale.x16.open.IN_PROCESS_REPEATED.p50Micros=928.0
+scale.x16.open.IN_PROCESS_REPEATED.p95Micros=1054.4
+scale.x16.open.IN_PROCESS_REPEATED.p99Micros=n/a (n=20 < 100)
+scale.x16.open.IN_PROCESS_REPEATED.maxMicros=2925.3
+scale.x16.open.IN_PROCESS_REPEATED.meanMicros=1040.9
+scale.x16.open.IN_PROCESS_REPEATED.stddevMicros=447.6
+scale.x16.firstQuery.IN_PROCESS_NEW_INSTANCE.timed=first query after open, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.x16.firstQuery.IN_PROCESS_NEW_INSTANCE.n=20
+scale.x16.firstQuery.IN_PROCESS_NEW_INSTANCE.minMicros=12896.4
+scale.x16.firstQuery.IN_PROCESS_NEW_INSTANCE.p50Micros=13194.4
+scale.x16.firstQuery.IN_PROCESS_NEW_INSTANCE.p95Micros=15856.4
+scale.x16.firstQuery.IN_PROCESS_NEW_INSTANCE.p99Micros=n/a (n=20 < 100)
+scale.x16.firstQuery.IN_PROCESS_NEW_INSTANCE.maxMicros=16265.0
+scale.x16.firstQuery.IN_PROCESS_NEW_INSTANCE.meanMicros=13797.0
+scale.x16.firstQuery.IN_PROCESS_NEW_INSTANCE.stddevMicros=1071.0
+scale.x16.query.IN_PROCESS_WARM.timed=MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.x16.query.IN_PROCESS_WARM.n=320
+scale.x16.query.IN_PROCESS_WARM.minMicros=2664.3
+scale.x16.query.IN_PROCESS_WARM.p50Micros=2800.0
+scale.x16.query.IN_PROCESS_WARM.p95Micros=5051.1
+scale.x16.query.IN_PROCESS_WARM.p99Micros=5583.8
+scale.x16.query.IN_PROCESS_WARM.maxMicros=6520.5
+scale.x16.query.IN_PROCESS_WARM.meanMicros=3049.8
+scale.x16.query.IN_PROCESS_WARM.stddevMicros=696.1
+scale.x16.query.IN_PROCESS_WARM.queriesPerSecond=327.9
+scale.x16.queryEncode.STANDALONE_DIAGNOSTIC.timed=normalize + encode only, same pipeline as the API, not subtracted
+scale.x16.queryEncode.STANDALONE_DIAGNOSTIC.n=320
+scale.x16.queryEncode.STANDALONE_DIAGNOSTIC.minMicros=4.3
+scale.x16.queryEncode.STANDALONE_DIAGNOSTIC.p50Micros=7.7
+scale.x16.queryEncode.STANDALONE_DIAGNOSTIC.p95Micros=27.5
+scale.x16.queryEncode.STANDALONE_DIAGNOSTIC.p99Micros=35.9
+scale.x16.queryEncode.STANDALONE_DIAGNOSTIC.maxMicros=47.8
+scale.x16.queryEncode.STANDALONE_DIAGNOSTIC.meanMicros=9.9
+scale.x16.queryEncode.STANDALONE_DIAGNOSTIC.stddevMicros=7.1
+scale.x16.open.FRESH_PROCESS_FIRST.timed=MonadaMemory.open(store) in the child, JVM startup excluded
+scale.x16.open.FRESH_PROCESS_FIRST.n=1
+scale.x16.open.FRESH_PROCESS_FIRST.minMicros=89140.2
+scale.x16.open.FRESH_PROCESS_FIRST.p50Micros=89140.2
+scale.x16.open.FRESH_PROCESS_FIRST.p95Micros=n/a (n=1 < 20)
+scale.x16.open.FRESH_PROCESS_FIRST.p99Micros=n/a (n=1 < 100)
+scale.x16.open.FRESH_PROCESS_FIRST.maxMicros=89140.2
+scale.x16.open.FRESH_PROCESS_FIRST.meanMicros=89140.2
+scale.x16.open.FRESH_PROCESS_FIRST.stddevMicros=n/a
+scale.x16.firstQuery.FRESH_PROCESS_FIRST.timed=first query of the child's pass, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.x16.firstQuery.FRESH_PROCESS_FIRST.n=1
+scale.x16.firstQuery.FRESH_PROCESS_FIRST.minMicros=138949.9
+scale.x16.firstQuery.FRESH_PROCESS_FIRST.p50Micros=138949.9
+scale.x16.firstQuery.FRESH_PROCESS_FIRST.p95Micros=n/a (n=1 < 20)
+scale.x16.firstQuery.FRESH_PROCESS_FIRST.p99Micros=n/a (n=1 < 100)
+scale.x16.firstQuery.FRESH_PROCESS_FIRST.maxMicros=138949.9
+scale.x16.firstQuery.FRESH_PROCESS_FIRST.meanMicros=138949.9
+scale.x16.firstQuery.FRESH_PROCESS_FIRST.stddevMicros=n/a
+scale.x16.query.FRESH_PROCESS_FIRST.timed=remaining queries of the child's single pass, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.x16.query.FRESH_PROCESS_FIRST.n=31
+scale.x16.query.FRESH_PROCESS_FIRST.minMicros=5820.8
+scale.x16.query.FRESH_PROCESS_FIRST.p50Micros=6989.4
+scale.x16.query.FRESH_PROCESS_FIRST.p95Micros=11171.0
+scale.x16.query.FRESH_PROCESS_FIRST.p99Micros=n/a (n=31 < 100)
+scale.x16.query.FRESH_PROCESS_FIRST.maxMicros=12109.9
+scale.x16.query.FRESH_PROCESS_FIRST.meanMicros=7150.3
+scale.x16.query.FRESH_PROCESS_FIRST.stddevMicros=1341.9
+scale.x16.query.FRESH_PROCESS_FIRST.queriesPerSecond=139.9
+scale.x16.processWall.FRESH_PROCESS_FIRST.timed=whole child process seen by the parent: JVM startup, open, one pass, output
+scale.x16.processWall.FRESH_PROCESS_FIRST.n=1
+scale.x16.processWall.FRESH_PROCESS_FIRST.minMicros=509151.7
+scale.x16.processWall.FRESH_PROCESS_FIRST.p50Micros=509151.7
+scale.x16.processWall.FRESH_PROCESS_FIRST.p95Micros=n/a (n=1 < 20)
+scale.x16.processWall.FRESH_PROCESS_FIRST.p99Micros=n/a (n=1 < 100)
+scale.x16.processWall.FRESH_PROCESS_FIRST.maxMicros=509151.7
+scale.x16.processWall.FRESH_PROCESS_FIRST.meanMicros=509151.7
+scale.x16.processWall.FRESH_PROCESS_FIRST.stddevMicros=n/a
+scale.x16.open.FRESH_PROCESS_REPEATED.timed=MonadaMemory.open(store) in the child, JVM startup excluded
+scale.x16.open.FRESH_PROCESS_REPEATED.n=4
+scale.x16.open.FRESH_PROCESS_REPEATED.minMicros=70274.2
+scale.x16.open.FRESH_PROCESS_REPEATED.p50Micros=73970.2
+scale.x16.open.FRESH_PROCESS_REPEATED.p95Micros=n/a (n=4 < 20)
+scale.x16.open.FRESH_PROCESS_REPEATED.p99Micros=n/a (n=4 < 100)
+scale.x16.open.FRESH_PROCESS_REPEATED.maxMicros=77959.7
+scale.x16.open.FRESH_PROCESS_REPEATED.meanMicros=74460.6
+scale.x16.open.FRESH_PROCESS_REPEATED.stddevMicros=3235.1
+scale.x16.firstQuery.FRESH_PROCESS_REPEATED.timed=first query of the child's pass, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.x16.firstQuery.FRESH_PROCESS_REPEATED.n=4
+scale.x16.firstQuery.FRESH_PROCESS_REPEATED.minMicros=120896.5
+scale.x16.firstQuery.FRESH_PROCESS_REPEATED.p50Micros=122219.5
+scale.x16.firstQuery.FRESH_PROCESS_REPEATED.p95Micros=n/a (n=4 < 20)
+scale.x16.firstQuery.FRESH_PROCESS_REPEATED.p99Micros=n/a (n=4 < 100)
+scale.x16.firstQuery.FRESH_PROCESS_REPEATED.maxMicros=126063.9
+scale.x16.firstQuery.FRESH_PROCESS_REPEATED.meanMicros=123342.0
+scale.x16.firstQuery.FRESH_PROCESS_REPEATED.stddevMicros=2263.1
+scale.x16.query.FRESH_PROCESS_REPEATED.timed=remaining queries of the child's single pass, MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+scale.x16.query.FRESH_PROCESS_REPEATED.n=124
+scale.x16.query.FRESH_PROCESS_REPEATED.minMicros=5632.8
+scale.x16.query.FRESH_PROCESS_REPEATED.p50Micros=6717.3
+scale.x16.query.FRESH_PROCESS_REPEATED.p95Micros=10892.0
+scale.x16.query.FRESH_PROCESS_REPEATED.p99Micros=13309.4
+scale.x16.query.FRESH_PROCESS_REPEATED.maxMicros=13496.9
+scale.x16.query.FRESH_PROCESS_REPEATED.meanMicros=7133.8
+scale.x16.query.FRESH_PROCESS_REPEATED.stddevMicros=1475.9
+scale.x16.query.FRESH_PROCESS_REPEATED.queriesPerSecond=140.2
+scale.x16.processWall.FRESH_PROCESS_REPEATED.timed=whole child process seen by the parent: JVM startup, open, one pass, output
+scale.x16.processWall.FRESH_PROCESS_REPEATED.n=4
+scale.x16.processWall.FRESH_PROCESS_REPEATED.minMicros=463667.0
+scale.x16.processWall.FRESH_PROCESS_REPEATED.p50Micros=470796.0
+scale.x16.processWall.FRESH_PROCESS_REPEATED.p95Micros=n/a (n=4 < 20)
+scale.x16.processWall.FRESH_PROCESS_REPEATED.p99Micros=n/a (n=4 < 100)
+scale.x16.processWall.FRESH_PROCESS_REPEATED.maxMicros=476474.4
+scale.x16.processWall.FRESH_PROCESS_REPEATED.meanMicros=470694.1
+scale.x16.processWall.FRESH_PROCESS_REPEATED.stddevMicros=5295.1
