@@ -250,6 +250,14 @@ tasks.register<JavaExec>("runBookLatency") {
     workingDir = rootProject.projectDir
 }
 
+tasks.register<JavaExec>("runBookFootprint") {
+    description = "Profile on-disk growth, memory footprint and repeat-import behaviour of book Stores over the latency data-size ladder: per-phase (empty, fresh import, reopen, repeat import) audit counts and per-file bytes, overlap and intra-batch duplicate experiments, hard structural checks, and labelled heap/allocation/RSS samples (evaluation only; offline; memory informational). Options via --args, e.g. --args=\"--input <body.txt> --scratch <new dir outside Git> [--out <report.txt>] [--summary <summary.md>]\""
+    group = "application"
+    mainClass.set("com.monada.evaluation.book.BookFootprintMain")
+    classpath = sourceSets["main"].runtimeClasspath
+    workingDir = rootProject.projectDir
+}
+
 tasks.named<Test>("test") {
     // The cross-JVM determinism test starts child JVMs that run the evaluation command on this runtime classpath.
     doFirst {

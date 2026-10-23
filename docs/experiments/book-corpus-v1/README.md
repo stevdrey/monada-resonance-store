@@ -18,6 +18,7 @@ verifies it offline against the checksums in [`manifest.properties`](manifest.pr
 | [`RECALL.md`](RECALL.md) | Exploratory recall quality against the judged evidence, failure taxonomy and versioned report (issue #167, Book 5/8). |
 | [`UNJUDGED-REVIEW.md`](UNJUDGED-REVIEW.md) | Score-blind human review of predeclared unjudged DEV hits, frozen as the append-only `book-queries-v2` (issue #177). |
 | [`LATENCY.md`](LATENCY.md) | Ingest, reopen and recall latency at a controlled data-size ladder, in process and in fresh JVMs, with result-ID parity (issue #168, Book 6/8). |
+| [`FOOTPRINT.md`](FOOTPRINT.md) | On-disk growth per file, memory footprint (heap, allocation, RSS) and reopen/repeat/overlap/duplicate import behaviour with hard structural checks (issue #169, Book 7/8). |
 
 ## Pinned edition
 
