@@ -215,6 +215,10 @@ class BookLatencyBenchmarkTest {
         assertEquals(2, cli("--input", "a", "--scratch", "b", "--queryPasses", "0").exit());
         assertEquals(2, cli("--input", "a", "--scratch", "b", "--processes", "many").exit());
         assertEquals(2, cli("--input", "a", "--scratch", "b", "--keep", "maybe").exit());
+        Run overflow = cli("--input", "a", "--scratch", "b", "--ingestWarmups", "2147483647", "--ingestTrials", "1");
+        assertEquals(2, overflow.exit(), "warmup + trial totals must never wrap");
+        assertTrue(overflow.err().contains("ingestWarmups must be in 0..100000"), overflow.err());
+        assertEquals(2, cli("--input", "a", "--scratch", "b", "--queryPasses", "100001").exit());
     }
 
     @Test

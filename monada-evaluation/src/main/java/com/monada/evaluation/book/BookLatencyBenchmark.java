@@ -55,13 +55,18 @@ final class BookLatencyBenchmark {
     static final String API = "MonadaMemory.resonate(query).topK(" + BookLatencyChild.K + ").threshold(-Infinity)";
     /** Mismatch details kept per run; the count is always complete. */
     private static final int MAX_MISMATCH_DETAILS = 20;
+    /** Upper bound of every repetition count: far beyond a bounded local run, far below int overflow. */
+    static final int MAX_COUNT = 100_000;
     private static final long CHILD_TIMEOUT_MINUTES = 5;
     private static final long CHILD_KILL_WAIT_SECONDS = 30;
 
     private BookLatencyBenchmark() {
     }
 
-    /** Repetition counts; warmup samples are taken exactly like measured ones and then discarded. */
+    /**
+     * Repetition counts; warmup samples are taken exactly like measured ones and then discarded. Every count is
+     * bounded by {@value #MAX_COUNT}, so warmup + measured totals can never overflow an {@code int} loop bound.
+     */
     record Config(List<BookLatencyScale> ladder, int ingestWarmups, int ingestTrials, int openWarmups,
                   int openTrials, int queryWarmupPasses, int queryPasses, int processes) {
         Config {
@@ -69,22 +74,22 @@ final class BookLatencyBenchmark {
             if (ladder.isEmpty()) {
                 throw new IllegalArgumentException("the ladder has no scale");
             }
-            requireAtLeast("ingestWarmups", ingestWarmups, 0);
-            requireAtLeast("ingestTrials", ingestTrials, 1);
-            requireAtLeast("openWarmups", openWarmups, 0);
-            requireAtLeast("openTrials", openTrials, 1);
-            requireAtLeast("queryWarmupPasses", queryWarmupPasses, 0);
-            requireAtLeast("queryPasses", queryPasses, 1);
-            requireAtLeast("processes", processes, 0);
+            requireRange("ingestWarmups", ingestWarmups, 0);
+            requireRange("ingestTrials", ingestTrials, 1);
+            requireRange("openWarmups", openWarmups, 0);
+            requireRange("openTrials", openTrials, 1);
+            requireRange("queryWarmupPasses", queryWarmupPasses, 0);
+            requireRange("queryPasses", queryPasses, 1);
+            requireRange("processes", processes, 0);
         }
 
         static Config defaults() {
             return new Config(BookLatencyScale.parseLadder(BookLatencyScale.DEFAULT_LADDER), 1, 5, 2, 20, 2, 10, 5);
         }
 
-        private static void requireAtLeast(String name, int value, int min) {
-            if (value < min) {
-                throw new IllegalArgumentException(name + " must be >= " + min + ", got " + value);
+        private static void requireRange(String name, int value, int min) {
+            if (value < min || value > MAX_COUNT) {
+                throw new IllegalArgumentException(name + " must be in " + min + ".." + MAX_COUNT + ", got " + value);
             }
         }
     }
