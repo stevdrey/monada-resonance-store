@@ -81,14 +81,20 @@ final class BookRecallReport {
         line(out, String.format(Locale.ROOT, "%-4s %-8s %-8s %-8s %-14s %-15s %s", "K", "P@K", "R@K", "Hit@K",
                 "Hit@K(direct)", "confounder hits", "unjudged hits"));
         for (int k : BookRecallEvaluator.KS) {
-            line(out, String.format(Locale.ROOT, "%-4d %-8s %-8s %-8s %-14s %-15d %d", k, num(a.precision().get(k)),
-                    num(a.recall().get(k)), num(a.hit().get(k)), num(a.directHit().get(k)),
+            line(out, partitionRow(k, a.precision().get(k), a.recall().get(k), a.hit().get(k), a.directHit().get(k),
                     a.confounderHits().get(k), a.unjudgedHits().get(k)));
         }
         line(out, "MRR " + num(a.mrr()) + " (n=" + a.answerable() + ")");
         line(out, "NO_ANSWER false hits: " + a.negativesWithHits() + "/" + a.negatives());
         line(out, "failures: " + failures(a.failures()));
         line(out, "");
+    }
+
+    /** One K row of a partition table; shared with the judgment-coverage self-check (issue #184). */
+    static String partitionRow(int k, Double precision, Double recall, Double hit, Double directHit,
+                               int confounderHits, int unjudgedHits) {
+        return String.format(Locale.ROOT, "%-4d %-8s %-8s %-8s %-14s %-15d %d", k, num(precision), num(recall),
+                num(hit), num(directHit), confounderHits, unjudgedHits);
     }
 
     private static void categories(StringBuilder out, List<Aggregate> categories) {
@@ -242,7 +248,7 @@ final class BookRecallReport {
         return text.isEmpty() ? "none" : text.toString();
     }
 
-    private static String num(Double value) {
+    static String num(Double value) {
         return value == null || value.isNaN() ? "n/a" : String.format(Locale.ROOT, "%.4f", value);
     }
 

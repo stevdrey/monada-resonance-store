@@ -242,6 +242,14 @@ tasks.register<JavaExec>("runBookUnjudgedReview") {
     workingDir = rootProject.projectDir
 }
 
+tasks.register<JavaExec>("runBookJudgmentCoverage") {
+    description = "Project the frozen book-recall-v1 ranked hits, unchanged, onto the book-queries-v1 and book-queries-v2 labels: pinned input digests, ranking digest, DEV/HOLDOUT label transitions, denominator provenance and v1 vs v2 projected metrics with unknown bounds, every delta attributed to label coverage (evaluation only; offline; zero searches). Options via --args, e.g. --args=\"[--baseline <report>] [--out <file>]\""
+    group = "application"
+    mainClass.set("com.monada.evaluation.book.BookJudgmentCoverageMain")
+    classpath = sourceSets["main"].runtimeClasspath
+    workingDir = rootProject.projectDir
+}
+
 tasks.register<JavaExec>("runBookLatency") {
     description = "Benchmark real-text ingest (encode + persist), reopen and recall latency of the verified book-corpus-v1 chunks over a declared data-size ladder (25%/50%/100% real, x4/x16 replica-tagged derived), in process and in sequential fresh child JVMs, with host metadata, nearest-rank p50/p95/p99 only where sample counts allow and a hard top-K result-id parity check (evaluation only; offline; timings informational; OS cold cache never measured). Options via --args, e.g. --args=\"--input <body.txt> --scratch <new dir outside Git> [--out <report.txt>] [--summary <summary.md>]\""
     group = "application"

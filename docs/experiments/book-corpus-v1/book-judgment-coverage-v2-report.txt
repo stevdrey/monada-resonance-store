@@ -1,0 +1,138 @@
+Monada book judgment coverage report: v1 vs v2 labels on one frozen ranking (Issue #184)
+format=monada-book-judgment-coverage-report
+formatVersion=1
+status=LABEL COVERAGE ONLY: zero searches; the v1 ranked hits are projected unchanged onto both label versions; every delta below is a judgment-coverage difference, not a retrieval improvement
+
+== Inputs ==
+baselineReport=docs/experiments/book-corpus-v1/book-recall-v1-report.txt
+baselineReport.sha256=86501f764e985835487a90b05ce5dbbdc2821455c94a97aaf5d443bba1a2ffd2
+v1.dataset=book-queries-v1
+v1.manifest.sha256=ec4efab61f53dfdaf15e31304e2d39d9815e821042224cc806c8d8a3b7ea3bbc
+v1.queries.sha256=9b1b0b222f26932622c9fe38a8d4351a0a637bd41f49319d882152a44fe05e14
+v1.judgments.sha256=5f129b6e0b8cb0565d9ba13cb6a57c67238403e7cde77e45c702068d6b163968
+v1.chunkMap.sha256=d3c62fe220a5e8b7ec584c06f44469ec887f08a71d8ed87a94d65f4ec709f017
+v1.split.digest=12f79086668abf3494161639250d92d39f595bd8759ad00368d31925dad41a43
+v2.dataset=book-queries-v2
+v2.manifest.sha256=35d9af0213c0a3e20277c1aa8045cb83b6ee9992637ffc0aa284c7870c5823cb
+v2.selection.sha256=c095247df3d57b568afc15fa12eee9b5efa9bc9ac74f9f7dedd6ecfa9463418d
+v2.review.sha256=37dc4627c26edd9a0ff49d1f766672cb2c91293025ab8d9ef64bd415d13b40e6
+v2.provenance=POST_HOC_RETRIEVAL_SAMPLED_DEV
+v2.review.protocol=SCORE_BLIND_WORKSHEET_QUERY_CHUNK_TEXT_KEY_AND_BYTE_RANGE
+v2.judgment.draftedBy=codex
+v2.judgment.draftBlinding=UNVERIFIED
+v2.judgment.reviewStatus=REVIEWED
+v2.judgment.reviewedAt=2026-10-21
+
+== Definitions ==
+occurrence = one ranked top-10 hit of one query in the frozen trace; pair = a distinct (query, chunk); the trace ranks an atom at most once per query, so they coincide
+labels: E2/E1 judged evidence, C0 judged confounder, U unjudged (unknown, never a negative)
+known = U counted as not relevant (the reported value); upper = every U counted as relevant; R@K has no upper bound because unjudged chunks outside the top-10 leave the relevant set unknown
+relevant = judged EVIDENCE chunks of an answerable query (every chunk is its own atom here); denominator = answerable queries of the group
+delta = v2 - v1 on identical hits: attributable only to the labels v2 adds; computed before rounding, so it can differ from the rounded v1/v2 columns by +-0.0001
+
+== Unchanged ranking (identical on both sides by construction) ==
+queries 32, ranked hits 320, new searches 0
+rankingDigest=3f0aa5ff78bb404e46a2a49891a2cd004ac606a37d94ec0c7630ee9107d7d0c3 (SHA-256 of query|rank|atom|score rows)
+v1 projection reproduces the frozen per-query trace metrics and partition tables: yes
+score = the frozen trace token (6 decimals); raw score bits are not in the baseline and are not recomputed
+
+== Label transitions v1 -> v2 (occurrences) ==
+partition queries      hits   U->U  U->E2  U->E1  U->C0  C0->C0  E2->E2  E1->E1
+DEV       answerable    200    139      0      1     50       1       9       0
+DEV       NO_ANSWER      40     30      0      0      9       1       0       0
+HOLDOUT   answerable     70     66      0      0      0       0       4       0
+HOLDOUT   NO_ANSWER      10     10      0      0      0       0       0       0
+ALL       answerable    270    205      0      1     50       1      13       0
+ALL       NO_ANSWER      50     40      0      0      9       1       0       0
+DEV changed: occurrences 60, distinct pairs 60, distinct chunks 32, queries 24, added judgments 60
+HOLDOUT changed: occurrences 0, distinct pairs 0, distinct chunks 0, queries 0, added judgments 0
+ALL changed: occurrences 60, distinct pairs 60, distinct chunks 32, queries 24, added judgments 60
+HOLDOUT: judgments identical to v1 (enforced); post-hoc DEV labels never reach HOLDOUT
+
+== Denominator provenance (answerable queries) ==
+partition relevant v1  relevant v2  U@10 v1      U@10 v2
+DEV       34           35           190          139
+HOLDOUT   13           13           66           66
+ALL       47           48           256          205
+query denominators do not change (answerable queries keep their split and answerability)
+
+== Projected metrics: v1 labels vs v2 labels on the same hits ==
+-- DEV: answerable 20 (denominator)
+metric  v1       v2       delta    v2 upper
+P@1     0.0500   0.1000   +0.0500  0.1000
+P@3     0.0833   0.1000   +0.0167  0.3667
+P@5     0.0500   0.0600   +0.0100  0.5800
+P@10    0.0450   0.0500   +0.0050  0.7450
+R@1     0.0250   0.0375   +0.0125  -
+R@3     0.1417   0.1542   +0.0125  -
+R@5     0.1417   0.1542   +0.0125  -
+R@10    0.2708   0.2833   +0.0125  -
+Hit@1   0.0500   0.1000   +0.0500  0.1000
+Hit@3   0.2500   0.3000   +0.0500  1.0000
+Hit@5   0.2500   0.3000   +0.0500  1.0000
+Hit@10  0.4500   0.5000   +0.0500  1.0000
+MRR     0.1705   0.2205   +0.0500  0.4250
+
+-- HOLDOUT: answerable 7 (denominator)
+metric  v1       v2       delta    v2 upper
+P@1     0.1429   0.1429   +0.0000  1.0000
+P@3     0.0952   0.0952   +0.0000  1.0000
+P@5     0.0857   0.0857   +0.0000  1.0000
+P@10    0.0571   0.0571   +0.0000  1.0000
+R@1     0.1429   0.1429   +0.0000  -
+R@3     0.1905   0.1905   +0.0000  -
+R@5     0.2619   0.2619   +0.0000  -
+R@10    0.3095   0.3095   +0.0000  -
+Hit@1   0.1429   0.1429   +0.0000  1.0000
+Hit@3   0.2857   0.2857   +0.0000  1.0000
+Hit@5   0.4286   0.4286   +0.0000  1.0000
+Hit@10  0.4286   0.4286   +0.0000  1.0000
+MRR     0.2500   0.2500   +0.0000  1.0000
+
+-- ALL: answerable 27 (denominator)
+metric  v1       v2       delta    v2 upper
+P@1     0.0741   0.1111   +0.0370  0.3333
+P@3     0.0864   0.0988   +0.0123  0.5309
+P@5     0.0593   0.0667   +0.0074  0.6889
+P@10    0.0481   0.0519   +0.0037  0.8111
+R@1     0.0556   0.0648   +0.0093  -
+R@3     0.1543   0.1636   +0.0093  -
+R@5     0.1728   0.1821   +0.0093  -
+R@10    0.2809   0.2901   +0.0093  -
+Hit@1   0.0741   0.1111   +0.0370  0.3333
+Hit@3   0.2593   0.2963   +0.0370  1.0000
+Hit@5   0.2963   0.3333   +0.0370  1.0000
+Hit@10  0.4444   0.4815   +0.0370  1.0000
+MRR     0.1911   0.2282   +0.0370  0.5741
+
+== Queries whose labels changed (no book text) ==
+AMB-02 DEV AMBIGUOUS added 2 | #1 U->C0 | #2 U->C0 | relevant 2->2 RR 0.0000->0.0000 R@10 0.0000->0.0000
+AMB-03 DEV AMBIGUOUS added 2 | #1 U->C0 | #2 U->C0 | relevant 2->2 RR 0.3333->0.3333 R@10 0.5000->0.5000
+CON-01 DEV CONFOUNDER added 3 | #1 U->C0 | #2 U->C0 | #4 U->C0 | relevant 2->2 RR 0.0000->0.0000 R@10 0.0000->0.0000
+CON-03 DEV CONFOUNDER added 2 | #1 U->C0 | #2 U->C0 | relevant 1->1 RR 0.1667->0.1667 R@10 1.0000->1.0000
+CON-04 DEV CONFOUNDER added 2 | #2 U->C0 | #5 U->C0 | relevant 2->2 RR 1.0000->1.0000 R@10 0.5000->0.5000
+LIT-01 DEV LITERAL added 3 | #1 U->C0 | #2 U->C0 | #5 U->C0 | relevant 1->1 RR 0.0000->0.0000 R@10 0.0000->0.0000
+LIT-03 DEV LITERAL added 2 | #1 U->C0 | #2 U->C0 | relevant 1->1 RR 0.0000->0.0000 R@10 0.0000->0.0000
+LIT-04 DEV LITERAL added 3 | #1 U->C0 | #3 U->C0 | #9 U->C0 | relevant 2->2 RR 0.5000->0.5000 R@10 0.5000->0.5000
+LIT-05 DEV LITERAL added 2 | #1 U->C0 | #2 U->C0 | relevant 1->1 RR 0.0000->0.0000 R@10 0.0000->0.0000
+MUL-01 DEV MULTI_EVIDENCE added 3 | #1 U->C0 | #2 U->C0 | #9 U->C0 | relevant 4->4 RR 0.1250->0.1250 R@10 0.2500->0.2500
+MUL-03 DEV MULTI_EVIDENCE added 4 | #1 U->C0 | #2 U->C0 | #8 U->C0 | #10 U->C0 | relevant 3->3 RR 0.1429->0.1429 R@10 0.3333->0.3333
+MUL-04 DEV MULTI_EVIDENCE added 3 | #1 U->C0 | #3 U->C0 | #10 U->C0 | relevant 3->3 RR 0.5000->0.5000 R@10 0.3333->0.3333
+MUL-05 DEV MULTI_EVIDENCE added 3 | #1 U->E1 | #2 U->C0 | #10 U->C0 | relevant 3->4 RR 0.0000->1.0000 R@10 0.0000->0.2500
+NAR-01 DEV NARRATIVE_TEMPORAL added 2 | #1 U->C0 | #3 U->C0 | relevant 1->1 RR 0.5000->0.5000 R@10 1.0000->1.0000
+NAR-02 DEV NARRATIVE_TEMPORAL added 2 | #1 U->C0 | #2 U->C0 | relevant 1->1 RR 0.0000->0.0000 R@10 0.0000->0.0000
+NAR-04 DEV NARRATIVE_TEMPORAL added 2 | #1 U->C0 | #2 U->C0 | relevant 1->1 RR 0.0000->0.0000 R@10 0.0000->0.0000
+NOA-01 DEV NO_ANSWER added 3 | #1 U->C0 | #2 U->C0 | #8 U->C0
+NOA-02 DEV NO_ANSWER added 3 | #1 U->C0 | #2 U->C0 | #8 U->C0
+NOA-04 DEV NO_ANSWER added 1 | #2 U->C0
+NOA-05 DEV NO_ANSWER added 2 | #1 U->C0 | #2 U->C0
+PAR-03 DEV PARAPHRASE added 3 | #1 U->C0 | #2 U->C0 | #6 U->C0 | relevant 1->1 RR 0.0000->0.0000 R@10 0.0000->0.0000
+PAR-04 DEV PARAPHRASE added 3 | #1 U->C0 | #2 U->C0 | #4 U->C0 | relevant 1->1 RR 0.0000->0.0000 R@10 0.0000->0.0000
+PAR-05 DEV PARAPHRASE added 2 | #1 U->C0 | #2 U->C0 | relevant 1->1 RR 0.0000->0.0000 R@10 0.0000->0.0000
+PAR-06 DEV PARAPHRASE added 3 | #1 U->C0 | #2 U->C0 | #8 U->C0 | relevant 1->1 RR 0.1429->0.1429 R@10 1.0000->1.0000
+
+== Not claimed ==
+- no retrieval improvement: ranking, scores, encoder, Store and the v1 report are unchanged
+- v2 labels are POST_HOC_RETRIEVAL_SAMPLED_DEV: sampled from this ranking's own hits, so they are not independent test evidence
+- HOLDOUT was already exposed by the published v1 report and is not fresh independent evidence
+- U stays unknown: unresolved and unselected hits are never turned into negatives

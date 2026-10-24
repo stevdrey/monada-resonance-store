@@ -17,6 +17,7 @@ verifies it offline against the checksums in [`manifest.properties`](manifest.pr
 | [`QUERIES.md`](QUERIES.md) | Judged query set `book-queries-v1` with frozen spans, chunk keys and dev/holdout split (issue #166, Book 4/8). |
 | [`RECALL.md`](RECALL.md) | Exploratory recall quality against the judged evidence, failure taxonomy and versioned report (issue #167, Book 5/8). |
 | [`UNJUDGED-REVIEW.md`](UNJUDGED-REVIEW.md) | Score-blind human review of predeclared unjudged DEV hits, frozen as the append-only `book-queries-v2` (issue #177). |
+| [`JUDGMENT-COVERAGE.md`](JUDGMENT-COVERAGE.md) | The frozen v1 ranking projected unchanged onto v1 and v2 labels; every delta attributed to label coverage, not retrieval (issue #184). |
 | [`LATENCY.md`](LATENCY.md) | Ingest, reopen and recall latency at a controlled data-size ladder, in process and in fresh JVMs, with result-ID parity (issue #168, Book 6/8). |
 | [`FOOTPRINT.md`](FOOTPRINT.md) | On-disk growth per file, memory footprint (heap, allocation, RSS) and reopen/repeat/overlap/duplicate import behaviour with hard structural checks (issue #169, Book 7/8). |
 | [`FEEDBACK.md`](FEEDBACK.md) | Explicit DEV-oracle feedback A/B on isolated Stores with HOLDOUT and confusable-probe contamination checks, plus one explicitly remembered note persisted across reopen (issue #170, Book 8/8). |
