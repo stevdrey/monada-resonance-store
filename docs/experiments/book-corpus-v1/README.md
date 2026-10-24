@@ -21,6 +21,7 @@ verifies it offline against the checksums in [`manifest.properties`](manifest.pr
 | [`LATENCY.md`](LATENCY.md) | Ingest, reopen and recall latency at a controlled data-size ladder, in process and in fresh JVMs, with result-ID parity (issue #168, Book 6/8). |
 | [`FOOTPRINT.md`](FOOTPRINT.md) | On-disk growth per file, memory footprint (heap, allocation, RSS) and reopen/repeat/overlap/duplicate import behaviour with hard structural checks (issue #169, Book 7/8). |
 | [`FEEDBACK.md`](FEEDBACK.md) | Explicit DEV-oracle feedback A/B on isolated Stores with HOLDOUT and confusable-probe contamination checks, plus one explicitly remembered note persisted across reopen (issue #170, Book 8/8). |
+| [`PROSPECTIVE-V3.md`](PROSPECTIVE-V3.md) | Prospective `book-queries-v3` protocol: a 40-slot plan (28 DEV, 12 FINAL_ONLY) precommitted before any query or ranking, human sign-off, review receipts and a closed final gate; no queries yet (issue #185, Phase II 2/10). |
 
 ## Pinned edition
 

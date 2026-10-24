@@ -52,7 +52,8 @@ class BookCorpusV1ContractTest {
             "JUDGMENT-COVERAGE.md", "book-judgment-coverage-v2-report.txt",
             "LATENCY.md", "book-latency-v1-report.txt", "book-latency-v1-summary.md",
             "FOOTPRINT.md", "book-footprint-v1-report.txt", "book-footprint-v1-summary.md",
-            "FEEDBACK.md", "book-feedback-v1-report.txt", ".gitattributes");
+            "FEEDBACK.md", "book-feedback-v1-report.txt", "PROSPECTIVE-V3.md",
+            "book-queries-v3-protocol.properties", "book-queries-v3-plan.psv", ".gitattributes");
     private static final String FIXTURE_DIR = "monada-evaluation/src/test/resources/book-corpus-fixture-v1";
     private static final Set<String> FIXTURE_FILES = Set.of(".gitattributes", "manifest.properties", "sample.txt");
 
