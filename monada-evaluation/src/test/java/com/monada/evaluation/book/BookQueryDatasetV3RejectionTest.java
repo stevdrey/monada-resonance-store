@@ -105,6 +105,9 @@ class BookQueryDatasetV3RejectionTest {
         assertTrue(v3.devCases().stream().allMatch(c -> c.slot().split() == Split.DEV));
         var e = assertThrows(IllegalStateException.class, v3::finalOnlyCases);
         assertTrue(e.getMessage().contains("final gate is CLOSED"), e.getMessage());
+        e = assertThrows(IllegalStateException.class, v3::cases);
+        assertTrue(e.getMessage().contains("final gate is CLOSED"), "the accessor must not leak FINAL_ONLY cases");
+        assertEquals(40, v3.authoredSlots().size());
     }
 
     @Test
@@ -118,6 +121,7 @@ class BookQueryDatasetV3RejectionTest {
         rejects("cannot be declared before the review");
         manifest.setProperty("finalGate.declaredAt", "2026-11-05");
         assertEquals(12, load().finalOnlyCases().size());
+        assertEquals(40, load().cases().size());
         manifest.setProperty("finalGate.status", "AJAR");
         rejects("unknown finalGate.status");
     }
@@ -131,10 +135,11 @@ class BookQueryDatasetV3RejectionTest {
         List.copyOf(queries.keySet()).subList(10, queries.size()).forEach(this::dropCase);
         decisions.put(queries.keySet().iterator().next(), "UNRESOLVED|reviewer cannot confirm the answer span");
         BookQueryDatasetV3 v3 = load();
-        assertEquals(10, v3.cases().size());
+        assertEquals(10, v3.authoredSlots().size());
         var e = assertThrows(IllegalStateException.class, v3::devCases);
         assertTrue(e.getMessage().contains("before human sign-off"), e.getMessage());
         assertThrows(IllegalStateException.class, v3::finalOnlyCases);
+        assertThrows(IllegalStateException.class, v3::cases, "the accessor must not bypass the review gate");
         manifest.setProperty("finalGate.status", "OPEN");
         rejects("cannot open over an unreviewed dataset");
     }

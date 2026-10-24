@@ -118,7 +118,9 @@ Unknown columns fail loading.
      or a model (names such as `claude`, `codex`, `GPT-5` or `review bot` are rejected);
    - the dates are ordered: protocol signed ≤ `authoring.startedAt` ≤ `review.reviewedAt`.
 
-Only `REVIEWED` produces judgments. A model-only draft can never be presented as reviewed.
+Only `REVIEWED` produces judgments. A model-only draft can never be presented as reviewed. The full `cases()` list
+is gated too: it throws unless the dataset is `REVIEWED` and the final gate is open, so no caller can reach
+FINAL_ONLY cases around the gates; `authoredSlots()` reports progress with slot ids only.
 
 ### Signing this protocol
 

@@ -101,6 +101,23 @@ record BookQueryDatasetV3(BookQueryProtocolV3 protocol, Properties manifest, Lis
         return copy;
     }
 
+    /**
+     * Every case, FINAL_ONLY included: the generated accessor would bypass both gates, so it is refused unless the
+     * dataset is reviewed and the final gate is open. Use {@link #devCases()} or {@link #authoredSlots()} otherwise.
+     */
+    @Override
+    public List<Case> cases() {
+        check(reviewed() && finalGateOpen(), "all book-queries-v3 cases need human sign-off and an open final gate;"
+                + " the dataset is " + manifest.getProperty("review.status") + " and the final gate is "
+                + manifest.getProperty("finalGate.status"));
+        return cases;
+    }
+
+    /** Slot ids that have a query, for progress checks; no text, answer or judgment. */
+    List<String> authoredSlots() {
+        return cases.stream().map(c -> c.slot().id()).toList();
+    }
+
     boolean reviewed() {
         return BookQueryProtocolV3.REVIEWED.equals(manifest.getProperty("review.status"));
     }
