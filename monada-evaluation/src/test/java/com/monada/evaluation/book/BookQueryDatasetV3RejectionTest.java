@@ -31,6 +31,7 @@ class BookQueryDatasetV3RejectionTest {
     private static BookQueryDataset V1;
     private static BookQueryProtocolV3 PROTOCOL;
     private static byte[] PROTOCOL_BYTES;
+    private static byte[] PLAN_BYTES;
     private static List<ChunkRef> CHUNKS;
 
     /** Query rows by slot, judgment rows in file order, review rows by slot (recomputed unless {@link #staleReview}). */
@@ -47,8 +48,8 @@ class BookQueryDatasetV3RejectionTest {
         Properties signed = BookQueryProtocolV3Test.committedManifest();
         BookQueryProtocolV3Test.sign(signed);
         PROTOCOL_BYTES = properties(signed);
-        PROTOCOL = BookQueryProtocolV3.parse(signed, BookQueryProtocolV3.read(
-                BookQueryProtocolV3Test.DIR.resolve(BookQueryProtocolV3.PLAN_FILE)), V1.manifest());
+        PLAN_BYTES = BookQueryProtocolV3.read(BookQueryProtocolV3Test.DIR.resolve(BookQueryProtocolV3.PLAN_FILE));
+        PROTOCOL = BookQueryProtocolV3.parse(signed, PLAN_BYTES, V1.manifest());
         CHUNKS = V1.chunkMap().values().stream().sorted(Comparator.comparingInt(ChunkRef::ordinal)).toList();
     }
 
@@ -108,6 +109,8 @@ class BookQueryDatasetV3RejectionTest {
         e = assertThrows(IllegalStateException.class, v3::cases);
         assertTrue(e.getMessage().contains("final gate is CLOSED"), "the accessor must not leak FINAL_ONLY cases");
         assertEquals(40, v3.authoredSlots().size());
+        assertEquals(List.copyOf(queries.keySet()), List.copyOf(v3.reviews().keySet()),
+                "receipts keep their file order");
     }
 
     @Test
@@ -208,19 +211,30 @@ class BookQueryDatasetV3RejectionTest {
 
     @Test
     void rejectsSignOffOverAnUnsignedProtocolOrBeforeIt() {
-        Properties unsigned = BookQueryProtocolV3Test.committedManifest();
-        var pending = BookQueryProtocolV3.parse(unsigned, BookQueryProtocolV3.read(
-                BookQueryProtocolV3Test.DIR.resolve(BookQueryProtocolV3.PLAN_FILE)), V1.manifest());
-        var e = assertThrows(IllegalStateException.class, () -> build(pending, properties(unsigned)));
+        byte[] unsigned = properties(BookQueryProtocolV3Test.committedManifest());
+        var e = assertThrows(IllegalStateException.class, () -> build(unsigned, m -> { }));
         assertTrue(e.getMessage().contains("the protocol is not signed"), e.getMessage());
         manifest.setProperty("authoring.startedAt", "2026-10-23");
         rejects("authoring started before the protocol was signed");
         manifest.setProperty("authoring.startedAt", "2026-10-31");
-        rejects("review.reviewedAt precedes authoring");
+        rejects("review.reviewedAt precedes what it reviews");
         manifest.setProperty("authoring.startedAt", "2026-10-25");
         rejects("protocol.sha256 does not match", m -> m.setProperty("protocol.sha256", "0".repeat(64)));
         manifest.setProperty("plan.sha256", "0".repeat(64));
         rejects("plan.sha256 differs from the protocol plan");
+    }
+
+    @Test
+    void rejectsMalformedOrInconsistentDatesInAnyStatus() {
+        manifest.setProperty("review.status", BookQueryProtocolV3.PENDING);
+        manifest.setProperty("authoring.startedAt", "soon");
+        rejects("authoring.startedAt is not an ISO date");
+        manifest.setProperty("authoring.startedAt", "2026-10-25");
+        manifest.setProperty("draft.draftedAt", "2026-10-24");
+        rejects("draft.draftedAt precedes authoring");
+        manifest.setProperty("review.status", BookQueryProtocolV3.REVIEWED);
+        manifest.setProperty("draft.draftedAt", "2026-10-31");
+        rejects("review.reviewedAt precedes what it reviews (2026-10-31)");
     }
 
     @Test
@@ -289,7 +303,7 @@ class BookQueryDatasetV3RejectionTest {
         replaceJudgment(noAnswer, "|0|CONFOUNDER|", "|1|CONFOUNDER|");
         rejects("contradictory label, CONFOUNDER with grade 1");
         replaceJudgment(noAnswer, "|1|CONFOUNDER|", "|1|EVIDENCE|");
-        rejects(noAnswer + ": contradictory label, NO_ANSWER case must not have evidence");
+        rejects(noAnswer + ": NO_ANSWER case must not have evidence");
         replaceJudgment(noAnswer, "|1|EVIDENCE|", "|0|CONFOUNDER|");
         queries.computeIfPresent(noAnswer, (k, row) -> row.replace("|NO_ANSWER|false|", "|NO_ANSWER|true|"));
         rejects(noAnswer + ": contradictory label, answerable must be false exactly for NO_ANSWER");
@@ -341,14 +355,10 @@ class BookQueryDatasetV3RejectionTest {
     }
 
     private BookQueryDatasetV3 load() {
-        return build(PROTOCOL, PROTOCOL_BYTES);
+        return build(PROTOCOL_BYTES, m -> { });
     }
 
-    private BookQueryDatasetV3 build(BookQueryProtocolV3 protocol, byte[] protocolBytes) {
-        return build(protocol, protocolBytes, m -> { });
-    }
-
-    private BookQueryDatasetV3 build(BookQueryProtocolV3 protocol, byte[] protocolBytes, Consumer<Properties> edit) {
+    private BookQueryDatasetV3 build(byte[] protocolBytes, Consumer<Properties> edit) {
         List<String> review = new ArrayList<>(List.of(BookQueryDatasetV3.REVIEW_HEADER));
         decisions.forEach((slot, decision) -> review.add(staleReview != null && staleReview.containsKey(slot)
                 ? staleReview.get(slot) : receipt(slot, decision)));
@@ -371,7 +381,7 @@ class BookQueryDatasetV3RejectionTest {
         m.setProperty("counts.approved",
                 String.valueOf(decisions.values().stream().filter(d -> d.startsWith("APPROVED|")).count()));
         edit.accept(m);
-        return BookQueryDatasetV3.parse(protocol, protocolBytes, m, q, j, r, V1);
+        return BookQueryDatasetV3.parse(protocolBytes, PLAN_BYTES, m, q, j, r, V1);
     }
 
     private void rejects(String message) {
@@ -379,7 +389,7 @@ class BookQueryDatasetV3RejectionTest {
     }
 
     private void rejects(String message, Consumer<Properties> edit) {
-        var e = assertThrows(IllegalStateException.class, () -> build(PROTOCOL, PROTOCOL_BYTES, edit));
+        var e = assertThrows(IllegalStateException.class, () -> build(PROTOCOL_BYTES, edit));
         assertTrue(e.getMessage().contains(message), e.getMessage());
     }
 

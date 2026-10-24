@@ -1,5 +1,13 @@
 package com.monada.evaluation.book;
 
+import static com.monada.evaluation.book.BookQueryDataset.check;
+import static com.monada.evaluation.book.BookQueryDataset.checkCount;
+import static com.monada.evaluation.book.BookQueryDataset.checkDigest;
+import static com.monada.evaluation.book.BookQueryDataset.lines;
+import static com.monada.evaluation.book.BookQueryDataset.parseEnum;
+import static com.monada.evaluation.book.BookQueryDataset.require;
+import static com.monada.evaluation.book.BookQueryDataset.utf8;
+
 import com.monada.evaluation.book.BookQueryDataset.Category;
 import java.io.IOException;
 import java.io.StringReader;
@@ -8,7 +16,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
@@ -30,9 +37,10 @@ import java.util.regex.Pattern;
  *
  * <p>The protocol is a draft until a named human reviewer, who is neither its drafter nor a model, signs it
  * ({@code protocol.status=REVIEWED}). {@link BookQueryDatasetV3} refuses to sign off a dataset over an unsigned
- * protocol. Every defect fails loading with an {@link IllegalStateException}.
+ * protocol. Instances exist only through {@link #parse} or {@link #load}; every defect fails with an
+ * {@link IllegalStateException}.
  */
-record BookQueryProtocolV3(Properties manifest, List<Slot> slots) {
+final class BookQueryProtocolV3 {
 
     static final String DATASET = "book-queries-v3";
     static final String FORMAT = "monada-book-queries-prospective";
@@ -59,11 +67,12 @@ record BookQueryProtocolV3(Properties manifest, List<Slot> slots) {
             "source.sizeBytes", "source.sha256", "chunking.policy", "chunkMap.sha256", "chunksFile.sha256");
 
     private static final Pattern SLOT = Pattern.compile("V3-[A-Z]{3}-[0-9]{2}");
-    private static final Pattern SHA256 = Pattern.compile("[0-9a-f]{64}");
-    /** Lower-cased name tokens that identify a model or an automated agent rather than a human. */
-    private static final Set<String> MODEL_TOKENS = Set.of("ai", "agent", "assistant", "bot", "chatgpt", "claude",
-            "codex", "copilot", "cursor", "devin", "gemini", "gpt", "llama", "llm", "mistral", "model", "openai",
-            "anthropic", "windsurf");
+    /**
+     * Lower-cased name tokens of model products and vendors. Generic words such as "ai" or "model" are excluded on
+     * purpose: they are also human names.
+     */
+    private static final Set<String> MODEL_TOKENS = Set.of("anthropic", "chatgpt", "codex", "copilot", "devin",
+            "gemini", "llama", "mistral", "openai", "windsurf");
     /** Retrieval output must never steer the protocol: no key or column may look like a run result. */
     private static final Pattern SCORE_LIKE = Pattern.compile("(?i).*(score|rank|hit|recall|mrr|ndcg|precision).*");
     private static final List<String> REQUIRED_KEYS = List.of("dataset", "protocolVersion", "format",
@@ -80,18 +89,24 @@ record BookQueryProtocolV3(Properties manifest, List<Slot> slots) {
     record Slot(String id, Category category, Split split) {
     }
 
-    BookQueryProtocolV3 {
-        Properties copy = new Properties();
-        copy.putAll(manifest);
-        manifest = copy;
-        slots = List.copyOf(slots);
+    private final Properties manifest;
+    private final List<Slot> slots;
+
+    private BookQueryProtocolV3(Properties manifest, List<Slot> slots) {
+        this.manifest = new Properties();
+        this.manifest.putAll(manifest);
+        this.slots = List.copyOf(slots);
     }
 
-    @Override
-    public Properties manifest() {
+    /** A copy: the validated status cannot be changed through it. */
+    Properties manifest() {
         Properties copy = new Properties();
         copy.putAll(manifest);
         return copy;
+    }
+
+    List<Slot> slots() {
+        return slots;
     }
 
     boolean reviewed() {
@@ -106,9 +121,13 @@ record BookQueryProtocolV3(Properties manifest, List<Slot> slots) {
 
     /** Loads the committed protocol and plan from {@code dir} (the {@code book-corpus-v1} contract directory). */
     static BookQueryProtocolV3 load(Path dir) {
+        return load(dir, BookQueryDataset.load());
+    }
+
+    static BookQueryProtocolV3 load(Path dir, BookQueryDataset v1) {
         Properties manifest = readProperties(read(dir.resolve(PROTOCOL_FILE)), PROTOCOL_FILE);
         check(PLAN_FILE.equals(manifest.getProperty("plan.file")), "plan.file must be " + PLAN_FILE);
-        return parse(manifest, read(dir.resolve(PLAN_FILE)), BookQueryDataset.load().manifest());
+        return parse(manifest, read(dir.resolve(PLAN_FILE)), v1.manifest());
     }
 
     /** Validates a protocol and its plan against the unchanged {@code book-queries-v1} manifest. */
@@ -138,7 +157,8 @@ record BookQueryProtocolV3(Properties manifest, List<Slot> slots) {
         List<Slot> slots = slots(plan);
         validateQuotas(manifest, slots);
         validateSplit(manifest, slots);
-        validateSignOff(manifest, "protocol", List.of(manifest.getProperty("protocol.draftedBy")));
+        validateSignOff(manifest, "protocol", List.of(manifest.getProperty("protocol.draftedBy")),
+                isoDate(manifest, "protocol.draftedAt"));
         return new BookQueryProtocolV3(manifest, slots);
     }
 
@@ -163,6 +183,11 @@ record BookQueryProtocolV3(Properties manifest, List<Slot> slots) {
         return BookQueryDataset.sha256(utf8(lines.toString()));
     }
 
+    /** The v1 id prefix of a category ({@code NOA} for {@code NO_ANSWER}). */
+    static String prefix(Category category) {
+        return category == Category.NO_ANSWER ? "NOA" : category.name().substring(0, 3);
+    }
+
     private static List<Slot> slots(byte[] bytes) {
         List<String> lines = lines(bytes, PLAN_FILE);
         check(!lines.isEmpty() && PLAN_HEADER.equals(lines.get(0)), PLAN_FILE + " header must be " + PLAN_HEADER);
@@ -180,11 +205,6 @@ record BookQueryProtocolV3(Properties manifest, List<Slot> slots) {
         return List.copyOf(slots.values());
     }
 
-    /** The v1 id prefix of a category ({@code NOA} for {@code NO_ANSWER}). */
-    static String prefix(Category category) {
-        return category == Category.NO_ANSWER ? "NOA" : category.name().substring(0, 3);
-    }
-
     private static void validateQuotas(Properties manifest, List<Slot> slots) {
         check(slots.size() == SLOTS, "the plan must have " + SLOTS + " slots, not " + slots.size());
         checkCount(manifest, "counts.slots", slots.size());
@@ -197,10 +217,11 @@ record BookQueryProtocolV3(Properties manifest, List<Slot> slots) {
         slots.forEach(s -> perCategory.merge(s.category(), 1L, Long::sum));
         for (Category category : Category.values()) {
             long n = perCategory.getOrDefault(category, 0L);
+            long finalOnly = slots.stream()
+                    .filter(s -> s.category() == category && s.split() == Split.FINAL_ONLY).count();
             checkCount(manifest, "counts." + category, n);
-            checkCount(manifest, "counts." + category + ".FINAL_ONLY",
-                    slots.stream().filter(s -> s.category() == category && s.split() == Split.FINAL_ONLY).count());
-            check(n > 0, "category " + category + " has no slot");
+            checkCount(manifest, "counts." + category + ".FINAL_ONLY", finalOnly);
+            check(n - finalOnly >= 1, "category " + category + " needs at least one DEV slot");
         }
         long narrative = slots.stream().filter(s -> NARRATIVE_MULTI_DISTRACTOR.contains(s.category())).count();
         checkMinimum(manifest, "min.NO_ANSWER", MIN_NO_ANSWER, perCategory.getOrDefault(Category.NO_ANSWER, 0L));
@@ -233,9 +254,11 @@ record BookQueryProtocolV3(Properties manifest, List<Slot> slots) {
 
     /**
      * Shared human sign-off rule for {@code <prefix>.status}: {@value #PENDING} always validates (fail closed);
-     * {@value #REVIEWED} needs a named reviewer and approver, an ISO review date, neither a drafter nor a model.
+     * {@value #REVIEWED} needs a named reviewer and approver who are neither a drafter nor a model, and an ISO review
+     * date no earlier than {@code notBefore} (what was reviewed cannot postdate its review).
      */
-    static void validateSignOff(Properties manifest, String prefix, Collection<String> drafters) {
+    static void validateSignOff(Properties manifest, String prefix, Collection<String> drafters,
+                                LocalDate notBefore) {
         String status = require(manifest, prefix + ".status");
         check(status.equals(REVIEWED) || status.equals(PENDING), "unknown " + prefix + ".status " + status);
         if (!status.equals(REVIEWED)) {
@@ -243,7 +266,8 @@ record BookQueryProtocolV3(Properties manifest, List<Slot> slots) {
         }
         String reviewer = require(manifest, prefix + ".reviewer").trim();
         String approver = require(manifest, prefix + ".approvedBy").trim();
-        isoDate(manifest, prefix + ".reviewedAt");
+        check(!isoDate(manifest, prefix + ".reviewedAt").isBefore(notBefore),
+                prefix + ".reviewedAt precedes what it reviews (" + notBefore + ")");
         for (String human : List.of(reviewer, approver)) {
             check(!looksLikeModel(human), prefix + ": " + human + " is not a human reviewer; a model-only draft"
                     + " cannot be presented as reviewed");
@@ -254,8 +278,13 @@ record BookQueryProtocolV3(Properties manifest, List<Slot> slots) {
         }
     }
 
+    /** A model product or vendor name ({@code claude*}, {@code gpt*}, ...) or a GitHub app account ({@code [bot]}). */
     static boolean looksLikeModel(String name) {
-        for (String token : name.toLowerCase(Locale.ROOT).split("[^a-z0-9]+")) {
+        String lower = name.toLowerCase(Locale.ROOT);
+        if (lower.endsWith("[bot]")) {
+            return true;
+        }
+        for (String token : lower.split("[^a-z0-9]+")) {
             if (MODEL_TOKENS.contains(token) || token.startsWith("gpt") || token.startsWith("claude")) {
                 return true;
             }
@@ -277,6 +306,7 @@ record BookQueryProtocolV3(Properties manifest, List<Slot> slots) {
         }
     }
 
+    /** Strict UTF-8 then {@link Properties#load}, naming the file in every error. */
     static Properties readProperties(byte[] bytes, String name) {
         String text = new String(bytes, StandardCharsets.UTF_8);
         check(Arrays.equals(utf8(text), bytes), name + " is not valid UTF-8");
@@ -294,48 +324,6 @@ record BookQueryProtocolV3(Properties manifest, List<Slot> slots) {
             return Files.readAllBytes(file);
         } catch (IOException e) {
             throw new IllegalStateException("cannot read " + file, e);
-        }
-    }
-
-    static List<String> lines(byte[] bytes, String name) {
-        String text = new String(bytes, StandardCharsets.UTF_8);
-        check(Arrays.equals(utf8(text), bytes), name + " is not valid UTF-8");
-        check(text.endsWith("\n") && !text.contains("\r"), name + " must use LF line ends and end with one");
-        return new ArrayList<>(List.of(text.substring(0, text.length() - 1).split("\n", -1)));
-    }
-
-    static <E extends Enum<E>> E parseEnum(Class<E> type, String value, String id, String field) {
-        try {
-            return Enum.valueOf(type, value);
-        } catch (IllegalArgumentException e) {
-            throw new IllegalStateException(id + ": unknown " + field + " " + value);
-        }
-    }
-
-    static void checkDigest(Properties manifest, String key, byte[] bytes) {
-        String pinned = require(manifest, key);
-        check(SHA256.matcher(pinned).matches(), key + " is not a lowercase SHA-256");
-        check(BookQueryDataset.sha256(bytes).equals(pinned), key + " does not match the file");
-    }
-
-    static void checkCount(Properties manifest, String key, long actual) {
-        check(String.valueOf(actual).equals(require(manifest, key)),
-                key + " is " + manifest.getProperty(key) + " but the data has " + actual);
-    }
-
-    static String require(Properties manifest, String key) {
-        String value = manifest.getProperty(key);
-        check(value != null && !value.isBlank(), "manifest is missing " + key);
-        return value;
-    }
-
-    static byte[] utf8(String text) {
-        return text.getBytes(StandardCharsets.UTF_8);
-    }
-
-    static void check(boolean condition, String message) {
-        if (!condition) {
-            throw new IllegalStateException(message);
         }
     }
 }

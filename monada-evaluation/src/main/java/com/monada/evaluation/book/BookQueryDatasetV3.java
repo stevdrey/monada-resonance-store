@@ -1,16 +1,15 @@
 package com.monada.evaluation.book;
 
-import static com.monada.evaluation.book.BookQueryProtocolV3.check;
-import static com.monada.evaluation.book.BookQueryProtocolV3.checkCount;
-import static com.monada.evaluation.book.BookQueryProtocolV3.checkDigest;
+import static com.monada.evaluation.book.BookQueryDataset.check;
+import static com.monada.evaluation.book.BookQueryDataset.checkCount;
+import static com.monada.evaluation.book.BookQueryDataset.checkDigest;
+import static com.monada.evaluation.book.BookQueryDataset.lines;
+import static com.monada.evaluation.book.BookQueryDataset.parseEnum;
+import static com.monada.evaluation.book.BookQueryDataset.require;
+import static com.monada.evaluation.book.BookQueryDataset.utf8;
 import static com.monada.evaluation.book.BookQueryProtocolV3.isoDate;
-import static com.monada.evaluation.book.BookQueryProtocolV3.lines;
-import static com.monada.evaluation.book.BookQueryProtocolV3.parseEnum;
-import static com.monada.evaluation.book.BookQueryProtocolV3.require;
-import static com.monada.evaluation.book.BookQueryProtocolV3.utf8;
 
 import com.monada.evaluation.book.BookQueryDataset.Category;
-import com.monada.evaluation.book.BookQueryDataset.ChunkRef;
 import com.monada.evaluation.book.BookQueryDataset.Judgment;
 import com.monada.evaluation.book.BookQueryDataset.Role;
 import com.monada.evaluation.book.BookQueryProtocolV3.Slot;
@@ -19,9 +18,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.IntSummaryStatistics;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -39,10 +38,10 @@ import java.util.regex.Pattern;
  * <p>Fail closed: until {@code review.status=REVIEWED}, with a signed protocol, all 40 slots approved by a named human
  * reviewer and approver who are neither a drafter nor a model, no case is available for evaluation. FINAL_ONLY cases
  * stay unavailable until a separate final gate is declared ({@code finalGate.status=OPEN}). Unlisted chunks are
- * unjudged, never implicitly non-relevant, and an {@link Decision#UNRESOLVED} case blocks sign-off.
+ * unjudged, never implicitly non-relevant, and an {@link Decision#UNRESOLVED} case blocks sign-off. Instances exist
+ * only through {@link #parse} or {@link #load}, so the gates cannot be bypassed by constructing one.
  */
-record BookQueryDatasetV3(BookQueryProtocolV3 protocol, Properties manifest, List<Case> cases,
-                          Map<String, Review> reviews) {
+final class BookQueryDatasetV3 {
 
     static final String MANIFEST_FILE = "book-queries-v3-manifest.properties";
     static final String QUERIES_FILE = "book-queries-v3-queries.psv";
@@ -50,6 +49,7 @@ record BookQueryDatasetV3(BookQueryProtocolV3 protocol, Properties manifest, Lis
     static final String REVIEW_FILE = "book-queries-v3-review.psv";
     static final String FORMAT = "monada-book-queries-prospective-dataset";
     static final String QUERIES_HEADER = "slot|split|category|answerable|text|rationale|draftedBy";
+    /** Same schema and rules as v1 ({@link BookQueryDataset#judgments}). */
     static final String JUDGMENTS_HEADER = BookQueryDataset.JUDGMENTS_HEADER;
     static final String REVIEW_HEADER = "slot|decision|contentSha256|note";
     /** {@code draftedBy} value for a case the human author wrote directly, without any proposed draft. */
@@ -57,7 +57,6 @@ record BookQueryDatasetV3(BookQueryProtocolV3 protocol, Properties manifest, Lis
     /** The only accepted {@code draft.verification} when any case was drafted (for example by a model). */
     static final String DRAFT_VERIFICATION = "EACH_DRAFTED_CASE_READ_AGAINST_BODY_AND_APPROVED_BY_REVIEWER";
 
-    private static final Pattern SHA256 = Pattern.compile("[0-9a-f]{64}");
     private static final Pattern ISSUE = Pattern.compile("#[1-9][0-9]*");
     private static final List<String> REQUIRED_KEYS = List.of("dataset", "datasetVersion", "format",
             "formatVersion", "protocol.sha256", "plan.sha256", "queries.file", "queries.sha256", "judgments.file",
@@ -76,37 +75,41 @@ record BookQueryDatasetV3(BookQueryProtocolV3 protocol, Properties manifest, Lis
         Case {
             judgments = List.copyOf(judgments);
         }
-
-        List<Judgment> evidence() {
-            return judgments.stream().filter(j -> j.role() == Role.EVIDENCE).toList();
-        }
-
-        List<Judgment> confounders() {
-            return judgments.stream().filter(j -> j.role() == Role.CONFOUNDER).toList();
-        }
     }
 
-    BookQueryDatasetV3 {
-        Properties copy = new Properties();
-        copy.putAll(manifest);
-        manifest = copy;
-        cases = List.copyOf(cases);
-        reviews = Map.copyOf(reviews);
+    private final BookQueryProtocolV3 protocol;
+    private final Properties manifest;
+    private final List<Case> cases;
+    private final Map<String, Review> reviews;
+
+    private BookQueryDatasetV3(BookQueryProtocolV3 protocol, Properties manifest, List<Case> cases,
+                               Map<String, Review> reviews) {
+        this.protocol = protocol;
+        this.manifest = new Properties();
+        this.manifest.putAll(manifest);
+        this.cases = List.copyOf(cases);
+        // Receipt-file order, so anything rendered from the receipts is deterministic.
+        this.reviews = Collections.unmodifiableMap(new LinkedHashMap<>(reviews));
     }
 
-    @Override
-    public Properties manifest() {
+    BookQueryProtocolV3 protocol() {
+        return protocol;
+    }
+
+    /** A copy: the validated status cannot be changed through it. */
+    Properties manifest() {
         Properties copy = new Properties();
         copy.putAll(manifest);
         return copy;
     }
 
-    /**
-     * Every case, FINAL_ONLY included: the generated accessor would bypass both gates, so it is refused unless the
-     * dataset is reviewed and the final gate is open. Use {@link #devCases()} or {@link #authoredSlots()} otherwise.
-     */
-    @Override
-    public List<Case> cases() {
+    /** Review receipts by slot, in receipt-file order. */
+    Map<String, Review> reviews() {
+        return reviews;
+    }
+
+    /** Every case, FINAL_ONLY included: only once the dataset is reviewed and the final gate is open. */
+    List<Case> cases() {
         check(reviewed() && finalGateOpen(), "all book-queries-v3 cases need human sign-off and an open final gate;"
                 + " the dataset is " + manifest.getProperty("review.status") + " and the final gate is "
                 + manifest.getProperty("finalGate.status"));
@@ -142,7 +145,6 @@ record BookQueryDatasetV3(BookQueryProtocolV3 protocol, Properties manifest, Lis
 
     /** Loads the dataset next to the protocol; fails when it has not been authored yet. */
     static BookQueryDatasetV3 load(Path dir) {
-        BookQueryProtocolV3 protocol = BookQueryProtocolV3.load(dir);
         Path manifestFile = dir.resolve(MANIFEST_FILE);
         check(Files.isRegularFile(manifestFile), "book-queries-v3 is not authored yet: " + MANIFEST_FILE
                 + " is missing");
@@ -152,18 +154,20 @@ record BookQueryDatasetV3(BookQueryProtocolV3 protocol, Properties manifest, Lis
                         && JUDGMENTS_FILE.equals(manifest.getProperty("judgments.file"))
                         && REVIEW_FILE.equals(manifest.getProperty("review.file")),
                 "queries.file, judgments.file and review.file must be the fixed v3 names");
-        return parse(protocol, BookQueryProtocolV3.read(dir.resolve(BookQueryProtocolV3.PROTOCOL_FILE)), manifest,
+        return parse(BookQueryProtocolV3.read(dir.resolve(BookQueryProtocolV3.PROTOCOL_FILE)),
+                BookQueryProtocolV3.read(dir.resolve(BookQueryProtocolV3.PLAN_FILE)), manifest,
                 BookQueryProtocolV3.read(dir.resolve(QUERIES_FILE)),
                 BookQueryProtocolV3.read(dir.resolve(JUDGMENTS_FILE)),
                 BookQueryProtocolV3.read(dir.resolve(REVIEW_FILE)), BookQueryDataset.load());
     }
 
     /**
-     * Validates a dataset against its protocol ({@code protocolBytes} are the exact protocol file the manifest pins)
-     * and the unchanged {@code book-queries-v1}, which supplies the chunk map and the already published query texts.
+     * Validates a dataset. The protocol is parsed here from {@code protocolBytes}, the exact bytes the manifest pins,
+     * so sign-off is always checked against the pinned protocol. The unchanged {@code book-queries-v1} supplies the
+     * chunk map and the already published query texts.
      */
-    static BookQueryDatasetV3 parse(BookQueryProtocolV3 protocol, byte[] protocolBytes, Properties manifest,
-                                    byte[] queries, byte[] judgments, byte[] review, BookQueryDataset v1) {
+    static BookQueryDatasetV3 parse(byte[] protocolBytes, byte[] planBytes, Properties manifest, byte[] queries,
+                                    byte[] judgments, byte[] review, BookQueryDataset v1) {
         REQUIRED_KEYS.forEach(key -> require(manifest, key));
         BookQueryProtocolV3.rejectScoreLikeKeys(manifest.stringPropertyNames(), MANIFEST_FILE);
         check(BookQueryProtocolV3.DATASET.equals(manifest.getProperty("dataset"))
@@ -171,6 +175,9 @@ record BookQueryDatasetV3(BookQueryProtocolV3 protocol, Properties manifest, Lis
         check(FORMAT.equals(manifest.getProperty("format")) && "1".equals(manifest.getProperty("formatVersion")),
                 "unsupported dataset format");
         checkDigest(manifest, "protocol.sha256", protocolBytes);
+        BookQueryProtocolV3 protocol = BookQueryProtocolV3.parse(
+                BookQueryProtocolV3.readProperties(protocolBytes, BookQueryProtocolV3.PROTOCOL_FILE), planBytes,
+                v1.manifest());
         check(protocol.manifest().getProperty("plan.sha256").equals(manifest.getProperty("plan.sha256")),
                 "plan.sha256 differs from the protocol plan");
         check(BookQueryDataset.PROTOCOL.equals(manifest.getProperty("authoring.protocol")),
@@ -178,23 +185,25 @@ record BookQueryDatasetV3(BookQueryProtocolV3 protocol, Properties manifest, Lis
         check("0".equals(manifest.getProperty("authoring.retrievalRunsBeforeFreeze")),
                 "labels must be frozen before any retrieval run");
         check(BookQueryDataset.GRADES.equals(manifest.getProperty("judgment.grades")), "unsupported judgment.grades");
+        validateDates(manifest);
         checkDigest(manifest, "queries.sha256", queries);
         checkDigest(manifest, "judgments.sha256", judgments);
         checkDigest(manifest, "review.sha256", review);
 
-        Map<String, Slot> plan = protocol.slotsById();
         Map<String, String> queryLines = new LinkedHashMap<>();
-        Map<String, Case> parsed = queries(queries, plan, v1, queryLines);
-        Map<String, List<String>> judgmentLines = new HashMap<>();
-        Map<String, List<Judgment>> byCase = judgments(judgments, parsed.keySet(), v1.chunkMap(), judgmentLines);
+        Map<String, Case> parsed = queries(queries, protocol.slotsById(), v1, queryLines);
+        Map<String, List<Judgment>> byCase = BookQueryDataset.judgments(judgments, parsed.keySet(), v1.chunkMap());
         List<Case> cases = new ArrayList<>();
         for (Case c : parsed.values()) {
             Case full = new Case(c.slot(), c.answerable(), c.text(), c.rationale(), c.draftedBy(),
                     byCase.getOrDefault(c.slot().id(), List.of()));
-            validateCase(full, v1.chunkMap());
+            // The v1 per-category rules; they never read the split, so the v1 placeholder split is irrelevant.
+            BookQueryDataset.validateCase(new BookQueryDataset.Case(full.slot().id(), BookQueryDataset.Split.DEV,
+                    full.slot().category(), full.answerable(), full.text(), full.rationale(), full.judgments()),
+                    v1.chunkMap());
             cases.add(full);
         }
-        Map<String, Review> reviews = reviews(review, queryLines, judgmentLines);
+        Map<String, Review> reviews = reviews(review, queryLines, judgmentLines(judgments));
 
         checkCount(manifest, "counts.queries", cases.size());
         checkCount(manifest, "counts.judgments", cases.stream().mapToInt(c -> c.judgments().size()).sum());
@@ -253,61 +262,14 @@ record BookQueryDatasetV3(BookQueryProtocolV3 protocol, Properties manifest, Lis
         return cases;
     }
 
-    private static Map<String, List<Judgment>> judgments(byte[] bytes, Set<String> ids, Map<String, ChunkRef> chunks,
-                                                         Map<String, List<String>> judgmentLines) {
+    /** Raw judgment rows by query id, in file order; called after {@link BookQueryDataset#judgments} validated them. */
+    private static Map<String, List<String>> judgmentLines(byte[] bytes) {
         List<String> lines = lines(bytes, JUDGMENTS_FILE);
-        check(!lines.isEmpty() && JUDGMENTS_HEADER.equals(lines.get(0)), JUDGMENTS_FILE + " header must be "
-                + JUDGMENTS_HEADER);
-        Map<String, List<Judgment>> byCase = new LinkedHashMap<>();
-        Set<String> seen = new HashSet<>();
+        Map<String, List<String>> byCase = new HashMap<>();
         for (String line : lines.subList(1, lines.size())) {
-            String[] f = line.split("\\|", -1);
-            check(f.length == 8, JUDGMENTS_FILE + " row needs 8 columns: " + line);
-            String id = f[0];
-            check(ids.contains(id), "orphan judgment for unknown query: " + id);
-            ChunkRef chunk = chunks.get(f[1]);
-            check(chunk != null, id + ": orphan judgment for unknown chunk key " + f[1]);
-            long start = number(f[2], id);
-            long end = number(f[3], id);
-            check(0 <= start && start < end, id + ": orphan span [" + start + "," + end + ") is empty or negative");
-            // v1 bounds every chunk by the source, so containment also keeps the span inside the source.
-            check(chunk.byteStart() <= start && end <= chunk.byteEnd(), id + ": orphan span [" + start + "," + end
-                    + ") is not inside chunk " + chunk.key());
-            check(SHA256.matcher(f[4]).matches(), id + ": spanSha256 is not a lowercase SHA-256");
-            long grade = number(f[5], id);
-            Role role = parseEnum(Role.class, f[6], id, "role");
-            check(role == Role.EVIDENCE ? grade == 1 || grade == 2 : grade == 0,
-                    id + ": contradictory label, " + role + " with grade " + grade + " on " + chunk.key());
-            check(!f[7].isBlank(), id + ": judgment note must not be blank");
-            check(seen.add(id + "\u0000" + chunk.key()),
-                    id + ": contradictory label, chunk " + chunk.key() + " is judged more than once");
-            byCase.computeIfAbsent(id, k -> new ArrayList<>())
-                    .add(new Judgment(chunk.key(), start, end, f[4], (int) grade, role, f[7]));
-            judgmentLines.computeIfAbsent(id, k -> new ArrayList<>()).add(line);
+            byCase.computeIfAbsent(line.substring(0, line.indexOf('|')), k -> new ArrayList<>()).add(line);
         }
         return byCase;
-    }
-
-    private static void validateCase(Case c, Map<String, ChunkRef> chunks) {
-        String id = c.slot().id();
-        int evidence = c.evidence().size();
-        if (!c.answerable()) {
-            check(evidence == 0, id + ": contradictory label, NO_ANSWER case must not have evidence");
-            return;
-        }
-        check(evidence > 0, id + ": answerable case has no evidence");
-        check(c.evidence().stream().anyMatch(j -> j.grade() == 2), id + ": no evidence directly answers it");
-        switch (c.slot().category()) {
-            case MULTI_EVIDENCE -> {
-                IntSummaryStatistics ordinals = c.evidence().stream()
-                        .mapToInt(j -> chunks.get(j.chunkKey()).ordinal()).summaryStatistics();
-                check(ordinals.getMax() - ordinals.getMin() >= 2,
-                        id + ": MULTI_EVIDENCE needs evidence in at least two non-adjacent chunks");
-            }
-            case AMBIGUOUS -> check(evidence >= 2, id + ": AMBIGUOUS needs evidence in at least two chunks");
-            case CONFOUNDER -> check(!c.confounders().isEmpty(), id + ": CONFOUNDER case has no confounder");
-            default -> { }
-        }
     }
 
     private static Map<String, Review> reviews(byte[] bytes, Map<String, String> queryLines,
@@ -331,11 +293,21 @@ record BookQueryDatasetV3(BookQueryProtocolV3 protocol, Properties manifest, Lis
         return reviews;
     }
 
+    /** Dates that hold in every status: ISO formats, and drafting no earlier than authoring. */
+    private static void validateDates(Properties manifest) {
+        LocalDate started = isoDate(manifest, "authoring.startedAt");
+        if (manifest.containsKey("draft.draftedAt")) {
+            check(!isoDate(manifest, "draft.draftedAt").isBefore(started), "draft.draftedAt precedes authoring");
+        }
+    }
+
     private static void validateSignOff(BookQueryProtocolV3 protocol, Properties manifest, List<Case> cases,
                                         Map<String, Review> reviews) {
         Set<String> drafters = new LinkedHashSet<>();
         cases.stream().map(Case::draftedBy).filter(d -> !d.equals(NO_DRAFT)).forEach(drafters::add);
-        BookQueryProtocolV3.validateSignOff(manifest, "review", drafters);
+        LocalDate started = isoDate(manifest, "authoring.startedAt");
+        LocalDate lastDraft = manifest.containsKey("draft.draftedAt") ? isoDate(manifest, "draft.draftedAt") : started;
+        BookQueryProtocolV3.validateSignOff(manifest, "review", drafters, lastDraft);
         if (!BookQueryProtocolV3.REVIEWED.equals(manifest.getProperty("review.status"))) {
             return;
         }
@@ -351,12 +323,10 @@ record BookQueryDatasetV3(BookQueryProtocolV3 protocol, Properties manifest, Lis
             check(DRAFT_VERIFICATION.equals(manifest.getProperty("draft.verification")),
                     "drafted cases (" + String.join(", ", drafters) + ") need draft.verification="
                             + DRAFT_VERIFICATION);
-            isoDate(manifest, "draft.draftedAt");
+            require(manifest, "draft.draftedAt");
         }
-        LocalDate protocolSigned = isoDate(protocol.manifest(), "protocol.reviewedAt");
-        LocalDate started = isoDate(manifest, "authoring.startedAt");
-        check(!started.isBefore(protocolSigned), "authoring started before the protocol was signed");
-        check(!isoDate(manifest, "review.reviewedAt").isBefore(started), "review.reviewedAt precedes authoring");
+        check(!started.isBefore(isoDate(protocol.manifest(), "protocol.reviewedAt")),
+                "authoring started before the protocol was signed");
     }
 
     private static void validateFinalGate(Properties manifest) {
@@ -372,13 +342,5 @@ record BookQueryDatasetV3(BookQueryProtocolV3 protocol, Properties manifest, Lis
         require(manifest, "finalGate.candidate");
         check(!isoDate(manifest, "finalGate.declaredAt").isBefore(isoDate(manifest, "review.reviewedAt")),
                 "the final gate cannot be declared before the review");
-    }
-
-    private static long number(String value, String id) {
-        try {
-            return Long.parseLong(value);
-        } catch (NumberFormatException e) {
-            throw new IllegalStateException(id + ": not a number: " + value);
-        }
     }
 }

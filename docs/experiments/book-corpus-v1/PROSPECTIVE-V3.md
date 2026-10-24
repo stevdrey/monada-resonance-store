@@ -35,7 +35,8 @@ The corpus and chunk binding (`corpusManifest.sha256`, `source.*`, `chunking.pol
 
 Fixed by issue #185: **40 slots, 28 DEV and 12 FINAL_ONLY**. Minimums: at least 8 `NO_ANSWER`, at least 8
 `PARAPHRASE`, and at least 8 narrative, multi-evidence or distractor cases (`NARRATIVE_TEMPORAL` + `MULTI_EVIDENCE` +
-`CONFOUNDER`). The validator hard-codes these values, so a protocol cannot declare lower ones.
+`CONFOUNDER`). The validator hard-codes these values, so a protocol cannot declare lower ones. Every category also
+keeps at least one DEV slot, so none is held out entirely.
 
 | Category | Slots | DEV | FINAL_ONLY |
 | --- | --- | --- | --- |
@@ -115,8 +116,12 @@ Unknown columns fail loading.
    - the protocol itself is signed;
    - all 40 slots have a query with an `APPROVED` receipt;
    - `review.reviewer`, `review.approvedBy` and an ISO `review.reviewedAt` are present, and neither person is a drafter
-     or a model (names such as `claude`, `codex`, `GPT-5` or `review bot` are rejected);
-   - the dates are ordered: protocol signed ≤ `authoring.startedAt` ≤ `review.reviewedAt`.
+     or a model. Model product and vendor names (`claude*`, `gpt*`, `codex`, `gemini`, `copilot`, `devin`, …) and
+     GitHub app accounts (`…[bot]`) are rejected. Generic words that are also human names (`Ai`, `Model`, `Agent`)
+     are not;
+   - the dates are ordered: protocol signed ≤ `authoring.startedAt` ≤ `draft.draftedAt` (when present) ≤
+     `review.reviewedAt`. Date formats, and drafting no earlier than authoring, are checked in every status.
+     Likewise the protocol's `protocol.reviewedAt` cannot precede its `protocol.draftedAt`.
 
 Only `REVIEWED` produces judgments. A model-only draft can never be presented as reviewed. The full `cases()` list
 is gated too: it throws unless the dataset is `REVIEWED` and the final gate is open, so no caller can reach

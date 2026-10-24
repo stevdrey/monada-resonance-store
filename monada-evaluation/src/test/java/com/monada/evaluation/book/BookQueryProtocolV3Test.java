@@ -35,7 +35,7 @@ class BookQueryProtocolV3Test {
     @BeforeAll
     static void load() {
         COMMITTED = BookQueryProtocolV3.load(DIR);
-        PLAN = BookQueryProtocolV3.lines(BookQueryProtocolV3.read(DIR.resolve(BookQueryProtocolV3.PLAN_FILE)), "plan");
+        PLAN = BookQueryDataset.lines(BookQueryProtocolV3.read(DIR.resolve(BookQueryProtocolV3.PLAN_FILE)), "plan");
         V1 = BookQueryDataset.load().manifest();
     }
 
@@ -111,7 +111,8 @@ class BookQueryProtocolV3Test {
 
     @Test
     void rejectsAModelDraftPresentedAsReviewed() {
-        for (String model : List.of("claude", "Claude Opus", "codex", "GPT-5", "devin-agent", "review bot")) {
+        for (String model : List.of("claude", "Claude Opus", "codex", "GPT-5", "devin-agent",
+                "chatgpt-codex-connector[bot]")) {
             rejects("is not a human reviewer", m -> {
                 sign(m);
                 m.setProperty("protocol.reviewer", model);
@@ -124,6 +125,43 @@ class BookQueryProtocolV3Test {
         rejects("other than the drafter", m -> {
             sign(m);
             m.setProperty("protocol.draftedBy", "Steven Rey Sequeira");
+        });
+    }
+
+    @Test
+    void humanNamesThatShareGenericWordsAreAccepted() {
+        for (String human : List.of("Ai Tanaka", "Model Smith", "Agent Orange", "Talbot")) {
+            assertFalse(BookQueryProtocolV3.looksLikeModel(human), human);
+            assertTrue(parse(m -> {
+                sign(m);
+                m.setProperty("protocol.reviewer", human);
+            }, plan -> { }).reviewed(), human);
+        }
+    }
+
+    @Test
+    void rejectsUndatedDraftsAndASignatureBeforeTheDraft() {
+        rejects("protocol.draftedAt is not an ISO date", m -> m.setProperty("protocol.draftedAt", "tbd"));
+        rejects("protocol.reviewedAt precedes what it reviews", m -> {
+            sign(m);
+            m.setProperty("protocol.reviewedAt", "2026-10-01");
+        });
+    }
+
+    @Test
+    void everyCategoryKeepsADevSlot() {
+        rejects("category AMBIGUOUS needs at least one DEV slot", m -> {
+            m.setProperty("counts.LITERAL.FINAL_ONLY", "0");
+            m.setProperty("counts.PARAPHRASE.FINAL_ONLY", "0");
+            m.setProperty("counts.NARRATIVE_TEMPORAL.FINAL_ONLY", "1");
+            m.setProperty("counts.AMBIGUOUS.FINAL_ONLY", "5");
+        }, plan -> {
+            for (String slot : List.of("V3-LIT-03", "V3-PAR-02", "V3-PAR-06", "V3-NAR-03")) {
+                setSplit(plan, slot, Split.DEV);
+            }
+            for (String slot : List.of("V3-AMB-01", "V3-AMB-02", "V3-AMB-03", "V3-AMB-05")) {
+                setSplit(plan, slot, Split.FINAL_ONLY);
+            }
         });
     }
 
@@ -163,7 +201,7 @@ class BookQueryProtocolV3Test {
 
     @Test
     void rejectsDriftAndRetrievalLeakage() {
-        rejects("plan.sha256 does not match", m -> m.setProperty("plan.sha256", "0".repeat(64)), false);
+        rejects("plan.sha256 does not match", m -> m.setProperty("plan.sha256", "0".repeat(64)));
         rejects("source.sha256 differs", m -> m.setProperty("source.sha256", "a".repeat(64)));
         rejects("must not carry retrieval output", m -> m.setProperty("selection.baselineScore", "0.31"));
         rejects("frozen before any retrieval run", m -> m.setProperty("authoring.retrievalRunsBeforeFreeze", "1"));
@@ -181,7 +219,20 @@ class BookQueryProtocolV3Test {
 
     /** A protocol copy after {@code edit}, with plan and split digests recomputed. */
     static BookQueryProtocolV3 parse(Consumer<Properties> edit, Consumer<List<String>> planEdit) {
-        return parse(edit, planEdit, true);
+        Properties m = committedManifest();
+        List<String> plan = new ArrayList<>(PLAN);
+        planEdit.accept(plan);
+        m.setProperty("plan.sha256", BookQueryDataset.sha256(planBytes(plan)));
+        Map<String, Split> declared = new java.util.TreeMap<>();
+        plan.subList(1, plan.size()).forEach(line -> {
+            String[] f = line.split("\\|", -1);
+            if (f.length == 3 && (f[2].equals("DEV") || f[2].equals("FINAL_ONLY"))) {
+                declared.put(f[0], Split.valueOf(f[2]));
+            }
+        });
+        m.setProperty("split.digest", BookQueryProtocolV3.splitDigest(declared));
+        edit.accept(m);
+        return BookQueryProtocolV3.parse(m, planBytes(plan), V1);
     }
 
     static byte[] planBytes(List<String> plan) {
@@ -194,38 +245,18 @@ class BookQueryProtocolV3Test {
                 BookQueryProtocolV3.read(DIR.resolve(BookQueryProtocolV3.PROTOCOL_FILE)), "protocol");
     }
 
-    private static BookQueryProtocolV3 parse(Consumer<Properties> edit, Consumer<List<String>> planEdit,
-                                             boolean recompute) {
-        Properties m = committedManifest();
-        List<String> plan = new ArrayList<>(PLAN);
-        planEdit.accept(plan);
-        if (recompute) {
-            m.setProperty("plan.sha256", BookQueryDataset.sha256(planBytes(plan)));
-            Map<String, Split> declared = new java.util.TreeMap<>();
-            plan.subList(1, plan.size()).forEach(line -> {
-                String[] f = line.split("\\|", -1);
-                if (f.length == 3 && (f[2].equals("DEV") || f[2].equals("FINAL_ONLY"))) {
-                    declared.put(f[0], Split.valueOf(f[2]));
-                }
-            });
-            m.setProperty("split.digest", BookQueryProtocolV3.splitDigest(declared));
-        }
-        edit.accept(m);
-        return BookQueryProtocolV3.parse(m, planBytes(plan), V1);
-    }
-
     private static void rejects(String message, Consumer<Properties> edit) {
         rejects(message, edit, plan -> { });
     }
 
-    private static void rejects(String message, Consumer<Properties> edit, boolean recompute) {
-        var e = assertThrows(IllegalStateException.class, () -> parse(edit, plan -> { }, recompute));
+    private static void rejects(String message, Consumer<Properties> edit, Consumer<List<String>> planEdit) {
+        var e = assertThrows(IllegalStateException.class, () -> parse(edit, planEdit));
         assertTrue(e.getMessage().contains(message), e.getMessage());
     }
 
-    private static void rejects(String message, Consumer<Properties> edit, Consumer<List<String>> planEdit) {
-        var e = assertThrows(IllegalStateException.class, () -> parse(edit, planEdit, true));
-        assertTrue(e.getMessage().contains(message), e.getMessage());
+    private static void setSplit(List<String> plan, String slot, Split split) {
+        int i = indexOf(plan, slot);
+        plan.set(i, plan.get(i).substring(0, plan.get(i).lastIndexOf('|') + 1) + split);
     }
 
     private static int indexOf(List<String> plan, String slot) {
