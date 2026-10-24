@@ -45,14 +45,16 @@ final class BookJudgmentCoverageReport {
         line(out, "");
         line(out, "== Definitions ==");
         line(out, "occurrence = one ranked top-" + BookRecallEvaluator.MAX_K + " hit of one query in the frozen trace;"
-                + " pair = a distinct (query, chunk); the trace ranks an atom at most once per query, so they coincide");
+                + " pair = a distinct (query, chunk); the trace ranks an atom at most once per query, so they"
+                + " coincide");
         line(out, "labels: E2/E1 judged evidence, C0 judged confounder, U unjudged (unknown, never a negative)");
         line(out, "known = U counted as not relevant (the reported value); upper = every U counted as relevant; R@K has"
                 + " no upper bound because unjudged chunks outside the top-" + BookRecallEvaluator.MAX_K
                 + " leave the relevant set unknown");
         line(out, "relevant = judged EVIDENCE chunks of an answerable query (every chunk is its own atom here);"
                 + " denominator = answerable queries of the group");
-        line(out, "delta = v2 - v1 on identical hits: attributable only to the labels v2 adds");
+        line(out, "delta = v2 - v1 on identical hits: attributable only to the labels v2 adds; computed before"
+                + " rounding, so it can differ from the rounded v1/v2 columns by +-0.0001");
         line(out, "");
 
         line(out, "== Unchanged ranking (identical on both sides by construction) ==");
@@ -138,10 +140,10 @@ final class BookJudgmentCoverageReport {
             }
             if (q.answerable()) {
                 text.append(" | relevant ").append(q.v1().relevant()).append("->").append(q.v2().relevant())
-                        .append(" RR ").append(BookJudgmentCoverage.num(q.v1().reciprocalRank())).append("->")
-                        .append(BookJudgmentCoverage.num(q.v2().reciprocalRank())).append(" R@10 ")
-                        .append(BookJudgmentCoverage.num(q.v1().recall().get(10))).append("->")
-                        .append(BookJudgmentCoverage.num(q.v2().recall().get(10)));
+                        .append(" RR ").append(BookRecallReport.num(q.v1().reciprocalRank())).append("->")
+                        .append(BookRecallReport.num(q.v2().reciprocalRank())).append(" R@10 ")
+                        .append(BookRecallReport.num(q.v1().recall().get(10))).append("->")
+                        .append(BookRecallReport.num(q.v2().recall().get(10)));
             }
             line(out, text.toString());
         }
@@ -161,10 +163,10 @@ final class BookJudgmentCoverageReport {
         double v1 = BookJudgmentCoverage.mean(group, q -> known.apply(q.v1()));
         double v2 = BookJudgmentCoverage.mean(group, q -> known.apply(q.v2()));
         String delta = Double.isNaN(v1) ? "n/a" : String.format(Locale.ROOT, "%+.4f", v2 - v1);
-        String bound = upper == null ? "-" : BookJudgmentCoverage.num(
+        String bound = upper == null ? "-" : BookRecallReport.num(
                 BookJudgmentCoverage.mean(group, q -> upper.apply(q.v2())));
-        line(out, String.format(Locale.ROOT, "%-7s %-8s %-8s %-8s %s", name, BookJudgmentCoverage.num(v1),
-                BookJudgmentCoverage.num(v2), delta, bound));
+        line(out, String.format(Locale.ROOT, "%-7s %-8s %-8s %-8s %s", name, BookRecallReport.num(v1),
+                BookRecallReport.num(v2), delta, bound));
     }
 
     private static long t(List<Query> group, Predicate<Row> filter, String from, String to) {

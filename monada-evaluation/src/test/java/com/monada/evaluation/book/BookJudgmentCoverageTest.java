@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
 import java.util.function.UnaryOperator;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -118,13 +119,53 @@ class BookJudgmentCoverageTest {
     }
 
     @Test
-    void aChangedAtomOrScoreChangesTheRankingDigest() {
+    void aMalformedScoreTokenFailsClosed() {
+        String line = firstHit("AMB-01");
+        byte[] bytes = edited(line, line.replace(" 0.312270 ", " 0.1.2 "));
+        assertRejected(bytes, V2, "malformed score token 0.1.2 at rank 1");
+    }
+
+    @Test
+    void aChangedScoreChangesTheRankingDigest() {
         String line = hitLine("AMB-01", 2);
         byte[] bytes = edited(line, line.replace(" 0.266776 ", " 0.266777 "));
         Result drifted = BookJudgmentCoverage.compare(bytes, BookQueryDataset.sha256(bytes), V2);
         assertNotEquals(RESULT.rankingDigest(), drifted.rankingDigest());
         // The pinned baseline itself never accepts these bytes.
         assertThrows(IllegalStateException.class, () -> BookJudgmentCoverage.load(bytes));
+    }
+
+    @Test
+    void aChangedAtomIdChangesTheRankingDigest() {
+        String line = firstHit("AMB-01");
+        String atom = line.substring(line.indexOf("atom=") + 5);
+        byte[] bytes = edited(line, line.replace(atom, "00000000-0000-3000-8000-000000000000"));
+        Result drifted = BookJudgmentCoverage.compare(bytes, BookQueryDataset.sha256(bytes), V2);
+        assertNotEquals(RESULT.rankingDigest(), drifted.rankingDigest());
+        assertThrows(IllegalStateException.class, () -> BookJudgmentCoverage.load(bytes));
+    }
+
+    @Test
+    void swappedQueryBlocksAreRejected() {
+        String text = new String(REPORT, StandardCharsets.UTF_8);
+        int trace = text.indexOf("== Per-query trace");
+        int first = text.indexOf("\nAMB-01 ", trace) + 1;
+        int second = text.indexOf("\nAMB-02 ", trace) + 1;
+        int third = text.indexOf("\nAMB-03 ", trace) + 1;
+        byte[] bytes = (text.substring(0, first) + text.substring(second, third) + text.substring(first, second)
+                + text.substring(third)).getBytes(StandardCharsets.UTF_8);
+        assertRejected(bytes, V2, "trace query order is not the id order");
+    }
+
+    @Test
+    void aMetricLineCopiedFromAnotherPartitionIsRejected() {
+        // The HOLDOUT K=1 row exists in the report, so only a check anchored to the DEV block catches this.
+        String text = new String(REPORT, StandardCharsets.UTF_8);
+        String dev = "\n1    0.0500   0.0250   0.0500   0.0500         0               19\n";
+        String holdout = "\n1    0.1429   0.1429   0.1429   0.1429         0               6\n";
+        assertTrue(text.contains(dev) && text.contains(holdout));
+        byte[] bytes = text.replaceFirst(Pattern.quote(dev), holdout).getBytes(StandardCharsets.UTF_8);
+        assertRejected(bytes, V2, "DEV: v1 projection does not reproduce the frozen line");
     }
 
     @Test
@@ -170,6 +211,23 @@ class BookJudgmentCoverageTest {
         Case dev = V2.cases().stream().filter(c -> c.id().equals("LIT-01")).findFirst().orElseThrow();
         assertEquals(Split.DEV, dev.split());
         assertRejected(REPORT, withCase("LIT-01", c -> addJudgment(c, KEY + "s012/c0000")), "is not a selected pair");
+    }
+
+    @Test
+    void anAddedJudgmentThatDiffersFromItsReviewIsRejected() {
+        // Same count, same chunk, valid grade: only the per-judgment comparison with review.psv catches the flip.
+        BookQueryDatasetV2 flipped = withCase("MUL-05", c -> {
+            List<Judgment> all = new ArrayList<>(c.judgments());
+            for (int i = 0; i < all.size(); i++) {
+                Judgment j = all.get(i);
+                if (j.role() == Role.EVIDENCE && j.grade() == 1 && j.chunkKey().equals(KEY + "s007/c0002")) {
+                    all.set(i, new Judgment(j.chunkKey(), j.byteStart(), j.byteEnd(), j.spanSha256(), 0,
+                            Role.CONFOUNDER, j.note()));
+                }
+            }
+            return new Case(c.id(), c.split(), c.category(), c.answerable(), c.text(), c.rationale(), all);
+        });
+        assertRejected(REPORT, flipped, "differs from its review decision");
     }
 
     private static Case addJudgment(Case c, String chunk) {

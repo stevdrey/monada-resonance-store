@@ -28,7 +28,7 @@ occurrence = one ranked top-10 hit of one query in the frozen trace; pair = a di
 labels: E2/E1 judged evidence, C0 judged confounder, U unjudged (unknown, never a negative)
 known = U counted as not relevant (the reported value); upper = every U counted as relevant; R@K has no upper bound because unjudged chunks outside the top-10 leave the relevant set unknown
 relevant = judged EVIDENCE chunks of an answerable query (every chunk is its own atom here); denominator = answerable queries of the group
-delta = v2 - v1 on identical hits: attributable only to the labels v2 adds
+delta = v2 - v1 on identical hits: attributable only to the labels v2 adds; computed before rounding, so it can differ from the rounded v1/v2 columns by +-0.0001
 
 == Unchanged ranking (identical on both sides by construction) ==
 queries 32, ranked hits 320, new searches 0

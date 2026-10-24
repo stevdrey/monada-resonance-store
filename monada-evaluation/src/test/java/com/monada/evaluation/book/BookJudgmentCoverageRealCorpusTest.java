@@ -14,9 +14,10 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Opt-in check on the real seeded Store (Issue #184): the coverage report's only ranking input, the frozen trace, is
- * still what a fresh evaluation ranks (atom ids, ranks, score tokens), and the raw score bits agree between two fresh
- * evaluations. The report itself never searches; this test is the only place that does. Skipped unless
- * {@value #WORK_ENV} names the seeded work directory; tests never download anything.
+ * still what a fresh evaluation ranks (atom ids, ranks, score tokens). The evaluator itself runs every query on two
+ * fresh instances and requires equal {@code Hit} records, whose {@code double} equality is {@link Double#compare},
+ * so the raw score bits are compared there. The report never searches; this test is the only place that does.
+ * Skipped unless {@value #WORK_ENV} names the seeded work directory; tests never download anything.
  */
 class BookJudgmentCoverageRealCorpusTest {
     private static final String WORK_ENV = "MONADA_BOOK_STORE_READBACK_V1_WORK";
@@ -31,23 +32,16 @@ class BookJudgmentCoverageRealCorpusTest {
                 .resolve("../" + BookUnjudgedSelection.BASELINE_REPORT).normalize());
         List<Row> rows = BookJudgmentCoverage.load(baseline).rows();
 
-        List<RankedHit> first = fresh(seeded);
-        List<RankedHit> second = fresh(seeded);
-        assertEquals(rows.size(), first.size());
-        for (int i = 0; i < rows.size(); i++) {
-            Row row = rows.get(i);
-            RankedHit hit = first.get(i);
-            assertEquals(List.of(row.rank(), row.atomId(), row.score()), List.of(hit.rank(), hit.atomId(),
-                    String.format(Locale.ROOT, "%.6f", hit.score())), row.queryId() + " #" + row.rank());
-            assertEquals(Double.doubleToLongBits(hit.score()), Double.doubleToLongBits(second.get(i).score()),
-                    row.queryId() + " #" + row.rank() + ": score bits differ between fresh evaluations");
-        }
-    }
-
-    private static List<RankedHit> fresh(Path seeded) throws Exception {
-        // The trace lists queries in id order.
-        return BookRecallEvaluator.evaluate(seeded, BookQueryDataset.load()).cases().stream()
+        // One evaluation: it already compares two fresh runs bit for bit and fails on any difference.
+        List<RankedHit> fresh = BookRecallEvaluator.evaluate(seeded, BookQueryDataset.load()).cases().stream()
                 .sorted(Comparator.comparing(c -> c.query().id()))
                 .flatMap(c -> c.hits().stream()).toList();
+        assertEquals(rows.size(), fresh.size());
+        for (int i = 0; i < rows.size(); i++) {
+            Row row = rows.get(i);
+            RankedHit hit = fresh.get(i);
+            assertEquals(List.of(row.rank(), row.atomId(), row.score()), List.of(hit.rank(), hit.atomId(),
+                    String.format(Locale.ROOT, "%.6f", hit.score())), row.queryId() + " #" + row.rank());
+        }
     }
 }

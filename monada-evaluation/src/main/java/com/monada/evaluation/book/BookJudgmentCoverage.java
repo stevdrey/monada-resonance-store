@@ -16,13 +16,14 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -48,6 +49,8 @@ final class BookJudgmentCoverage {
     static final List<String> LABELS = List.of("E2", "E1", "C0", "U");
 
     private static final String TRACE_SECTION = "\n== Per-query trace (all hits, raw atom ids) ==\n";
+    /** A query head line of the trace; the same shape {@code BookUnjudgedSelection} parses. */
+    private static final Pattern TRACE_HEAD = Pattern.compile("([A-Z]{3}-[0-9]{2}) (DEV|HOLDOUT) .*");
 
     /** One ranked hit of the frozen trace with its label under each judgment version. */
     record Row(String queryId, Split split, Category category, boolean answerable, int rank, String atomId,
@@ -117,15 +120,28 @@ final class BookJudgmentCoverage {
 
     /** Checks the bundled dataset files against their pins, then compares on the pinned {@code baseline}. */
     static Result load(byte[] baseline) {
-        pin("book-queries-v1 manifest.properties", BookQueryDataset.resource("manifest.properties"),
+        // Each file is read once: the bytes that are pinned are the bytes that are parsed.
+        byte[] v1Manifest = pin("book-queries-v1 manifest.properties", BookQueryDataset.resource("manifest.properties"),
                 V1_MANIFEST_SHA256);
-        pin("book-queries-v2 manifest.properties", BookQueryDatasetV2.resource("manifest.properties"),
-                V2_MANIFEST_SHA256);
-        pin("book-queries-v2 selection.psv", BookQueryDatasetV2.resource(BookQueryDatasetV2.SELECTION_FILE),
-                V2_SELECTION_SHA256);
-        pin("book-queries-v2 review.psv", BookQueryDatasetV2.resource(BookQueryDatasetV2.REVIEW_FILE),
+        byte[] v2Manifest = pin("book-queries-v2 manifest.properties",
+                BookQueryDatasetV2.resource("manifest.properties"), V2_MANIFEST_SHA256);
+        byte[] selection = pin("book-queries-v2 selection.psv",
+                BookQueryDatasetV2.resource(BookQueryDatasetV2.SELECTION_FILE), V2_SELECTION_SHA256);
+        byte[] review = pin("book-queries-v2 review.psv", BookQueryDatasetV2.resource(BookQueryDatasetV2.REVIEW_FILE),
                 V2_REVIEW_SHA256);
-        return compare(baseline, BookUnjudgedSelection.BASELINE_SHA256, BookQueryDatasetV2.load());
+        // The pinned v1 manifest pins its other files by digest, which BookQueryDataset.parse checks.
+        Properties v1Properties = BookQueryDatasetV2.readManifest(v1Manifest);
+        BookQueryDataset v1 = BookQueryDataset.parse(v1Properties, resource(v1Properties, "queries.file"),
+                resource(v1Properties, "judgments.file"), resource(v1Properties, "chunkMap.file"));
+        BookQueryDatasetV2 v2 = BookQueryDatasetV2.parse(BookQueryDatasetV2.readManifest(v2Manifest), v1, v1Manifest,
+                selection, review);
+        return compare(baseline, BookUnjudgedSelection.BASELINE_SHA256, v2);
+    }
+
+    private static byte[] resource(Properties manifest, String key) {
+        String name = manifest.getProperty(key);
+        check(name != null && !name.isBlank(), "book-queries-v1 manifest is missing " + key);
+        return BookQueryDataset.resource(name);
     }
 
     /** As {@link #load} on already loaded data; tests pass edited traces (with their pin) and edited v2 datasets. */
@@ -145,13 +161,17 @@ final class BookJudgmentCoverage {
         v1.cases().forEach(c -> v1Cases.put(c.id(), c));
         Map<String, Case> v2Cases = new TreeMap<>();
         v2.cases().forEach(c -> v2Cases.put(c.id(), c));
-        check(traceOrder(text).equals(List.copyOf(v1Cases.keySet())),
+        Map<String, String> heads = traceHeads(text);
+        check(List.copyOf(heads.keySet()).equals(List.copyOf(v1Cases.keySet())),
                 "trace query order is not the id order of book-queries-v1");
         Map<String, List<Hit>> byQuery = new LinkedHashMap<>();
         v1Cases.keySet().forEach(id -> byQuery.put(id, new ArrayList<>()));
         hits.forEach(h -> byQuery.get(h.queryId()).add(h));
         Set<String> selected = v2.selection().stream().map(p -> p.queryId() + "|" + p.chunkKey())
                 .collect(Collectors.toSet());
+        Map<String, Judgment> reviewed = new LinkedHashMap<>();
+        v2.reviews().stream().filter(BookQueryDatasetV2.Review::labels)
+                .forEach(r -> reviewed.put(r.queryId() + "|" + r.chunkKey(), expectedJudgment(r)));
 
         List<Query> queries = new ArrayList<>();
         int addedTotal = 0;
@@ -168,6 +188,8 @@ final class BookJudgmentCoverage {
                         before.id() + ": added judgment on " + j.chunkKey() + " is not a selected pair");
                 check(traced.contains(j.chunkKey()),
                         before.id() + ": added judgment on " + j.chunkKey() + " is not a traced hit");
+                check(j.equals(reviewed.get(before.id() + "|" + j.chunkKey())), before.id() + ": added judgment on "
+                        + j.chunkKey() + " differs from its review decision (role, grade, span or note)");
             }
             addedTotal += added.size();
             Map<String, Judgment> judged = new LinkedHashMap<>();
@@ -183,11 +205,11 @@ final class BookJudgmentCoverage {
             queries.add(new Query(before, after, rows, added, metrics(before, rows, Row::v1),
                     metrics(after, rows, Row::v2)));
         }
-        check(addedTotal == v2.reviews().stream().filter(BookQueryDatasetV2.Review::labels).count(),
-                "book-queries-v2 adds " + addedTotal + " judgments, but its reviews label a different number");
+        check(addedTotal == reviewed.size(),
+                "book-queries-v2 adds " + addedTotal + " judgments, but its reviews label " + reviewed.size());
         Result result = new Result(BookQueryDataset.sha256(baseline), rankingDigest(queries), v1.manifest(),
                 v2.manifest(), queries);
-        requireBaselineMetrics(text, result);
+        requireBaselineMetrics(text, heads, result);
         return result;
     }
 
@@ -199,7 +221,7 @@ final class BookJudgmentCoverage {
         return BookQueryDataset.sha256(rows.toString().getBytes(StandardCharsets.UTF_8));
     }
 
-    /** Mean of {@code metric} over the answerable queries of {@code group}, summed then divided as the baseline does. */
+    /** Mean of {@code metric} over the answerable queries of {@code group}, summed then divided like the baseline. */
     static double mean(List<Query> group, Function<Query, Double> metric) {
         List<Query> answerable = group.stream().filter(Query::answerable).toList();
         return answerable.isEmpty() ? Double.NaN
@@ -210,10 +232,6 @@ final class BookJudgmentCoverage {
     static int count(List<Query> group, int k, Function<Row, String> label, String value) {
         return (int) group.stream().filter(Query::answerable).flatMap(q -> q.rows().stream().limit(k))
                 .filter(r -> label.apply(r).equals(value)).count();
-    }
-
-    static String num(double value) {
-        return Double.isNaN(value) ? "n/a" : String.format(Locale.ROOT, "%.4f", value);
     }
 
     private static Metrics metrics(Case c, List<Row> rows, Function<Row, String> label) {
@@ -256,6 +274,12 @@ final class BookJudgmentCoverage {
                 directHit, upperPrecision, upperHit, ReciprocalRank.compute(optimistic, keys));
     }
 
+    /** The judgment a labelling review must become (as {@code BookQueryDatasetV2} merges it). */
+    private static Judgment expectedJudgment(BookQueryDatasetV2.Review r) {
+        Role role = r.decision() == BookQueryDatasetV2.Decision.EVIDENCE ? Role.EVIDENCE : Role.CONFOUNDER;
+        return new Judgment(r.chunkKey(), r.byteStart(), r.byteEnd(), r.spanSha256(), r.grade(), role, r.note());
+    }
+
     /** The v2-only judgments of a case; the v1 judgments must come first, unchanged and in order. */
     private static List<Judgment> added(Case before, Case after) {
         check(after.split() == before.split() && after.category() == before.category()
@@ -280,10 +304,19 @@ final class BookJudgmentCoverage {
         check(ranked.size() <= BookRecallEvaluator.MAX_K, id + ": more than " + BookRecallEvaluator.MAX_K + " hits");
         for (int i = 0; i < ranked.size(); i++) {
             check(ranked.get(i).rank() == i + 1, id + ": ranks are not contiguous from 1 at " + ranked.get(i).rank());
-            double score = Double.parseDouble(ranked.get(i).score());
+            double score = score(id, ranked.get(i));
             check(!Double.isNaN(score), id + ": score is not a number at rank " + (i + 1));
-            check(i == 0 || Double.parseDouble(ranked.get(i - 1).score()) >= score,
+            check(i == 0 || score(id, ranked.get(i - 1)) >= score,
                     id + ": scores are not descending at rank " + (i + 1));
+        }
+    }
+
+    /** The trace accepts any {@code [0-9.Ee+-]} token, so an unparsable one must still fail closed. */
+    private static double score(String id, Hit hit) {
+        try {
+            return Double.parseDouble(hit.score());
+        } catch (NumberFormatException e) {
+            throw new IllegalStateException(id + ": malformed score token " + hit.score() + " at rank " + hit.rank());
         }
     }
 
@@ -310,25 +343,24 @@ final class BookJudgmentCoverage {
         return null;
     }
 
-    private static List<String> traceOrder(String text) {
+    /** The query head line of each traced query, in trace order, from one pass over the trace section. */
+    private static Map<String, String> traceHeads(String text) {
         int at = text.indexOf(TRACE_SECTION);
-        return List.of(text.substring(at + TRACE_SECTION.length()).split("\n")).stream()
-                .filter(line -> line.matches("[A-Z]{3}-[0-9]{2} (DEV|HOLDOUT) .*"))
-                .map(line -> line.substring(0, 6)).toList();
+        Map<String, String> heads = new LinkedHashMap<>();
+        for (String line : text.substring(at + TRACE_SECTION.length()).split("\n")) {
+            Matcher head = TRACE_HEAD.matcher(line);
+            if (head.matches()) {
+                check(heads.put(head.group(1), line) == null, head.group(1) + ": traced twice");
+            }
+        }
+        return heads;
     }
 
     /**
      * The v1 projection must reproduce the frozen report: each answerable query's trace head metrics and each
      * partition's P/R/Hit/direct, confounder/unjudged hit and MRR lines, as the baseline formats them.
      */
-    private static void requireBaselineMetrics(String text, Result result) {
-        int at = text.indexOf(TRACE_SECTION);
-        Map<String, String> heads = new LinkedHashMap<>();
-        for (String line : text.substring(at + TRACE_SECTION.length()).split("\n")) {
-            if (line.matches("[A-Z]{3}-[0-9]{2} (DEV|HOLDOUT) .*")) {
-                heads.put(line.substring(0, 6), line);
-            }
-        }
+    private static void requireBaselineMetrics(String text, Map<String, String> heads, Result result) {
         for (Query q : result.queries()) {
             String head = heads.get(q.id());
             if (!q.answerable()) {
@@ -338,21 +370,33 @@ final class BookJudgmentCoverage {
             check(head.endsWith(headMetrics(q.v1())), q.id() + ": v1 projection does not reproduce the frozen trace"
                     + " metrics; expected suffix" + headMetrics(q.v1()) + " in: " + head);
         }
-        String table = text.substring(0, at);
+        List<String> table = List.of(text.substring(0, text.indexOf(TRACE_SECTION)).split("\n", -1));
         for (String partition : PARTITIONS) {
-            for (String line : partitionLines(partition, result.in(partition))) {
-                check(table.contains("\n" + line + "\n"),
-                        partition + ": v1 projection does not reproduce the frozen line: " + line);
+            List<String> expected = partitionLines(partition, result.in(partition));
+            // Anchored to this partition's own block: header, column titles, the K rows, then MRR.
+            int start = -1;
+            for (int i = 0; i < table.size() && start < 0; i++) {
+                if (table.get(i).startsWith("-- " + partition + ": queries ")) {
+                    start = i;
+                }
+            }
+            check(start >= 0 && start + expected.size() < table.size(),
+                    partition + ": the frozen report has no partition block");
+            List<String> actual = new ArrayList<>(table.subList(start, start + expected.size() + 1));
+            actual.remove(1);
+            for (int i = 0; i < expected.size(); i++) {
+                check(expected.get(i).equals(actual.get(i)), partition + ": v1 projection does not reproduce the"
+                        + " frozen line: expected " + expected.get(i) + ", found " + actual.get(i));
             }
         }
     }
 
     private static String headMetrics(Metrics m) {
         StringBuilder head = new StringBuilder(" firstEvidenceRank=").append(m.firstRank()).append(" RR=")
-                .append(num(m.reciprocalRank()));
+                .append(BookRecallReport.num(m.reciprocalRank()));
         for (int k : BookRecallEvaluator.KS) {
-            head.append(" P@").append(k).append('=').append(num(m.precision().get(k)));
-            head.append(" R@").append(k).append('=').append(num(m.recall().get(k)));
+            head.append(" P@").append(k).append('=').append(BookRecallReport.num(m.precision().get(k)));
+            head.append(" R@").append(k).append('=').append(BookRecallReport.num(m.recall().get(k)));
         }
         return head.toString();
     }
@@ -364,12 +408,13 @@ final class BookJudgmentCoverage {
         lines.add("-- " + partition + ": queries " + group.size() + ", answerable " + answerable + " (denominator),"
                 + " NO_ANSWER " + (group.size() - answerable));
         for (int k : BookRecallEvaluator.KS) {
-            lines.add(String.format(Locale.ROOT, "%-4d %-8s %-8s %-8s %-14s %-15d %d", k,
-                    num(mean(group, q -> q.v1().precision().get(k))), num(mean(group, q -> q.v1().recall().get(k))),
-                    num(mean(group, q -> q.v1().hit().get(k))), num(mean(group, q -> q.v1().directHit().get(k))),
-                    count(group, k, Row::v1, "C0"), count(group, k, Row::v1, "U")));
+            lines.add(BookRecallReport.partitionRow(k, mean(group, q -> q.v1().precision().get(k)),
+                    mean(group, q -> q.v1().recall().get(k)), mean(group, q -> q.v1().hit().get(k)),
+                    mean(group, q -> q.v1().directHit().get(k)), count(group, k, Row::v1, "C0"),
+                    count(group, k, Row::v1, "U")));
         }
-        lines.add("MRR " + num(mean(group, q -> q.v1().reciprocalRank())) + " (n=" + answerable + ")");
+        lines.add("MRR " + BookRecallReport.num(mean(group, q -> q.v1().reciprocalRank())) + " (n=" + answerable
+                + ")");
         return lines;
     }
 
@@ -379,9 +424,10 @@ final class BookJudgmentCoverage {
                 .filter(r -> r.v1().equals(from) && r.v2().equals(to)).count();
     }
 
-    private static void pin(String name, byte[] bytes, String pinned) {
+    private static byte[] pin(String name, byte[] bytes, String pinned) {
         String actual = BookQueryDataset.sha256(bytes);
         check(pinned.equals(actual), name + " SHA-256 is " + actual + ", pinned " + pinned);
+        return bytes;
     }
 
     private static void check(boolean condition, String message) {

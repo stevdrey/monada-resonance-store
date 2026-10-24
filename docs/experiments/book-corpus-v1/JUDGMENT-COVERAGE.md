@@ -36,15 +36,15 @@ comparator refuses to render when any of these checks fails:
 
 | Check | Rejects |
 | --- | --- |
-| Pinned SHA-256 (in code) of the baseline, v1 `manifest.properties` and v2 `manifest.properties`, `selection.psv`, `review.psv` | Any edited input, including an edit that also refreshes the manifest digests. |
+| Pinned SHA-256 (in code) of the baseline, v1 `manifest.properties` and v2 `manifest.properties`, `selection.psv`, `review.psv` | Any edited input, including an edit that also refreshes the manifest digests. Each file is read once, so the pinned bytes are the parsed bytes. |
 | Trace parse (`BookUnjudgedSelection.parseTrace`) | Unknown query, split/category drift, an atom ranked twice, or a v1 label that differs from `book-queries-v1`. |
-| Ranking shape | Ranks that are not contiguous from 1, more than 10 hits, or scores that are not descending. A trace that is not in query-id order. |
+| Ranking shape | Ranks that are not contiguous from 1, more than 10 hits, a malformed or `NaN` score token, or scores that are not descending. A trace that is not in query-id order. |
 | One atom per chunk | `store.atoms` different from `chunks.count`, or repeated-text atoms. Relevance keys are then exactly chunk keys. |
-| v1 projection reproduces the baseline | Any per-query `RR`/`P@K`/`R@K`/`firstEvidenceRank` or partition metric line (P/R/Hit/direct, confounder/unjudged hits, MRR) that differs from the frozen report. |
+| v1 projection reproduces the baseline | Any per-query `RR`/`P@K`/`R@K`/`firstEvidenceRank` or partition metric line (P/R/Hit/direct, confounder/unjudged hits, MRR) that differs from the frozen report. Lines are compared in order inside each partition's own block, so a line copied from another partition does not pass. The rows are rendered by the same `BookRecallReport.partitionRow`/`num` as the baseline. |
 | v2 status | `judgment.reviewStatus` other than `REVIEWED`, or undecided pairs. |
 | No overwrite | v2 drops, reorders or changes a v1 judgment; a chunk judged twice. |
 | HOLDOUT | Any HOLDOUT judgment that v2 adds. |
-| Added judgments | A pair outside `selection.psv` or outside the query's traced hits; a label change other than `U → E1/E2/C0`. |
+| Added judgments | A pair outside `selection.psv` or outside the query's traced hits; a judgment whose role, grade, span or note differs from its `review.psv` decision; a label change other than `U → E1/E2/C0`. |
 
 The `rankingDigest` (SHA-256 of `query|rank|atom|score` rows) identifies the ranking independent of labels.
 
@@ -77,14 +77,17 @@ do not say the system retrieves better.
   counted as relevant (P@K, Hit@K, MRR). R@K has no upper bound, because unjudged chunks outside the top-10 leave
   the relevant set unknown.
 - `U` is never turned into a negative label: unselected and unresolved hits stay unknown.
+- **Delta** is computed before rounding, so it can differ from the difference of the rounded v1/v2 columns by
+  ±0.0001 (for example ALL P@3: 0.0864 → 0.0988, delta +0.0123).
 
 ## Limitations
 
 - **Score bits.** The frozen trace stores scores as 6-decimal tokens. The report compares those tokens exactly;
   raw `double` bits are not in the baseline and are not recomputed. The opt-in
   `BookJudgmentCoverageRealCorpusTest` (`MONADA_BOOK_STORE_READBACK_V1_WORK=<seeded dir>`, no download) re-runs
-  the evaluation on a seeded Store. It checks atom ids, ranks and score tokens against the trace, and raw score
-  bits between two fresh evaluations. That test is the only code path here that searches.
+  the evaluation on a seeded Store and checks atom ids, ranks and score tokens against the trace. The evaluator
+  itself runs every query on two fresh instances and requires equal hits (`double` compared bit for bit), so the
+  raw score bits are checked there. That test is the only code path here that searches.
 - **Post-hoc bias.** v2 labels are `POST_HOC_RETRIEVAL_SAMPLED_DEV`: sampled from this ranking's own hits and drafted
   by a model, then human-verified (see [UNJUDGED-REVIEW.md](UNJUDGED-REVIEW.md)). They concentrate on chunks this
   ranking already returns, so they are not independent test evidence.
