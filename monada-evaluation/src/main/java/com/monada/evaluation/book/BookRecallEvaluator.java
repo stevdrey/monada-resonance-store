@@ -86,11 +86,13 @@ final class BookRecallEvaluator {
     }
 
     /** The public API with default options, no threshold: every top-K hit stays visible. */
-    static final RetrieverFactory DEFAULT_RETRIEVER = copy -> {
-        MonadaMemory memory = MonadaMemory.open(copy);
+    static final RetrieverFactory DEFAULT_RETRIEVER = copy -> retriever(MonadaMemory.open(copy));
+
+    /** The measured query path ({@code resonate(query).topK(k).threshold(-Infinity)}) on an opened instance. */
+    static Retriever retriever(MonadaMemory memory) {
         return (query, k) -> memory.resonate(query).topK(k).threshold(Double.NEGATIVE_INFINITY).execute().results()
                 .stream().map((ResonanceResult r) -> new Hit(r.atom().id(), r.score())).toList();
-    };
+    }
 
     /** Everything that identifies the measured inputs and configuration; rendered as the report header. */
     record Identity(Map<String, String> fields) {
@@ -172,6 +174,19 @@ final class BookRecallEvaluator {
 
     static Result evaluate(Path work, BookQueryDataset dataset, RetrieverFactory retriever, Path tmpRoot)
             throws IOException, BookInputException {
+        return evaluate(work, dataset, retriever, tmpRoot, 0);
+    }
+
+    /**
+     * {@link #evaluate(Path, BookQueryDataset, RetrieverFactory, Path)} on a Store that must hold exactly
+     * {@code feedbackEvents} recorded feedback events: 0 is the baseline contract (an absent or empty feedback log);
+     * a positive count is a declared treatment (Issue #170), whose feedback-aware ranking is what is measured.
+     */
+    static Result evaluate(Path work, BookQueryDataset dataset, RetrieverFactory retriever, Path tmpRoot,
+                           int feedbackEvents) throws IOException, BookInputException {
+        if (feedbackEvents < 0) {
+            throw new IllegalArgumentException("feedbackEvents must not be negative: " + feedbackEvents);
+        }
         Path chunkDir = work.resolve(ExperimentDirectoryGuard.CHUNKS_DIR);
         Path store = work.resolve(ExperimentDirectoryGuard.STORE_DIR);
         byte[] chunkBytes = Files.readAllBytes(chunkDir.resolve(BookChunkOutputWriter.CHUNKS_FILE));
@@ -185,7 +200,7 @@ final class BookRecallEvaluator {
         Manifest manifest = auditedManifest(store);
         if (manifest != null) {
             // Checked before readback: a feedback log is reported as feedback, not as a generic readback failure.
-            requireNoFeedback(store, manifest);
+            requireFeedback(store, manifest, feedbackEvents);
         }
         // Only the verdict is needed: skip the exploratory self-recall and its extra Store copy.
         BookStoreReadback.Verification readback = BookStoreReadback.verify(work, tmpRoot, false);
@@ -236,7 +251,7 @@ final class BookRecallEvaluator {
         }
 
         Identity identity = identity(dataset.manifest(), chunks, header, sidecarBytes, manifest, readback,
-                rankingDigest(store, manifest));
+                rankingDigest(store, manifest), feedbackEvents);
         List<Aggregate> partitions = List.of(
                 aggregate("DEV", results, r -> r.query().split() == Split.DEV),
                 aggregate("HOLDOUT", results, r -> r.query().split() == Split.HOLDOUT),
@@ -284,19 +299,41 @@ final class BookRecallEvaluator {
 
     /**
      * The default options rank feedback-aware, so recorded feedback would change scores and order without changing
-     * the atom fingerprint: this baseline requires an absent or empty feedback log.
+     * the atom fingerprint: the baseline ({@code expected} 0) requires an absent or empty feedback log, and a declared
+     * treatment a log of exactly {@code expected} events.
      */
-    private static void requireNoFeedback(Path store, Manifest manifest) throws IOException, BookInputException {
+    private static void requireFeedback(Path store, Manifest manifest, int expected)
+            throws IOException, BookInputException {
         Path root = store.toAbsolutePath().normalize();
         Path log = root.resolve(manifest.feedbackSegment()).normalize();
         if (!log.startsWith(root)) {
             throw invalid("the Store's feedback segment resolves outside the Store");
         }
-        if (Files.exists(log, LinkOption.NOFOLLOW_LINKS)
-                && (!Files.isRegularFile(log, LinkOption.NOFOLLOW_LINKS) || Files.size(log) > 0)) {
-            throw invalid("the Store has recorded feedback; book recall is measured on a feedback-free Store only"
-                    + " (seed a new work directory)");
+        boolean exists = Files.exists(log, LinkOption.NOFOLLOW_LINKS);
+        if (exists && !Files.isRegularFile(log, LinkOption.NOFOLLOW_LINKS)) {
+            throw invalid("the Store's feedback segment is not a regular file");
         }
+        if (expected == 0) {
+            if (exists && Files.size(log) > 0) {
+                throw invalid("the Store has recorded feedback; book recall is measured on a feedback-free Store only"
+                        + " (seed a new work directory)");
+            }
+            return;
+        }
+        long events = feedbackEvents(log);
+        if (events != expected) {
+            throw invalid("the Store has " + events + " recorded feedback events; the declared treatment has "
+                    + expected);
+        }
+    }
+
+    /** Recorded feedback events: the non-blank lines of the feedback log, 0 when it is absent or not a file. */
+    static long feedbackEvents(Path log) throws IOException {
+        if (!Files.isRegularFile(log, LinkOption.NOFOLLOW_LINKS)) {
+            return 0;
+        }
+        return new String(Files.readAllBytes(log), StandardCharsets.UTF_8).lines().filter(line -> !line.isBlank())
+                .count();
     }
 
     /** The chunk set in the work directory must be the one the judgments were made against. */
@@ -433,7 +470,7 @@ final class BookRecallEvaluator {
     }
 
     /** The strongest judgment of this query on any of the atom's chunk keys. */
-    private static String label(List<String> keys, Map<String, Judgment> judged) {
+    static String label(List<String> keys, Map<String, Judgment> judged) {
         int grade = -1;
         boolean confounder = false;
         for (String key : keys) {
@@ -523,7 +560,8 @@ final class BookRecallEvaluator {
 
     private static Identity identity(Properties dataset, BookChunkFiles.Loaded chunks, Map<String, String> header,
                                      byte[] sidecarBytes, Manifest manifest,
-                                     BookStoreReadback.Verification readback, String rankingDigest) {
+                                     BookStoreReadback.Verification readback, String rankingDigest,
+                                     int feedbackEvents) {
         Map<String, String> f = new LinkedHashMap<>();
         f.put("corpus", chunks.corpus());
         f.put("corpusVersion", chunks.corpusVersion());
@@ -550,7 +588,9 @@ final class BookRecallEvaluator {
         // a different report under the same atom-only fingerprint. The atom log is left out: it records wall-clock
         // creation times, so it differs between two seedings of the same corpus.
         f.put("store.vectorsSha256", rankingDigest);
-        f.put("store.feedbackEvents", "0 (required: feedback-aware ranking must not reorder the baseline)");
+        f.put("store.feedbackEvents", feedbackEvents == 0
+                ? "0 (required: feedback-aware ranking must not reorder the baseline)"
+                : feedbackEvents + " (declared treatment: predeclared explicit feedback, ranked feedback-aware)");
         f.put("store.manifestVersion", manifest.version());
         f.put("profile", PROFILE);
         f.put("encodingProfile", manifest.encodingProfile().toString());

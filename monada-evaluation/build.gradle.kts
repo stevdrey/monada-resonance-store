@@ -258,6 +258,14 @@ tasks.register<JavaExec>("runBookFootprint") {
     workingDir = rootProject.projectDir
 }
 
+tasks.register<JavaExec>("runBookFeedback") {
+    description = "Replay predeclared explicit DEV-oracle feedback on book Stores and add one explicit verified note: isolated control/treatment/note Stores from the same frozen chunks, per-query control vs treatment (after reopen) P@K/R@K/Hit@K/MRR, regressions, HOLDOUT/confusable/NO_ANSWER contamination checks, note persistence after reopen, repeat-run determinism (evaluation only; offline; no autonomous learning). Options via --args, e.g. --args=\"--input <body.txt> --scratch <new dir outside Git> [--out <report.txt>]\""
+    group = "application"
+    mainClass.set("com.monada.evaluation.book.BookFeedbackMain")
+    classpath = sourceSets["main"].runtimeClasspath
+    workingDir = rootProject.projectDir
+}
+
 tasks.named<Test>("test") {
     // The cross-JVM determinism test starts child JVMs that run the evaluation command on this runtime classpath.
     doFirst {
