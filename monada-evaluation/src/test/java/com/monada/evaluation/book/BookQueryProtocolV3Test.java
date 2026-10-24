@@ -210,6 +210,14 @@ class BookQueryProtocolV3Test {
         rejects("provenance must be", m -> m.setProperty("provenance", "POST_HOC_RETRIEVAL_SAMPLED_DEV"));
     }
 
+    /** Back to the unsigned draft, whether or not the committed protocol has been signed. */
+    static void unsign(Properties m) {
+        m.setProperty("protocol.status", BookQueryProtocolV3.PENDING);
+        m.remove("protocol.reviewer");
+        m.remove("protocol.approvedBy");
+        m.remove("protocol.reviewedAt");
+    }
+
     static void sign(Properties m) {
         m.setProperty("protocol.status", BookQueryProtocolV3.REVIEWED);
         m.setProperty("protocol.reviewer", "Steven Rey Sequeira");

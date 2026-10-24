@@ -211,7 +211,9 @@ class BookQueryDatasetV3RejectionTest {
 
     @Test
     void rejectsSignOffOverAnUnsignedProtocolOrBeforeIt() {
-        byte[] unsigned = properties(BookQueryProtocolV3Test.committedManifest());
+        Properties draft = BookQueryProtocolV3Test.committedManifest();
+        BookQueryProtocolV3Test.unsign(draft);
+        byte[] unsigned = properties(draft);
         var e = assertThrows(IllegalStateException.class, () -> build(unsigned, m -> { }));
         assertTrue(e.getMessage().contains("the protocol is not signed"), e.getMessage());
         manifest.setProperty("authoring.startedAt", "2026-10-23");
