@@ -49,6 +49,7 @@ class BookCorpusV1ContractTest {
             "README.md", "RIGHTS.md", "manifest.properties", "VerifyBookCorpus.java", "CHUNKING.md",
             "STORE-READBACK.md", "QUERIES.md", "RECALL.md", "book-recall-v1-report.txt", "HUB-DIAGNOSTICS.md",
             "book-hub-diagnostics-v1-report.txt", "UNJUDGED-REVIEW.md", "book-unjudged-review-v2-report.txt",
+            "JUDGMENT-COVERAGE.md", "book-judgment-coverage-v2-report.txt",
             "LATENCY.md", "book-latency-v1-report.txt", "book-latency-v1-summary.md",
             "FOOTPRINT.md", "book-footprint-v1-report.txt", "book-footprint-v1-summary.md",
             "FEEDBACK.md", "book-feedback-v1-report.txt", ".gitattributes");
