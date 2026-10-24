@@ -2,13 +2,13 @@ package com.monada.evaluation.book;
 
 import com.monada.api.MonadaMemory;
 import com.monada.core.KnowledgeAtom;
-import com.monada.core.ResonanceResult;
 import com.monada.evaluation.book.BookFeedbackPlan.Event;
 import com.monada.evaluation.book.BookFeedbackPlan.Plan;
 import com.monada.evaluation.book.BookQueryDataset.Case;
 import com.monada.evaluation.book.BookQueryDataset.Split;
 import com.monada.evaluation.book.BookRecallEvaluator.CaseResult;
 import com.monada.evaluation.book.BookRecallEvaluator.Hit;
+import com.monada.storage.FileManifestStore;
 import com.monada.storage.JsonStrings;
 import com.monada.storage.Manifest;
 import com.monada.storage.feedback.FeedbackSignal;
@@ -115,16 +115,16 @@ final class BookFeedbackExperiment {
     }
 
     /**
-     * The run's outcome; {@code keyByAtom} maps each chunk atom to its first chunk key, so probe hits (raw atom ids)
-     * can be reported by key.
+     * The run's outcome; {@code keysByAtom} maps each chunk atom to its chunk keys (more than one only for repeated
+     * text), so probe hits (raw atom ids) can be reported by key and labelled like the evaluator labels hits.
      */
     record Result(Plan plan, BookRecallEvaluator.Result control, BookRecallEvaluator.Result treatment,
                   List<Probe> probes, NoteResult note, List<Check> checks, String baselineSha256,
-                  Map<String, String> keyByAtom) {
+                  Map<String, List<String>> keysByAtom) {
         Result {
             probes = List.copyOf(probes);
             checks = List.copyOf(checks);
-            keyByAtom = Map.copyOf(keyByAtom);
+            keysByAtom = Map.copyOf(keysByAtom);
         }
 
         boolean passed() {
@@ -136,10 +136,14 @@ final class BookFeedbackExperiment {
         }
     }
 
-    /** The predeclared confusable probes of every DEV case that receives feedback, in case id order. */
+    /**
+     * The predeclared confusable probes of every DEV case that receives feedback, in case id order. A variant whose
+     * text equals any feedback query (its own source included, for example an already lower-case question) is no
+     * confusable variant and is skipped, so a probe never carries feedback of its own.
+     */
     static List<Probe> probes(BookQueryDataset dataset, Plan plan, BookChunkFiles.Loaded chunks) {
-        Set<String> withFeedback = new LinkedHashSet<>();
-        plan.events().forEach(e -> withFeedback.add(e.caseId()));
+        Set<String> withFeedback = plan.caseIds();
+        Set<String> feedbackQueries = plan.queries();
         Map<String, String> atomByKey = new LinkedHashMap<>();
         chunks.entries().forEach(e -> atomByKey.put(e.key(), KnowledgeAtom.text(e.text()).id()));
         List<Probe> probes = new ArrayList<>();
@@ -147,11 +151,15 @@ final class BookFeedbackExperiment {
                 .forEach(c -> {
                     Set<String> evidence = new LinkedHashSet<>();
                     c.evidence().forEach(j -> evidence.add(atomByKey.get(j.chunkKey())));
-                    probes.add(new Probe(c.id() + "/" + ProbeKind.CASE_FOLDED, ProbeKind.CASE_FOLDED, c,
-                            c.text().toLowerCase(Locale.ROOT), evidence, List.of(), List.of()));
-                    probes.add(new Probe(c.id() + "/" + ProbeKind.REWORDED, ProbeKind.REWORDED, c,
-                            "In the story, " + Character.toLowerCase(c.text().charAt(0)) + c.text().substring(1),
-                            evidence, List.of(), List.of()));
+                    Map<ProbeKind, String> variants = new LinkedHashMap<>();
+                    variants.put(ProbeKind.CASE_FOLDED, c.text().toLowerCase(Locale.ROOT));
+                    variants.put(ProbeKind.REWORDED,
+                            "In the story, " + Character.toLowerCase(c.text().charAt(0)) + c.text().substring(1));
+                    variants.forEach((kind, text) -> {
+                        if (!feedbackQueries.contains(text)) {
+                            probes.add(new Probe(c.id() + "/" + kind, kind, c, text, evidence, List.of(), List.of()));
+                        }
+                    });
                 });
         return probes;
     }
@@ -222,16 +230,17 @@ final class BookFeedbackExperiment {
         for (Event e : plan.events()) {
             sink.apply(memory, e);
         }
+        BookRecallEvaluator.Retriever liveRetriever = BookRecallEvaluator.retriever(memory);
         List<List<Hit>> live = new ArrayList<>();
         for (Case c : cases) {
-            live.add(search(memory, c.text()));
+            live.add(liveRetriever.search(c.text(), BookRecallEvaluator.MAX_K));
         }
         checks.add(new Check("treatment.feedbackLogMatchesPlan", logMatches(log, plan),
                 plan.events().size() + " events (query, queryKey, atomId, signal, delta; createdAt ignored)"));
 
         // Bound to the events actually recorded; whether they are exactly the plan is the check above.
         BookRecallEvaluator.Result treatmentResult = BookRecallEvaluator.evaluate(treatment, dataset,
-                BookRecallEvaluator.DEFAULT_RETRIEVER, tmp, recordedEvents(log));
+                BookRecallEvaluator.DEFAULT_RETRIEVER, tmp, (int) BookRecallEvaluator.feedbackEvents(log));
         int sameAfterReopen = 0;
         for (int i = 0; i < cases.size(); i++) {
             if (live.get(i).equals(hits(treatmentResult.cases().get(i)))) {
@@ -274,15 +283,16 @@ final class BookFeedbackExperiment {
                 isolated + "/" + measured.size() + " confusable variants rank exactly as in control (no transfer)"));
         checks.add(new Check("isolation.controlStoreUnchanged",
                 controlDigest.equals(BookStoreInventory.treeDigest(controlStore)),
-                "the control Store's bytes are identical before and after the treatment and note phases"));
+                "the control Store's bytes are identical before and after the treatment phase"));
 
         NoteResult note = note(noteWork, runDir, tmp, chunks, expected, cases, controlResult, checks);
         checks.add(new Check("isolation.controlStoreUnchangedAfterNote",
                 controlDigest.equals(BookStoreInventory.treeDigest(controlStore)),
                 "the note phase never touches the control Store"));
-        Map<String, String> keyByAtom = new LinkedHashMap<>();
-        chunks.entries().forEach(e -> keyByAtom.putIfAbsent(KnowledgeAtom.text(e.text()).id(), e.key()));
-        return new Result(plan, controlResult, treatmentResult, measured, note, checks, baselineSha, keyByAtom);
+        Map<String, List<String>> keysByAtom = new LinkedHashMap<>();
+        chunks.entries().forEach(e -> keysByAtom.computeIfAbsent(KnowledgeAtom.text(e.text()).id(),
+                id -> new ArrayList<>()).add(e.key()));
+        return new Result(plan, controlResult, treatmentResult, measured, note, checks, baselineSha, keysByAtom);
     }
 
     private static NoteResult note(Path work, Path runDir, Path tmp, BookChunkFiles.Loaded chunks,
@@ -376,41 +386,40 @@ final class BookFeedbackExperiment {
     /** Queries a fresh instance on a throwaway copy of {@code store}, so measuring never writes to the arm. */
     private static List<List<Hit>> runOnCopy(Path store, Path tmp, List<String> queries) throws IOException {
         return BookStoreReadback.onCopy(store, tmp, copy -> {
-            MonadaMemory memory = MonadaMemory.open(copy);
+            BookRecallEvaluator.Retriever retriever = BookRecallEvaluator.DEFAULT_RETRIEVER.open(copy);
             List<List<Hit>> all = new ArrayList<>();
             for (String query : queries) {
-                all.add(search(memory, query));
+                all.add(retriever.search(query, BookRecallEvaluator.MAX_K));
             }
             return all;
         });
-    }
-
-    private static List<Hit> search(MonadaMemory memory, String query) {
-        return memory.resonate(query).topK(BookRecallEvaluator.MAX_K).threshold(Double.NEGATIVE_INFINITY).execute()
-                .results().stream().map((ResonanceResult r) -> new Hit(r.atom().id(), r.score())).toList();
     }
 
     static List<Hit> hits(CaseResult r) {
         return r.hits().stream().map(h -> new Hit(h.atomId(), h.score())).toList();
     }
 
-    private static Path feedbackLog(Path store) throws BookInputException {
-        Manifest manifest = BookStoreReadback.audit(store).manifest();
-        if (manifest == null) {
+    /**
+     * The feedback segment named by the treatment Store's manifest. {@code MonadaMemory.open} has already created
+     * this arm's own Store, so the plain manifest read (which ensures the Store directories) writes nothing new, and
+     * no full integrity audit is needed just for a path; the evaluator audits the Store when it measures it.
+     */
+    private static Path feedbackLog(Path store) throws IOException, BookInputException {
+        Manifest manifest = new FileManifestStore(store).load().orElseThrow(() -> new BookInputException(
+                BookInputException.Reason.INVALID_INPUT, "the treatment Store has no manifest"));
+        Path root = store.toAbsolutePath().normalize();
+        Path log = root.resolve(manifest.feedbackSegment()).normalize();
+        if (!log.startsWith(root)) {
             throw new BookInputException(BookInputException.Reason.INVALID_INPUT,
-                    "the treatment Store's manifest cannot be read");
+                    "the treatment Store's feedback segment resolves outside the Store");
         }
-        return store.toAbsolutePath().normalize().resolve(manifest.feedbackSegment()).normalize();
+        return log;
     }
 
-    private static int recordedEvents(Path log) throws IOException {
-        if (!Files.isRegularFile(log, LinkOption.NOFOLLOW_LINKS)) {
-            return 0;
-        }
-        return (int) Files.readAllLines(log, StandardCharsets.UTF_8).stream().filter(l -> !l.isBlank()).count();
-    }
-
-    /** The persisted log, parsed read-only, is exactly the plan in order; wall-clock {@code createdAt} is ignored. */
+    /**
+     * The persisted log, parsed read-only, is exactly the plan in order; wall-clock {@code createdAt} is ignored. A
+     * line that does not parse, or a non-numeric delta, is a mismatch, not a crash.
+     */
     private static boolean logMatches(Path log, Plan plan) throws IOException {
         if (!Files.isRegularFile(log, LinkOption.NOFOLLOW_LINKS)) {
             return false;
@@ -420,15 +429,19 @@ final class BookFeedbackExperiment {
         if (lines.size() != plan.events().size()) {
             return false;
         }
-        for (int i = 0; i < lines.size(); i++) {
-            Map<String, String> f = new LinkedHashMap<>(JsonStrings.parseFlat(lines.get(i), "feedback log"));
-            Event e = plan.events().get(i);
-            double delta = e.signal() == FeedbackSignal.POSITIVE ? POSITIVE_DELTA : NEGATIVE_DELTA;
-            if (!e.query().equals(f.get("query")) || !e.query().equals(f.get("queryKey"))
-                    || !e.atomId().equals(f.get("atomId")) || !e.signal().name().equals(f.get("signal"))
-                    || f.get("delta") == null || Double.parseDouble(f.get("delta")) != delta) {
-                return false;
+        try {
+            for (int i = 0; i < lines.size(); i++) {
+                Map<String, String> f = JsonStrings.parseFlat(lines.get(i), "feedback log");
+                Event e = plan.events().get(i);
+                double delta = e.signal() == FeedbackSignal.POSITIVE ? POSITIVE_DELTA : NEGATIVE_DELTA;
+                if (!e.query().equals(f.get("query")) || !e.query().equals(f.get("queryKey"))
+                        || !e.atomId().equals(f.get("atomId")) || !e.signal().name().equals(f.get("signal"))
+                        || f.get("delta") == null || Double.parseDouble(f.get("delta")) != delta) {
+                    return false;
+                }
             }
+        } catch (IllegalStateException | NumberFormatException e) {
+            return false;
         }
         return true;
     }

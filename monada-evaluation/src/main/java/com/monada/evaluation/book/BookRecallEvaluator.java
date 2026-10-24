@@ -86,11 +86,13 @@ final class BookRecallEvaluator {
     }
 
     /** The public API with default options, no threshold: every top-K hit stays visible. */
-    static final RetrieverFactory DEFAULT_RETRIEVER = copy -> {
-        MonadaMemory memory = MonadaMemory.open(copy);
+    static final RetrieverFactory DEFAULT_RETRIEVER = copy -> retriever(MonadaMemory.open(copy));
+
+    /** The measured query path ({@code resonate(query).topK(k).threshold(-Infinity)}) on an opened instance. */
+    static Retriever retriever(MonadaMemory memory) {
         return (query, k) -> memory.resonate(query).topK(k).threshold(Double.NEGATIVE_INFINITY).execute().results()
                 .stream().map((ResonanceResult r) -> new Hit(r.atom().id(), r.score())).toList();
-    };
+    }
 
     /** Everything that identifies the measured inputs and configuration; rendered as the report header. */
     record Identity(Map<String, String> fields) {
@@ -318,12 +320,20 @@ final class BookRecallEvaluator {
             }
             return;
         }
-        long events = exists ? new String(Files.readAllBytes(log), StandardCharsets.UTF_8).lines()
-                .filter(line -> !line.isBlank()).count() : 0;
+        long events = feedbackEvents(log);
         if (events != expected) {
             throw invalid("the Store has " + events + " recorded feedback events; the declared treatment has "
                     + expected);
         }
+    }
+
+    /** Recorded feedback events: the non-blank lines of the feedback log, 0 when it is absent or not a file. */
+    static long feedbackEvents(Path log) throws IOException {
+        if (!Files.isRegularFile(log, LinkOption.NOFOLLOW_LINKS)) {
+            return 0;
+        }
+        return new String(Files.readAllBytes(log), StandardCharsets.UTF_8).lines().filter(line -> !line.isBlank())
+                .count();
     }
 
     /** The chunk set in the work directory must be the one the judgments were made against. */
@@ -460,7 +470,7 @@ final class BookRecallEvaluator {
     }
 
     /** The strongest judgment of this query on any of the atom's chunk keys. */
-    private static String label(List<String> keys, Map<String, Judgment> judged) {
+    static String label(List<String> keys, Map<String, Judgment> judged) {
         int grade = -1;
         boolean confounder = false;
         for (String key : keys) {

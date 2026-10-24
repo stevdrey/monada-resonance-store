@@ -198,8 +198,8 @@ Confusable variants of DEV feedback queries (rule: CASE_FOLDED = lower-cased tex
   CON-01/REWORDED     ISOLATED firstEvidenceRank none -> none top1 U s006/c0002 0.203772 -> U s006/c0002 0.203772 query: In the story, what does the Duchess's baby turn into?
   CON-03/CASE_FOLDED  ISOLATED firstEvidenceRank 6 -> 6 top1 U s009/c0006 0.266320 -> U s009/c0006 0.266320 query: what does the mock turtle say he used to be?
   CON-03/REWORDED     ISOLATED firstEvidenceRank 4 -> 4 top1 U s009/c0006 0.273915 -> U s009/c0006 0.273915 query: In the story, what does the Mock Turtle say he used to be?
-  CON-04/CASE_FOLDED  ISOLATED firstEvidenceRank 1 -> 1 top1 E s004/c0004 0.188764 -> E s004/c0004 0.188764 query: what happened to bill the lizard when he came down the chimney?
-  CON-04/REWORDED     ISOLATED firstEvidenceRank 1 -> 1 top1 E s004/c0004 0.196192 -> E s004/c0004 0.196192 query: In the story, what happened to Bill the Lizard when he came down the chimney?
+  CON-04/CASE_FOLDED  ISOLATED firstEvidenceRank 1 -> 1 top1 E2 s004/c0004 0.188764 -> E2 s004/c0004 0.188764 query: what happened to bill the lizard when he came down the chimney?
+  CON-04/REWORDED     ISOLATED firstEvidenceRank 1 -> 1 top1 E2 s004/c0004 0.196192 -> E2 s004/c0004 0.196192 query: In the story, what happened to Bill the Lizard when he came down the chimney?
   LIT-01/CASE_FOLDED  ISOLATED firstEvidenceRank none -> none top1 U s009/c0005 0.404788 -> U s009/c0005 0.404788 query: what words are printed on the label of the little bottle alice finds on the glass table?
   LIT-01/REWORDED     ISOLATED firstEvidenceRank none -> none top1 U s009/c0005 0.395980 -> U s009/c0005 0.395980 query: In the story, what words are printed on the label of the little bottle Alice finds on the glass table?
   LIT-03/CASE_FOLDED  ISOLATED firstEvidenceRank none -> none top1 U s009/c0001 0.476470 -> U s009/c0001 0.476470 query: what is the name of alice's cat?
@@ -270,7 +270,7 @@ PASS treatment.reopenParity: 32/32 queries rank identically on the feedback inst
 PASS contamination.holdoutUnchanged: 8/8 HOLDOUT queries rank exactly as in control
 PASS contamination.devWithoutFeedbackUnchanged: 1/1 DEV queries without feedback rank exactly as in control
 PASS contamination.confusableProbesUnchanged: 46/46 confusable variants rank exactly as in control (no transfer)
-PASS isolation.controlStoreUnchanged: the control Store's bytes are identical before and after the treatment and note phases
+PASS isolation.controlStoreUnchanged: the control Store's bytes are identical before and after the treatment phase
 PASS note.newAtomId: remember returned the content-derived id of the note, no chunk's
 PASS note.sidecarReadsBack: the provenance sidecar line parses back to the written fields
 PASS note.persistedNextToOriginals: after reopen: note exact, 87/87 original chunks exact, 88 atoms, audit HEALTHY

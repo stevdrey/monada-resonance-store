@@ -5,17 +5,19 @@ import com.monada.evaluation.book.BookFeedbackExperiment.NoteRank;
 import com.monada.evaluation.book.BookFeedbackExperiment.Probe;
 import com.monada.evaluation.book.BookFeedbackExperiment.Result;
 import com.monada.evaluation.book.BookFeedbackPlan.Event;
+import com.monada.evaluation.book.BookQueryDataset.Judgment;
 import com.monada.evaluation.book.BookRecallEvaluator.Aggregate;
 import com.monada.evaluation.book.BookRecallEvaluator.CaseResult;
 import com.monada.evaluation.book.BookRecallEvaluator.Hit;
 import com.monada.evaluation.book.BookRecallEvaluator.RankedHit;
 import com.monada.storage.feedback.FeedbackSignal;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.TreeMap;
+import java.util.Set;
 
 /**
  * Renders a {@link BookFeedbackExperiment.Result} as a versioned, deterministic plain-text report: no paths, timings,
@@ -67,8 +69,9 @@ final class BookFeedbackReport {
             partition(out, result.control().partitions().get(i), result.treatment().partitions().get(i));
         }
         categories(out, result);
-        changes(out, result);
-        negatives(out, result);
+        Set<String> withFeedback = result.plan().caseIds();
+        changes(out, result, withFeedback);
+        negatives(out, result, withFeedback);
         probes(out, result);
         note(out, result);
         checks(out, result);
@@ -182,10 +185,9 @@ final class BookFeedbackReport {
         line(out, "");
     }
 
-    private static void changes(StringBuilder out, Result result) {
+    private static void changes(StringBuilder out, Result result, Set<String> withFeedback) {
         line(out, "== Per-query changes (answerable) ==");
         List<String> regressions = new ArrayList<>();
-        Map<String, Boolean> withFeedback = feedbackCases(result);
         for (int i = 0; i < result.control().cases().size(); i++) {
             CaseResult c = result.control().cases().get(i);
             CaseResult t = result.treatment().cases().get(i);
@@ -198,7 +200,7 @@ final class BookFeedbackReport {
             }
             line(out, String.format(Locale.ROOT, "%s %-7s %-18s feedback=%-3s firstEvidenceRank %s -> %s RR %s -> %s"
                             + " R@%d %s -> %s %s", c.query().id(), c.query().split(), c.query().category(),
-                    withFeedback.containsKey(c.query().id()) ? "yes" : "no", rank(c.firstRelevantRank()),
+                    withFeedback.contains(c.query().id()) ? "yes" : "no", rank(c.firstRelevantRank()),
                     rank(t.firstRelevantRank()), num(c.reciprocalRank()), num(t.reciprocalRank()),
                     BookRecallEvaluator.MAX_K, num(c.recall().get(BookRecallEvaluator.MAX_K)),
                     num(t.recall().get(BookRecallEvaluator.MAX_K)), change));
@@ -207,11 +209,10 @@ final class BookFeedbackReport {
         line(out, "");
     }
 
-    private static void negatives(StringBuilder out, Result result) {
+    private static void negatives(StringBuilder out, Result result, Set<String> withFeedback) {
         line(out, "== NO_ANSWER queries: control -> treatment ==");
         line(out, "Feedback can move which chunk ranks first; it cannot make the Store abstain at threshold"
                 + " -Infinity.");
-        Map<String, Boolean> withFeedback = feedbackCases(result);
         for (int i = 0; i < result.control().cases().size(); i++) {
             CaseResult c = result.control().cases().get(i);
             CaseResult t = result.treatment().cases().get(i);
@@ -219,7 +220,7 @@ final class BookFeedbackReport {
                 continue;
             }
             line(out, String.format(Locale.ROOT, "%s %-7s feedback=%-3s %s -> %s top1 %s -> %s", c.query().id(),
-                    c.query().split(), withFeedback.containsKey(c.query().id()) ? "yes" : "no", c.failure(),
+                    c.query().split(), withFeedback.contains(c.query().id()) ? "yes" : "no", c.failure(),
                     t.failure(), top1(c), top1(t)));
         }
         line(out, "");
@@ -325,27 +326,24 @@ final class BookFeedbackReport {
         return worse ? "REGRESSED" : better ? "IMPROVED" : "UNCHANGED";
     }
 
-    private static Map<String, Boolean> feedbackCases(Result result) {
-        Map<String, Boolean> ids = new TreeMap<>();
-        result.plan().events().forEach(e -> ids.put(e.caseId(), true));
-        return ids;
-    }
-
     private static String top1(CaseResult r) {
         return r.hits().isEmpty() ? "none" : String.format(Locale.ROOT, "%s %s %.6f", r.hits().getFirst().label(),
                 shortKey(r.hits().getFirst().key()), r.hits().getFirst().score());
     }
 
-    /** The probe's top hit by chunk key, labelled with the source case's judgment of that key. */
+    /** The probe's top hit by chunk key, labelled as the evaluator labels hits, from the source case's judgments. */
     private static String top1(Result result, Probe p, List<Hit> hits) {
         if (hits.isEmpty()) {
             return "none";
         }
-        String key = result.keyByAtom().get(hits.getFirst().atomId());
-        String label = p.evidenceAtoms().contains(hits.getFirst().atomId()) ? "E"
-                : p.source().confounders().stream().anyMatch(j -> j.chunkKey().equals(key)) ? "C0" : "U";
-        return String.format(Locale.ROOT, "%s %s %.6f", label, key == null ? hits.getFirst().atomId()
-                : shortKey(key), hits.getFirst().score());
+        List<String> keys = result.keysByAtom().get(hits.getFirst().atomId());
+        if (keys == null) {
+            return String.format(Locale.ROOT, "%s %.6f", hits.getFirst().atomId(), hits.getFirst().score());
+        }
+        Map<String, Judgment> judged = new LinkedHashMap<>();
+        p.source().judgments().forEach(j -> judged.put(j.chunkKey(), j));
+        return String.format(Locale.ROOT, "%s %s %.6f", BookRecallEvaluator.label(keys, judged),
+                shortKey(keys.getFirst()), hits.getFirst().score());
     }
 
     private static String noteRank(NoteRank r) {

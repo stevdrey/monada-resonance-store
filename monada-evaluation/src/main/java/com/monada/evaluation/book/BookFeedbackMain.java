@@ -91,6 +91,10 @@ public final class BookFeedbackMain {
                 refused = BookUnjudgedReviewMain.protectedOutput("--out", report, root,
                         root.resolve(FEEDBACK_REPORT));
             }
+            if (refused == null && !Files.isRegularFile(baseline)) {
+                refused = "--baseline not found: " + baseline + " (the committed recall report, see"
+                        + " docs/experiments/book-corpus-v1/RECALL.md)";
+            }
             if (refused != null) {
                 err.println(refused);
                 return 2;
@@ -146,7 +150,8 @@ public final class BookFeedbackMain {
         } catch (BookInputException e) {
             err.println(e.getMessage());
             return e.reason() == BookInputException.Reason.BAD_MANIFEST ? 2 : 1;
-        } catch (IllegalStateException e) {
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            // A rejected feedback call or an unparsable value: the run failed, report it as a failed check would be.
             err.println(e.getMessage());
             return 1;
         } catch (IOException | UncheckedIOException e) {

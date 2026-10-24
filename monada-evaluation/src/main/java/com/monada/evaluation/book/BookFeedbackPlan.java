@@ -63,6 +63,12 @@ final class BookFeedbackPlan {
             return events.stream().filter(e -> e.signal() == signal).count();
         }
 
+        Set<String> caseIds() {
+            Set<String> ids = new TreeSet<>();
+            events.forEach(e -> ids.add(e.caseId()));
+            return ids;
+        }
+
         Set<String> queries() {
             Set<String> queries = new TreeSet<>();
             events.forEach(e -> queries.add(e.query()));

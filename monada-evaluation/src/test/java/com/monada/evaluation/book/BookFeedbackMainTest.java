@@ -93,6 +93,18 @@ class BookFeedbackMainTest {
     }
 
     @Test
+    void aMissingBaselineIsAUsageErrorBeforeAnything() throws Exception {
+        Path scratch = dir.resolve("scratch");
+        Path missing = dir.resolve("no-baseline.txt");
+        Run run = cli("--input", "missing-body.txt", "--baseline", missing.toString(), "--scratch",
+                scratch.toString());
+        assertEquals(2, run.exit());
+        assertTrue(run.err().startsWith("--baseline not found: " + missing), run.err());
+        assertFalse(run.err().contains("Offline acquisition"), "the corpus hint is for the body only");
+        assertFalse(Files.exists(scratch));
+    }
+
+    @Test
     void outputsMayNotReplaceFrozenArtifactsExceptTheirOwn() throws Exception {
         Path recall = ROOT.resolve(BookFeedbackMain.BASELINE_REPORT);
         byte[] before = Files.readAllBytes(recall);

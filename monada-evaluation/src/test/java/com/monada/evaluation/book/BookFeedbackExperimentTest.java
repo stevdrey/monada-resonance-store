@@ -114,6 +114,25 @@ class BookFeedbackExperimentTest {
     }
 
     @Test
+    void aVariantEqualToAFeedbackQueryIsNoProbe() throws Exception {
+        // LIT-01 already lower-case: its CASE_FOLDED variant would be the feedback query itself.
+        List<String> queries = BookRecallFixture.QUERIES.stream().map(row -> row.startsWith("LIT-01|")
+                ? "LIT-01|LITERAL|how many gulls circled the breakwater?|Counted in chapter one." : row).toList();
+        Path reference = BookRecallFixture.seededWork(dir, "lower", BookRecallFixture.POLICY);
+        BookQueryDataset lower = BookRecallFixture.dataset(reference, queries, BookRecallFixture.JUDGMENTS);
+        byte[] lowerBaseline = BookRecallReport.render(BookRecallEvaluator.evaluate(reference, lower))
+                .getBytes(StandardCharsets.UTF_8);
+
+        Result result = BookFeedbackExperiment.run(chunked, lower, lowerBaseline, dir.resolve("run"));
+
+        assertTrue(result.passed(), result.failures().toString());
+        List<String> lit01 = result.probes().stream().filter(p -> p.source().id().equals("LIT-01"))
+                .map(BookFeedbackExperiment.Probe::id).toList();
+        assertEquals(List.of("LIT-01/REWORDED"), lit01);
+        assertTrue(result.probes().stream().noneMatch(p -> result.plan().queries().contains(p.text())));
+    }
+
+    @Test
     void twoRunsOnNewStoresRenderIdenticalReports() throws Exception {
         String first = BookFeedbackReport.body(BookFeedbackExperiment.run(chunked, dataset, baseline,
                 dir.resolve("a")));
