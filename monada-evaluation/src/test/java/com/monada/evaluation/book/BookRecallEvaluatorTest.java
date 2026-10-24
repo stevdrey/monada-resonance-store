@@ -6,10 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.monada.api.MonadaMemory;
 import com.monada.evaluation.book.BookRecallEvaluator.CaseResult;
 import com.monada.evaluation.book.BookRecallEvaluator.Hit;
 import com.monada.evaluation.book.BookRecallEvaluator.Result;
 import com.monada.evaluation.book.BookRecallEvaluator.RetrieverFactory;
+import com.monada.storage.feedback.FeedbackSignal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -208,6 +210,25 @@ class BookRecallEvaluatorTest {
         BookInputException e = assertThrows(BookInputException.class,
                 () -> BookRecallEvaluator.evaluate(work, dataset, scripted(script()), dir));
         assertTrue(e.getMessage().contains("feedback"), e.getMessage());
+    }
+
+    @Test
+    void declaredTreatmentRequiresExactlyItsFeedbackEvents() throws Exception {
+        MonadaMemory memory = MonadaMemory.open(work.resolve("store"));
+        String atom = BookRecallFixture.atomId(work, "s001/c0000");
+        memory.feedback("first explicit query", atom, FeedbackSignal.POSITIVE);
+        memory.feedback("second explicit query", atom, FeedbackSignal.NEGATIVE);
+        Path log = work.resolve("store/feedback/feedback-000001.log");
+        Result result = BookRecallEvaluator.evaluate(work, dataset, scripted(script()), dir, 2);
+        assertTrue(result.identity().fields().get("store.feedbackEvents").startsWith("2 (declared treatment"),
+                result.identity().fields().toString());
+        BookInputException e = assertThrows(BookInputException.class,
+                () -> BookRecallEvaluator.evaluate(work, dataset, scripted(script()), dir, 3));
+        assertEquals("the Store has 2 recorded feedback events; the declared treatment has 3", e.getMessage());
+        Files.writeString(log, "");
+        e = assertThrows(BookInputException.class,
+                () -> BookRecallEvaluator.evaluate(work, dataset, scripted(script()), dir, 1));
+        assertEquals("the Store has 0 recorded feedback events; the declared treatment has 1", e.getMessage());
     }
 
     @Test

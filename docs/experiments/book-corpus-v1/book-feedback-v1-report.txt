@@ -1,0 +1,667 @@
+Monada book feedback report (Issue #170, Book 8/8)
+format=monada-book-feedback-report
+formatVersion=1
+status=EXPLORATORY: explicit host/oracle feedback replay and one explicit note; no autonomous learning, mistake detection or fact correction is shipped; nothing is promoted; HOLDOUT is reported only
+checks=PASS (17/17)
+
+== Inputs ==
+corpus=book-corpus-v1
+corpusVersion=1
+corpusManifest.sha256=d68aae03a7b4bebdc78d2fe43260adb055d6369d77be9324fb8378ea3a39228f
+source.sizeBytes=151095
+source.sha256=b44b499274ef98e0bc12c190ee08d9c63480b7c96946101a540a0cb24b3a944c
+chunking.policy=book-chunking-v1
+chunking.chapterHeadingPattern=CHAPTER [IVXLC]+\.
+chunking.maxChunkBytes=2048
+chunking.overlapBytes=0
+chunks.count=87
+chunksFile.sha256=e1f4ea9dd6dfcfb3225a845855b79476f686b8868b526a45d05fd863a2608a04
+sidecar.sha256=d3c62fe220a5e8b7ec584c06f44469ec887f08a71d8ed87a94d65f4ec709f017
+dataset=book-queries-v1 v1
+queries.sha256=9b1b0b222f26932622c9fe38a8d4351a0a637bd41f49319d882152a44fe05e14
+judgments.sha256=5f129b6e0b8cb0565d9ba13cb6a57c67238403e7cde77e45c702068d6b163968
+chunkMap.sha256=d3c62fe220a5e8b7ec584c06f44469ec887f08a71d8ed87a94d65f4ec709f017
+split.method=per-category-sha256-rank-last-third-holdout-v1
+split.digest=12f79086668abf3494161639250d92d39f595bd8759ad00368d31925dad41a43
+judgment.reviewStatus=REVIEWED
+store.atoms=87
+store.fingerprint=dd11b6ba7e7f51b00af4f9bbaec4dc2649fd87ed05b3bbb97bdf9d0b42bb03d7
+store.vectorsSha256=b781092b4cc9ffb50aa75f4e07521bd6133184eb22907423a42de15720224370
+store.manifestVersion=0.4
+profile=MonadaMemoryOptions.defaults()
+encodingProfile=EncodingProfile[encoder=SimpleFrequencyEncoder, encoderVersion=1.0, dimensions=128, normalizer=LexicalEnrichmentPipeline, normalizerVersion=LexicalEnrichmentPipeline#fc22fb3d254ceb3f30c61a81fc75ba94e80344d6c2280e9fccb204ed086faff0, weightingStrategy=WeightedTokens, originalWeight=1.0, expansionWeight=0.25, aliasOriginalWeight=0.25, aliasExpansionWeight=0.0625]
+api=MonadaMemory.resonate(query).topK(10).threshold(-Infinity)
+k=[1, 3, 5, 10]
+baseline.report.sha256=86501f764e985835487a90b05ce5dbbdc2821455c94a97aaf5d443bba1a2ffd2
+control.store.feedbackEvents=0 (required: feedback-aware ranking must not reorder the baseline)
+treatment.store.vectorsSha256=b781092b4cc9ffb50aa75f4e07521bd6133184eb22907423a42de15720224370
+treatment.store.fingerprint=dd11b6ba7e7f51b00af4f9bbaec4dc2649fd87ed05b3bbb97bdf9d0b42bb03d7
+treatment.store.feedbackEvents=41 (declared treatment: predeclared explicit feedback, ranked feedback-aware)
+feedback.api=MonadaMemory.feedback(query, atomId, signal) with default deltas +0.0500 / -0.0500
+feedback.queryKeys=ExactQueryKeyStrategy (MonadaMemoryOptions.defaults(); not changed)
+arms=control, treatment and note: three Stores seeded separately from the same chunk set, each in its own work directory
+runs=control and treatment are measured twice per query on fresh instances of a throwaway copy; treatment is also ranked on the instance that recorded the feedback
+note.id=book-note-v1/authorship
+note.text=Lewis Carroll was the pen name of Charles Lutwidge Dodgson, the Oxford mathematician who wrote Alice's Adventures in Wonderland, first published in 1865.
+note.source=https://www.britannica.com/biography/Lewis-Carroll
+note.wording=ORIGINAL_WORDING_NO_BOOK_TEXT
+note.verificationStatus=VERIFIED
+note.verifiedBy=Steven Rey Sequeira
+note.verifiedAt=2026-10-23
+
+== What is measured, and what is not ==
+ranking feedback: an explicit statement by the host that, for one exact query text, an atom should rank higher (POSITIVE) or lower (NEGATIVE); it changes scores, never stored text
+explicit new note: content the host adds with remember(); it is a new atom next to the old ones and replaces, deletes or versions nothing
+execution outcomes: not used or measured here
+not shipped: the Store does not detect wrong answers, does not choose feedback, does not add or correct facts by itself and does not generalize feedback beyond the exact query key
+metrics: as in the book recall report (P@K, R@K, Hit@K over judged evidence; MRR; NO_ANSWER false hits); labels E2/E1 evidence, C0 confounder, U unjudged
+outcome per group: BETTER/WORSE by MRR, ties broken by Hit@10 then R@10; SAME when all three are equal; no improvement is required
+regression: an answerable query whose RR, any Hit@K or R@10 is lower in treatment than in control
+contamination: a query without its own feedback (HOLDOUT, DEV without feedback, confusable variant) whose top-10 differs from control in any atom or score
+chunk keys below are relative to <corpus>/<policy>/ of the inputs
+
+== Feedback plan (predeclared, DEV oracle labels only) ==
+rule=book-feedback-v1-dev-oracle
+ruleText=per DEV case of book-queries-v1: POSITIVE for every judged EVIDENCE chunk (grade 2 or 1), NEGATIVE for every judged CONFOUNDER chunk (grade 0) whose atom is not also evidence of the case; one event per (query, atom); the exact v1 query text; MonadaMemory default deltas (+-0.05); default ExactQueryKeyStrategy
+events=41 (POSITIVE 34, NEGATIVE 7)
+casesWithFeedback=23
+plan.sha256=4bc2e10d33bc80e9cc70527566c7261a2e8a4b453556ee1481e61874f21babfb
+disclosure.atomsAlsoJudgedByHoldout=7 (feedback stays keyed by the DEV query text; HOLDOUT queries are checked for transfer)
+  AMB-02 POSITIVE E2 s003/c0003 atom=86423dbc-f49c-32c6-a93a-67c2a8721578
+  AMB-02 POSITIVE E2 s009/c0004 atom=3a28c214-1eb6-3f97-af30-0cae7290db48
+  AMB-03 POSITIVE E2 s006/c0005 atom=97f3eab3-b587-3387-813b-f894c6ec329a
+  AMB-03 POSITIVE E2 s006/c0006 atom=5a6f5bf5-ec4d-3313-92af-01d3c194fb1f
+  CON-01 POSITIVE E2 s006/c0005 atom=97f3eab3-b587-3387-813b-f894c6ec329a
+  CON-01 POSITIVE E2 s006/c0006 atom=5a6f5bf5-ec4d-3313-92af-01d3c194fb1f
+  CON-01 NEGATIVE C0 s011/c0004 atom=7aabf3e5-d332-35e2-bc0f-9626232d511d
+  CON-03 POSITIVE E2 s009/c0004 atom=3a28c214-1eb6-3f97-af30-0cae7290db48
+  CON-03 NEGATIVE C0 s009/c0003 atom=2af0e887-5d53-3735-bf92-3d03ff89b592
+  CON-04 POSITIVE E2 s004/c0004 atom=b7024e85-43b8-3380-88c9-b978411b5858
+  CON-04 POSITIVE E1 s004/c0005 atom=ccf97a3b-981c-3da3-aefb-a769e5175f74
+  CON-04 NEGATIVE C0 s011/c0001 atom=5962d593-7843-3820-a025-3e4cac812f1f
+  LIT-01 POSITIVE E2 s001/c0004 atom=7bd5e978-b29d-3476-aeb0-535ea550ad3d
+  LIT-03 POSITIVE E2 s001/c0002 atom=847e47c6-a39b-30c3-bd09-cf611af2af08
+  LIT-04 POSITIVE E2 s004/c0000 atom=7d0b84c3-7c89-34bf-af4a-dcc488eae98d
+  LIT-04 POSITIVE E2 s004/c0003 atom=91443fa7-702b-37ba-9053-400d71ffea45
+  LIT-05 POSITIVE E2 s004/c0008 atom=8f2ebb80-c120-37d4-ad7f-0f7ef60f11f9
+  MUL-01 POSITIVE E2 s001/c0006 atom=f15c0f90-ddb5-38fa-b375-6d7cee710f57
+  MUL-01 POSITIVE E1 s002/c0000 atom=4ad18c69-fd7d-382e-a92d-25fa5997b109
+  MUL-01 POSITIVE E2 s004/c0001 atom=9316b989-da1b-376c-a6cd-769486f4e935
+  MUL-01 POSITIVE E2 s005/c0003 atom=48d4ceb4-e445-35bf-bb75-eb0ace5e3f9f
+  MUL-03 POSITIVE E2 s002/c0002 atom=a20df8a3-4b64-392d-9632-a0740e1a8b39
+  MUL-03 POSITIVE E2 s005/c0001 atom=23c4863a-2e33-376d-9bd8-6180c066e250
+  MUL-03 POSITIVE E2 s010/c0004 atom=5de1241e-84b2-39aa-9b9b-f442302ab711
+  MUL-04 POSITIVE E2 s006/c0002 atom=a218b1dc-8483-3550-bcec-e898613ba9d1
+  MUL-04 POSITIVE E2 s006/c0005 atom=97f3eab3-b587-3387-813b-f894c6ec329a
+  MUL-04 POSITIVE E2 s008/c0004 atom=69a38030-4945-3cf8-94a1-05a8f01c81a1
+  MUL-05 POSITIVE E1 s006/c0005 atom=97f3eab3-b587-3387-813b-f894c6ec329a
+  MUL-05 POSITIVE E2 s007/c0000 atom=33ab9543-f84e-3375-9728-5d42c7f835c8
+  MUL-05 POSITIVE E2 s011/c0002 atom=610112e6-d606-3622-945e-94852062b26f
+  NAR-01 POSITIVE E2 s001/c0005 atom=21bd335c-7302-3795-bb79-cf29e7c929c8
+  NAR-02 POSITIVE E2 s001/c0002 atom=847e47c6-a39b-30c3-bd09-cf611af2af08
+  NAR-04 POSITIVE E2 s012/c0004 atom=f84758f7-d691-3e95-8de9-fd222e96fe26
+  NOA-01 NEGATIVE C0 s001/c0000 atom=6415669b-3407-301e-9544-c8c30625eb36
+  NOA-01 NEGATIVE C0 s012/c0004 atom=f84758f7-d691-3e95-8de9-fd222e96fe26
+  NOA-02 NEGATIVE C0 s002/c0001 atom=e1536334-3ab3-310e-aa8e-90b4dc92a4d3
+  NOA-04 NEGATIVE C0 s008/c0001 atom=c05c2cd9-3bf2-392d-b40f-9d9b03b3ca99
+  PAR-03 POSITIVE E2 s008/c0003 atom=1eb31a6c-f8c0-3975-b9d6-cb2aa89a4fd9
+  PAR-04 POSITIVE E2 s007/c0000 atom=33ab9543-f84e-3375-9728-5d42c7f835c8
+  PAR-05 POSITIVE E2 s009/c0005 atom=71a6fff0-b7a4-3d55-bfb7-f5193a6368b6
+  PAR-06 POSITIVE E2 s003/c0002 atom=341eb2f5-76c2-34ed-9e23-f0643a269ff1
+
+== Metrics by partition: control -> treatment (treatment measured after reopen) ==
+-- DEV: queries 24, answerable 20 (denominator), NO_ANSWER 4
+K    P@K c -> t (delta)         R@K c -> t (delta)         Hit@K c -> t (delta)
+1    0.0500 -> 0.1000 (+0.0500) 0.0250 -> 0.0417 (+0.0167) 0.0500 -> 0.1000 (+0.0500)
+3    0.0833 -> 0.1833 (+0.1000) 0.1417 -> 0.3458 (+0.2042) 0.2500 -> 0.5000 (+0.2500)
+5    0.0500 -> 0.1500 (+0.1000) 0.1417 -> 0.4375 (+0.2958) 0.2500 -> 0.5500 (+0.3000)
+10   0.0450 -> 0.1050 (+0.0600) 0.2708 -> 0.5542 (+0.2833) 0.4500 -> 0.6500 (+0.2000)
+MRR 0.1705 -> 0.3246 (+0.1540) (n=20)
+NO_ANSWER false hits: 4/4 -> 4/4
+outcome=BETTER
+
+-- HOLDOUT: queries 8, answerable 7 (denominator), NO_ANSWER 1
+K    P@K c -> t (delta)         R@K c -> t (delta)         Hit@K c -> t (delta)
+1    0.1429 -> 0.1429 (+0.0000) 0.1429 -> 0.1429 (+0.0000) 0.1429 -> 0.1429 (+0.0000)
+3    0.0952 -> 0.0952 (+0.0000) 0.1905 -> 0.1905 (+0.0000) 0.2857 -> 0.2857 (+0.0000)
+5    0.0857 -> 0.0857 (+0.0000) 0.2619 -> 0.2619 (+0.0000) 0.4286 -> 0.4286 (+0.0000)
+10   0.0571 -> 0.0571 (+0.0000) 0.3095 -> 0.3095 (+0.0000) 0.4286 -> 0.4286 (+0.0000)
+MRR 0.2500 -> 0.2500 (+0.0000) (n=7)
+NO_ANSWER false hits: 1/1 -> 1/1
+outcome=SAME
+
+-- ALL: queries 32, answerable 27 (denominator), NO_ANSWER 5
+K    P@K c -> t (delta)         R@K c -> t (delta)         Hit@K c -> t (delta)
+1    0.0741 -> 0.1111 (+0.0370) 0.0556 -> 0.0679 (+0.0123) 0.0741 -> 0.1111 (+0.0370)
+3    0.0864 -> 0.1605 (+0.0741) 0.1543 -> 0.3056 (+0.1512) 0.2593 -> 0.4444 (+0.1852)
+5    0.0593 -> 0.1333 (+0.0741) 0.1728 -> 0.3920 (+0.2191) 0.2963 -> 0.5185 (+0.2222)
+10   0.0481 -> 0.0926 (+0.0444) 0.2809 -> 0.4907 (+0.2099) 0.4444 -> 0.5926 (+0.1481)
+MRR 0.1911 -> 0.3052 (+0.1141) (n=27)
+NO_ANSWER false hits: 5/5 -> 5/5
+outcome=BETTER
+
+== Metrics by category (DEV + HOLDOUT): control -> treatment ==
+category            ans  Hit@1                    Hit@10                   MRR
+LITERAL             5    0.2000 -> 0.2000 (+0.0000) 0.4000 -> 0.4000 (+0.0000) 0.3000 -> 0.3000 (+0.0000)
+PARAPHRASE          6    0.0000 -> 0.0000 (+0.0000) 0.1667 -> 0.5000 (+0.3333) 0.0238 -> 0.2000 (+0.1762)
+NARRATIVE_TEMPORAL  4    0.0000 -> 0.0000 (+0.0000) 0.5000 -> 0.5000 (+0.0000) 0.1875 -> 0.1875 (+0.0000)
+MULTI_EVIDENCE      5    0.0000 -> 0.2000 (+0.2000) 0.8000 -> 1.0000 (+0.2000) 0.2536 -> 0.5333 (+0.2798)
+CONFOUNDER          4    0.2500 -> 0.2500 (+0.0000) 0.5000 -> 0.5000 (+0.0000) 0.2917 -> 0.3750 (+0.0833)
+AMBIGUOUS           3    0.0000 -> 0.0000 (+0.0000) 0.3333 -> 0.6667 (+0.3333) 0.1111 -> 0.2083 (+0.0972)
+
+== Per-query changes (answerable) ==
+AMB-01 HOLDOUT AMBIGUOUS          feedback=no  firstEvidenceRank none -> none RR 0.0000 -> 0.0000 R@10 0.0000 -> 0.0000 UNCHANGED
+AMB-02 DEV     AMBIGUOUS          feedback=yes firstEvidenceRank none -> 8 RR 0.0000 -> 0.1250 R@10 0.0000 -> 0.5000 IMPROVED
+AMB-03 DEV     AMBIGUOUS          feedback=yes firstEvidenceRank 3 -> 2 RR 0.3333 -> 0.5000 R@10 0.5000 -> 1.0000 IMPROVED
+CON-01 DEV     CONFOUNDER         feedback=yes firstEvidenceRank none -> none RR 0.0000 -> 0.0000 R@10 0.0000 -> 0.0000 UNCHANGED
+CON-02 HOLDOUT CONFOUNDER         feedback=no  firstEvidenceRank none -> none RR 0.0000 -> 0.0000 R@10 0.0000 -> 0.0000 UNCHANGED
+CON-03 DEV     CONFOUNDER         feedback=yes firstEvidenceRank 6 -> 2 RR 0.1667 -> 0.5000 R@10 1.0000 -> 1.0000 IMPROVED
+CON-04 DEV     CONFOUNDER         feedback=yes firstEvidenceRank 1 -> 1 RR 1.0000 -> 1.0000 R@10 0.5000 -> 1.0000 IMPROVED
+LIT-01 DEV     LITERAL            feedback=yes firstEvidenceRank none -> none RR 0.0000 -> 0.0000 R@10 0.0000 -> 0.0000 UNCHANGED
+LIT-02 HOLDOUT LITERAL            feedback=no  firstEvidenceRank 1 -> 1 RR 1.0000 -> 1.0000 R@10 1.0000 -> 1.0000 UNCHANGED
+LIT-03 DEV     LITERAL            feedback=yes firstEvidenceRank none -> none RR 0.0000 -> 0.0000 R@10 0.0000 -> 0.0000 UNCHANGED
+LIT-04 DEV     LITERAL            feedback=yes firstEvidenceRank 2 -> 2 RR 0.5000 -> 0.5000 R@10 0.5000 -> 0.5000 UNCHANGED
+LIT-05 DEV     LITERAL            feedback=yes firstEvidenceRank none -> none RR 0.0000 -> 0.0000 R@10 0.0000 -> 0.0000 UNCHANGED
+MUL-01 DEV     MULTI_EVIDENCE     feedback=yes firstEvidenceRank 8 -> 2 RR 0.1250 -> 0.5000 R@10 0.2500 -> 0.7500 IMPROVED
+MUL-02 HOLDOUT MULTI_EVIDENCE     feedback=no  firstEvidenceRank 2 -> 2 RR 0.5000 -> 0.5000 R@10 0.6667 -> 0.6667 UNCHANGED
+MUL-03 DEV     MULTI_EVIDENCE     feedback=yes firstEvidenceRank 7 -> 2 RR 0.1429 -> 0.5000 R@10 0.3333 -> 1.0000 IMPROVED
+MUL-04 DEV     MULTI_EVIDENCE     feedback=yes firstEvidenceRank 2 -> 1 RR 0.5000 -> 1.0000 R@10 0.3333 -> 0.6667 IMPROVED
+MUL-05 DEV     MULTI_EVIDENCE     feedback=yes firstEvidenceRank none -> 6 RR 0.0000 -> 0.1667 R@10 0.0000 -> 0.6667 IMPROVED
+NAR-01 DEV     NARRATIVE_TEMPORAL feedback=yes firstEvidenceRank 2 -> 2 RR 0.5000 -> 0.5000 R@10 1.0000 -> 1.0000 UNCHANGED
+NAR-02 DEV     NARRATIVE_TEMPORAL feedback=yes firstEvidenceRank none -> none RR 0.0000 -> 0.0000 R@10 0.0000 -> 0.0000 UNCHANGED
+NAR-03 HOLDOUT NARRATIVE_TEMPORAL feedback=no  firstEvidenceRank 4 -> 4 RR 0.2500 -> 0.2500 R@10 0.5000 -> 0.5000 UNCHANGED
+NAR-04 DEV     NARRATIVE_TEMPORAL feedback=yes firstEvidenceRank none -> none RR 0.0000 -> 0.0000 R@10 0.0000 -> 0.0000 UNCHANGED
+PAR-01 HOLDOUT PARAPHRASE         feedback=no  firstEvidenceRank none -> none RR 0.0000 -> 0.0000 R@10 0.0000 -> 0.0000 UNCHANGED
+PAR-02 HOLDOUT PARAPHRASE         feedback=no  firstEvidenceRank none -> none RR 0.0000 -> 0.0000 R@10 0.0000 -> 0.0000 UNCHANGED
+PAR-03 DEV     PARAPHRASE         feedback=yes firstEvidenceRank none -> 2 RR 0.0000 -> 0.5000 R@10 0.0000 -> 1.0000 IMPROVED
+PAR-04 DEV     PARAPHRASE         feedback=yes firstEvidenceRank none -> 5 RR 0.0000 -> 0.2000 R@10 0.0000 -> 1.0000 IMPROVED
+PAR-05 DEV     PARAPHRASE         feedback=yes firstEvidenceRank none -> none RR 0.0000 -> 0.0000 R@10 0.0000 -> 0.0000 UNCHANGED
+PAR-06 DEV     PARAPHRASE         feedback=yes firstEvidenceRank 7 -> 2 RR 0.1429 -> 0.5000 R@10 1.0000 -> 1.0000 IMPROVED
+regressions=none
+
+== NO_ANSWER queries: control -> treatment ==
+Feedback can move which chunk ranks first; it cannot make the Store abstain at threshold -Infinity.
+NOA-01 DEV     feedback=yes FALSE_POSITIVE -> FALSE_POSITIVE top1 U s009/c0001 0.449220 -> U s009/c0001 0.449220
+NOA-02 DEV     feedback=yes FALSE_POSITIVE -> FALSE_POSITIVE top1 U s009/c0001 0.426670 -> U s009/c0001 0.426670
+NOA-03 HOLDOUT feedback=no  FALSE_POSITIVE -> FALSE_POSITIVE top1 U s011/c0000 0.183027 -> U s011/c0000 0.183027
+NOA-04 DEV     feedback=yes FALSE_POSITIVE -> FALSE_POSITIVE top1 C0 s008/c0001 0.362891 -> C0 s008/c0001 0.312891
+NOA-05 DEV     feedback=no  FALSE_POSITIVE -> FALSE_POSITIVE top1 U s008/c0002 0.272291 -> U s008/c0002 0.272291
+
+== Contamination probes ==
+HOLDOUT and DEV queries without feedback: compared in full in the per-query trace and in the hard checks below.
+Confusable variants of DEV feedback queries (rule: CASE_FOLDED = lower-cased text; REWORDED = "In the story, " + the question):
+  AMB-02/CASE_FOLDED  ISOLATED firstEvidenceRank none -> none top1 U s009/c0001 0.295196 -> U s009/c0001 0.295196 query: who tells alice a sad story?
+  AMB-02/REWORDED     ISOLATED firstEvidenceRank none -> none top1 U s011/c0005 0.270434 -> U s011/c0005 0.270434 query: In the story, who tells Alice a sad story?
+  AMB-03/CASE_FOLDED  ISOLATED firstEvidenceRank 3 -> 3 top1 U s009/c0001 0.316288 -> U s009/c0001 0.316288 query: who in wonderland is mad?
+  AMB-03/REWORDED     ISOLATED firstEvidenceRank 3 -> 3 top1 U s009/c0001 0.307496 -> U s009/c0001 0.307496 query: In the story, who in Wonderland is mad?
+  CON-01/CASE_FOLDED  ISOLATED firstEvidenceRank none -> none top1 U s006/c0002 0.205027 -> U s006/c0002 0.205027 query: what does the duchess's baby turn into?
+  CON-01/REWORDED     ISOLATED firstEvidenceRank none -> none top1 U s006/c0002 0.203772 -> U s006/c0002 0.203772 query: In the story, what does the Duchess's baby turn into?
+  CON-03/CASE_FOLDED  ISOLATED firstEvidenceRank 6 -> 6 top1 U s009/c0006 0.266320 -> U s009/c0006 0.266320 query: what does the mock turtle say he used to be?
+  CON-03/REWORDED     ISOLATED firstEvidenceRank 4 -> 4 top1 U s009/c0006 0.273915 -> U s009/c0006 0.273915 query: In the story, what does the Mock Turtle say he used to be?
+  CON-04/CASE_FOLDED  ISOLATED firstEvidenceRank 1 -> 1 top1 E s004/c0004 0.188764 -> E s004/c0004 0.188764 query: what happened to bill the lizard when he came down the chimney?
+  CON-04/REWORDED     ISOLATED firstEvidenceRank 1 -> 1 top1 E s004/c0004 0.196192 -> E s004/c0004 0.196192 query: In the story, what happened to Bill the Lizard when he came down the chimney?
+  LIT-01/CASE_FOLDED  ISOLATED firstEvidenceRank none -> none top1 U s009/c0005 0.404788 -> U s009/c0005 0.404788 query: what words are printed on the label of the little bottle alice finds on the glass table?
+  LIT-01/REWORDED     ISOLATED firstEvidenceRank none -> none top1 U s009/c0005 0.395980 -> U s009/c0005 0.395980 query: In the story, what words are printed on the label of the little bottle Alice finds on the glass table?
+  LIT-03/CASE_FOLDED  ISOLATED firstEvidenceRank none -> none top1 U s009/c0001 0.476470 -> U s009/c0001 0.476470 query: what is the name of alice's cat?
+  LIT-03/REWORDED     ISOLATED firstEvidenceRank none -> none top1 U s009/c0001 0.467556 -> U s009/c0001 0.467556 query: In the story, what is the name of Alice's cat?
+  LIT-04/CASE_FOLDED  ISOLATED firstEvidenceRank 2 -> 2 top1 U s011/c0005 0.393985 -> U s011/c0005 0.393985 query: what name does the white rabbit call alice when he mistakes her for his housemaid?
+  LIT-04/REWORDED     ISOLATED firstEvidenceRank 2 -> 2 top1 U s011/c0005 0.423459 -> U s011/c0005 0.423459 query: In the story, what name does the White Rabbit call Alice when he mistakes her for his housemaid?
+  LIT-05/CASE_FOLDED  ISOLATED firstEvidenceRank none -> none top1 U s009/c0001 0.497553 -> U s009/c0001 0.497553 query: what is the caterpillar smoking when alice first meets it?
+  LIT-05/REWORDED     ISOLATED firstEvidenceRank none -> none top1 U s009/c0001 0.492250 -> U s009/c0001 0.492250 query: In the story, what is the Caterpillar smoking when Alice first meets it?
+  MUL-01/CASE_FOLDED  ISOLATED firstEvidenceRank 8 -> 8 top1 U s009/c0006 0.292341 -> U s009/c0006 0.292341 query: what did alice eat or drink that made her grow bigger?
+  MUL-01/REWORDED     ISOLATED firstEvidenceRank none -> none top1 U s009/c0006 0.299383 -> U s009/c0006 0.299383 query: In the story, what did Alice eat or drink that made her grow bigger?
+  MUL-03/CASE_FOLDED  ISOLATED firstEvidenceRank 7 -> 7 top1 U s005/c0000 0.189634 -> U s005/c0000 0.189634 query: which poems did alice try to recite but get the words wrong?
+  MUL-03/REWORDED     ISOLATED firstEvidenceRank 5 -> 5 top1 U s005/c0000 0.195273 -> U s005/c0000 0.195273 query: In the story, which poems did Alice try to recite but get the words wrong?
+  MUL-04/CASE_FOLDED  ISOLATED firstEvidenceRank 2 -> 2 top1 U s010/c0000 0.207713 -> U s010/c0000 0.207713 query: in which places does the cheshire cat show up?
+  MUL-04/REWORDED     ISOLATED firstEvidenceRank 5 -> 5 top1 U s010/c0000 0.207251 -> U s010/c0000 0.207251 query: In the story, in which places does the Cheshire Cat show up?
+  MUL-05/CASE_FOLDED  ISOLATED firstEvidenceRank none -> none top1 U s007/c0002 0.166718 -> U s007/c0002 0.166718 query: where in the story does the hatter appear?
+  MUL-05/REWORDED     ISOLATED firstEvidenceRank 10 -> 10 top1 U s007/c0002 0.166950 -> U s007/c0002 0.166950 query: In the story, where in the story does the Hatter appear?
+  NAR-01/CASE_FOLDED  ISOLATED firstEvidenceRank 2 -> 2 top1 U s004/c0003 0.500578 -> U s004/c0003 0.500578 query: what happened to alice's size right after she drank from the first bottle?
+  NAR-01/REWORDED     ISOLATED firstEvidenceRank 2 -> 2 top1 U s004/c0003 0.490370 -> U s004/c0003 0.490370 query: In the story, what happened to Alice's size right after she drank from the first bottle?
+  NAR-02/CASE_FOLDED  ISOLATED firstEvidenceRank none -> none top1 U s009/c0002 0.395642 -> U s009/c0002 0.395642 query: where did alice land at the end of her long fall?
+  NAR-02/REWORDED     ISOLATED firstEvidenceRank none -> none top1 U s006/c0003 0.394178 -> U s006/c0003 0.394178 query: In the story, where did Alice land at the end of her long fall?
+  NAR-04/CASE_FOLDED  ISOLATED firstEvidenceRank none -> none top1 U s009/c0003 0.243230 -> U s009/c0003 0.243230 query: what happened just before alice woke up on the bank?
+  NAR-04/REWORDED     ISOLATED firstEvidenceRank none -> none top1 U s009/c0001 0.239091 -> U s009/c0001 0.239091 query: In the story, what happened just before Alice woke up on the bank?
+  NOA-01/CASE_FOLDED  ISOLATED firstEvidenceRank none -> none top1 U s009/c0001 0.449220 -> U s009/c0001 0.449220 query: what is the name of alice's older sister?
+  NOA-01/REWORDED     ISOLATED firstEvidenceRank none -> none top1 U s009/c0001 0.443562 -> U s009/c0001 0.443562 query: In the story, what is the name of Alice's older sister?
+  NOA-02/CASE_FOLDED  ISOLATED firstEvidenceRank none -> none top1 U s009/c0001 0.426670 -> U s009/c0001 0.426670 query: how old is alice?
+  NOA-02/REWORDED     ISOLATED firstEvidenceRank none -> none top1 U s009/c0001 0.415810 -> U s009/c0001 0.415810 query: In the story, how old is Alice?
+  NOA-04/CASE_FOLDED  ISOLATED firstEvidenceRank none -> none top1 C0 s008/c0001 0.362891 -> C0 s008/c0001 0.362891 query: what is the queen of hearts' first name?
+  NOA-04/REWORDED     ISOLATED firstEvidenceRank none -> none top1 C0 s008/c0001 0.335972 -> C0 s008/c0001 0.335972 query: In the story, what is the Queen of Hearts' first name?
+  PAR-03/CASE_FOLDED  ISOLATED firstEvidenceRank none -> none top1 U s006/c0000 0.224699 -> U s006/c0000 0.224699 query: in the royal outdoor game, which living creatures served as the sticks and the balls?
+  PAR-03/REWORDED     ISOLATED firstEvidenceRank 10 -> 10 top1 U s006/c0000 0.214242 -> U s006/c0000 0.214242 query: In the story, in the royal outdoor game, which living creatures served as the sticks and the balls?
+  PAR-04/CASE_FOLDED  ISOLATED firstEvidenceRank none -> none top1 U s008/c0007 0.282549 -> U s008/c0007 0.282549 query: who was dozing between two tea drinkers while they leaned on him like a pillow?
+  PAR-04/REWORDED     ISOLATED firstEvidenceRank 10 -> 10 top1 U s008/c0007 0.265085 -> U s008/c0007 0.265085 query: In the story, who was dozing between two tea drinkers while they leaned on him like a pillow?
+  PAR-05/CASE_FOLDED  ISOLATED firstEvidenceRank none -> none top1 U s008/c0007 0.164399 -> U s008/c0007 0.164399 query: which odd-sounding school subjects did the sorrowful sea creature say he had studied?
+  PAR-05/REWORDED     ISOLATED firstEvidenceRank none -> none top1 U s008/c0007 0.182791 -> U s008/c0007 0.182791 query: In the story, which odd-sounding school subjects did the sorrowful sea creature say he had studied?
+  PAR-06/CASE_FOLDED  ISOLATED firstEvidenceRank 7 -> 7 top1 U s003/c0000 0.346553 -> U s003/c0000 0.346553 query: how did the girl reward the runners once everyone was declared a winner?
+  PAR-06/REWORDED     ISOLATED firstEvidenceRank 5 -> 5 top1 U s003/c0000 0.342663 -> U s003/c0000 0.342663 query: In the story, how did the girl reward the runners once everyone was declared a winner?
+confusable transfer=0/46 (exact query keys: feedback does not generalize to a reworded or re-cased question)
+
+== Phase C: explicit new note ==
+note.atomId=ea7cc7a2-dfdd-3256-b0cf-2ce36394eda7
+note.sidecar={"format":"monada-book-note-sidecar","formatVersion":"1","noteId":"book-note-v1/authorship","atomId":"ea7cc7a2-dfdd-3256-b0cf-2ce36394eda7","sha256":"bad5198eca7d26f42985ec161a5b2d2fdeab4ef100706662dd556039359f00c3","utf8Bytes":"153","source":"https://www.britannica.com/biography/Lewis-Carroll","wording":"ORIGINAL_WORDING_NO_BOOK_TEXT","verificationStatus":"VERIFIED","verifiedBy":"Steven Rey Sequeira","verifiedAt":"2026-10-23","lifecycle":"APPEND_ONLY: no replacement, deletion or version resolution; original chunks remain queryable"}
+after reopen: atoms 88 (chunks 87 + note 1), original chunks exact 87/87, note exact true, audit HEALTHY
+chunk readback contract: passed=false, unexpected atoms 1 (the chunk-only readback is expected to flag the note)
+lifecycle=APPEND_ONLY: no replacement, deletion or version resolution; original chunks remain queryable
+note probes (predeclared; the note is not required to rank first):
+  note at #1 0.345857 query: What was the real name of the writer known as Lewis Carroll?
+  note at #1 0.535303 query: In which year was Alice's Adventures in Wonderland first published?
+judged queries whose top-10 now includes the note: 10 (false transfer for NO_ANSWER queries; for answerable ones the note displaces a chunk)
+  AMB-03 DEV     AMBIGUOUS          note at #1 0.344124
+  CON-01 DEV     CONFOUNDER         note at #9 0.086711
+  CON-02 HOLDOUT CONFOUNDER         note at #4 0.205196
+  LIT-03 DEV     LITERAL            note at #7 0.324443
+  NAR-04 DEV     NARRATIVE_TEMPORAL note at #1 0.280976
+  NOA-01 DEV     NO_ANSWER          note at #9 0.305888
+  NOA-03 HOLDOUT NO_ANSWER          note at #9 0.132453
+  NOA-04 DEV     NO_ANSWER          note at #3 0.280976
+  PAR-03 DEV     PARAPHRASE         note at #2 0.217643
+  PAR-04 DEV     PARAPHRASE         note at #4 0.236940
+
+== Hard checks ==
+PASS control.cleanSeed: own Store, CLEAN, 87 atoms, readback passed
+PASS treatment.cleanSeed: own Store, CLEAN, 87 atoms, readback passed
+PASS note.cleanSeed: own Store, CLEAN, 87 atoms, readback passed
+PASS control.reproducesBaseline: control recall report vs committed baseline sha256 86501f764e985835487a90b05ce5dbbdc2821455c94a97aaf5d443bba1a2ffd2
+PASS guard.unknownAtomRejected: feedback on an atom id outside the Store throws and writes nothing
+PASS treatment.feedbackLogMatchesPlan: 41 events (query, queryKey, atomId, signal, delta; createdAt ignored)
+PASS treatment.reopenParity: 32/32 queries rank identically on the feedback instance and after reopen
+PASS contamination.holdoutUnchanged: 8/8 HOLDOUT queries rank exactly as in control
+PASS contamination.devWithoutFeedbackUnchanged: 1/1 DEV queries without feedback rank exactly as in control
+PASS contamination.confusableProbesUnchanged: 46/46 confusable variants rank exactly as in control (no transfer)
+PASS isolation.controlStoreUnchanged: the control Store's bytes are identical before and after the treatment and note phases
+PASS note.newAtomId: remember returned the content-derived id of the note, no chunk's
+PASS note.sidecarReadsBack: the provenance sidecar line parses back to the written fields
+PASS note.persistedNextToOriginals: after reopen: note exact, 87/87 original chunks exact, 88 atoms, audit HEALTHY
+PASS note.chunkReadbackSeesOneExtraAtom: the chunk-only readback contract reports the note as its one unexpected atom
+PASS note.rankingsWithoutNoteUnchanged: 22/22 judged queries whose top-10 lacks the note rank exactly as in control
+PASS isolation.controlStoreUnchangedAfterNote: the note phase never touches the control Store
+
+== Per-query trace: control vs treatment top-10 ==
+AMB-01 HOLDOUT AMBIGUOUS IDENTICAL
+  query: Why is the White Rabbit in such a hurry?
+  #1  c 0.312270 U  s011/c0005           t 0.312270 U  s011/c0005
+  #2  c 0.266776 U  s008/c0003           t 0.266776 U  s008/c0003
+  #3  c 0.216776 U  s002/c0005           t 0.216776 U  s002/c0005
+  #4  c 0.202107 U  s009/c0001           t 0.202107 U  s009/c0001
+  #5  c 0.193108 U  s001/c0000           t 0.193108 U  s001/c0000
+  #6  c 0.191951 U  s005/c0002           t 0.191951 U  s005/c0002
+  #7  c 0.178723 U  s009/c0005           t 0.178723 U  s009/c0005
+  #8  c 0.171431 U  s005/c0001           t 0.171431 U  s005/c0001
+  #9  c 0.163434 U  s004/c0000           t 0.163434 U  s004/c0000
+  #10 c 0.161881 U  s002/c0006           t 0.161881 U  s002/c0006
+AMB-02 DEV AMBIGUOUS CHANGED
+  query: Who tells Alice a sad story?
+  #1  c 0.295196 U  s009/c0001           t 0.295196 U  s009/c0001
+  #2  c 0.270489 U  s002/c0000           t 0.270489 U  s002/c0000
+  #3  c 0.269240 U  s002/c0004           t 0.269240 U  s002/c0004
+  #4  c 0.268773 U  s011/c0005           t 0.268773 U  s011/c0005
+  #5  c 0.241506 U  s007/c0003           t 0.241506 U  s007/c0003
+  #6  c 0.237466 U  s002/c0005           t 0.237466 U  s002/c0005
+  #7  c 0.236952 U  s003/c0004           t 0.236952 U  s003/c0004
+  #8  c 0.229616 U  s008/c0003           t 0.231239 E2 s009/c0004
+  #9  c 0.224375 U  s009/c0003           t 0.229616 U  s008/c0003
+  #10 c 0.215325 U  s010/c0004           t 0.224375 U  s009/c0003
+AMB-03 DEV AMBIGUOUS CHANGED
+  query: Who in Wonderland is mad?
+  #1  c 0.316288 U  s009/c0001           t 0.316288 U  s009/c0001
+  #2  c 0.249053 U  s007/c0001           t 0.298246 E2 s006/c0006
+  #3  c 0.248246 E2 s006/c0006           t 0.249053 U  s007/c0001
+  #4  c 0.218643 U  s002/c0005           t 0.218643 U  s002/c0005
+  #5  c 0.208767 U  s003/c0002           t 0.208767 U  s003/c0002
+  #6  c 0.201640 U  s006/c0003           t 0.201640 U  s006/c0003
+  #7  c 0.198069 U  s009/c0000           t 0.198069 U  s009/c0000
+  #8  c 0.192539 U  s008/c0002           t 0.194518 E2 s006/c0005
+  #9  c 0.191896 U  s005/c0000           t 0.192539 U  s008/c0002
+  #10 c 0.189705 U  s009/c0005           t 0.191896 U  s005/c0000
+CON-01 DEV CONFOUNDER IDENTICAL
+  query: What does the Duchess's baby turn into?
+  #1  c 0.205027 U  s006/c0002           t 0.205027 U  s006/c0002
+  #2  c 0.176728 U  s009/c0002           t 0.176728 U  s009/c0002
+  #3  c 0.155929 U  s009/c0001           t 0.155929 U  s009/c0001
+  #4  c 0.120636 U  s008/c0007           t 0.120636 U  s008/c0007
+  #5  c 0.114482 U  s012/c0002           t 0.114482 U  s012/c0002
+  #6  c 0.106668 U  s009/c0003           t 0.106668 U  s009/c0003
+  #7  c 0.089958 U  s004/c0003           t 0.089958 U  s004/c0003
+  #8  c 0.088209 U  s008/c0003           t 0.088209 U  s008/c0003
+  #9  c 0.077648 U  s009/c0006           t 0.077648 U  s009/c0006
+  #10 c 0.077557 U  s007/c0000           t 0.077557 U  s007/c0000
+CON-02 HOLDOUT CONFOUNDER IDENTICAL
+  query: Who is accused of stealing the tarts?
+  #1  c 0.210352 U  s009/c0003           t 0.210352 U  s009/c0003
+  #2  c 0.209097 U  s009/c0001           t 0.209097 U  s009/c0001
+  #3  c 0.208834 U  s009/c0005           t 0.208834 U  s009/c0005
+  #4  c 0.164139 U  s007/c0001           t 0.164139 U  s007/c0001
+  #5  c 0.153207 U  s003/c0003           t 0.153207 U  s003/c0003
+  #6  c 0.149766 U  s006/c0007           t 0.149766 U  s006/c0007
+  #7  c 0.145617 U  s012/c0000           t 0.145617 U  s012/c0000
+  #8  c 0.145215 U  s003/c0000           t 0.145215 U  s003/c0000
+  #9  c 0.141705 U  s007/c0004           t 0.141705 U  s007/c0004
+  #10 c 0.139686 U  s002/c0005           t 0.139686 U  s002/c0005
+CON-03 DEV CONFOUNDER CHANGED
+  query: What does the Mock Turtle say he used to be?
+  #1  c 0.266320 U  s009/c0006           t 0.266320 U  s009/c0006
+  #2  c 0.247647 U  s009/c0005           t 0.248390 E2 s009/c0004
+  #3  c 0.209586 U  s010/c0003           t 0.247647 U  s009/c0005
+  #4  c 0.207251 U  s010/c0000           t 0.209586 U  s010/c0003
+  #5  c 0.203914 U  s007/c0001           t 0.207251 U  s010/c0000
+  #6  c 0.198390 E2 s009/c0004           t 0.203914 U  s007/c0001
+  #7  c 0.190919 U  s010/c0002           t 0.190919 U  s010/c0002
+  #8  c 0.166298 C0 s009/c0003           t 0.144040 U  s010/c0004
+  #9  c 0.144040 U  s010/c0004           t 0.129636 U  s012/c0003
+  #10 c 0.129636 U  s012/c0003           t 0.129619 U  s006/c0003
+CON-04 DEV CONFOUNDER CHANGED
+  query: What happened to Bill the Lizard when he came down the chimney?
+  #1  c 0.188764 E2 s004/c0004           t 0.238764 E2 s004/c0004
+  #2  c 0.174705 U  s008/c0001           t 0.175048 E1 s004/c0005
+  #3  c 0.172315 U  s001/c0001           t 0.174705 U  s008/c0001
+  #4  c 0.164610 U  s011/c0002           t 0.172315 U  s001/c0001
+  #5  c 0.150106 U  s001/c0005           t 0.164610 U  s011/c0002
+  #6  c 0.145419 U  s007/c0000           t 0.150106 U  s001/c0005
+  #7  c 0.133977 U  s011/c0004           t 0.145419 U  s007/c0000
+  #8  c 0.131475 U  s005/c0003           t 0.133977 U  s011/c0004
+  #9  c 0.129296 U  s004/c0002           t 0.131475 U  s005/c0003
+  #10 c 0.127216 U  s006/c0000           t 0.129296 U  s004/c0002
+LIT-01 DEV LITERAL IDENTICAL
+  query: What words are printed on the label of the little bottle Alice finds on the glass table?
+  #1  c 0.404788 U  s009/c0005           t 0.404788 U  s009/c0005
+  #2  c 0.357174 U  s009/c0004           t 0.357174 U  s009/c0004
+  #3  c 0.315117 U  s009/c0001           t 0.315117 U  s009/c0001
+  #4  c 0.310991 U  s005/c0000           t 0.310991 U  s005/c0000
+  #5  c 0.296166 U  s007/c0004           t 0.296166 U  s007/c0004
+  #6  c 0.286143 U  s007/c0000           t 0.286143 U  s007/c0000
+  #7  c 0.284638 U  s012/c0001           t 0.284638 U  s012/c0001
+  #8  c 0.283638 U  s009/c0003           t 0.283638 U  s009/c0003
+  #9  c 0.278736 U  s009/c0006           t 0.278736 U  s009/c0006
+  #10 c 0.267394 U  s008/c0003           t 0.267394 U  s008/c0003
+LIT-02 HOLDOUT LITERAL IDENTICAL
+  query: What was written on the jar Alice took from a shelf while she was falling down the well?
+  #1  c 0.597078 E2 s001/c0001           t 0.597078 E2 s001/c0001
+  #2  c 0.532140 U  s001/c0003           t 0.532140 U  s001/c0003
+  #3  c 0.453440 U  s011/c0004           t 0.453440 U  s011/c0004
+  #4  c 0.451714 U  s005/c0003           t 0.451714 U  s005/c0003
+  #5  c 0.448970 U  s008/c0006           t 0.448970 U  s008/c0006
+  #6  c 0.401196 U  s004/c0006           t 0.401196 U  s004/c0006
+  #7  c 0.394816 U  s007/c0005           t 0.394816 U  s007/c0005
+  #8  c 0.394192 U  s009/c0006           t 0.394192 U  s009/c0006
+  #9  c 0.393403 U  s008/c0004           t 0.393403 U  s008/c0004
+  #10 c 0.374576 U  s001/c0000           t 0.374576 U  s001/c0000
+LIT-03 DEV LITERAL IDENTICAL
+  query: What is the name of Alice's cat?
+  #1  c 0.476470 U  s009/c0001           t 0.476470 U  s009/c0001
+  #2  c 0.465633 U  s009/c0003           t 0.465633 U  s009/c0003
+  #3  c 0.380021 U  s007/c0001           t 0.380021 U  s007/c0001
+  #4  c 0.375269 U  s009/c0006           t 0.375269 U  s009/c0006
+  #5  c 0.371470 U  s009/c0005           t 0.371470 U  s009/c0005
+  #6  c 0.331295 U  s002/c0005           t 0.331295 U  s002/c0005
+  #7  c 0.324206 U  s003/c0001           t 0.324206 U  s003/c0001
+  #8  c 0.317911 U  s009/c0002           t 0.317911 U  s009/c0002
+  #9  c 0.317396 U  s007/c0000           t 0.317396 U  s007/c0000
+  #10 c 0.312500 U  s008/c0005           t 0.312500 U  s008/c0005
+LIT-04 DEV LITERAL CHANGED
+  query: What name does the White Rabbit call Alice when he mistakes her for his housemaid?
+  #1  c 0.393985 U  s011/c0005           t 0.393985 U  s011/c0005
+  #2  c 0.312908 E2 s004/c0000           t 0.362908 E2 s004/c0000
+  #3  c 0.299865 U  s001/c0000           t 0.299865 U  s001/c0000
+  #4  c 0.298113 U  s007/c0001           t 0.298113 U  s007/c0001
+  #5  c 0.236261 U  s010/c0004           t 0.236261 U  s010/c0004
+  #6  c 0.228841 U  s009/c0001           t 0.228841 U  s009/c0001
+  #7  c 0.223699 U  s006/c0003           t 0.223699 U  s006/c0003
+  #8  c 0.216952 U  s008/c0001           t 0.216952 U  s008/c0001
+  #9  c 0.216574 U  s002/c0005           t 0.216574 U  s002/c0005
+  #10 c 0.211890 U  s009/c0000           t 0.211890 U  s009/c0000
+LIT-05 DEV LITERAL IDENTICAL
+  query: What is the Caterpillar smoking when Alice first meets it?
+  #1  c 0.497553 U  s009/c0001           t 0.497553 U  s009/c0001
+  #2  c 0.434745 U  s007/c0001           t 0.434745 U  s007/c0001
+  #3  c 0.357125 U  s003/c0001           t 0.357125 U  s003/c0001
+  #4  c 0.345552 U  s005/c0002           t 0.345552 U  s005/c0002
+  #5  c 0.340279 U  s007/c0000           t 0.340279 U  s007/c0000
+  #6  c 0.325669 U  s010/c0006           t 0.325669 U  s010/c0006
+  #7  c 0.314728 U  s003/c0002           t 0.314728 U  s003/c0002
+  #8  c 0.305720 U  s007/c0004           t 0.305720 U  s007/c0004
+  #9  c 0.305614 U  s001/c0000           t 0.305614 U  s001/c0000
+  #10 c 0.303758 U  s005/c0000           t 0.303758 U  s005/c0000
+MUL-01 DEV MULTI_EVIDENCE CHANGED
+  query: What did Alice eat or drink that made her grow bigger?
+  #1  c 0.292341 U  s009/c0006           t 0.292341 U  s009/c0006
+  #2  c 0.236119 U  s008/c0001           t 0.242118 E2 s004/c0001
+  #3  c 0.228070 U  s009/c0003           t 0.236119 U  s008/c0001
+  #4  c 0.217058 U  s004/c0007           t 0.230589 E2 s001/c0006
+  #5  c 0.205956 U  s001/c0001           t 0.230000 E2 s005/c0003
+  #6  c 0.205402 U  s003/c0001           t 0.228070 U  s009/c0003
+  #7  c 0.196853 U  s009/c0000           t 0.217058 U  s004/c0007
+  #8  c 0.192118 E2 s004/c0001           t 0.205956 U  s001/c0001
+  #9  c 0.191341 U  s009/c0001           t 0.205402 U  s003/c0001
+  #10 c 0.182386 U  s007/c0001           t 0.196853 U  s009/c0000
+MUL-02 HOLDOUT MULTI_EVIDENCE IDENTICAL
+  query: Who was called as a witness at the trial of the Knave?
+  #1  c 0.389145 U  s011/c0001           t 0.389145 U  s011/c0001
+  #2  c 0.355335 E2 s011/c0002           t 0.355335 E2 s011/c0002
+  #3  c 0.342722 U  s008/c0006           t 0.342722 U  s008/c0006
+  #4  c 0.339415 U  s008/c0001           t 0.339415 U  s008/c0001
+  #5  c 0.328897 U  s012/c0004           t 0.328897 U  s012/c0004
+  #6  c 0.323338 U  s012/c0001           t 0.323338 U  s012/c0001
+  #7  c 0.319778 U  s012/c0000           t 0.319778 U  s012/c0000
+  #8  c 0.319348 U  s004/c0006           t 0.319348 U  s004/c0006
+  #9  c 0.311335 U  s011/c0000           t 0.311335 U  s011/c0000
+  #10 c 0.307614 E2 s011/c0004           t 0.307614 E2 s011/c0004
+MUL-03 DEV MULTI_EVIDENCE CHANGED
+  query: Which poems did Alice try to recite but get the words wrong?
+  #1  c 0.189634 U  s005/c0000           t 0.189634 U  s005/c0000
+  #2  c 0.141088 U  s004/c0007           t 0.161525 E2 s002/c0002
+  #3  c 0.139392 U  s005/c0002           t 0.141088 U  s004/c0007
+  #4  c 0.131859 U  s006/c0001           t 0.139392 U  s005/c0002
+  #5  c 0.117528 U  s001/c0000           t 0.131985 E2 s010/c0004
+  #6  c 0.113011 U  s004/c0001           t 0.131859 U  s006/c0001
+  #7  c 0.111525 E2 s002/c0002           t 0.117528 U  s001/c0000
+  #8  c 0.104368 U  s009/c0001           t 0.113011 U  s004/c0001
+  #9  c 0.097590 U  s010/c0006           t 0.104368 U  s009/c0001
+  #10 c 0.095346 U  s011/c0002           t 0.103116 E2 s005/c0001
+MUL-04 DEV MULTI_EVIDENCE CHANGED
+  query: In which places does the Cheshire Cat show up?
+  #1  c 0.207713 U  s010/c0000           t 0.224793 E2 s006/c0005
+  #2  c 0.174793 E2 s006/c0005           t 0.207713 U  s010/c0000
+  #3  c 0.170516 U  s011/c0004           t 0.170516 U  s011/c0004
+  #4  c 0.169621 U  s012/c0005           t 0.169621 U  s012/c0005
+  #5  c 0.167038 U  s008/c0005           t 0.167038 U  s008/c0005
+  #6  c 0.141668 U  s002/c0005           t 0.165328 E2 s006/c0002
+  #7  c 0.141392 U  s009/c0004           t 0.141668 U  s002/c0005
+  #8  c 0.139285 U  s011/c0002           t 0.141392 U  s009/c0004
+  #9  c 0.136924 U  s010/c0003           t 0.139285 U  s011/c0002
+  #10 c 0.136743 U  s012/c0000           t 0.136924 U  s010/c0003
+MUL-05 DEV MULTI_EVIDENCE CHANGED
+  query: Where in the story does the Hatter appear?
+  #1  c 0.166718 U  s007/c0002           t 0.166718 U  s007/c0002
+  #2  c 0.144766 U  s009/c0002           t 0.144766 U  s009/c0002
+  #3  c 0.140690 U  s007/c0001           t 0.140690 U  s007/c0001
+  #4  c 0.133278 U  s011/c0003           t 0.133278 U  s011/c0003
+  #5  c 0.122998 U  s009/c0001           t 0.122998 U  s009/c0001
+  #6  c 0.113650 U  s007/c0003           t 0.118825 E2 s007/c0000
+  #7  c 0.113364 U  s007/c0004           t 0.113650 U  s007/c0003
+  #8  c 0.081978 U  s006/c0003           t 0.113364 U  s007/c0004
+  #9  c 0.076262 U  s010/c0002           t 0.109929 E2 s011/c0002
+  #10 c 0.069007 U  s010/c0006           t 0.081978 U  s006/c0003
+NAR-01 DEV NARRATIVE_TEMPORAL CHANGED
+  query: What happened to Alice's size right after she drank from the first bottle?
+  #1  c 0.500578 U  s004/c0003           t 0.500578 U  s004/c0003
+  #2  c 0.439473 E2 s001/c0005           t 0.489473 E2 s001/c0005
+  #3  c 0.432426 U  s001/c0001           t 0.432426 U  s001/c0001
+  #4  c 0.428734 U  s009/c0001           t 0.428734 U  s009/c0001
+  #5  c 0.409644 U  s001/c0000           t 0.409644 U  s001/c0000
+  #6  c 0.405273 U  s008/c0006           t 0.405273 U  s008/c0006
+  #7  c 0.402807 U  s006/c0007           t 0.402807 U  s006/c0007
+  #8  c 0.392535 U  s005/c0003           t 0.392535 U  s005/c0003
+  #9  c 0.384455 U  s004/c0004           t 0.384455 U  s004/c0004
+  #10 c 0.378215 U  s004/c0000           t 0.378215 U  s004/c0000
+NAR-02 DEV NARRATIVE_TEMPORAL IDENTICAL
+  query: Where did Alice land at the end of her long fall?
+  #1  c 0.395642 U  s009/c0002           t 0.395642 U  s009/c0002
+  #2  c 0.395537 U  s006/c0002           t 0.395537 U  s006/c0002
+  #3  c 0.391059 U  s006/c0003           t 0.391059 U  s006/c0003
+  #4  c 0.367411 U  s008/c0001           t 0.367411 U  s008/c0001
+  #5  c 0.362266 U  s010/c0003           t 0.362266 U  s010/c0003
+  #6  c 0.361768 U  s012/c0004           t 0.361768 U  s012/c0004
+  #7  c 0.350070 U  s008/c0002           t 0.350070 U  s008/c0002
+  #8  c 0.348548 U  s007/c0004           t 0.348548 U  s007/c0004
+  #9  c 0.336581 U  s012/c0005           t 0.336581 U  s012/c0005
+  #10 c 0.334497 U  s012/c0006           t 0.334497 U  s012/c0006
+NAR-03 HOLDOUT NARRATIVE_TEMPORAL IDENTICAL
+  query: Where did Alice go right after the Cat vanished and left its grin behind?
+  #1  c 0.342010 U  s002/c0002           t 0.342010 U  s002/c0002
+  #2  c 0.337146 U  s009/c0003           t 0.337146 U  s009/c0003
+  #3  c 0.310913 U  s006/c0002           t 0.310913 U  s006/c0002
+  #4  c 0.300052 E2 s006/c0007           t 0.300052 E2 s006/c0007
+  #5  c 0.286442 U  s002/c0005           t 0.286442 U  s002/c0005
+  #6  c 0.285607 U  s003/c0003           t 0.285607 U  s003/c0003
+  #7  c 0.264249 U  s001/c0002           t 0.264249 U  s001/c0002
+  #8  c 0.257770 U  s003/c0004           t 0.257770 U  s003/c0004
+  #9  c 0.256310 U  s009/c0004           t 0.256310 U  s009/c0004
+  #10 c 0.254353 U  s011/c0001           t 0.254353 U  s011/c0001
+NAR-04 DEV NARRATIVE_TEMPORAL IDENTICAL
+  query: What happened just before Alice woke up on the bank?
+  #1  c 0.243230 U  s009/c0003           t 0.243230 U  s009/c0003
+  #2  c 0.235791 U  s009/c0001           t 0.235791 U  s009/c0001
+  #3  c 0.230469 U  s004/c0006           t 0.230469 U  s004/c0006
+  #4  c 0.227862 U  s006/c0007           t 0.227862 U  s006/c0007
+  #5  c 0.224756 U  s007/c0001           t 0.224756 U  s007/c0001
+  #6  c 0.218340 U  s008/c0006           t 0.218340 U  s008/c0006
+  #7  c 0.217735 U  s008/c0001           t 0.217735 U  s008/c0001
+  #8  c 0.213747 U  s006/c0000           t 0.213747 U  s006/c0000
+  #9  c 0.211684 U  s007/c0005           t 0.211684 U  s007/c0005
+  #10 c 0.210490 U  s011/c0004           t 0.210490 U  s011/c0004
+NOA-01 DEV NO_ANSWER IDENTICAL
+  query: What is the name of Alice's older sister?
+  #1  c 0.449220 U  s009/c0001           t 0.449220 U  s009/c0001
+  #2  c 0.428551 U  s009/c0003           t 0.428551 U  s009/c0003
+  #3  c 0.384503 U  s007/c0001           t 0.384503 U  s007/c0001
+  #4  c 0.341993 U  s007/c0000           t 0.341993 U  s007/c0000
+  #5  c 0.331855 U  s008/c0001           t 0.331855 U  s008/c0001
+  #6  c 0.326732 U  s008/c0002           t 0.326732 U  s008/c0002
+  #7  c 0.311311 U  s009/c0005           t 0.311311 U  s009/c0005
+  #8  c 0.308154 U  s009/c0006           t 0.308154 U  s009/c0006
+  #9  c 0.305664 U  s003/c0001           t 0.305664 U  s003/c0001
+  #10 c 0.299729 U  s009/c0002           t 0.299729 U  s009/c0002
+NOA-02 DEV NO_ANSWER IDENTICAL
+  query: How old is Alice?
+  #1  c 0.426670 U  s009/c0001           t 0.426670 U  s009/c0001
+  #2  c 0.345643 U  s009/c0003           t 0.345643 U  s009/c0003
+  #3  c 0.333617 U  s009/c0005           t 0.333617 U  s009/c0005
+  #4  c 0.308576 U  s005/c0001           t 0.308576 U  s005/c0001
+  #5  c 0.307519 U  s009/c0006           t 0.307519 U  s009/c0006
+  #6  c 0.293285 U  s002/c0005           t 0.293285 U  s002/c0005
+  #7  c 0.279716 U  s003/c0003           t 0.279716 U  s003/c0003
+  #8  c 0.267567 U  s007/c0001           t 0.267567 U  s007/c0001
+  #9  c 0.266223 U  s003/c0004           t 0.266223 U  s003/c0004
+  #10 c 0.261447 U  s002/c0000           t 0.261447 U  s002/c0000
+NOA-03 HOLDOUT NO_ANSWER IDENTICAL
+  query: Who slays the Jabberwock?
+  #1  c 0.183027 U  s011/c0000           t 0.183027 U  s011/c0000
+  #2  c 0.181631 U  s007/c0001           t 0.181631 U  s007/c0001
+  #3  c 0.169220 U  s010/c0000           t 0.169220 U  s010/c0000
+  #4  c 0.152112 U  s008/c0000           t 0.152112 U  s008/c0000
+  #5  c 0.149683 U  s010/c0004           t 0.149683 U  s010/c0004
+  #6  c 0.144338 U  s003/c0005           t 0.144338 U  s003/c0005
+  #7  c 0.135394 U  s011/c0002           t 0.135394 U  s011/c0002
+  #8  c 0.134742 U  s008/c0003           t 0.134742 U  s008/c0003
+  #9  c 0.128898 U  s006/c0007           t 0.128898 U  s006/c0007
+  #10 c 0.128152 U  s004/c0004           t 0.128152 U  s004/c0004
+NOA-04 DEV NO_ANSWER CHANGED
+  query: What is the Queen of Hearts' first name?
+  #1  c 0.362891 C0 s008/c0001           t 0.312891 C0 s008/c0001
+  #2  c 0.288973 U  s007/c0001           t 0.288973 U  s007/c0001
+  #3  c 0.269476 U  s009/c0001           t 0.269476 U  s009/c0001
+  #4  c 0.243230 U  s009/c0003           t 0.243230 U  s009/c0003
+  #5  c 0.233975 U  s003/c0001           t 0.233975 U  s003/c0001
+  #6  c 0.215119 U  s008/c0000           t 0.215119 U  s008/c0000
+  #7  c 0.207390 U  s011/c0001           t 0.207390 U  s011/c0001
+  #8  c 0.202553 U  s009/c0005           t 0.202553 U  s009/c0005
+  #9  c 0.200082 U  s008/c0002           t 0.200082 U  s008/c0002
+  #10 c 0.188982 U  s010/c0006           t 0.188982 U  s010/c0006
+NOA-05 DEV NO_ANSWER IDENTICAL
+  query: What does Alice usually eat for breakfast at home?
+  #1  c 0.272291 U  s008/c0002           t 0.272291 U  s008/c0002
+  #2  c 0.269408 U  s011/c0001           t 0.269408 U  s011/c0001
+  #3  c 0.257965 U  s009/c0005           t 0.257965 U  s009/c0005
+  #4  c 0.251418 U  s008/c0001           t 0.251418 U  s008/c0001
+  #5  c 0.250326 U  s012/c0001           t 0.250326 U  s012/c0001
+  #6  c 0.233373 U  s009/c0001           t 0.233373 U  s009/c0001
+  #7  c 0.221730 U  s009/c0003           t 0.221730 U  s009/c0003
+  #8  c 0.218411 U  s004/c0007           t 0.218411 U  s004/c0007
+  #9  c 0.217898 U  s009/c0006           t 0.217898 U  s009/c0006
+  #10 c 0.209586 U  s010/c0003           t 0.209586 U  s010/c0003
+PAR-01 HOLDOUT PARAPHRASE IDENTICAL
+  query: Which animal can disappear gradually until nothing but its smile is left?
+  #1  c 0.309892 U  s005/c0004           t 0.309892 U  s005/c0004
+  #2  c 0.296296 U  s006/c0001           t 0.296296 U  s006/c0001
+  #3  c 0.278298 U  s004/c0002           t 0.278298 U  s004/c0002
+  #4  c 0.272630 U  s001/c0003           t 0.272630 U  s001/c0003
+  #5  c 0.263216 U  s001/c0001           t 0.263216 U  s001/c0001
+  #6  c 0.262976 U  s005/c0002           t 0.262976 U  s005/c0002
+  #7  c 0.253459 U  s009/c0003           t 0.253459 U  s009/c0003
+  #8  c 0.248304 U  s006/c0000           t 0.248304 U  s006/c0000
+  #9  c 0.245908 U  s007/c0005           t 0.245908 U  s007/c0005
+  #10 c 0.244344 U  s007/c0000           t 0.244344 U  s007/c0000
+PAR-02 HOLDOUT PARAPHRASE IDENTICAL
+  query: What object was making Alice shrink after she picked it up in the hall?
+  #1  c 0.523281 U  s001/c0005           t 0.523281 U  s001/c0005
+  #2  c 0.503069 U  s001/c0006           t 0.503069 U  s001/c0006
+  #3  c 0.496805 U  s008/c0006           t 0.496805 U  s008/c0006
+  #4  c 0.491480 U  s001/c0000           t 0.491480 U  s001/c0000
+  #5  c 0.490641 U  s001/c0003           t 0.490641 U  s001/c0003
+  #6  c 0.473414 U  s008/c0004           t 0.473414 U  s008/c0004
+  #7  c 0.464154 U  s004/c0006           t 0.464154 U  s004/c0006
+  #8  c 0.454752 U  s009/c0006           t 0.454752 U  s009/c0006
+  #9  c 0.444969 U  s004/c0007           t 0.444969 U  s004/c0007
+  #10 c 0.437331 U  s004/c0000           t 0.437331 U  s004/c0000
+PAR-03 DEV PARAPHRASE CHANGED
+  query: In the royal outdoor game, which living creatures served as the sticks and the balls?
+  #1  c 0.224699 U  s006/c0000           t 0.224699 U  s006/c0000
+  #2  c 0.190676 U  s007/c0001           t 0.197602 E2 s008/c0003
+  #3  c 0.188193 U  s008/c0002           t 0.190676 U  s007/c0001
+  #4  c 0.173785 U  s010/c0000           t 0.188193 U  s008/c0002
+  #5  c 0.169504 U  s011/c0002           t 0.173785 U  s010/c0000
+  #6  c 0.168573 U  s009/c0003           t 0.169504 U  s011/c0002
+  #7  c 0.164765 U  s001/c0001           t 0.168573 U  s009/c0003
+  #8  c 0.154718 U  s004/c0006           t 0.164765 U  s001/c0001
+  #9  c 0.149613 U  s004/c0000           t 0.154718 U  s004/c0006
+  #10 c 0.148159 U  s002/c0005           t 0.149613 U  s004/c0000
+PAR-04 DEV PARAPHRASE CHANGED
+  query: Who was dozing between two tea drinkers while they leaned on him like a pillow?
+  #1  c 0.282549 U  s008/c0007           t 0.282549 U  s008/c0007
+  #2  c 0.260030 U  s009/c0002           t 0.260030 U  s009/c0002
+  #3  c 0.253924 U  s011/c0005           t 0.253924 U  s011/c0005
+  #4  c 0.224597 U  s003/c0002           t 0.224597 U  s003/c0002
+  #5  c 0.220847 U  s000/c0000           t 0.222189 E2 s007/c0000
+  #6  c 0.204534 U  s007/c0004           t 0.220847 U  s000/c0000
+  #7  c 0.195515 U  s012/c0002           t 0.204534 U  s007/c0004
+  #8  c 0.192827 U  s008/c0003           t 0.195515 U  s012/c0002
+  #9  c 0.182574 U  s008/c0005           t 0.192827 U  s008/c0003
+  #10 c 0.174727 U  s011/c0004           t 0.182574 U  s008/c0005
+PAR-05 DEV PARAPHRASE IDENTICAL
+  query: Which odd-sounding school subjects did the sorrowful sea creature say he had studied?
+  #1  c 0.164399 U  s008/c0007           t 0.164399 U  s008/c0007
+  #2  c 0.129153 U  s011/c0001           t 0.129153 U  s011/c0001
+  #3  c 0.128388 U  s010/c0006           t 0.128388 U  s010/c0006
+  #4  c 0.097692 U  s011/c0000           t 0.097692 U  s011/c0000
+  #5  c 0.096476 U  s005/c0003           t 0.096476 U  s005/c0003
+  #6  c 0.092399 U  s001/c0004           t 0.092399 U  s001/c0004
+  #7  c 0.088778 U  s010/c0001           t 0.088778 U  s010/c0001
+  #8  c 0.071906 U  s007/c0005           t 0.071906 U  s007/c0005
+  #9  c 0.070750 U  s010/c0005           t 0.070750 U  s010/c0005
+  #10 c 0.070657 U  s004/c0000           t 0.070657 U  s004/c0000
+PAR-06 DEV PARAPHRASE CHANGED
+  query: How did the girl reward the runners once everyone was declared a winner?
+  #1  c 0.346553 U  s003/c0000           t 0.346553 U  s003/c0000
+  #2  c 0.240481 U  s002/c0004           t 0.270059 E2 s003/c0002
+  #3  c 0.236364 U  s003/c0003           t 0.240481 U  s002/c0004
+  #4  c 0.232547 U  s008/c0006           t 0.236364 U  s003/c0003
+  #5  c 0.231202 U  s008/c0004           t 0.232547 U  s008/c0006
+  #6  c 0.225706 U  s002/c0006           t 0.231202 U  s008/c0004
+  #7  c 0.220059 E2 s003/c0002           t 0.225706 U  s002/c0006
+  #8  c 0.216549 U  s009/c0006           t 0.216549 U  s009/c0006
+  #9  c 0.201046 U  s006/c0000           t 0.201046 U  s006/c0000
+  #10 c 0.200496 U  s011/c0000           t 0.200496 U  s011/c0000
+== Repeat run ==
+repeat.identical=true (a second complete run on new Stores rendered the same bytes above this section)
