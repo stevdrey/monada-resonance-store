@@ -1,0 +1,1065 @@
+# book-footprint-v1 (Issue #169; evaluation only; exploratory)
+== Deterministic ==
+input.corpus=book-corpus-v1
+input.corpusVersion=1
+input.source.sha256=b44b499274ef98e0bc12c190ee08d9c63480b7c96946101a540a0cb24b3a944c
+input.chunking.policy=book-chunking-v1
+input.chunks.count=87
+input.chunks.duplicateContent=0
+input.chunksFile.sha256=e1f4ea9dd6dfcfb3225a845855b79476f686b8868b526a45d05fd863a2608a04
+input.chunkMap.sha256=d3c62fe220a5e8b7ec584c06f44469ec887f08a71d8ed87a94d65f4ec709f017
+api=MonadaMemory.open(store).rememberAll(texts); reopen probe: resonate(first text).topK(1)
+ladder=25%,50%,100%,x4,x16
+scale.p25.kind=REAL (frozen chunks, text unmodified)
+scale.p25.chunks=21
+scale.p25.uniqueAtoms=21
+scale.p25.EMPTY.inputTexts=0
+scale.p25.EMPTY.inputTextBytes=0
+scale.p25.EMPTY.newAtoms=0
+scale.p25.EMPTY.newTextBytes=0
+scale.p25.EMPTY.uniqueTextBytes=0
+scale.p25.EMPTY.uniqueTextCodePoints=0
+scale.p25.EMPTY.audit=ABSENT (info=0 warnings=0 errors=0 fatal=0)
+scale.p25.EMPTY.atoms=unique=0 physical=0 historyDuplicates=0
+scale.p25.EMPTY.vectorIndex=entries=0 uniqueIds=0 duplicateIds=0 duplicateOffsets=0 atomsWithVector=0 atomsWithoutVector=0 orphanVectors=0
+scale.p25.EMPTY.feedbackRecords=0
+scale.p25.EMPTY.dimensions=0
+scale.p25.EMPTY.vectorFrameBytes=0
+scale.p25.EMPTY.bytes.manifest=absent
+scale.p25.EMPTY.bytes.vectors=absent
+scale.p25.EMPTY.bytes.vectorIndex=absent
+scale.p25.EMPTY.bytes.feedback=absent
+scale.p25.EMPTY.bytes.other=none
+scale.p25.EMPTY.unchangedFromPreviousPhase=n/a
+scale.p25.FRESH_IMPORT.inputTexts=21
+scale.p25.FRESH_IMPORT.inputTextBytes=37101
+scale.p25.FRESH_IMPORT.newAtoms=21
+scale.p25.FRESH_IMPORT.newTextBytes=37101
+scale.p25.FRESH_IMPORT.uniqueTextBytes=37101
+scale.p25.FRESH_IMPORT.uniqueTextCodePoints=35447
+scale.p25.FRESH_IMPORT.audit=HEALTHY (info=0 warnings=0 errors=0 fatal=0)
+scale.p25.FRESH_IMPORT.atoms=unique=21 physical=21 historyDuplicates=0
+scale.p25.FRESH_IMPORT.vectorIndex=entries=21 uniqueIds=21 duplicateIds=0 duplicateOffsets=0 atomsWithVector=21 atomsWithoutVector=0 orphanVectors=0
+scale.p25.FRESH_IMPORT.feedbackRecords=0
+scale.p25.FRESH_IMPORT.dimensions=128
+scale.p25.FRESH_IMPORT.vectorFrameBytes=512
+scale.p25.FRESH_IMPORT.bytes.manifest=766
+scale.p25.FRESH_IMPORT.bytes.vectors=10752
+scale.p25.FRESH_IMPORT.bytes.vectorIndex=879
+scale.p25.FRESH_IMPORT.bytes.feedback=0
+scale.p25.FRESH_IMPORT.bytes.other=none
+scale.p25.FRESH_IMPORT.unchangedFromPreviousPhase=no
+scale.p25.REOPEN.inputTexts=0
+scale.p25.REOPEN.inputTextBytes=0
+scale.p25.REOPEN.newAtoms=0
+scale.p25.REOPEN.newTextBytes=0
+scale.p25.REOPEN.uniqueTextBytes=37101
+scale.p25.REOPEN.uniqueTextCodePoints=35447
+scale.p25.REOPEN.audit=HEALTHY (info=0 warnings=0 errors=0 fatal=0)
+scale.p25.REOPEN.atoms=unique=21 physical=21 historyDuplicates=0
+scale.p25.REOPEN.vectorIndex=entries=21 uniqueIds=21 duplicateIds=0 duplicateOffsets=0 atomsWithVector=21 atomsWithoutVector=0 orphanVectors=0
+scale.p25.REOPEN.feedbackRecords=0
+scale.p25.REOPEN.dimensions=128
+scale.p25.REOPEN.vectorFrameBytes=512
+scale.p25.REOPEN.bytes.manifest=766
+scale.p25.REOPEN.bytes.vectors=10752
+scale.p25.REOPEN.bytes.vectorIndex=879
+scale.p25.REOPEN.bytes.feedback=0
+scale.p25.REOPEN.bytes.other=none
+scale.p25.REOPEN.unchangedFromPreviousPhase=yes
+scale.p25.REPEAT_IMPORT.inputTexts=21
+scale.p25.REPEAT_IMPORT.inputTextBytes=37101
+scale.p25.REPEAT_IMPORT.newAtoms=0
+scale.p25.REPEAT_IMPORT.newTextBytes=0
+scale.p25.REPEAT_IMPORT.uniqueTextBytes=37101
+scale.p25.REPEAT_IMPORT.uniqueTextCodePoints=35447
+scale.p25.REPEAT_IMPORT.audit=HEALTHY (info=0 warnings=0 errors=0 fatal=0)
+scale.p25.REPEAT_IMPORT.atoms=unique=21 physical=21 historyDuplicates=0
+scale.p25.REPEAT_IMPORT.vectorIndex=entries=21 uniqueIds=21 duplicateIds=0 duplicateOffsets=0 atomsWithVector=21 atomsWithoutVector=0 orphanVectors=0
+scale.p25.REPEAT_IMPORT.feedbackRecords=0
+scale.p25.REPEAT_IMPORT.dimensions=128
+scale.p25.REPEAT_IMPORT.vectorFrameBytes=512
+scale.p25.REPEAT_IMPORT.bytes.manifest=766
+scale.p25.REPEAT_IMPORT.bytes.vectors=10752
+scale.p25.REPEAT_IMPORT.bytes.vectorIndex=879
+scale.p25.REPEAT_IMPORT.bytes.feedback=0
+scale.p25.REPEAT_IMPORT.bytes.other=none
+scale.p25.REPEAT_IMPORT.unchangedFromPreviousPhase=yes
+scale.p50.kind=REAL (frozen chunks, text unmodified)
+scale.p50.chunks=43
+scale.p50.uniqueAtoms=43
+scale.p50.EMPTY.inputTexts=0
+scale.p50.EMPTY.inputTextBytes=0
+scale.p50.EMPTY.newAtoms=0
+scale.p50.EMPTY.newTextBytes=0
+scale.p50.EMPTY.uniqueTextBytes=0
+scale.p50.EMPTY.uniqueTextCodePoints=0
+scale.p50.EMPTY.audit=ABSENT (info=0 warnings=0 errors=0 fatal=0)
+scale.p50.EMPTY.atoms=unique=0 physical=0 historyDuplicates=0
+scale.p50.EMPTY.vectorIndex=entries=0 uniqueIds=0 duplicateIds=0 duplicateOffsets=0 atomsWithVector=0 atomsWithoutVector=0 orphanVectors=0
+scale.p50.EMPTY.feedbackRecords=0
+scale.p50.EMPTY.dimensions=0
+scale.p50.EMPTY.vectorFrameBytes=0
+scale.p50.EMPTY.bytes.manifest=absent
+scale.p50.EMPTY.bytes.vectors=absent
+scale.p50.EMPTY.bytes.vectorIndex=absent
+scale.p50.EMPTY.bytes.feedback=absent
+scale.p50.EMPTY.bytes.other=none
+scale.p50.EMPTY.unchangedFromPreviousPhase=n/a
+scale.p50.FRESH_IMPORT.inputTexts=43
+scale.p50.FRESH_IMPORT.inputTextBytes=75233
+scale.p50.FRESH_IMPORT.newAtoms=43
+scale.p50.FRESH_IMPORT.newTextBytes=75233
+scale.p50.FRESH_IMPORT.uniqueTextBytes=75233
+scale.p50.FRESH_IMPORT.uniqueTextCodePoints=71897
+scale.p50.FRESH_IMPORT.audit=HEALTHY (info=0 warnings=0 errors=0 fatal=0)
+scale.p50.FRESH_IMPORT.atoms=unique=43 physical=43 historyDuplicates=0
+scale.p50.FRESH_IMPORT.vectorIndex=entries=43 uniqueIds=43 duplicateIds=0 duplicateOffsets=0 atomsWithVector=43 atomsWithoutVector=0 orphanVectors=0
+scale.p50.FRESH_IMPORT.feedbackRecords=0
+scale.p50.FRESH_IMPORT.dimensions=128
+scale.p50.FRESH_IMPORT.vectorFrameBytes=512
+scale.p50.FRESH_IMPORT.bytes.manifest=766
+scale.p50.FRESH_IMPORT.bytes.vectors=22016
+scale.p50.FRESH_IMPORT.bytes.vectorIndex=1825
+scale.p50.FRESH_IMPORT.bytes.feedback=0
+scale.p50.FRESH_IMPORT.bytes.other=none
+scale.p50.FRESH_IMPORT.unchangedFromPreviousPhase=no
+scale.p50.REOPEN.inputTexts=0
+scale.p50.REOPEN.inputTextBytes=0
+scale.p50.REOPEN.newAtoms=0
+scale.p50.REOPEN.newTextBytes=0
+scale.p50.REOPEN.uniqueTextBytes=75233
+scale.p50.REOPEN.uniqueTextCodePoints=71897
+scale.p50.REOPEN.audit=HEALTHY (info=0 warnings=0 errors=0 fatal=0)
+scale.p50.REOPEN.atoms=unique=43 physical=43 historyDuplicates=0
+scale.p50.REOPEN.vectorIndex=entries=43 uniqueIds=43 duplicateIds=0 duplicateOffsets=0 atomsWithVector=43 atomsWithoutVector=0 orphanVectors=0
+scale.p50.REOPEN.feedbackRecords=0
+scale.p50.REOPEN.dimensions=128
+scale.p50.REOPEN.vectorFrameBytes=512
+scale.p50.REOPEN.bytes.manifest=766
+scale.p50.REOPEN.bytes.vectors=22016
+scale.p50.REOPEN.bytes.vectorIndex=1825
+scale.p50.REOPEN.bytes.feedback=0
+scale.p50.REOPEN.bytes.other=none
+scale.p50.REOPEN.unchangedFromPreviousPhase=yes
+scale.p50.REPEAT_IMPORT.inputTexts=43
+scale.p50.REPEAT_IMPORT.inputTextBytes=75233
+scale.p50.REPEAT_IMPORT.newAtoms=0
+scale.p50.REPEAT_IMPORT.newTextBytes=0
+scale.p50.REPEAT_IMPORT.uniqueTextBytes=75233
+scale.p50.REPEAT_IMPORT.uniqueTextCodePoints=71897
+scale.p50.REPEAT_IMPORT.audit=HEALTHY (info=0 warnings=0 errors=0 fatal=0)
+scale.p50.REPEAT_IMPORT.atoms=unique=43 physical=43 historyDuplicates=0
+scale.p50.REPEAT_IMPORT.vectorIndex=entries=43 uniqueIds=43 duplicateIds=0 duplicateOffsets=0 atomsWithVector=43 atomsWithoutVector=0 orphanVectors=0
+scale.p50.REPEAT_IMPORT.feedbackRecords=0
+scale.p50.REPEAT_IMPORT.dimensions=128
+scale.p50.REPEAT_IMPORT.vectorFrameBytes=512
+scale.p50.REPEAT_IMPORT.bytes.manifest=766
+scale.p50.REPEAT_IMPORT.bytes.vectors=22016
+scale.p50.REPEAT_IMPORT.bytes.vectorIndex=1825
+scale.p50.REPEAT_IMPORT.bytes.feedback=0
+scale.p50.REPEAT_IMPORT.bytes.other=none
+scale.p50.REPEAT_IMPORT.unchangedFromPreviousPhase=yes
+scale.p100.kind=REAL (frozen chunks, text unmodified)
+scale.p100.chunks=87
+scale.p100.uniqueAtoms=87
+scale.p100.EMPTY.inputTexts=0
+scale.p100.EMPTY.inputTextBytes=0
+scale.p100.EMPTY.newAtoms=0
+scale.p100.EMPTY.newTextBytes=0
+scale.p100.EMPTY.uniqueTextBytes=0
+scale.p100.EMPTY.uniqueTextCodePoints=0
+scale.p100.EMPTY.audit=ABSENT (info=0 warnings=0 errors=0 fatal=0)
+scale.p100.EMPTY.atoms=unique=0 physical=0 historyDuplicates=0
+scale.p100.EMPTY.vectorIndex=entries=0 uniqueIds=0 duplicateIds=0 duplicateOffsets=0 atomsWithVector=0 atomsWithoutVector=0 orphanVectors=0
+scale.p100.EMPTY.feedbackRecords=0
+scale.p100.EMPTY.dimensions=0
+scale.p100.EMPTY.vectorFrameBytes=0
+scale.p100.EMPTY.bytes.manifest=absent
+scale.p100.EMPTY.bytes.vectors=absent
+scale.p100.EMPTY.bytes.vectorIndex=absent
+scale.p100.EMPTY.bytes.feedback=absent
+scale.p100.EMPTY.bytes.other=none
+scale.p100.EMPTY.unchangedFromPreviousPhase=n/a
+scale.p100.FRESH_IMPORT.inputTexts=87
+scale.p100.FRESH_IMPORT.inputTextBytes=150885
+scale.p100.FRESH_IMPORT.newAtoms=87
+scale.p100.FRESH_IMPORT.newTextBytes=150885
+scale.p100.FRESH_IMPORT.uniqueTextBytes=150885
+scale.p100.FRESH_IMPORT.uniqueTextCodePoints=144390
+scale.p100.FRESH_IMPORT.audit=HEALTHY (info=0 warnings=0 errors=0 fatal=0)
+scale.p100.FRESH_IMPORT.atoms=unique=87 physical=87 historyDuplicates=0
+scale.p100.FRESH_IMPORT.vectorIndex=entries=87 uniqueIds=87 duplicateIds=0 duplicateOffsets=0 atomsWithVector=87 atomsWithoutVector=0 orphanVectors=0
+scale.p100.FRESH_IMPORT.feedbackRecords=0
+scale.p100.FRESH_IMPORT.dimensions=128
+scale.p100.FRESH_IMPORT.vectorFrameBytes=512
+scale.p100.FRESH_IMPORT.bytes.manifest=766
+scale.p100.FRESH_IMPORT.bytes.vectors=44544
+scale.p100.FRESH_IMPORT.bytes.vectorIndex=3717
+scale.p100.FRESH_IMPORT.bytes.feedback=0
+scale.p100.FRESH_IMPORT.bytes.other=none
+scale.p100.FRESH_IMPORT.unchangedFromPreviousPhase=no
+scale.p100.REOPEN.inputTexts=0
+scale.p100.REOPEN.inputTextBytes=0
+scale.p100.REOPEN.newAtoms=0
+scale.p100.REOPEN.newTextBytes=0
+scale.p100.REOPEN.uniqueTextBytes=150885
+scale.p100.REOPEN.uniqueTextCodePoints=144390
+scale.p100.REOPEN.audit=HEALTHY (info=0 warnings=0 errors=0 fatal=0)
+scale.p100.REOPEN.atoms=unique=87 physical=87 historyDuplicates=0
+scale.p100.REOPEN.vectorIndex=entries=87 uniqueIds=87 duplicateIds=0 duplicateOffsets=0 atomsWithVector=87 atomsWithoutVector=0 orphanVectors=0
+scale.p100.REOPEN.feedbackRecords=0
+scale.p100.REOPEN.dimensions=128
+scale.p100.REOPEN.vectorFrameBytes=512
+scale.p100.REOPEN.bytes.manifest=766
+scale.p100.REOPEN.bytes.vectors=44544
+scale.p100.REOPEN.bytes.vectorIndex=3717
+scale.p100.REOPEN.bytes.feedback=0
+scale.p100.REOPEN.bytes.other=none
+scale.p100.REOPEN.unchangedFromPreviousPhase=yes
+scale.p100.REPEAT_IMPORT.inputTexts=87
+scale.p100.REPEAT_IMPORT.inputTextBytes=150885
+scale.p100.REPEAT_IMPORT.newAtoms=0
+scale.p100.REPEAT_IMPORT.newTextBytes=0
+scale.p100.REPEAT_IMPORT.uniqueTextBytes=150885
+scale.p100.REPEAT_IMPORT.uniqueTextCodePoints=144390
+scale.p100.REPEAT_IMPORT.audit=HEALTHY (info=0 warnings=0 errors=0 fatal=0)
+scale.p100.REPEAT_IMPORT.atoms=unique=87 physical=87 historyDuplicates=0
+scale.p100.REPEAT_IMPORT.vectorIndex=entries=87 uniqueIds=87 duplicateIds=0 duplicateOffsets=0 atomsWithVector=87 atomsWithoutVector=0 orphanVectors=0
+scale.p100.REPEAT_IMPORT.feedbackRecords=0
+scale.p100.REPEAT_IMPORT.dimensions=128
+scale.p100.REPEAT_IMPORT.vectorFrameBytes=512
+scale.p100.REPEAT_IMPORT.bytes.manifest=766
+scale.p100.REPEAT_IMPORT.bytes.vectors=44544
+scale.p100.REPEAT_IMPORT.bytes.vectorIndex=3717
+scale.p100.REPEAT_IMPORT.bytes.feedback=0
+scale.p100.REPEAT_IMPORT.bytes.other=none
+scale.p100.REPEAT_IMPORT.unchangedFromPreviousPhase=yes
+scale.x4.kind=DERIVED (replica-tagged, not real-book shape)
+scale.x4.chunks=348
+scale.x4.uniqueAtoms=348
+scale.x4.EMPTY.inputTexts=0
+scale.x4.EMPTY.inputTextBytes=0
+scale.x4.EMPTY.newAtoms=0
+scale.x4.EMPTY.newTextBytes=0
+scale.x4.EMPTY.uniqueTextBytes=0
+scale.x4.EMPTY.uniqueTextCodePoints=0
+scale.x4.EMPTY.audit=ABSENT (info=0 warnings=0 errors=0 fatal=0)
+scale.x4.EMPTY.atoms=unique=0 physical=0 historyDuplicates=0
+scale.x4.EMPTY.vectorIndex=entries=0 uniqueIds=0 duplicateIds=0 duplicateOffsets=0 atomsWithVector=0 atomsWithoutVector=0 orphanVectors=0
+scale.x4.EMPTY.feedbackRecords=0
+scale.x4.EMPTY.dimensions=0
+scale.x4.EMPTY.vectorFrameBytes=0
+scale.x4.EMPTY.bytes.manifest=absent
+scale.x4.EMPTY.bytes.vectors=absent
+scale.x4.EMPTY.bytes.vectorIndex=absent
+scale.x4.EMPTY.bytes.feedback=absent
+scale.x4.EMPTY.bytes.other=none
+scale.x4.EMPTY.unchangedFromPreviousPhase=n/a
+scale.x4.FRESH_IMPORT.inputTexts=348
+scale.x4.FRESH_IMPORT.inputTextBytes=606672
+scale.x4.FRESH_IMPORT.newAtoms=348
+scale.x4.FRESH_IMPORT.newTextBytes=606672
+scale.x4.FRESH_IMPORT.uniqueTextBytes=606672
+scale.x4.FRESH_IMPORT.uniqueTextCodePoints=580692
+scale.x4.FRESH_IMPORT.audit=HEALTHY (info=0 warnings=0 errors=0 fatal=0)
+scale.x4.FRESH_IMPORT.atoms=unique=348 physical=348 historyDuplicates=0
+scale.x4.FRESH_IMPORT.vectorIndex=entries=348 uniqueIds=348 duplicateIds=0 duplicateOffsets=0 atomsWithVector=348 atomsWithoutVector=0 orphanVectors=0
+scale.x4.FRESH_IMPORT.feedbackRecords=0
+scale.x4.FRESH_IMPORT.dimensions=128
+scale.x4.FRESH_IMPORT.vectorFrameBytes=512
+scale.x4.FRESH_IMPORT.bytes.manifest=766
+scale.x4.FRESH_IMPORT.bytes.vectors=178176
+scale.x4.FRESH_IMPORT.bytes.vectorIndex=15092
+scale.x4.FRESH_IMPORT.bytes.feedback=0
+scale.x4.FRESH_IMPORT.bytes.other=none
+scale.x4.FRESH_IMPORT.unchangedFromPreviousPhase=no
+scale.x4.REOPEN.inputTexts=0
+scale.x4.REOPEN.inputTextBytes=0
+scale.x4.REOPEN.newAtoms=0
+scale.x4.REOPEN.newTextBytes=0
+scale.x4.REOPEN.uniqueTextBytes=606672
+scale.x4.REOPEN.uniqueTextCodePoints=580692
+scale.x4.REOPEN.audit=HEALTHY (info=0 warnings=0 errors=0 fatal=0)
+scale.x4.REOPEN.atoms=unique=348 physical=348 historyDuplicates=0
+scale.x4.REOPEN.vectorIndex=entries=348 uniqueIds=348 duplicateIds=0 duplicateOffsets=0 atomsWithVector=348 atomsWithoutVector=0 orphanVectors=0
+scale.x4.REOPEN.feedbackRecords=0
+scale.x4.REOPEN.dimensions=128
+scale.x4.REOPEN.vectorFrameBytes=512
+scale.x4.REOPEN.bytes.manifest=766
+scale.x4.REOPEN.bytes.vectors=178176
+scale.x4.REOPEN.bytes.vectorIndex=15092
+scale.x4.REOPEN.bytes.feedback=0
+scale.x4.REOPEN.bytes.other=none
+scale.x4.REOPEN.unchangedFromPreviousPhase=yes
+scale.x4.REPEAT_IMPORT.inputTexts=348
+scale.x4.REPEAT_IMPORT.inputTextBytes=606672
+scale.x4.REPEAT_IMPORT.newAtoms=0
+scale.x4.REPEAT_IMPORT.newTextBytes=0
+scale.x4.REPEAT_IMPORT.uniqueTextBytes=606672
+scale.x4.REPEAT_IMPORT.uniqueTextCodePoints=580692
+scale.x4.REPEAT_IMPORT.audit=HEALTHY (info=0 warnings=0 errors=0 fatal=0)
+scale.x4.REPEAT_IMPORT.atoms=unique=348 physical=348 historyDuplicates=0
+scale.x4.REPEAT_IMPORT.vectorIndex=entries=348 uniqueIds=348 duplicateIds=0 duplicateOffsets=0 atomsWithVector=348 atomsWithoutVector=0 orphanVectors=0
+scale.x4.REPEAT_IMPORT.feedbackRecords=0
+scale.x4.REPEAT_IMPORT.dimensions=128
+scale.x4.REPEAT_IMPORT.vectorFrameBytes=512
+scale.x4.REPEAT_IMPORT.bytes.manifest=766
+scale.x4.REPEAT_IMPORT.bytes.vectors=178176
+scale.x4.REPEAT_IMPORT.bytes.vectorIndex=15092
+scale.x4.REPEAT_IMPORT.bytes.feedback=0
+scale.x4.REPEAT_IMPORT.bytes.other=none
+scale.x4.REPEAT_IMPORT.unchangedFromPreviousPhase=yes
+scale.x16.kind=DERIVED (replica-tagged, not real-book shape)
+scale.x16.chunks=1392
+scale.x16.uniqueAtoms=1392
+scale.x16.EMPTY.inputTexts=0
+scale.x16.EMPTY.inputTextBytes=0
+scale.x16.EMPTY.newAtoms=0
+scale.x16.EMPTY.newTextBytes=0
+scale.x16.EMPTY.uniqueTextBytes=0
+scale.x16.EMPTY.uniqueTextCodePoints=0
+scale.x16.EMPTY.audit=ABSENT (info=0 warnings=0 errors=0 fatal=0)
+scale.x16.EMPTY.atoms=unique=0 physical=0 historyDuplicates=0
+scale.x16.EMPTY.vectorIndex=entries=0 uniqueIds=0 duplicateIds=0 duplicateOffsets=0 atomsWithVector=0 atomsWithoutVector=0 orphanVectors=0
+scale.x16.EMPTY.feedbackRecords=0
+scale.x16.EMPTY.dimensions=0
+scale.x16.EMPTY.vectorFrameBytes=0
+scale.x16.EMPTY.bytes.manifest=absent
+scale.x16.EMPTY.bytes.vectors=absent
+scale.x16.EMPTY.bytes.vectorIndex=absent
+scale.x16.EMPTY.bytes.feedback=absent
+scale.x16.EMPTY.bytes.other=none
+scale.x16.EMPTY.unchangedFromPreviousPhase=n/a
+scale.x16.FRESH_IMPORT.inputTexts=1392
+scale.x16.FRESH_IMPORT.inputTextBytes=2430342
+scale.x16.FRESH_IMPORT.newAtoms=1392
+scale.x16.FRESH_IMPORT.newTextBytes=2430342
+scale.x16.FRESH_IMPORT.uniqueTextBytes=2430342
+scale.x16.FRESH_IMPORT.uniqueTextCodePoints=2326422
+scale.x16.FRESH_IMPORT.audit=HEALTHY (info=0 warnings=0 errors=0 fatal=0)
+scale.x16.FRESH_IMPORT.atoms=unique=1392 physical=1392 historyDuplicates=0
+scale.x16.FRESH_IMPORT.vectorIndex=entries=1392 uniqueIds=1392 duplicateIds=0 duplicateOffsets=0 atomsWithVector=1392 atomsWithoutVector=0 orphanVectors=0
+scale.x16.FRESH_IMPORT.feedbackRecords=0
+scale.x16.FRESH_IMPORT.dimensions=128
+scale.x16.FRESH_IMPORT.vectorFrameBytes=512
+scale.x16.FRESH_IMPORT.bytes.manifest=766
+scale.x16.FRESH_IMPORT.bytes.vectors=712704
+scale.x16.FRESH_IMPORT.bytes.vectorIndex=61028
+scale.x16.FRESH_IMPORT.bytes.feedback=0
+scale.x16.FRESH_IMPORT.bytes.other=none
+scale.x16.FRESH_IMPORT.unchangedFromPreviousPhase=no
+scale.x16.REOPEN.inputTexts=0
+scale.x16.REOPEN.inputTextBytes=0
+scale.x16.REOPEN.newAtoms=0
+scale.x16.REOPEN.newTextBytes=0
+scale.x16.REOPEN.uniqueTextBytes=2430342
+scale.x16.REOPEN.uniqueTextCodePoints=2326422
+scale.x16.REOPEN.audit=HEALTHY (info=0 warnings=0 errors=0 fatal=0)
+scale.x16.REOPEN.atoms=unique=1392 physical=1392 historyDuplicates=0
+scale.x16.REOPEN.vectorIndex=entries=1392 uniqueIds=1392 duplicateIds=0 duplicateOffsets=0 atomsWithVector=1392 atomsWithoutVector=0 orphanVectors=0
+scale.x16.REOPEN.feedbackRecords=0
+scale.x16.REOPEN.dimensions=128
+scale.x16.REOPEN.vectorFrameBytes=512
+scale.x16.REOPEN.bytes.manifest=766
+scale.x16.REOPEN.bytes.vectors=712704
+scale.x16.REOPEN.bytes.vectorIndex=61028
+scale.x16.REOPEN.bytes.feedback=0
+scale.x16.REOPEN.bytes.other=none
+scale.x16.REOPEN.unchangedFromPreviousPhase=yes
+scale.x16.REPEAT_IMPORT.inputTexts=1392
+scale.x16.REPEAT_IMPORT.inputTextBytes=2430342
+scale.x16.REPEAT_IMPORT.newAtoms=0
+scale.x16.REPEAT_IMPORT.newTextBytes=0
+scale.x16.REPEAT_IMPORT.uniqueTextBytes=2430342
+scale.x16.REPEAT_IMPORT.uniqueTextCodePoints=2326422
+scale.x16.REPEAT_IMPORT.audit=HEALTHY (info=0 warnings=0 errors=0 fatal=0)
+scale.x16.REPEAT_IMPORT.atoms=unique=1392 physical=1392 historyDuplicates=0
+scale.x16.REPEAT_IMPORT.vectorIndex=entries=1392 uniqueIds=1392 duplicateIds=0 duplicateOffsets=0 atomsWithVector=1392 atomsWithoutVector=0 orphanVectors=0
+scale.x16.REPEAT_IMPORT.feedbackRecords=0
+scale.x16.REPEAT_IMPORT.dimensions=128
+scale.x16.REPEAT_IMPORT.vectorFrameBytes=512
+scale.x16.REPEAT_IMPORT.bytes.manifest=766
+scale.x16.REPEAT_IMPORT.bytes.vectors=712704
+scale.x16.REPEAT_IMPORT.bytes.vectorIndex=61028
+scale.x16.REPEAT_IMPORT.bytes.feedback=0
+scale.x16.REPEAT_IMPORT.bytes.other=none
+scale.x16.REPEAT_IMPORT.unchangedFromPreviousPhase=yes
+experiment.OVERLAP.description=import the 50% scale, then every chunk into the same Store
+experiment.OVERLAP.IMPORT_50%.inputTexts=43
+experiment.OVERLAP.IMPORT_50%.inputTextBytes=75233
+experiment.OVERLAP.IMPORT_50%.newAtoms=43
+experiment.OVERLAP.IMPORT_50%.newTextBytes=75233
+experiment.OVERLAP.IMPORT_50%.uniqueTextBytes=75233
+experiment.OVERLAP.IMPORT_50%.uniqueTextCodePoints=71897
+experiment.OVERLAP.IMPORT_50%.audit=HEALTHY (info=0 warnings=0 errors=0 fatal=0)
+experiment.OVERLAP.IMPORT_50%.atoms=unique=43 physical=43 historyDuplicates=0
+experiment.OVERLAP.IMPORT_50%.vectorIndex=entries=43 uniqueIds=43 duplicateIds=0 duplicateOffsets=0 atomsWithVector=43 atomsWithoutVector=0 orphanVectors=0
+experiment.OVERLAP.IMPORT_50%.feedbackRecords=0
+experiment.OVERLAP.IMPORT_50%.dimensions=128
+experiment.OVERLAP.IMPORT_50%.vectorFrameBytes=512
+experiment.OVERLAP.IMPORT_50%.bytes.manifest=766
+experiment.OVERLAP.IMPORT_50%.bytes.vectors=22016
+experiment.OVERLAP.IMPORT_50%.bytes.vectorIndex=1825
+experiment.OVERLAP.IMPORT_50%.bytes.feedback=0
+experiment.OVERLAP.IMPORT_50%.bytes.other=none
+experiment.OVERLAP.IMPORT_50%.unchangedFromPreviousPhase=n/a
+experiment.OVERLAP.IMPORT_100%.inputTexts=87
+experiment.OVERLAP.IMPORT_100%.inputTextBytes=150885
+experiment.OVERLAP.IMPORT_100%.newAtoms=44
+experiment.OVERLAP.IMPORT_100%.newTextBytes=75652
+experiment.OVERLAP.IMPORT_100%.uniqueTextBytes=150885
+experiment.OVERLAP.IMPORT_100%.uniqueTextCodePoints=144390
+experiment.OVERLAP.IMPORT_100%.audit=HEALTHY (info=0 warnings=0 errors=0 fatal=0)
+experiment.OVERLAP.IMPORT_100%.atoms=unique=87 physical=87 historyDuplicates=0
+experiment.OVERLAP.IMPORT_100%.vectorIndex=entries=87 uniqueIds=87 duplicateIds=0 duplicateOffsets=0 atomsWithVector=87 atomsWithoutVector=0 orphanVectors=0
+experiment.OVERLAP.IMPORT_100%.feedbackRecords=0
+experiment.OVERLAP.IMPORT_100%.dimensions=128
+experiment.OVERLAP.IMPORT_100%.vectorFrameBytes=512
+experiment.OVERLAP.IMPORT_100%.bytes.manifest=766
+experiment.OVERLAP.IMPORT_100%.bytes.vectors=44544
+experiment.OVERLAP.IMPORT_100%.bytes.vectorIndex=3717
+experiment.OVERLAP.IMPORT_100%.bytes.feedback=0
+experiment.OVERLAP.IMPORT_100%.bytes.other=none
+experiment.OVERLAP.IMPORT_100%.unchangedFromPreviousPhase=no
+experiment.INTRA_BATCH_DUPLICATES.description=every chunk twice in one rememberAll call, against a clean single import on its own Store
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.inputTexts=87
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.inputTextBytes=150885
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.newAtoms=87
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.newTextBytes=150885
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.uniqueTextBytes=150885
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.uniqueTextCodePoints=144390
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.audit=HEALTHY (info=0 warnings=0 errors=0 fatal=0)
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.atoms=unique=87 physical=87 historyDuplicates=0
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.vectorIndex=entries=87 uniqueIds=87 duplicateIds=0 duplicateOffsets=0 atomsWithVector=87 atomsWithoutVector=0 orphanVectors=0
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.feedbackRecords=0
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.dimensions=128
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.vectorFrameBytes=512
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.bytes.manifest=766
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.bytes.vectors=44544
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.bytes.vectorIndex=3717
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.bytes.feedback=0
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.bytes.other=none
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.unchangedFromPreviousPhase=n/a
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.inputTexts=174
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.inputTextBytes=301770
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.newAtoms=87
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.newTextBytes=150885
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.uniqueTextBytes=150885
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.uniqueTextCodePoints=144390
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.audit=HEALTHY (info=0 warnings=0 errors=0 fatal=0)
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.atoms=unique=87 physical=87 historyDuplicates=0
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.vectorIndex=entries=87 uniqueIds=87 duplicateIds=0 duplicateOffsets=0 atomsWithVector=87 atomsWithoutVector=0 orphanVectors=0
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.feedbackRecords=0
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.dimensions=128
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.vectorFrameBytes=512
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.bytes.manifest=766
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.bytes.vectors=44544
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.bytes.vectorIndex=3717
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.bytes.feedback=0
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.bytes.other=none
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.unchangedFromPreviousPhase=n/a
+checks.total=204
+checks.failed=0
+checks.status=PASS
+check.scale.p25.FRESH_IMPORT.audit=PASS expected=HEALTHY actual=HEALTHY
+check.scale.p25.FRESH_IMPORT.uniqueAtoms=PASS expected=21 actual=21
+check.scale.p25.FRESH_IMPORT.atomLogPhysicalRecords=PASS expected=21 actual=21
+check.scale.p25.FRESH_IMPORT.atomHistoryDuplicates=PASS expected=0 actual=0
+check.scale.p25.FRESH_IMPORT.vectorIndexEntries=PASS expected=21 actual=21
+check.scale.p25.FRESH_IMPORT.uniqueVectorIndexIds=PASS expected=21 actual=21
+check.scale.p25.FRESH_IMPORT.duplicateVectorOffsets=PASS expected=0 actual=0
+check.scale.p25.FRESH_IMPORT.activeAtomsWithVector=PASS expected=21 actual=21
+check.scale.p25.FRESH_IMPORT.vectorEntriesWithoutActiveAtom=PASS expected=0 actual=0
+check.scale.p25.FRESH_IMPORT.feedbackLogRecords=PASS expected=0 actual=0
+check.scale.p25.FRESH_IMPORT.vectorSegmentBytes=PASS expected=10752 actual=10752
+check.scale.p25.FRESH_IMPORT.unattributedFiles=PASS expected={} actual={}
+check.scale.p25.FRESH_IMPORT.chunksResolvedExactly=PASS expected=21 actual=21
+check.scale.p25.FRESH_IMPORT.sidecarKeysResolvedExactly=PASS expected=21 actual=21
+check.scale.p25.REOPEN.storeUnchanged=PASS expected=yes actual=yes
+check.scale.p25.REPEAT_IMPORT.newAtoms=PASS expected=0 actual=0
+check.scale.p25.REPEAT_IMPORT.storeUnchanged=PASS expected=yes actual=yes
+check.scale.p25.REPEAT_IMPORT.audit=PASS expected=HEALTHY actual=HEALTHY
+check.scale.p25.REPEAT_IMPORT.uniqueAtoms=PASS expected=21 actual=21
+check.scale.p25.REPEAT_IMPORT.atomLogPhysicalRecords=PASS expected=21 actual=21
+check.scale.p25.REPEAT_IMPORT.atomHistoryDuplicates=PASS expected=0 actual=0
+check.scale.p25.REPEAT_IMPORT.vectorIndexEntries=PASS expected=21 actual=21
+check.scale.p25.REPEAT_IMPORT.uniqueVectorIndexIds=PASS expected=21 actual=21
+check.scale.p25.REPEAT_IMPORT.duplicateVectorOffsets=PASS expected=0 actual=0
+check.scale.p25.REPEAT_IMPORT.activeAtomsWithVector=PASS expected=21 actual=21
+check.scale.p25.REPEAT_IMPORT.vectorEntriesWithoutActiveAtom=PASS expected=0 actual=0
+check.scale.p25.REPEAT_IMPORT.feedbackLogRecords=PASS expected=0 actual=0
+check.scale.p25.REPEAT_IMPORT.vectorSegmentBytes=PASS expected=10752 actual=10752
+check.scale.p25.REPEAT_IMPORT.unattributedFiles=PASS expected={} actual={}
+check.scale.p50.FRESH_IMPORT.audit=PASS expected=HEALTHY actual=HEALTHY
+check.scale.p50.FRESH_IMPORT.uniqueAtoms=PASS expected=43 actual=43
+check.scale.p50.FRESH_IMPORT.atomLogPhysicalRecords=PASS expected=43 actual=43
+check.scale.p50.FRESH_IMPORT.atomHistoryDuplicates=PASS expected=0 actual=0
+check.scale.p50.FRESH_IMPORT.vectorIndexEntries=PASS expected=43 actual=43
+check.scale.p50.FRESH_IMPORT.uniqueVectorIndexIds=PASS expected=43 actual=43
+check.scale.p50.FRESH_IMPORT.duplicateVectorOffsets=PASS expected=0 actual=0
+check.scale.p50.FRESH_IMPORT.activeAtomsWithVector=PASS expected=43 actual=43
+check.scale.p50.FRESH_IMPORT.vectorEntriesWithoutActiveAtom=PASS expected=0 actual=0
+check.scale.p50.FRESH_IMPORT.feedbackLogRecords=PASS expected=0 actual=0
+check.scale.p50.FRESH_IMPORT.vectorSegmentBytes=PASS expected=22016 actual=22016
+check.scale.p50.FRESH_IMPORT.unattributedFiles=PASS expected={} actual={}
+check.scale.p50.FRESH_IMPORT.chunksResolvedExactly=PASS expected=43 actual=43
+check.scale.p50.FRESH_IMPORT.sidecarKeysResolvedExactly=PASS expected=43 actual=43
+check.scale.p50.REOPEN.storeUnchanged=PASS expected=yes actual=yes
+check.scale.p50.REPEAT_IMPORT.newAtoms=PASS expected=0 actual=0
+check.scale.p50.REPEAT_IMPORT.storeUnchanged=PASS expected=yes actual=yes
+check.scale.p50.REPEAT_IMPORT.audit=PASS expected=HEALTHY actual=HEALTHY
+check.scale.p50.REPEAT_IMPORT.uniqueAtoms=PASS expected=43 actual=43
+check.scale.p50.REPEAT_IMPORT.atomLogPhysicalRecords=PASS expected=43 actual=43
+check.scale.p50.REPEAT_IMPORT.atomHistoryDuplicates=PASS expected=0 actual=0
+check.scale.p50.REPEAT_IMPORT.vectorIndexEntries=PASS expected=43 actual=43
+check.scale.p50.REPEAT_IMPORT.uniqueVectorIndexIds=PASS expected=43 actual=43
+check.scale.p50.REPEAT_IMPORT.duplicateVectorOffsets=PASS expected=0 actual=0
+check.scale.p50.REPEAT_IMPORT.activeAtomsWithVector=PASS expected=43 actual=43
+check.scale.p50.REPEAT_IMPORT.vectorEntriesWithoutActiveAtom=PASS expected=0 actual=0
+check.scale.p50.REPEAT_IMPORT.feedbackLogRecords=PASS expected=0 actual=0
+check.scale.p50.REPEAT_IMPORT.vectorSegmentBytes=PASS expected=22016 actual=22016
+check.scale.p50.REPEAT_IMPORT.unattributedFiles=PASS expected={} actual={}
+check.scale.p100.FRESH_IMPORT.audit=PASS expected=HEALTHY actual=HEALTHY
+check.scale.p100.FRESH_IMPORT.uniqueAtoms=PASS expected=87 actual=87
+check.scale.p100.FRESH_IMPORT.atomLogPhysicalRecords=PASS expected=87 actual=87
+check.scale.p100.FRESH_IMPORT.atomHistoryDuplicates=PASS expected=0 actual=0
+check.scale.p100.FRESH_IMPORT.vectorIndexEntries=PASS expected=87 actual=87
+check.scale.p100.FRESH_IMPORT.uniqueVectorIndexIds=PASS expected=87 actual=87
+check.scale.p100.FRESH_IMPORT.duplicateVectorOffsets=PASS expected=0 actual=0
+check.scale.p100.FRESH_IMPORT.activeAtomsWithVector=PASS expected=87 actual=87
+check.scale.p100.FRESH_IMPORT.vectorEntriesWithoutActiveAtom=PASS expected=0 actual=0
+check.scale.p100.FRESH_IMPORT.feedbackLogRecords=PASS expected=0 actual=0
+check.scale.p100.FRESH_IMPORT.vectorSegmentBytes=PASS expected=44544 actual=44544
+check.scale.p100.FRESH_IMPORT.unattributedFiles=PASS expected={} actual={}
+check.scale.p100.FRESH_IMPORT.chunksResolvedExactly=PASS expected=87 actual=87
+check.scale.p100.FRESH_IMPORT.sidecarKeysResolvedExactly=PASS expected=87 actual=87
+check.scale.p100.REOPEN.storeUnchanged=PASS expected=yes actual=yes
+check.scale.p100.REPEAT_IMPORT.newAtoms=PASS expected=0 actual=0
+check.scale.p100.REPEAT_IMPORT.storeUnchanged=PASS expected=yes actual=yes
+check.scale.p100.REPEAT_IMPORT.audit=PASS expected=HEALTHY actual=HEALTHY
+check.scale.p100.REPEAT_IMPORT.uniqueAtoms=PASS expected=87 actual=87
+check.scale.p100.REPEAT_IMPORT.atomLogPhysicalRecords=PASS expected=87 actual=87
+check.scale.p100.REPEAT_IMPORT.atomHistoryDuplicates=PASS expected=0 actual=0
+check.scale.p100.REPEAT_IMPORT.vectorIndexEntries=PASS expected=87 actual=87
+check.scale.p100.REPEAT_IMPORT.uniqueVectorIndexIds=PASS expected=87 actual=87
+check.scale.p100.REPEAT_IMPORT.duplicateVectorOffsets=PASS expected=0 actual=0
+check.scale.p100.REPEAT_IMPORT.activeAtomsWithVector=PASS expected=87 actual=87
+check.scale.p100.REPEAT_IMPORT.vectorEntriesWithoutActiveAtom=PASS expected=0 actual=0
+check.scale.p100.REPEAT_IMPORT.feedbackLogRecords=PASS expected=0 actual=0
+check.scale.p100.REPEAT_IMPORT.vectorSegmentBytes=PASS expected=44544 actual=44544
+check.scale.p100.REPEAT_IMPORT.unattributedFiles=PASS expected={} actual={}
+check.scale.x4.FRESH_IMPORT.audit=PASS expected=HEALTHY actual=HEALTHY
+check.scale.x4.FRESH_IMPORT.uniqueAtoms=PASS expected=348 actual=348
+check.scale.x4.FRESH_IMPORT.atomLogPhysicalRecords=PASS expected=348 actual=348
+check.scale.x4.FRESH_IMPORT.atomHistoryDuplicates=PASS expected=0 actual=0
+check.scale.x4.FRESH_IMPORT.vectorIndexEntries=PASS expected=348 actual=348
+check.scale.x4.FRESH_IMPORT.uniqueVectorIndexIds=PASS expected=348 actual=348
+check.scale.x4.FRESH_IMPORT.duplicateVectorOffsets=PASS expected=0 actual=0
+check.scale.x4.FRESH_IMPORT.activeAtomsWithVector=PASS expected=348 actual=348
+check.scale.x4.FRESH_IMPORT.vectorEntriesWithoutActiveAtom=PASS expected=0 actual=0
+check.scale.x4.FRESH_IMPORT.feedbackLogRecords=PASS expected=0 actual=0
+check.scale.x4.FRESH_IMPORT.vectorSegmentBytes=PASS expected=178176 actual=178176
+check.scale.x4.FRESH_IMPORT.unattributedFiles=PASS expected={} actual={}
+check.scale.x4.FRESH_IMPORT.chunksResolvedExactly=PASS expected=348 actual=348
+check.scale.x4.REOPEN.storeUnchanged=PASS expected=yes actual=yes
+check.scale.x4.REPEAT_IMPORT.newAtoms=PASS expected=0 actual=0
+check.scale.x4.REPEAT_IMPORT.storeUnchanged=PASS expected=yes actual=yes
+check.scale.x4.REPEAT_IMPORT.audit=PASS expected=HEALTHY actual=HEALTHY
+check.scale.x4.REPEAT_IMPORT.uniqueAtoms=PASS expected=348 actual=348
+check.scale.x4.REPEAT_IMPORT.atomLogPhysicalRecords=PASS expected=348 actual=348
+check.scale.x4.REPEAT_IMPORT.atomHistoryDuplicates=PASS expected=0 actual=0
+check.scale.x4.REPEAT_IMPORT.vectorIndexEntries=PASS expected=348 actual=348
+check.scale.x4.REPEAT_IMPORT.uniqueVectorIndexIds=PASS expected=348 actual=348
+check.scale.x4.REPEAT_IMPORT.duplicateVectorOffsets=PASS expected=0 actual=0
+check.scale.x4.REPEAT_IMPORT.activeAtomsWithVector=PASS expected=348 actual=348
+check.scale.x4.REPEAT_IMPORT.vectorEntriesWithoutActiveAtom=PASS expected=0 actual=0
+check.scale.x4.REPEAT_IMPORT.feedbackLogRecords=PASS expected=0 actual=0
+check.scale.x4.REPEAT_IMPORT.vectorSegmentBytes=PASS expected=178176 actual=178176
+check.scale.x4.REPEAT_IMPORT.unattributedFiles=PASS expected={} actual={}
+check.scale.x16.FRESH_IMPORT.audit=PASS expected=HEALTHY actual=HEALTHY
+check.scale.x16.FRESH_IMPORT.uniqueAtoms=PASS expected=1392 actual=1392
+check.scale.x16.FRESH_IMPORT.atomLogPhysicalRecords=PASS expected=1392 actual=1392
+check.scale.x16.FRESH_IMPORT.atomHistoryDuplicates=PASS expected=0 actual=0
+check.scale.x16.FRESH_IMPORT.vectorIndexEntries=PASS expected=1392 actual=1392
+check.scale.x16.FRESH_IMPORT.uniqueVectorIndexIds=PASS expected=1392 actual=1392
+check.scale.x16.FRESH_IMPORT.duplicateVectorOffsets=PASS expected=0 actual=0
+check.scale.x16.FRESH_IMPORT.activeAtomsWithVector=PASS expected=1392 actual=1392
+check.scale.x16.FRESH_IMPORT.vectorEntriesWithoutActiveAtom=PASS expected=0 actual=0
+check.scale.x16.FRESH_IMPORT.feedbackLogRecords=PASS expected=0 actual=0
+check.scale.x16.FRESH_IMPORT.vectorSegmentBytes=PASS expected=712704 actual=712704
+check.scale.x16.FRESH_IMPORT.unattributedFiles=PASS expected={} actual={}
+check.scale.x16.FRESH_IMPORT.chunksResolvedExactly=PASS expected=1392 actual=1392
+check.scale.x16.REOPEN.storeUnchanged=PASS expected=yes actual=yes
+check.scale.x16.REPEAT_IMPORT.newAtoms=PASS expected=0 actual=0
+check.scale.x16.REPEAT_IMPORT.storeUnchanged=PASS expected=yes actual=yes
+check.scale.x16.REPEAT_IMPORT.audit=PASS expected=HEALTHY actual=HEALTHY
+check.scale.x16.REPEAT_IMPORT.uniqueAtoms=PASS expected=1392 actual=1392
+check.scale.x16.REPEAT_IMPORT.atomLogPhysicalRecords=PASS expected=1392 actual=1392
+check.scale.x16.REPEAT_IMPORT.atomHistoryDuplicates=PASS expected=0 actual=0
+check.scale.x16.REPEAT_IMPORT.vectorIndexEntries=PASS expected=1392 actual=1392
+check.scale.x16.REPEAT_IMPORT.uniqueVectorIndexIds=PASS expected=1392 actual=1392
+check.scale.x16.REPEAT_IMPORT.duplicateVectorOffsets=PASS expected=0 actual=0
+check.scale.x16.REPEAT_IMPORT.activeAtomsWithVector=PASS expected=1392 actual=1392
+check.scale.x16.REPEAT_IMPORT.vectorEntriesWithoutActiveAtom=PASS expected=0 actual=0
+check.scale.x16.REPEAT_IMPORT.feedbackLogRecords=PASS expected=0 actual=0
+check.scale.x16.REPEAT_IMPORT.vectorSegmentBytes=PASS expected=712704 actual=712704
+check.scale.x16.REPEAT_IMPORT.unattributedFiles=PASS expected={} actual={}
+check.experiment.OVERLAP.IMPORT_50%.audit=PASS expected=HEALTHY actual=HEALTHY
+check.experiment.OVERLAP.IMPORT_50%.uniqueAtoms=PASS expected=43 actual=43
+check.experiment.OVERLAP.IMPORT_50%.atomLogPhysicalRecords=PASS expected=43 actual=43
+check.experiment.OVERLAP.IMPORT_50%.atomHistoryDuplicates=PASS expected=0 actual=0
+check.experiment.OVERLAP.IMPORT_50%.vectorIndexEntries=PASS expected=43 actual=43
+check.experiment.OVERLAP.IMPORT_50%.uniqueVectorIndexIds=PASS expected=43 actual=43
+check.experiment.OVERLAP.IMPORT_50%.duplicateVectorOffsets=PASS expected=0 actual=0
+check.experiment.OVERLAP.IMPORT_50%.activeAtomsWithVector=PASS expected=43 actual=43
+check.experiment.OVERLAP.IMPORT_50%.vectorEntriesWithoutActiveAtom=PASS expected=0 actual=0
+check.experiment.OVERLAP.IMPORT_50%.feedbackLogRecords=PASS expected=0 actual=0
+check.experiment.OVERLAP.IMPORT_50%.vectorSegmentBytes=PASS expected=22016 actual=22016
+check.experiment.OVERLAP.IMPORT_50%.unattributedFiles=PASS expected={} actual={}
+check.experiment.OVERLAP.IMPORT_100%.audit=PASS expected=HEALTHY actual=HEALTHY
+check.experiment.OVERLAP.IMPORT_100%.uniqueAtoms=PASS expected=87 actual=87
+check.experiment.OVERLAP.IMPORT_100%.atomLogPhysicalRecords=PASS expected=87 actual=87
+check.experiment.OVERLAP.IMPORT_100%.atomHistoryDuplicates=PASS expected=0 actual=0
+check.experiment.OVERLAP.IMPORT_100%.vectorIndexEntries=PASS expected=87 actual=87
+check.experiment.OVERLAP.IMPORT_100%.uniqueVectorIndexIds=PASS expected=87 actual=87
+check.experiment.OVERLAP.IMPORT_100%.duplicateVectorOffsets=PASS expected=0 actual=0
+check.experiment.OVERLAP.IMPORT_100%.activeAtomsWithVector=PASS expected=87 actual=87
+check.experiment.OVERLAP.IMPORT_100%.vectorEntriesWithoutActiveAtom=PASS expected=0 actual=0
+check.experiment.OVERLAP.IMPORT_100%.feedbackLogRecords=PASS expected=0 actual=0
+check.experiment.OVERLAP.IMPORT_100%.vectorSegmentBytes=PASS expected=44544 actual=44544
+check.experiment.OVERLAP.IMPORT_100%.unattributedFiles=PASS expected={} actual={}
+check.experiment.OVERLAP.IMPORT_100%.newAtoms=PASS expected=44 actual=44
+check.experiment.OVERLAP.IMPORT_100%.appendedAtomRecords=PASS expected=44 actual=44
+check.experiment.OVERLAP.IMPORT_100%.appendedVectorBytes=PASS expected=22528 actual=22528
+check.experiment.OVERLAP.IMPORT_100%.chunksResolvedExactly=PASS expected=87 actual=87
+check.experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.audit=PASS expected=HEALTHY actual=HEALTHY
+check.experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.uniqueAtoms=PASS expected=87 actual=87
+check.experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.atomLogPhysicalRecords=PASS expected=87 actual=87
+check.experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.atomHistoryDuplicates=PASS expected=0 actual=0
+check.experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.vectorIndexEntries=PASS expected=87 actual=87
+check.experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.uniqueVectorIndexIds=PASS expected=87 actual=87
+check.experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.duplicateVectorOffsets=PASS expected=0 actual=0
+check.experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.activeAtomsWithVector=PASS expected=87 actual=87
+check.experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.vectorEntriesWithoutActiveAtom=PASS expected=0 actual=0
+check.experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.feedbackLogRecords=PASS expected=0 actual=0
+check.experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.vectorSegmentBytes=PASS expected=44544 actual=44544
+check.experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.unattributedFiles=PASS expected={} actual={}
+check.experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.audit=PASS expected=HEALTHY actual=HEALTHY
+check.experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.uniqueAtoms=PASS expected=87 actual=87
+check.experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.atomLogPhysicalRecords=PASS expected=87 actual=87
+check.experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.atomHistoryDuplicates=PASS expected=0 actual=0
+check.experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.vectorIndexEntries=PASS expected=87 actual=87
+check.experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.uniqueVectorIndexIds=PASS expected=87 actual=87
+check.experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.duplicateVectorOffsets=PASS expected=0 actual=0
+check.experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.activeAtomsWithVector=PASS expected=87 actual=87
+check.experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.vectorEntriesWithoutActiveAtom=PASS expected=0 actual=0
+check.experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.feedbackLogRecords=PASS expected=0 actual=0
+check.experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.vectorSegmentBytes=PASS expected=44544 actual=44544
+check.experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.unattributedFiles=PASS expected={} actual={}
+check.experiment.INTRA_BATCH_DUPLICATES.sameStatistics=PASS expected=StorageIntegrityStatistics[atomLogPhysicalRecords=87, activeUniqueAtoms=87, atomHistoryDuplicates=0, vectorIndexEntries=87, uniqueVectorIndexIds=87, duplicateVectorIndexIds=0, distinctVectorOffsets=87, duplicateVectorOffsets=0, activeAtomsWithVector=87, activeAtomsWithoutVector=0, vectorEntriesWithoutActiveAtom=0, feedbackLogRecords=0] actual=StorageIntegrityStatistics[atomLogPhysicalRecords=87, activeUniqueAtoms=87, atomHistoryDuplicates=0, vectorIndexEntries=87, uniqueVectorIndexIds=87, duplicateVectorIndexIds=0, distinctVectorOffsets=87, duplicateVectorOffsets=0, activeAtomsWithVector=87, activeAtomsWithoutVector=0, vectorEntriesWithoutActiveAtom=0, feedbackLogRecords=0]
+check.experiment.INTRA_BATCH_DUPLICATES.sameBytes.manifest=PASS expected=766 actual=766
+check.experiment.INTRA_BATCH_DUPLICATES.sameBytes.vectors=PASS expected=44544 actual=44544
+check.experiment.INTRA_BATCH_DUPLICATES.sameBytes.vectorIndex=PASS expected=3717 actual=3717
+check.experiment.INTRA_BATCH_DUPLICATES.sameBytes.feedback=PASS expected=0 actual=0
+check.experiment.INTRA_BATCH_DUPLICATES.sameOtherFiles=PASS expected={} actual={}
+check.experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.chunksResolvedExactly=PASS expected=174 actual=174
+check.inputs.guarded[0].unchanged=PASS expected=yes actual=yes
+check.inputs.guarded[1].unchanged=PASS expected=yes actual=yes
+== Measured ==
+note=atom-segment bytes vary by up to 9 bytes per record across runs (createdAt Instant fraction digits); totals and ratios inherit that; not a compression ratio
+scale.p25.EMPTY.bytes.atoms=absent
+scale.p25.EMPTY.bytes.total=0
+scale.p25.EMPTY.storeBytesPerUniqueAtom=n/a
+scale.p25.EMPTY.storeBytesPerUniqueTextByte=n/a
+scale.p25.EMPTY.storeBytesPerUniqueTextCodePoint=n/a
+scale.p25.EMPTY.atomBytesPerUniqueTextByte=n/a
+scale.p25.EMPTY.vectorShareOfTotal=n/a
+scale.p25.FRESH_IMPORT.bytes.atoms=51159
+scale.p25.FRESH_IMPORT.bytes.total=63556
+scale.p25.FRESH_IMPORT.storeBytesPerUniqueAtom=3026.476
+scale.p25.FRESH_IMPORT.storeBytesPerUniqueTextByte=1.713
+scale.p25.FRESH_IMPORT.storeBytesPerUniqueTextCodePoint=1.793
+scale.p25.FRESH_IMPORT.atomBytesPerUniqueTextByte=1.379
+scale.p25.FRESH_IMPORT.vectorShareOfTotal=0.169
+scale.p25.FRESH_IMPORT.deltaBytes.total=63556
+scale.p25.FRESH_IMPORT.deltaBytes.atoms=51159
+scale.p25.FRESH_IMPORT.appendAmplification=1.713
+scale.p25.REOPEN.bytes.atoms=51159
+scale.p25.REOPEN.bytes.total=63556
+scale.p25.REOPEN.storeBytesPerUniqueAtom=3026.476
+scale.p25.REOPEN.storeBytesPerUniqueTextByte=1.713
+scale.p25.REOPEN.storeBytesPerUniqueTextCodePoint=1.793
+scale.p25.REOPEN.atomBytesPerUniqueTextByte=1.379
+scale.p25.REOPEN.vectorShareOfTotal=0.169
+scale.p25.REOPEN.deltaBytes.total=0
+scale.p25.REOPEN.deltaBytes.atoms=0
+scale.p25.REOPEN.appendAmplification=n/a (no new text, 0 bytes appended)
+scale.p25.REPEAT_IMPORT.bytes.atoms=51159
+scale.p25.REPEAT_IMPORT.bytes.total=63556
+scale.p25.REPEAT_IMPORT.storeBytesPerUniqueAtom=3026.476
+scale.p25.REPEAT_IMPORT.storeBytesPerUniqueTextByte=1.713
+scale.p25.REPEAT_IMPORT.storeBytesPerUniqueTextCodePoint=1.793
+scale.p25.REPEAT_IMPORT.atomBytesPerUniqueTextByte=1.379
+scale.p25.REPEAT_IMPORT.vectorShareOfTotal=0.169
+scale.p25.REPEAT_IMPORT.deltaBytes.total=0
+scale.p25.REPEAT_IMPORT.deltaBytes.atoms=0
+scale.p25.REPEAT_IMPORT.appendAmplification=n/a (no new text, 0 bytes appended)
+scale.p50.EMPTY.bytes.atoms=absent
+scale.p50.EMPTY.bytes.total=0
+scale.p50.EMPTY.storeBytesPerUniqueAtom=n/a
+scale.p50.EMPTY.storeBytesPerUniqueTextByte=n/a
+scale.p50.EMPTY.storeBytesPerUniqueTextCodePoint=n/a
+scale.p50.EMPTY.atomBytesPerUniqueTextByte=n/a
+scale.p50.EMPTY.vectorShareOfTotal=n/a
+scale.p50.FRESH_IMPORT.bytes.atoms=103757
+scale.p50.FRESH_IMPORT.bytes.total=128364
+scale.p50.FRESH_IMPORT.storeBytesPerUniqueAtom=2985.209
+scale.p50.FRESH_IMPORT.storeBytesPerUniqueTextByte=1.706
+scale.p50.FRESH_IMPORT.storeBytesPerUniqueTextCodePoint=1.785
+scale.p50.FRESH_IMPORT.atomBytesPerUniqueTextByte=1.379
+scale.p50.FRESH_IMPORT.vectorShareOfTotal=0.172
+scale.p50.FRESH_IMPORT.deltaBytes.total=128364
+scale.p50.FRESH_IMPORT.deltaBytes.atoms=103757
+scale.p50.FRESH_IMPORT.appendAmplification=1.706
+scale.p50.REOPEN.bytes.atoms=103757
+scale.p50.REOPEN.bytes.total=128364
+scale.p50.REOPEN.storeBytesPerUniqueAtom=2985.209
+scale.p50.REOPEN.storeBytesPerUniqueTextByte=1.706
+scale.p50.REOPEN.storeBytesPerUniqueTextCodePoint=1.785
+scale.p50.REOPEN.atomBytesPerUniqueTextByte=1.379
+scale.p50.REOPEN.vectorShareOfTotal=0.172
+scale.p50.REOPEN.deltaBytes.total=0
+scale.p50.REOPEN.deltaBytes.atoms=0
+scale.p50.REOPEN.appendAmplification=n/a (no new text, 0 bytes appended)
+scale.p50.REPEAT_IMPORT.bytes.atoms=103757
+scale.p50.REPEAT_IMPORT.bytes.total=128364
+scale.p50.REPEAT_IMPORT.storeBytesPerUniqueAtom=2985.209
+scale.p50.REPEAT_IMPORT.storeBytesPerUniqueTextByte=1.706
+scale.p50.REPEAT_IMPORT.storeBytesPerUniqueTextCodePoint=1.785
+scale.p50.REPEAT_IMPORT.atomBytesPerUniqueTextByte=1.379
+scale.p50.REPEAT_IMPORT.vectorShareOfTotal=0.172
+scale.p50.REPEAT_IMPORT.deltaBytes.total=0
+scale.p50.REPEAT_IMPORT.deltaBytes.atoms=0
+scale.p50.REPEAT_IMPORT.appendAmplification=n/a (no new text, 0 bytes appended)
+scale.p100.EMPTY.bytes.atoms=absent
+scale.p100.EMPTY.bytes.total=0
+scale.p100.EMPTY.storeBytesPerUniqueAtom=n/a
+scale.p100.EMPTY.storeBytesPerUniqueTextByte=n/a
+scale.p100.EMPTY.storeBytesPerUniqueTextCodePoint=n/a
+scale.p100.EMPTY.atomBytesPerUniqueTextByte=n/a
+scale.p100.EMPTY.vectorShareOfTotal=n/a
+scale.p100.FRESH_IMPORT.bytes.atoms=208153
+scale.p100.FRESH_IMPORT.bytes.total=257180
+scale.p100.FRESH_IMPORT.storeBytesPerUniqueAtom=2956.092
+scale.p100.FRESH_IMPORT.storeBytesPerUniqueTextByte=1.704
+scale.p100.FRESH_IMPORT.storeBytesPerUniqueTextCodePoint=1.781
+scale.p100.FRESH_IMPORT.atomBytesPerUniqueTextByte=1.380
+scale.p100.FRESH_IMPORT.vectorShareOfTotal=0.173
+scale.p100.FRESH_IMPORT.deltaBytes.total=257180
+scale.p100.FRESH_IMPORT.deltaBytes.atoms=208153
+scale.p100.FRESH_IMPORT.appendAmplification=1.704
+scale.p100.REOPEN.bytes.atoms=208153
+scale.p100.REOPEN.bytes.total=257180
+scale.p100.REOPEN.storeBytesPerUniqueAtom=2956.092
+scale.p100.REOPEN.storeBytesPerUniqueTextByte=1.704
+scale.p100.REOPEN.storeBytesPerUniqueTextCodePoint=1.781
+scale.p100.REOPEN.atomBytesPerUniqueTextByte=1.380
+scale.p100.REOPEN.vectorShareOfTotal=0.173
+scale.p100.REOPEN.deltaBytes.total=0
+scale.p100.REOPEN.deltaBytes.atoms=0
+scale.p100.REOPEN.appendAmplification=n/a (no new text, 0 bytes appended)
+scale.p100.REPEAT_IMPORT.bytes.atoms=208153
+scale.p100.REPEAT_IMPORT.bytes.total=257180
+scale.p100.REPEAT_IMPORT.storeBytesPerUniqueAtom=2956.092
+scale.p100.REPEAT_IMPORT.storeBytesPerUniqueTextByte=1.704
+scale.p100.REPEAT_IMPORT.storeBytesPerUniqueTextCodePoint=1.781
+scale.p100.REPEAT_IMPORT.atomBytesPerUniqueTextByte=1.380
+scale.p100.REPEAT_IMPORT.vectorShareOfTotal=0.173
+scale.p100.REPEAT_IMPORT.deltaBytes.total=0
+scale.p100.REPEAT_IMPORT.deltaBytes.atoms=0
+scale.p100.REPEAT_IMPORT.appendAmplification=n/a (no new text, 0 bytes appended)
+scale.x4.EMPTY.bytes.atoms=absent
+scale.x4.EMPTY.bytes.total=0
+scale.x4.EMPTY.storeBytesPerUniqueAtom=n/a
+scale.x4.EMPTY.storeBytesPerUniqueTextByte=n/a
+scale.x4.EMPTY.storeBytesPerUniqueTextCodePoint=n/a
+scale.x4.EMPTY.atomBytesPerUniqueTextByte=n/a
+scale.x4.EMPTY.vectorShareOfTotal=n/a
+scale.x4.FRESH_IMPORT.bytes.atoms=836788
+scale.x4.FRESH_IMPORT.bytes.total=1030822
+scale.x4.FRESH_IMPORT.storeBytesPerUniqueAtom=2962.132
+scale.x4.FRESH_IMPORT.storeBytesPerUniqueTextByte=1.699
+scale.x4.FRESH_IMPORT.storeBytesPerUniqueTextCodePoint=1.775
+scale.x4.FRESH_IMPORT.atomBytesPerUniqueTextByte=1.379
+scale.x4.FRESH_IMPORT.vectorShareOfTotal=0.173
+scale.x4.FRESH_IMPORT.deltaBytes.total=1030822
+scale.x4.FRESH_IMPORT.deltaBytes.atoms=836788
+scale.x4.FRESH_IMPORT.appendAmplification=1.699
+scale.x4.REOPEN.bytes.atoms=836788
+scale.x4.REOPEN.bytes.total=1030822
+scale.x4.REOPEN.storeBytesPerUniqueAtom=2962.132
+scale.x4.REOPEN.storeBytesPerUniqueTextByte=1.699
+scale.x4.REOPEN.storeBytesPerUniqueTextCodePoint=1.775
+scale.x4.REOPEN.atomBytesPerUniqueTextByte=1.379
+scale.x4.REOPEN.vectorShareOfTotal=0.173
+scale.x4.REOPEN.deltaBytes.total=0
+scale.x4.REOPEN.deltaBytes.atoms=0
+scale.x4.REOPEN.appendAmplification=n/a (no new text, 0 bytes appended)
+scale.x4.REPEAT_IMPORT.bytes.atoms=836788
+scale.x4.REPEAT_IMPORT.bytes.total=1030822
+scale.x4.REPEAT_IMPORT.storeBytesPerUniqueAtom=2962.132
+scale.x4.REPEAT_IMPORT.storeBytesPerUniqueTextByte=1.699
+scale.x4.REPEAT_IMPORT.storeBytesPerUniqueTextCodePoint=1.775
+scale.x4.REPEAT_IMPORT.atomBytesPerUniqueTextByte=1.379
+scale.x4.REPEAT_IMPORT.vectorShareOfTotal=0.173
+scale.x4.REPEAT_IMPORT.deltaBytes.total=0
+scale.x4.REPEAT_IMPORT.deltaBytes.atoms=0
+scale.x4.REPEAT_IMPORT.appendAmplification=n/a (no new text, 0 bytes appended)
+scale.x16.EMPTY.bytes.atoms=absent
+scale.x16.EMPTY.bytes.total=0
+scale.x16.EMPTY.storeBytesPerUniqueAtom=n/a
+scale.x16.EMPTY.storeBytesPerUniqueTextByte=n/a
+scale.x16.EMPTY.storeBytesPerUniqueTextCodePoint=n/a
+scale.x16.EMPTY.atomBytesPerUniqueTextByte=n/a
+scale.x16.EMPTY.vectorShareOfTotal=n/a
+scale.x16.FRESH_IMPORT.bytes.atoms=3352165
+scale.x16.FRESH_IMPORT.bytes.total=4126663
+scale.x16.FRESH_IMPORT.storeBytesPerUniqueAtom=2964.557
+scale.x16.FRESH_IMPORT.storeBytesPerUniqueTextByte=1.698
+scale.x16.FRESH_IMPORT.storeBytesPerUniqueTextCodePoint=1.774
+scale.x16.FRESH_IMPORT.atomBytesPerUniqueTextByte=1.379
+scale.x16.FRESH_IMPORT.vectorShareOfTotal=0.173
+scale.x16.FRESH_IMPORT.deltaBytes.total=4126663
+scale.x16.FRESH_IMPORT.deltaBytes.atoms=3352165
+scale.x16.FRESH_IMPORT.appendAmplification=1.698
+scale.x16.REOPEN.bytes.atoms=3352165
+scale.x16.REOPEN.bytes.total=4126663
+scale.x16.REOPEN.storeBytesPerUniqueAtom=2964.557
+scale.x16.REOPEN.storeBytesPerUniqueTextByte=1.698
+scale.x16.REOPEN.storeBytesPerUniqueTextCodePoint=1.774
+scale.x16.REOPEN.atomBytesPerUniqueTextByte=1.379
+scale.x16.REOPEN.vectorShareOfTotal=0.173
+scale.x16.REOPEN.deltaBytes.total=0
+scale.x16.REOPEN.deltaBytes.atoms=0
+scale.x16.REOPEN.appendAmplification=n/a (no new text, 0 bytes appended)
+scale.x16.REPEAT_IMPORT.bytes.atoms=3352165
+scale.x16.REPEAT_IMPORT.bytes.total=4126663
+scale.x16.REPEAT_IMPORT.storeBytesPerUniqueAtom=2964.557
+scale.x16.REPEAT_IMPORT.storeBytesPerUniqueTextByte=1.698
+scale.x16.REPEAT_IMPORT.storeBytesPerUniqueTextCodePoint=1.774
+scale.x16.REPEAT_IMPORT.atomBytesPerUniqueTextByte=1.379
+scale.x16.REPEAT_IMPORT.vectorShareOfTotal=0.173
+scale.x16.REPEAT_IMPORT.deltaBytes.total=0
+scale.x16.REPEAT_IMPORT.deltaBytes.atoms=0
+scale.x16.REPEAT_IMPORT.appendAmplification=n/a (no new text, 0 bytes appended)
+experiment.OVERLAP.IMPORT_50%.bytes.atoms=103757
+experiment.OVERLAP.IMPORT_50%.bytes.total=128364
+experiment.OVERLAP.IMPORT_50%.storeBytesPerUniqueAtom=2985.209
+experiment.OVERLAP.IMPORT_50%.storeBytesPerUniqueTextByte=1.706
+experiment.OVERLAP.IMPORT_50%.storeBytesPerUniqueTextCodePoint=1.785
+experiment.OVERLAP.IMPORT_50%.atomBytesPerUniqueTextByte=1.379
+experiment.OVERLAP.IMPORT_50%.vectorShareOfTotal=0.172
+experiment.OVERLAP.IMPORT_100%.bytes.atoms=208153
+experiment.OVERLAP.IMPORT_100%.bytes.total=257180
+experiment.OVERLAP.IMPORT_100%.storeBytesPerUniqueAtom=2956.092
+experiment.OVERLAP.IMPORT_100%.storeBytesPerUniqueTextByte=1.704
+experiment.OVERLAP.IMPORT_100%.storeBytesPerUniqueTextCodePoint=1.781
+experiment.OVERLAP.IMPORT_100%.atomBytesPerUniqueTextByte=1.380
+experiment.OVERLAP.IMPORT_100%.vectorShareOfTotal=0.173
+experiment.OVERLAP.IMPORT_100%.deltaBytes.total=128816
+experiment.OVERLAP.IMPORT_100%.deltaBytes.atoms=104396
+experiment.OVERLAP.IMPORT_100%.appendAmplification=1.703
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.bytes.atoms=208150
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.bytes.total=257177
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.storeBytesPerUniqueAtom=2956.057
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.storeBytesPerUniqueTextByte=1.704
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.storeBytesPerUniqueTextCodePoint=1.781
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.atomBytesPerUniqueTextByte=1.380
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.vectorShareOfTotal=0.173
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.bytes.atoms=208153
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.bytes.total=257180
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.storeBytesPerUniqueAtom=2956.092
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.storeBytesPerUniqueTextByte=1.704
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.storeBytesPerUniqueTextCodePoint=1.781
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.atomBytesPerUniqueTextByte=1.380
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.vectorShareOfTotal=0.173
+== Host ==
+host.java.version=27
+host.java.vm=OpenJDK 64-Bit Server VM 27+35
+host.java.vendor=Azul Systems, Inc.
+host.os=Linux 7.2.11-200.fc44.x86_64 amd64
+host.processors=16
+host.max_heap=3832 MiB
+host.cpu=AMD Ryzen 7 7730U with Radeon Graphics
+host.gc=G1 Young Generation, G1 Concurrent GC, G1 Old Generation
+host.jvm_args=(none) (+4 other arguments not recorded)
+host.scratch_file_store=btrfs (/dev/nvme0n1p6)
+host.page_cache=WARM_OR_UNKNOWN (no OS cache drop performed; files were just written or read; an OS cold-cache condition is never measured or implied)
+host.memory_heap=java.lang.management MemoryMXBean heap/non-heap usage; heap pool peaks reset at phase start and summed (upper bound, not simultaneous)
+host.memory_allocation=com.sun.management.ThreadMXBean current-thread allocated bytes, delta over the phase (this thread only)
+host.memory_rss=/proc/self/status VmRSS (resident now) and VmHWM (process-lifetime peak, never reset)
+host.memory_gc=after-GC readings follow an advisory System.gc(); the JVM may ignore it
+== Memory ==
+scale.p25.EMPTY.memory=NOT_SAMPLED (no API call in this phase)
+scale.p25.FRESH_IMPORT.heap.usedBytes=10989032
+scale.p25.FRESH_IMPORT.heap.committedBytes=37748736
+scale.p25.FRESH_IMPORT.heap.poolPeakSumBytes=20012728
+scale.p25.FRESH_IMPORT.heap.usedAfterGcBytes=3276616
+scale.p25.FRESH_IMPORT.nonHeap.committedBytes=11862016
+scale.p25.FRESH_IMPORT.allocation.threadBytes=5041168
+scale.p25.FRESH_IMPORT.rss.residentKiB=81736
+scale.p25.FRESH_IMPORT.rss.processPeakKiB=81736
+scale.p25.REOPEN.heap.usedBytes=7470920
+scale.p25.REOPEN.heap.committedBytes=37748736
+scale.p25.REOPEN.heap.poolPeakSumBytes=7470920
+scale.p25.REOPEN.heap.usedAfterGcBytes=3434888
+scale.p25.REOPEN.nonHeap.committedBytes=12713984
+scale.p25.REOPEN.allocation.threadBytes=2137600
+scale.p25.REOPEN.rss.residentKiB=85004
+scale.p25.REOPEN.rss.processPeakKiB=85004
+scale.p25.REPEAT_IMPORT.heap.usedBytes=3433536
+scale.p25.REPEAT_IMPORT.heap.committedBytes=37748736
+scale.p25.REPEAT_IMPORT.heap.poolPeakSumBytes=3433536
+scale.p25.REPEAT_IMPORT.heap.usedAfterGcBytes=3436168
+scale.p25.REPEAT_IMPORT.nonHeap.committedBytes=12713984
+scale.p25.REPEAT_IMPORT.allocation.threadBytes=935056
+scale.p25.REPEAT_IMPORT.rss.residentKiB=85192
+scale.p25.REPEAT_IMPORT.rss.processPeakKiB=85192
+scale.p25.retainedHeapEstimate.APPROXIMATE=80576
+scale.p50.EMPTY.memory=NOT_SAMPLED (no API call in this phase)
+scale.p50.FRESH_IMPORT.heap.usedBytes=11824776
+scale.p50.FRESH_IMPORT.heap.committedBytes=37748736
+scale.p50.FRESH_IMPORT.heap.poolPeakSumBytes=11824776
+scale.p50.FRESH_IMPORT.heap.usedAfterGcBytes=3450432
+scale.p50.FRESH_IMPORT.nonHeap.committedBytes=12910592
+scale.p50.FRESH_IMPORT.allocation.threadBytes=7170384
+scale.p50.FRESH_IMPORT.rss.residentKiB=85928
+scale.p50.FRESH_IMPORT.rss.processPeakKiB=85928
+scale.p50.REOPEN.heap.usedBytes=9741888
+scale.p50.REOPEN.heap.committedBytes=37748736
+scale.p50.REOPEN.heap.poolPeakSumBytes=9741888
+scale.p50.REOPEN.heap.usedAfterGcBytes=3457056
+scale.p50.REOPEN.nonHeap.committedBytes=12976128
+scale.p50.REOPEN.allocation.threadBytes=1593152
+scale.p50.REOPEN.rss.residentKiB=86332
+scale.p50.REOPEN.rss.processPeakKiB=86332
+scale.p50.REPEAT_IMPORT.heap.usedBytes=5552840
+scale.p50.REPEAT_IMPORT.heap.committedBytes=37748736
+scale.p50.REPEAT_IMPORT.heap.poolPeakSumBytes=5552840
+scale.p50.REPEAT_IMPORT.heap.usedAfterGcBytes=3459448
+scale.p50.REPEAT_IMPORT.nonHeap.committedBytes=13107200
+scale.p50.REPEAT_IMPORT.allocation.threadBytes=1666912
+scale.p50.REPEAT_IMPORT.rss.residentKiB=86704
+scale.p50.REPEAT_IMPORT.rss.processPeakKiB=86704
+scale.p50.retainedHeapEstimate.APPROXIMATE=157976
+scale.p100.EMPTY.memory=NOT_SAMPLED (no API call in this phase)
+scale.p100.FRESH_IMPORT.heap.usedBytes=5930040
+scale.p100.FRESH_IMPORT.heap.committedBytes=37748736
+scale.p100.FRESH_IMPORT.heap.poolPeakSumBytes=18512952
+scale.p100.FRESH_IMPORT.heap.usedAfterGcBytes=3478336
+scale.p100.FRESH_IMPORT.nonHeap.committedBytes=13697024
+scale.p100.FRESH_IMPORT.allocation.threadBytes=14295168
+scale.p100.FRESH_IMPORT.rss.residentKiB=87868
+scale.p100.FRESH_IMPORT.rss.processPeakKiB=87868
+scale.p100.REOPEN.heap.usedBytes=11866944
+scale.p100.REOPEN.heap.committedBytes=37748736
+scale.p100.REOPEN.heap.poolPeakSumBytes=11866944
+scale.p100.REOPEN.heap.usedAfterGcBytes=3485856
+scale.p100.REOPEN.nonHeap.committedBytes=13762560
+scale.p100.REOPEN.allocation.threadBytes=2803712
+scale.p100.REOPEN.rss.residentKiB=88076
+scale.p100.REOPEN.rss.processPeakKiB=88076
+scale.p100.REPEAT_IMPORT.heap.usedBytes=9775864
+scale.p100.REPEAT_IMPORT.heap.committedBytes=37748736
+scale.p100.REPEAT_IMPORT.heap.poolPeakSumBytes=9775864
+scale.p100.REPEAT_IMPORT.heap.usedAfterGcBytes=3487816
+scale.p100.REPEAT_IMPORT.nonHeap.committedBytes=13893632
+scale.p100.REPEAT_IMPORT.allocation.threadBytes=3183952
+scale.p100.REPEAT_IMPORT.rss.residentKiB=88548
+scale.p100.REPEAT_IMPORT.rss.processPeakKiB=88548
+scale.p100.retainedHeapEstimate.APPROXIMATE=311768
+scale.x4.EMPTY.memory=NOT_SAMPLED (no API call in this phase)
+scale.x4.FRESH_IMPORT.heap.usedBytes=18306496
+scale.x4.FRESH_IMPORT.heap.committedBytes=37748736
+scale.x4.FRESH_IMPORT.heap.poolPeakSumBytes=24597952
+scale.x4.FRESH_IMPORT.heap.usedAfterGcBytes=4444760
+scale.x4.FRESH_IMPORT.nonHeap.committedBytes=14221312
+scale.x4.FRESH_IMPORT.allocation.threadBytes=56979832
+scale.x4.FRESH_IMPORT.rss.residentKiB=99120
+scale.x4.FRESH_IMPORT.rss.processPeakKiB=99120
+scale.x4.REOPEN.heap.usedBytes=10232760
+scale.x4.REOPEN.heap.committedBytes=37748736
+scale.x4.REOPEN.heap.poolPeakSumBytes=24912824
+scale.x4.REOPEN.heap.usedAfterGcBytes=4462096
+scale.x4.REOPEN.nonHeap.committedBytes=14221312
+scale.x4.REOPEN.allocation.threadBytes=10504512
+scale.x4.REOPEN.rss.residentKiB=100544
+scale.x4.REOPEN.rss.processPeakKiB=100544
+scale.x4.REPEAT_IMPORT.heap.usedBytes=8655024
+scale.x4.REPEAT_IMPORT.heap.committedBytes=37748736
+scale.x4.REPEAT_IMPORT.heap.poolPeakSumBytes=25432240
+scale.x4.REPEAT_IMPORT.heap.usedAfterGcBytes=4464128
+scale.x4.REPEAT_IMPORT.nonHeap.committedBytes=14221312
+scale.x4.REPEAT_IMPORT.allocation.threadBytes=12311568
+scale.x4.REPEAT_IMPORT.rss.residentKiB=101184
+scale.x4.REPEAT_IMPORT.rss.processPeakKiB=101184
+scale.x4.retainedHeapEstimate.APPROXIMATE=1237336
+scale.x16.EMPTY.memory=NOT_SAMPLED (no API call in this phase)
+scale.x16.FRESH_IMPORT.heap.usedBytes=33689704
+scale.x16.FRESH_IMPORT.heap.committedBytes=113246208
+scale.x16.FRESH_IMPORT.heap.poolPeakSumBytes=79827048
+scale.x16.FRESH_IMPORT.heap.usedAfterGcBytes=9291544
+scale.x16.FRESH_IMPORT.nonHeap.committedBytes=14352384
+scale.x16.FRESH_IMPORT.allocation.threadBytes=226421408
+scale.x16.FRESH_IMPORT.rss.residentKiB=176008
+scale.x16.FRESH_IMPORT.rss.processPeakKiB=176008
+scale.x16.REOPEN.heap.usedBytes=43942608
+scale.x16.REOPEN.heap.committedBytes=113246208
+scale.x16.REOPEN.heap.poolPeakSumBytes=83788496
+scale.x16.REOPEN.heap.usedAfterGcBytes=9355408
+scale.x16.REOPEN.nonHeap.committedBytes=14417920
+scale.x16.REOPEN.allocation.threadBytes=41130480
+scale.x16.REOPEN.rss.residentKiB=180048
+scale.x16.REOPEN.rss.processPeakKiB=180048
+scale.x16.REPEAT_IMPORT.heap.usedBytes=36373496
+scale.x16.REPEAT_IMPORT.heap.committedBytes=113246208
+scale.x16.REPEAT_IMPORT.heap.poolPeakSumBytes=92996600
+scale.x16.REPEAT_IMPORT.heap.usedAfterGcBytes=9357368
+scale.x16.REPEAT_IMPORT.nonHeap.committedBytes=14417920
+scale.x16.REPEAT_IMPORT.allocation.threadBytes=48410104
+scale.x16.REPEAT_IMPORT.rss.residentKiB=183012
+scale.x16.REPEAT_IMPORT.rss.processPeakKiB=183012
+scale.x16.retainedHeapEstimate.APPROXIMATE=4940648
+experiment.OVERLAP.IMPORT_50%.heap.usedBytes=12055704
+experiment.OVERLAP.IMPORT_50%.heap.committedBytes=113246208
+experiment.OVERLAP.IMPORT_50%.heap.poolPeakSumBytes=85456024
+experiment.OVERLAP.IMPORT_50%.heap.usedAfterGcBytes=9170944
+experiment.OVERLAP.IMPORT_50%.nonHeap.committedBytes=14417920
+experiment.OVERLAP.IMPORT_50%.allocation.threadBytes=7106072
+experiment.OVERLAP.IMPORT_50%.rss.residentKiB=183060
+experiment.OVERLAP.IMPORT_50%.rss.processPeakKiB=183060
+experiment.OVERLAP.IMPORT_100%.heap.usedBytes=19656704
+experiment.OVERLAP.IMPORT_100%.heap.committedBytes=113246208
+experiment.OVERLAP.IMPORT_100%.heap.poolPeakSumBytes=19656704
+experiment.OVERLAP.IMPORT_100%.heap.usedAfterGcBytes=9177096
+experiment.OVERLAP.IMPORT_100%.nonHeap.committedBytes=14417920
+experiment.OVERLAP.IMPORT_100%.allocation.threadBytes=8677552
+experiment.OVERLAP.IMPORT_100%.rss.residentKiB=183084
+experiment.OVERLAP.IMPORT_100%.rss.processPeakKiB=183084
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.heap.usedBytes=32245768
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.heap.committedBytes=113246208
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.heap.poolPeakSumBytes=32245768
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.heap.usedAfterGcBytes=9178208
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.nonHeap.committedBytes=14417920
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.allocation.threadBytes=14160800
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.rss.residentKiB=183180
+experiment.INTRA_BATCH_DUPLICATES.CLEAN_ONCE.rss.processPeakKiB=183180
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.heap.usedBytes=28052576
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.heap.committedBytes=113246208
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.heap.poolPeakSumBytes=28052576
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.heap.usedAfterGcBytes=9183104
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.nonHeap.committedBytes=14417920
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.allocation.threadBytes=14805632
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.rss.residentKiB=184432
+experiment.INTRA_BATCH_DUPLICATES.EVERY_CHUNK_TWICE.rss.processPeakKiB=184432
