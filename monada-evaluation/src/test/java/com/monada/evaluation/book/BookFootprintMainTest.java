@@ -131,7 +131,9 @@ class BookFootprintMainTest {
         assertTrue(text.contains("checks.status=PASS"), text);
         assertTrue(text.contains("check.inputs.guarded[0].unchanged=PASS"), text);
         assertTrue(text.contains("scale.p100.REPEAT_IMPORT.unchangedFromPreviousPhase=yes"), text);
-        assertTrue(Files.readString(summary, StandardCharsets.UTF_8).contains("Checks: **PASS**"));
+        String summaryText = Files.readString(summary, StandardCharsets.UTF_8);
+        assertTrue(summaryText.contains("Checks: **PASS**"), summaryText);
+        assertTrue(summaryText.contains("| Input text bytes | Unique text bytes |"), summaryText);
         assertFalse(Files.exists(scratch), "scratch is removed after the run");
         assertEquals(inputsBefore, BookStoreInventory.treeDigest(inputs), "inputs are only read");
 

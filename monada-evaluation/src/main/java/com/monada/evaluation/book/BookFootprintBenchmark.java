@@ -2,7 +2,6 @@ package com.monada.evaluation.book;
 
 import com.monada.api.MonadaMemory;
 import com.monada.core.KnowledgeAtom;
-import com.monada.storage.audit.StorageIntegrityAuditor;
 import com.monada.storage.audit.StorageIntegrityStatistics;
 import java.io.IOException;
 import java.lang.ref.Reference;
@@ -39,6 +38,8 @@ import java.util.Set;
  * Memory samples ({@link BookMemorySampler}) are informational only.
  */
 final class BookFootprintBenchmark {
+    /** The scale the OVERLAP experiment seeds its Store with before importing every chunk. */
+    static final String OVERLAP_SEED = "50%";
     static final String API = "MonadaMemory.open(store).rememberAll(texts); reopen probe: resonate(first text).topK(1)";
 
     private BookFootprintBenchmark() {
@@ -60,12 +61,12 @@ final class BookFootprintBenchmark {
      * @param newTextBytes    UTF-8 bytes of the texts of those new atoms (the content the phase had to persist)
      * @param uniqueTextBytes UTF-8 bytes of the distinct texts the Store should hold after the phase
      * @param uniqueTextCodePoints Unicode code points of those distinct texts
-     * @param unchanged       the Store's tree digest equals the previous phase's
+     * @param unchanged       the Store's tree digest equals the previous phase's; null for a Store's first phase
      * @param memory          memory sample around the phase's API work, or null where no API call ran
      */
     record PhaseResult(String phase, int inputTexts, long inputTextBytes, int newAtoms, long newTextBytes,
                        int expectedUniqueAtoms, long uniqueTextBytes, long uniqueTextCodePoints,
-                       BookFootprintSnapshot snapshot, boolean unchanged, BookMemorySampler.Sample memory) {
+                       BookFootprintSnapshot snapshot, Boolean unchanged, BookMemorySampler.Sample memory) {
     }
 
     /**
@@ -112,9 +113,7 @@ final class BookFootprintBenchmark {
     static Result run(BookChunkFiles.Loaded chunks, Map<String, String> inputs, List<BookLatencyScale> ladder,
                       Path scratch, BookMemorySampler sampler, List<Path> guardedInputs) throws IOException {
         List<String> texts = chunks.entries().stream().map(BookChunkFiles.Entry::text).toList();
-        if (texts.isEmpty()) {
-            throw new IllegalArgumentException("the experiment needs chunks");
-        }
+        requireRunnable(texts.size(), ladder);
         Map<Path, String> inputDigests = new LinkedHashMap<>();
         for (Path input : guardedInputs) {
             inputDigests.put(input, digest(input));
@@ -144,11 +143,31 @@ final class BookFootprintBenchmark {
         return new Result(inputs, scales, done, checks, host);
     }
 
+    /**
+     * Fails, before anything is created, when {@code chunkCount} chunks cannot run the experiment: every ladder scale
+     * and the {@value #OVERLAP_SEED} seed of the OVERLAP experiment must select at least one chunk. Count arithmetic
+     * only, so callers can check a corpus before any scratch directory exists.
+     */
+    static void requireRunnable(int chunkCount, List<BookLatencyScale> ladder) {
+        if (chunkCount < 1) {
+            throw new IllegalArgumentException("the experiment needs chunks");
+        }
+        for (BookLatencyScale scale : ladder) {
+            scale.requireSelects(chunkCount);
+        }
+        try {
+            BookLatencyScale.parse(OVERLAP_SEED).requireSelects(chunkCount);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("the OVERLAP experiment needs its " + OVERLAP_SEED + " seed to select a"
+                    + " chunk: " + e.getMessage(), e);
+        }
+    }
+
     private static ScaleResult runScale(BookLatencyScale.Selected selected, BookChunkFiles.Loaded chunks, Path store,
                                         BookMemorySampler sampler, List<Check> checks) throws IOException {
         String id = "scale." + selected.scale().id();
         List<String> texts = selected.texts();
-        Map<String, String> expected = expectedContents(texts);
+        Map<String, String> expected = BookStoreReadback.expectedContents(texts);
         List<PhaseResult> phases = new ArrayList<>();
         Phases tracker = new Phases(store, phases);
 
@@ -159,23 +178,21 @@ final class BookFootprintBenchmark {
         });
         PhaseResult freshPhase = tracker.record("FRESH_IMPORT", texts, expected, fresh.sample());
         structural(id + ".FRESH_IMPORT", freshPhase, expected.size(), checks);
-        checks.add(new Check(id + ".FRESH_IMPORT.chunksResolvedExactly", Integer.toString(texts.size()),
-                Integer.toString(resolved(store, texts))));
-        if (selected.scale().kind() == BookLatencyScale.Kind.REAL) {
-            // REAL ordinals are the sidecar's own: every selected chunk key must reach its exact text in the Store.
-            checks.add(new Check(id + ".FRESH_IMPORT.sidecarKeysResolvedExactly",
-                    Integer.toString(selected.ordinals().size()),
-                    Integer.toString(sidecarResolved(store, chunks, selected.ordinals()))));
-        }
+        // REAL ordinals are the sidecar's own: every selected chunk key must reach its exact text in the Store.
+        resolution(id + ".FRESH_IMPORT", store, freshPhase, texts,
+                selected.scale().kind() == BookLatencyScale.Kind.REAL ? chunks : null, selected.ordinals(), checks);
 
         String probe = texts.getFirst();
         BookMemorySampler.Measured<Void> reopen = sampler.measure(id + ".REOPEN", () -> {
             MonadaMemory.open(store).resonate(probe).topK(1).execute();
             return null;
         });
-        PhaseResult reopenPhase = tracker.record("REOPEN", List.of(), expected, reopen.sample());
-        checks.add(new Check(id + ".REOPEN.storeUnchanged", "yes", yesNo(reopenPhase.unchanged())));
+        // The retained-heap probe opens and queries the Store too: it runs before the REOPEN snapshot, so anything
+        // either reopen wrote is charged to REOPEN, never to the repeat import that follows.
         long retained = retainedHeap(store, probe);
+        PhaseResult reopenPhase = tracker.record("REOPEN", List.of(), expected, reopen.sample());
+        checks.add(new Check(id + ".REOPEN.storeUnchanged", "yes",
+                yesNo(Boolean.TRUE.equals(reopenPhase.unchanged()))));
 
         BookMemorySampler.Measured<Void> repeat = sampler.measure(id + ".REPEAT_IMPORT", () -> {
             MonadaMemory.open(store).rememberAll(texts);
@@ -183,7 +200,8 @@ final class BookFootprintBenchmark {
         });
         PhaseResult repeatPhase = tracker.record("REPEAT_IMPORT", texts, expected, repeat.sample());
         checks.add(new Check(id + ".REPEAT_IMPORT.newAtoms", "0", Integer.toString(repeatPhase.newAtoms())));
-        checks.add(new Check(id + ".REPEAT_IMPORT.storeUnchanged", "yes", yesNo(repeatPhase.unchanged())));
+        checks.add(new Check(id + ".REPEAT_IMPORT.storeUnchanged", "yes",
+                yesNo(Boolean.TRUE.equals(repeatPhase.unchanged()))));
         structural(id + ".REPEAT_IMPORT", repeatPhase, expected.size(), checks);
         return new ScaleResult(selected, phases, retained);
     }
@@ -192,9 +210,9 @@ final class BookFootprintBenchmark {
     private static Experiment overlap(List<String> texts, Path dir, BookMemorySampler sampler, List<Check> checks)
             throws IOException {
         String id = "experiment.OVERLAP";
-        List<String> half = BookLatencyScale.parse("50%").select(texts).texts();
-        Map<String, String> halfExpected = expectedContents(half);
-        Map<String, String> allExpected = expectedContents(texts);
+        List<String> half = BookLatencyScale.parse(OVERLAP_SEED).select(texts).texts();
+        Map<String, String> halfExpected = BookStoreReadback.expectedContents(half);
+        Map<String, String> allExpected = BookStoreReadback.expectedContents(texts);
         Path store = dir.resolve("store");
         List<PhaseResult> phases = new ArrayList<>();
         Phases tracker = new Phases(store, phases);
@@ -221,8 +239,7 @@ final class BookFootprintBenchmark {
                 Long.toString(allPhase.newAtoms() * allPhase.snapshot().frameBytes()),
                 Long.toString(allPhase.snapshot().bytes(BookFootprintSnapshot.Role.VECTORS)
                         - halfPhase.snapshot().bytes(BookFootprintSnapshot.Role.VECTORS))));
-        checks.add(new Check(id + ".IMPORT_100%.chunksResolvedExactly", Integer.toString(texts.size()),
-                Integer.toString(resolved(store, texts))));
+        resolution(id + ".IMPORT_100%", store, allPhase, texts, null, List.of(), checks);
         return new Experiment("OVERLAP", "import the 50% scale, then every chunk into the same Store", phases);
     }
 
@@ -230,7 +247,7 @@ final class BookFootprintBenchmark {
     private static Experiment intraBatchDuplicates(List<String> texts, Path dir, BookMemorySampler sampler,
                                                    List<Check> checks) throws IOException {
         String id = "experiment.INTRA_BATCH_DUPLICATES";
-        Map<String, String> expected = expectedContents(texts);
+        Map<String, String> expected = BookStoreReadback.expectedContents(texts);
         List<String> twice = new ArrayList<>(texts);
         twice.addAll(texts);
         List<PhaseResult> phases = new ArrayList<>();
@@ -259,8 +276,7 @@ final class BookFootprintBenchmark {
                     Long.toString(b.files().get(role))));
         }
         checks.add(new Check(id + ".sameOtherFiles", a.other().toString(), b.other().toString()));
-        checks.add(new Check(id + ".chunksResolvedExactly", Integer.toString(twice.size()),
-                Integer.toString(resolved(doubledStore, twice))));
+        resolution(id + ".EVERY_CHUNK_TWICE", doubledStore, doubledPhase, twice, null, List.of(), checks);
         return new Experiment("INTRA_BATCH_DUPLICATES", "every chunk twice in one rememberAll call, against a clean"
                 + " single import on its own Store", phases);
     }
@@ -270,7 +286,8 @@ final class BookFootprintBenchmark {
         private final Path store;
         private final List<PhaseResult> out;
         private final Set<String> held = new LinkedHashSet<>();
-        private String lastDigest = "absent";
+        /** Null until the first phase: that phase has nothing to be unchanged from. */
+        private String lastDigest;
 
         Phases(Path store, List<PhaseResult> out) {
             this.store = store;
@@ -281,7 +298,7 @@ final class BookFootprintBenchmark {
                            BookMemorySampler.Sample memory) throws IOException {
             int newAtoms = 0;
             long newBytes = 0;
-            for (Map.Entry<String, String> atom : expectedContents(input).entrySet()) {
+            for (Map.Entry<String, String> atom : BookStoreReadback.expectedContents(input).entrySet()) {
                 if (!held.contains(atom.getKey())) {
                     newAtoms++;
                     newBytes += utf8(atom.getValue());
@@ -295,7 +312,7 @@ final class BookFootprintBenchmark {
                 codePoints += text.codePointCount(0, text.length());
             }
             BookFootprintSnapshot snapshot = BookFootprintSnapshot.take(store);
-            boolean unchanged = snapshot.treeDigest().equals(lastDigest);
+            Boolean unchanged = lastDigest == null ? null : snapshot.treeDigest().equals(lastDigest);
             lastDigest = snapshot.treeDigest();
             long inputBytes = input.stream().mapToLong(BookFootprintBenchmark::utf8).sum();
             PhaseResult result = new PhaseResult(phase, input.size(), inputBytes, newAtoms, newBytes, expected.size(),
@@ -330,40 +347,41 @@ final class BookFootprintBenchmark {
         checks.add(new Check(id + ".unattributedFiles", "{}", s.other().toString()));
     }
 
-    /** Texts (repeats included) whose content-derived id reads back exactly that text from disk. */
-    private static int resolved(Path store, List<String> texts) throws IOException {
-        Map<String, String> contents = inventory(store).contents();
+    /**
+     * Exact-readback checks of one phase, from a single inventory read through the manifest the phase's snapshot
+     * already parsed (no second audit): every text of {@code texts} (repeats included) must read back exactly from its
+     * content-derived id, and, when {@code chunks} is given, so must every sidecar entry at {@code ordinals}.
+     */
+    private static void resolution(String id, Path store, PhaseResult phase, List<String> texts,
+                                   BookChunkFiles.Loaded chunks, List<Integer> ordinals, List<Check> checks) {
+        Map<String, String> contents;
+        try {
+            contents = BookStoreInventory.read(store, phase.snapshot().manifest()).contents();
+        } catch (IOException e) {
+            // An unreadable inventory resolves nothing: the checks report it instead of aborting the run.
+            contents = Map.of();
+        }
         int resolved = 0;
         for (String text : texts) {
             if (text.equals(contents.get(KnowledgeAtom.text(text).id()))) {
                 resolved++;
             }
         }
-        return resolved;
-    }
-
-    /** Sidecar entries at {@code ordinals} whose chunk key's text reads back exactly from its content-derived id. */
-    private static int sidecarResolved(Path store, BookChunkFiles.Loaded chunks, List<Integer> ordinals)
-            throws IOException {
-        Map<String, String> contents = inventory(store).contents();
-        int resolved = 0;
+        checks.add(new Check(id + ".chunksResolvedExactly", Integer.toString(texts.size()),
+                Integer.toString(resolved)));
+        if (chunks == null) {
+            return;
+        }
+        int keys = 0;
         for (int ordinal : ordinals) {
             BookChunkFiles.Entry entry = chunks.entries().get(ordinal);
-            if (entry.ordinal() == ordinal && entry.key() != null
+            if (entry.ordinal() == ordinal
                     && entry.text().equals(contents.get(KnowledgeAtom.text(entry.text()).id()))) {
-                resolved++;
+                keys++;
             }
         }
-        return resolved;
-    }
-
-    private static BookStoreInventory inventory(Path store) throws IOException {
-        try {
-            return BookStoreInventory.read(store, new StorageIntegrityAuditor().audit(store).manifest());
-        } catch (IOException | RuntimeException e) {
-            // An unreadable inventory resolves nothing: the check reports it instead of aborting the run.
-            return BookStoreInventory.empty();
-        }
+        checks.add(new Check(id + ".sidecarKeysResolvedExactly", Integer.toString(ordinals.size()),
+                Integer.toString(keys)));
     }
 
     /**
@@ -378,15 +396,6 @@ final class BookFootprintBenchmark {
         instance = null;
         long dropped = BookMemorySampler.heapUsedAfterGc();
         return held - dropped;
-    }
-
-    /** Content-derived atom id to text, one entry per distinct text, in first-occurrence order. */
-    static Map<String, String> expectedContents(List<String> texts) {
-        Map<String, String> expected = new LinkedHashMap<>();
-        for (String text : texts) {
-            expected.putIfAbsent(KnowledgeAtom.text(text).id(), text);
-        }
-        return expected;
     }
 
     private static long utf8(String text) {

@@ -2,6 +2,8 @@ package com.monada.evaluation.book;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.monada.evaluation.book.BookFootprintBenchmark.Experiment;
@@ -150,5 +152,55 @@ class BookFootprintBenchmarkTest {
     void ratiosAreNeverDividedByZero() {
         assertEquals("n/a", BookFootprintReport.ratio(10, 0));
         assertEquals("2.500", BookFootprintReport.ratio(5, 2));
+    }
+
+    @Test
+    void growthWithoutNewTextIsReportedNotHiddenAsNa() {
+        assertEquals("1.700", BookFootprintReport.appendAmplification(170, 100));
+        assertEquals("n/a (no new text, 0 bytes appended)", BookFootprintReport.appendAmplification(0, 0));
+        assertEquals("UNEXPECTED (+42 bytes with no new text)", BookFootprintReport.appendAmplification(42, 0));
+    }
+
+    @Test
+    void aStoresFirstPhaseHasNothingToBeUnchangedFrom() throws Exception {
+        Result result = run(fixture(), "scratch");
+        for (ScaleResult scale : result.scales()) {
+            assertNull(phase(scale.phases(), "EMPTY").unchanged(), scale.selected().scale().spec());
+        }
+        assertNull(phase(result.experiments().get(0).phases(), "IMPORT_50%").unchanged());
+        String report = BookFootprintReport.render(result);
+        assertTrue(report.contains("scale.p50.EMPTY.unchangedFromPreviousPhase=n/a"), report);
+        assertFalse(report.contains("EMPTY.unchangedFromPreviousPhase=yes"), report);
+        String summary = BookFootprintReport.summary(result);
+        assertTrue(summary.contains("| Input text bytes | Unique text bytes |"), summary);
+    }
+
+    @Test
+    void aCorpusTooSmallForTheOverlapSeedIsRefusedBeforeAnythingIsCreated() throws Exception {
+        Fixture fixture = fixture();
+        BookChunkFiles.Loaded one = new BookChunkFiles.Loaded(fixture.chunks().corpus(),
+                fixture.chunks().corpusVersion(), fixture.chunks().sourceSha256(), fixture.chunks().policyId(),
+                fixture.chunks().chunksFileSha256(), fixture.chunks().entries().subList(0, 1));
+        Path scratch = Files.createDirectory(dir.resolve("one"));
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> BookFootprintBenchmark.run(one, Map.of(), BookLatencyScale.parseLadder("100%"), scratch,
+                        sampler(), List.of()));
+        assertTrue(e.getMessage().contains("OVERLAP"), e.getMessage());
+        try (Stream<Path> children = Files.list(scratch)) {
+            assertEquals(0, children.count(), "nothing is created when the corpus cannot run");
+        }
+    }
+
+    @Test
+    void theRetainedHeapProbeIsChargedToReopenNotToTheRepeatImport() throws Exception {
+        // The probe runs before the REOPEN snapshot: REPEAT_IMPORT is compared against a digest taken after it.
+        Result result = run(fixture(), "scratch");
+        for (ScaleResult scale : result.scales()) {
+            PhaseResult fresh = phase(scale.phases(), "FRESH_IMPORT");
+            PhaseResult reopen = phase(scale.phases(), "REOPEN");
+            assertEquals(fresh.snapshot().treeDigest(), reopen.snapshot().treeDigest());
+            assertEquals(reopen.snapshot().treeDigest(), phase(scale.phases(), "REPEAT_IMPORT").snapshot()
+                    .treeDigest());
+        }
     }
 }

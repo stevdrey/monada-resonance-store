@@ -36,8 +36,9 @@ Exit codes:
 - `0`: the report was written and every check passed.
 - `1`: the body is not the verified corpus, or a structural check failed. On a check failure the report is still
   written and the failing checks are printed on standard error.
-- `2`: a usage error, a missing file, an unsafe `--scratch` or output path, or an I/O failure (including a scratch
-  directory that cannot be removed).
+- `2`: a usage error (including a corpus so small that a ladder scale or the OVERLAP experiment's `50%` seed would
+  select no chunk, checked before `--scratch` is created), a missing file, an unsafe `--scratch` or output path, or an
+  I/O failure (including a scratch directory that cannot be removed).
 
 ## What is measured
 
@@ -50,7 +51,9 @@ vocabulary, not real-book shape).
 
 1. `EMPTY`: the Store does not exist.
 2. `FRESH_IMPORT`: `MonadaMemory.open(store).rememberAll(texts)`.
-3. `REOPEN`: a new instance answers one recall (the first chunk's text, top 1), so the vectors really load.
+3. `REOPEN`: a new instance answers one recall (the first chunk's text, top 1), so the vectors really load. The
+   retained-heap probe (below) opens and queries a second instance before the REOPEN snapshot, so anything either
+   reopen wrote would be charged to `REOPEN`, never to the repeat import.
 4. `REPEAT_IMPORT`: a new instance calls `rememberAll` with the same texts.
 
 **Content experiments**, over all 87 chunks, each on its own Stores:
@@ -64,7 +67,8 @@ severity counts and logical counts (physical atom records, unique atoms, history
 unique ids, duplicate offsets, atoms with and without a vector, orphan vectors, feedback records). It records the size
 of every file, attributed to its role (`manifest.json`, atom segment, vector segment, `indexes/vector-map.idx`,
 feedback segment); any other file is listed by its relative path, so no byte goes unaccounted for. It also records a
-tree digest: a phase is `unchanged` when its digest equals the previous phase's. Taking a snapshot never creates or
+tree digest: a phase is `unchanged` when its digest equals the previous phase's, and `n/a` for a Store's first phase,
+which has nothing to compare with. Taking a snapshot never creates or
 changes anything; it fails if the Store changes while it is read.
 
 **Derived values** are named for what they are. They are not compression ratios:
@@ -76,7 +80,7 @@ changes anything; it fails if the Store changes while it is read.
 | `storeBytesPerUniqueTextCodePoint` | total Store bytes ÷ Unicode code points of those texts ("bytes per source character") |
 | `atomBytesPerUniqueTextByte` | atom-segment bytes ÷ UTF-8 bytes of the distinct texts |
 | `vectorShareOfTotal` | vector-segment bytes ÷ total Store bytes |
-| `appendAmplification` | bytes the phase added to the Store ÷ UTF-8 bytes of the texts that were new to it (`n/a` when none were new) |
+| `appendAmplification` | bytes the phase added to the Store ÷ UTF-8 bytes of the texts that were new to it. With no new text it is `n/a (no new text, 0 bytes appended)`, or `UNEXPECTED (+N bytes with no new text)` if the Store grew anyway, so growth is never hidden behind `n/a` |
 
 ### Hard checks
 
@@ -116,6 +120,10 @@ Three families are recorded under separate keys and never treated as interchange
 
 A **retained-heap estimate** per scale is the heap used after an advisory GC while one reopened, queried instance is
 held, minus the same after it is dropped. It is labelled `APPROXIMATE`: it depends on the GC honouring the request.
+An allocation counter that reads -1 (measurement disabled at runtime) is reported as `UNSUPPORTED`, never as 0.
+
+The summary's disk table has two text columns: `Input text bytes` is what the phase passed to the API (repeats
+included; 0 for `EMPTY` and `REOPEN`), and `Unique text bytes` is the distinct text the Store should hold after it.
 
 ## Results (one host, 2026-10-23)
 

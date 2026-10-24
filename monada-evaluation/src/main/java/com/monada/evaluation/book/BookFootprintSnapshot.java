@@ -2,8 +2,6 @@ package com.monada.evaluation.book;
 
 import com.monada.storage.FileFrequencyStore;
 import com.monada.storage.Manifest;
-import com.monada.storage.audit.StorageIntegrityAuditor;
-import com.monada.storage.audit.StorageIntegrityReport;
 import com.monada.storage.audit.StorageIntegrityStatistics;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -31,10 +29,12 @@ import java.util.stream.Stream;
  * @param other       bytes of every other regular file, by relative path (sorted)
  * @param totalBytes  bytes of every regular file below the Store root
  * @param treeDigest  {@link BookStoreInventory#treeDigest(Path)} of the Store root
+ * @param manifest    the manifest the audit parsed, or null when absent or unreadable (lets callers read the atom
+ *                    inventory without a second audit)
  */
 record BookFootprintSnapshot(BookStoreReadback.Audit audit, StorageIntegrityStatistics statistics, int dimensions,
                              long frameBytes, Map<Role, Long> files, Map<String, Long> other, long totalBytes,
-                             String treeDigest) {
+                             String treeDigest, Manifest manifest) {
     static final long ABSENT = -1;
 
     /** The file roles a Store is made of. */
@@ -65,23 +65,11 @@ record BookFootprintSnapshot(BookStoreReadback.Audit audit, StorageIntegrityStat
                 files.put(role, ABSENT);
             }
             return new BookFootprintSnapshot(new BookStoreReadback.Audit("ABSENT", 0, 0, 0, 0),
-                    StorageIntegrityStatistics.empty(), 0, 0, files, Map.of(), 0, "absent");
+                    StorageIntegrityStatistics.empty(), 0, 0, files, Map.of(), 0, "absent", null);
         }
         String digestBefore = BookStoreInventory.treeDigest(store);
-        BookStoreReadback.Audit audit;
-        StorageIntegrityStatistics statistics;
-        Manifest manifest;
-        try {
-            StorageIntegrityReport report = new StorageIntegrityAuditor().audit(store);
-            audit = BookStoreReadback.Audit.of(report);
-            statistics = report.statistics();
-            manifest = report.manifest();
-        } catch (RuntimeException e) {
-            audit = BookStoreReadback.Audit.failed(e.getClass().getSimpleName() + ": "
-                    + BookStoreReadback.withoutPaths(e.getMessage(), store));
-            statistics = StorageIntegrityStatistics.empty();
-            manifest = null;
-        }
+        BookStoreReadback.Audited audited = BookStoreReadback.audit(store);
+        Manifest manifest = audited.manifest();
 
         Path root = store.toAbsolutePath().normalize();
         Map<Role, Path> rolePaths = new LinkedHashMap<>();
@@ -119,7 +107,8 @@ record BookFootprintSnapshot(BookStoreReadback.Audit audit, StorageIntegrityStat
             // The snapshot itself must be read-only; a concurrent writer would make its numbers meaningless.
             throw new IllegalStateException("the Store changed while it was being snapshotted");
         }
-        return new BookFootprintSnapshot(audit, statistics, dimensions, frame, files, other, total, digestAfter);
+        return new BookFootprintSnapshot(audited.audit(), audited.statistics(), dimensions, frame, files, other, total,
+                digestAfter, manifest);
     }
 
     /** Bytes of {@code role}, 0 when absent. */

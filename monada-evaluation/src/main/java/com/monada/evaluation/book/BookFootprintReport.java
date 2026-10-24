@@ -122,7 +122,7 @@ final class BookFootprintReport {
             line(out, p + ".bytes." + role.key, bytes(s.files().get(role)));
         }
         line(out, p + ".bytes.other", s.other().isEmpty() ? "none" : s.other().toString());
-        line(out, p + ".unchangedFromPreviousPhase", BookFootprintBenchmark.yesNo(phase.unchanged()));
+        line(out, p + ".unchangedFromPreviousPhase", unchanged(phase));
     }
 
     private static void measured(StringBuilder out, String p, PhaseResult phase, PhaseResult previous) {
@@ -139,7 +139,7 @@ final class BookFootprintReport {
             long delta = s.totalBytes() - previous.snapshot().totalBytes();
             line(out, p + ".deltaBytes.total", delta);
             line(out, p + ".deltaBytes.atoms", s.bytes(Role.ATOMS) - previous.snapshot().bytes(Role.ATOMS));
-            line(out, p + ".appendAmplification", ratio(delta, phase.newTextBytes()));
+            line(out, p + ".appendAmplification", appendAmplification(delta, phase.newTextBytes()));
         }
     }
 
@@ -171,10 +171,10 @@ final class BookFootprintReport {
         }
         out.append("\n## Disk, per phase\n\n");
         out.append("Bytes. `atoms` and `total` vary by a few bytes per record across runs (creation timestamps).\n\n");
-        out.append("| Store | Phase | Source text bytes | Unique chunks | Atoms (unique/physical) | Dim | manifest |"
-                + " atoms | vectors | vectorIndex | feedback | total | B/atom | B/text byte | Append amp. |"
-                + " Unchanged |\n");
-        out.append("| --- | --- | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: |"
+        out.append("| Store | Phase | Input text bytes | Unique text bytes | Unique chunks | Atoms (unique/physical) |"
+                + " Dim | manifest | atoms | vectors | vectorIndex | feedback | total | B/atom | B/text byte |"
+                + " Append amp. | Unchanged |\n");
+        out.append("| --- | --- | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: |"
                 + " --- |\n");
         for (ScaleResult scale : result.scales()) {
             String name = scale.selected().scale().spec() + " " + scale.selected().scale().kind();
@@ -210,8 +210,10 @@ final class BookFootprintReport {
             BookFootprintSnapshot s = phase.snapshot();
             StorageIntegrityStatistics st = s.statistics();
             String amplification = deltas && previous != null
-                    ? ratio(s.totalBytes() - previous.snapshot().totalBytes(), phase.newTextBytes()) : "n/a";
+                    ? appendAmplification(s.totalBytes() - previous.snapshot().totalBytes(), phase.newTextBytes())
+                    : "n/a";
             out.append("| ").append(store).append(" | ").append(phase.phase())
+                    .append(" | ").append(phase.inputTextBytes())
                     .append(" | ").append(phase.uniqueTextBytes())
                     .append(" | ").append(phase.expectedUniqueAtoms())
                     .append(" | ").append(st.activeUniqueAtoms()).append('/').append(st.atomLogPhysicalRecords())
@@ -223,8 +225,7 @@ final class BookFootprintReport {
                     .append(" | ").append(ratio(s.totalBytes(), st.activeUniqueAtoms()))
                     .append(" | ").append(ratio(s.totalBytes(), phase.uniqueTextBytes()))
                     .append(" | ").append(amplification)
-                    .append(" | ").append(previous == null || !deltas ? "—"
-                            : BookFootprintBenchmark.yesNo(phase.unchanged()))
+                    .append(" | ").append(deltas ? unchanged(phase) : "—")
                     .append(" |\n");
             previous = phase;
         }
@@ -262,6 +263,23 @@ final class BookFootprintReport {
 
     private static String bytes(long value) {
         return value == BookFootprintSnapshot.ABSENT ? "absent" : Long.toString(value);
+    }
+
+    /** {@code yes}/{@code no} against the previous phase of the same Store, {@code n/a} for its first phase. */
+    private static String unchanged(PhaseResult phase) {
+        return phase.unchanged() == null ? "n/a" : BookFootprintBenchmark.yesNo(phase.unchanged());
+    }
+
+    /**
+     * Bytes a phase added per byte of new text. A phase without new text has no ratio, but growth there is never
+     * hidden behind {@code n/a}: it is reported as {@code UNEXPECTED} with the bytes added.
+     */
+    static String appendAmplification(long deltaBytes, long newTextBytes) {
+        if (newTextBytes > 0) {
+            return ratio(deltaBytes, newTextBytes);
+        }
+        return deltaBytes == 0 ? "n/a (no new text, 0 bytes appended)"
+                : "UNEXPECTED (" + (deltaBytes > 0 ? "+" : "") + deltaBytes + " bytes with no new text)";
     }
 
     static String ratio(long numerator, long denominator) {

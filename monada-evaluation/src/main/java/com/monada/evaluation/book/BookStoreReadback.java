@@ -9,6 +9,7 @@ import com.monada.storage.Manifest;
 import com.monada.storage.audit.StorageIntegrityAuditor;
 import com.monada.storage.audit.StorageIntegrityReport;
 import com.monada.storage.audit.StorageIntegritySeverity;
+import com.monada.storage.audit.StorageIntegrityStatistics;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -391,18 +392,21 @@ public final class BookStoreReadback {
         return work == null ? result : result.replace(work.toString(), "<work>");
     }
 
-    /** An audit plus the manifest it parsed (null when unreadable or the audit failed). */
-    private record Audited(Audit audit, Manifest manifest) {
+    /**
+     * An audit, the manifest it parsed (null when unreadable or the audit failed) and its logical counts
+     * ({@link StorageIntegrityStatistics#empty()} when the audit failed).
+     */
+    record Audited(Audit audit, Manifest manifest, StorageIntegrityStatistics statistics) {
     }
 
     /** Runs the read-only auditor; an exception from the auditor itself becomes a failed audit, not a crash. */
-    private static Audited audit(Path store) {
+    static Audited audit(Path store) {
         try {
             StorageIntegrityReport report = new StorageIntegrityAuditor().audit(store);
-            return new Audited(Audit.of(report), report.manifest());
+            return new Audited(Audit.of(report), report.manifest(), report.statistics());
         } catch (RuntimeException e) {
             return new Audited(Audit.failed(e.getClass().getSimpleName() + ": " + withoutPaths(e.getMessage(), store)),
-                    null);
+                    null, StorageIntegrityStatistics.empty());
         }
     }
 
@@ -514,9 +518,14 @@ public final class BookStoreReadback {
 
     /** Content-derived atom id to chunk text, one entry per unique text, in first-occurrence order. */
     private static Map<String, String> expectedContents(BookChunkFiles.Loaded chunks) {
+        return expectedContents(chunks.entries().stream().map(BookChunkFiles.Entry::text).toList());
+    }
+
+    /** Content-derived atom id to text, one entry per distinct text, in first-occurrence order. */
+    static Map<String, String> expectedContents(List<String> texts) {
         Map<String, String> expected = new LinkedHashMap<>();
-        for (BookChunkFiles.Entry entry : chunks.entries()) {
-            expected.putIfAbsent(KnowledgeAtom.text(entry.text()).id(), entry.text());
+        for (String text : texts) {
+            expected.putIfAbsent(KnowledgeAtom.text(text).id(), text);
         }
         return expected;
     }

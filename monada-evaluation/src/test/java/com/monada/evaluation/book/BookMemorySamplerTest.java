@@ -50,6 +50,18 @@ class BookMemorySamplerTest {
     }
 
     @Test
+    void aCounterDisabledAtRuntimeIsUnsupportedNotZero() throws Exception {
+        BookMemorySampler sampler = new BookMemorySampler(BookMemorySampler.fromCounter(() -> -1), Optional::empty);
+        String allocated = sampler.measure("p", () -> null).sample().allocatedBytes();
+        assertEquals("UNSUPPORTED (thread allocated memory measurement returned -1 (disabled at runtime))", allocated);
+
+        AtomicLong counter = new AtomicLong(10);
+        BookMemorySampler counting = new BookMemorySampler(BookMemorySampler.fromCounter(counter::get),
+                Optional::empty);
+        assertEquals("5", counting.measure("p", () -> counter.addAndGet(5)).sample().allocatedBytes());
+    }
+
+    @Test
     void procStatusFieldsParseOnlyKibValues() {
         assertEquals("1024", BookMemorySampler.procField(STATUS, "VmRSS"));
         assertTrue(BookMemorySampler.procField(STATUS, "VmSwap").startsWith("UNKNOWN (no VmSwap"));

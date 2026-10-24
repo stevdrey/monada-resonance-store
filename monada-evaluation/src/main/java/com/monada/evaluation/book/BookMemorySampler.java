@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
 /**
@@ -148,19 +149,28 @@ final class BookMemorySampler {
         } else if (!threads.isThreadAllocatedMemoryEnabled()) {
             reason = "thread allocated memory measurement is disabled";
         } else {
-            return new AllocationProbe() {
-                @Override
-                public OptionalLong allocatedBytes() {
-                    return OptionalLong.of(threads.getCurrentThreadAllocatedBytes());
-                }
-
-                @Override
-                public String unsupportedReason() {
-                    return null;
-                }
-            };
+            return fromCounter(threads::getCurrentThreadAllocatedBytes);
         }
         return unsupported(reason);
+    }
+
+    /**
+     * A probe over a thread-allocation counter. The JVM reports -1 when measurement was disabled after the probe was
+     * built, so a negative reading is unsupported, never a number: two -1 readings must not look like 0 bytes.
+     */
+    static AllocationProbe fromCounter(LongSupplier counter) {
+        return new AllocationProbe() {
+            @Override
+            public OptionalLong allocatedBytes() {
+                long value = counter.getAsLong();
+                return value < 0 ? OptionalLong.empty() : OptionalLong.of(value);
+            }
+
+            @Override
+            public String unsupportedReason() {
+                return "thread allocated memory measurement returned -1 (disabled at runtime)";
+            }
+        };
     }
 
     /** A probe that never measures, for {@code reason}. */

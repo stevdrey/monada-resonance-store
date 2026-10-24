@@ -100,13 +100,12 @@ public final class BookFootprintMain {
             BookChunker.Result chunked = BookChunker.chunk(source, BookChunkingPolicy.V1);
             BookChunkOutputWriter.Output rendered = BookChunkOutputWriter.render(chunked);
             BookChunkFiles.Loaded chunks = BookChunkFiles.parse(rendered.chunks(), rendered.sidecar());
-            for (BookLatencyScale scale : ladder) {
-                try {
-                    scale.requireSelects(chunks.entries().size());
-                } catch (IllegalArgumentException e) {
-                    err.println(e.getMessage() + "\n" + USAGE);
-                    return 2;
-                }
+            try {
+                // Every ladder scale and the OVERLAP seed must select a chunk: checked before scratch exists.
+                BookFootprintBenchmark.requireRunnable(chunks.entries().size(), ladder);
+            } catch (IllegalArgumentException e) {
+                err.println(e.getMessage() + "\n" + USAGE);
+                return 2;
             }
             Map<String, String> inputs = inputs(chunks, rendered);
 
