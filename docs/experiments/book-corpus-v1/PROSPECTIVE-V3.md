@@ -125,7 +125,9 @@ Unknown columns fail loading.
 
 Only `REVIEWED` produces judgments. A model-only draft can never be presented as reviewed. The full `cases()` list
 is gated too: it throws unless the dataset is `REVIEWED` and the final gate is open, so no caller can reach
-FINAL_ONLY cases around the gates; `authoredSlots()` reports progress with slot ids only.
+FINAL_ONLY cases around the gates; `authoredSlots()` reports progress with slot ids only. Review receipts carry
+reviewer notes, so they follow the same gates: `devReviews()` needs sign-off, while `finalOnlyReviews()` and the full
+`reviews()` also need the open final gate.
 
 ### Signing this protocol
 

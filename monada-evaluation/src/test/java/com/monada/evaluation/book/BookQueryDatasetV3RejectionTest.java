@@ -109,8 +109,33 @@ class BookQueryDatasetV3RejectionTest {
         e = assertThrows(IllegalStateException.class, v3::cases);
         assertTrue(e.getMessage().contains("final gate is CLOSED"), "the accessor must not leak FINAL_ONLY cases");
         assertEquals(40, v3.authoredSlots().size());
-        assertEquals(List.copyOf(queries.keySet()), List.copyOf(v3.reviews().keySet()),
-                "receipts keep their file order");
+        assertEquals(PROTOCOL.slots().stream().filter(s -> s.split() == Split.DEV).map(Slot::id).toList(),
+                List.copyOf(v3.devReviews().keySet()), "DEV receipts keep their file order");
+    }
+
+    @Test
+    void finalOnlyReceiptNotesStayBehindTheGate() {
+        String finalSlot = PROTOCOL.slots().stream().filter(s -> s.split() == Split.FINAL_ONLY).findFirst()
+                .orElseThrow().id();
+        String note = "reviewer note that hints at the FINAL_ONLY answer";
+        decisions.put(finalSlot, "APPROVED|" + note);
+        BookQueryDatasetV3 closed = load();
+        var e = assertThrows(IllegalStateException.class, closed::reviews);
+        assertTrue(e.getMessage().contains("final gate is CLOSED"), e.getMessage());
+        e = assertThrows(IllegalStateException.class, closed::finalOnlyReviews);
+        assertTrue(e.getMessage().contains("final gate is CLOSED"), e.getMessage());
+        assertEquals(28, closed.devReviews().size());
+        assertTrue(closed.devReviews().values().stream().noneMatch(r -> r.note().contains(note)),
+                "no FINAL_ONLY note is reachable through the DEV receipts");
+
+        manifest.setProperty("finalGate.status", "OPEN");
+        manifest.setProperty("finalGate.issue", "#190");
+        manifest.setProperty("finalGate.candidate", "frozen candidate named by #190");
+        manifest.setProperty("finalGate.declaredAt", "2026-11-05");
+        BookQueryDatasetV3 open = load();
+        assertEquals(note, open.finalOnlyReviews().get(finalSlot).note());
+        assertEquals(12, open.finalOnlyReviews().size());
+        assertEquals(40, open.reviews().size());
     }
 
     @Test
@@ -143,6 +168,9 @@ class BookQueryDatasetV3RejectionTest {
         assertTrue(e.getMessage().contains("before human sign-off"), e.getMessage());
         assertThrows(IllegalStateException.class, v3::finalOnlyCases);
         assertThrows(IllegalStateException.class, v3::cases, "the accessor must not bypass the review gate");
+        for (var accessor : List.<Runnable>of(v3::reviews, v3::devReviews, v3::finalOnlyReviews)) {
+            assertThrows(IllegalStateException.class, accessor::run, "no receipt note before human sign-off");
+        }
         manifest.setProperty("finalGate.status", "OPEN");
         rejects("cannot open over an unreviewed dataset");
     }

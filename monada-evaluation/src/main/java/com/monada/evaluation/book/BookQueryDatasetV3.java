@@ -103,9 +103,40 @@ final class BookQueryDatasetV3 {
         return copy;
     }
 
-    /** Review receipts by slot, in receipt-file order. */
+    /**
+     * Every review receipt by slot, in receipt-file order. Receipts carry reviewer notes about their cases, so they are
+     * gated exactly like {@link #cases()}: only once the dataset is reviewed and the final gate is open.
+     */
     Map<String, Review> reviews() {
+        check(reviewed() && finalGateOpen(), "all book-queries-v3 receipts need human sign-off and an open final gate;"
+                + " the dataset is " + manifest.getProperty("review.status") + " and the final gate is "
+                + manifest.getProperty("finalGate.status"));
         return reviews;
+    }
+
+    /** DEV receipts, gated like {@link #devCases()}. */
+    Map<String, Review> devReviews() {
+        check(reviewed(), "book-queries-v3 is " + manifest.getProperty("review.status")
+                + ": no receipt is available before human sign-off");
+        return reviewsOf(Split.DEV);
+    }
+
+    /** FINAL_ONLY receipts, gated like {@link #finalOnlyCases()}. */
+    Map<String, Review> finalOnlyReviews() {
+        check(reviewed() && finalGateOpen(), "FINAL_ONLY receipts are not available: the final gate is "
+                + manifest.getProperty("finalGate.status"));
+        return reviewsOf(Split.FINAL_ONLY);
+    }
+
+    private Map<String, Review> reviewsOf(Split split) {
+        Map<String, Slot> plan = protocol.slotsById();
+        Map<String, Review> selected = new LinkedHashMap<>();
+        reviews.forEach((slot, review) -> {
+            if (plan.get(slot).split() == split) {
+                selected.put(slot, review);
+            }
+        });
+        return Collections.unmodifiableMap(selected);
     }
 
     /** Every case, FINAL_ONLY included: only once the dataset is reviewed and the final gate is open. */
