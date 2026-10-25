@@ -13,8 +13,9 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /**
- * Issue #185 is protocol-only: the frozen {@code book-queries-v1} and {@code book-queries-v2} files and every
- * committed book report stay byte-identical, and no v3 query, judgment or review receipt exists yet.
+ * The frozen {@code book-queries-v1} and {@code book-queries-v2} files and every committed book report stay
+ * byte-identical (issues #185, #186). The v3 queries, judgments and receipts live only in their own resource
+ * directory ({@link BookQueryDatasetV3Test}); the contract directory keeps just the protocol and the plan.
  */
 class BookQueriesFrozenResourcesTest {
     private static final Path ROOT = Path.of(System.getProperty("user.dir")).resolve("..").normalize();
@@ -79,7 +80,7 @@ class BookQueriesFrozenResourcesTest {
     }
 
     @Test
-    void noV3QueryOrGoldDecisionIsAuthoredYet() throws Exception {
+    void theContractDirectoryHoldsNoV3QueryOrGoldDecision() throws Exception {
         try (Stream<Path> files = Files.list(ROOT.resolve(DOCS))) {
             var v3 = files.map(p -> p.getFileName().toString()).filter(n -> n.startsWith("book-queries-v3-"))
                     .collect(Collectors.toSet());

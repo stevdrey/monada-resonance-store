@@ -1,0 +1,61 @@
+queryId|chunkKey|byteStart|byteEnd|spanSha256|grade|role|note
+V3-LIT-01|book-corpus-v1/book-chunking-v1/s001/c0006|11443|11491|c5f8d0668baf9d5967f4499c291ef2675314408e24184629743745b273bfbc6f|2|EVIDENCE|cake inscription in the hall
+V3-LIT-02|book-corpus-v1/book-chunking-v1/s007/c0001|77955|78017|cbb4457dd5be724730977f57f3d3a604099fda71c786a1c8c0cd3a8782ac7a6c|2|EVIDENCE|the March Hare defends the butter
+V3-LIT-03|book-corpus-v1/book-chunking-v1/s008/c0000|88630|89110|b9e281a7f86ac7d4baf1831190f8db76c8de23a753c95c5017b4e78bb9272978|2|EVIDENCE|Five, Seven and Two named
+V3-LIT-04|book-corpus-v1/book-chunking-v1/s004/c0003|39720|39779|e882707ffb0e4e86d20e67419092c0327b0b6dd351bb1e45d4471cce23136020|2|EVIDENCE|Pat replies to the Rabbit
+V3-PAR-01|book-corpus-v1/book-chunking-v1/s003/c0000|24928|25000|e20de6af580706aeed2a95c5ca245f36bb24dc35d6fa0dd3ba999446d52a3980|2|EVIDENCE|the Mouse begins its dry history
+V3-PAR-02|book-corpus-v1/book-chunking-v1/s005/c0004|56365|56400|49c3943698077f65ab7c6ee75cdfd8e849759fa73bd605c1debb48ef7a39be27|2|EVIDENCE|the Pigeon calls Alice a serpent
+V3-PAR-03|book-corpus-v1/book-chunking-v1/s006/c0002|65719|65829|a417d437c0534087f0a4684ae7130be5373f34f3e3c885ad193493ddc7afe09e|2|EVIDENCE|the cook throws things
+V3-PAR-04|book-corpus-v1/book-chunking-v1/s010/c0000|117338|117405|a03aa30deaa3c8012d665a0fdf46d30a4be434e55aeacc8dbfbcb205e58fd4bb|2|EVIDENCE|what is thrown in the dance
+V3-PAR-05|book-corpus-v1/book-chunking-v1/s009/c0003|109482|109558|91e54cf529b31fe43f08541ee3cb47143bd131b57753bee5e09673de7107b3fb|2|EVIDENCE|the Queen sends the Gryphon
+V3-PAR-06|book-corpus-v1/book-chunking-v1/s008/c0004|96655|96740|18e4fe2ed4004c0369ad0c28e6e3f08d6fce1f6a856209916011807b160a240e|2|EVIDENCE|the Queen during croquet
+V3-PAR-07|book-corpus-v1/book-chunking-v1/s007/c0003|81099|81165|f01ebecbda5706192dbdaefc47bf706f4d458877d15df5c890ef1bd6ba20c59a|2|EVIDENCE|the Hatter quotes his song
+V3-PAR-08|book-corpus-v1/book-chunking-v1/s007/c0000|76306|76347|8a463784b315c31d2c95abd646eeaa147ca4d3ca6ec97417a35b665b0d797f0d|2|EVIDENCE|the Hatter asks the riddle
+V3-NAR-01|book-corpus-v1/book-chunking-v1/s001/c0000|1586|1686|82de08528fa2fba885256e9b4ba8abc9891a8c39d15131aae75b54065d58f3c1|2|EVIDENCE|the watch makes Alice follow
+V3-NAR-02|book-corpus-v1/book-chunking-v1/s005/c0003|54582|54704|b4bbed7947af51f2a5f52300bb4d7ff06ad8b2c15b08e627568c89779004fa34|2|EVIDENCE|first bite of the right-hand bit
+V3-NAR-03|book-corpus-v1/book-chunking-v1/s007/c0006|87917|88008|3981f5b5cdbec69c1d3f13b0d53af382d9d2c2409f2ecea54b799a1a1bdc0b26|2|EVIDENCE|back in the hall after the tea-party
+V3-NAR-04|book-corpus-v1/book-chunking-v1/s004/c0002|36947|37001|59fa4b42f078ddc8266fffafdd89557c50de83cdda31bdb8c7ef0666df7c6a52|2|EVIDENCE|Alice fills the room
+V3-NAR-05|book-corpus-v1/book-chunking-v1/s012/c0005|148539|148640|cc64c86c0d57596e56cc120537ea9530d668716a7c52e86c87bff4d0edcbfad6|2|EVIDENCE|the sister stays and dreams
+V3-MUL-01|book-corpus-v1/book-chunking-v1/s001/c0003|7072|7138|01c5a2887130028282938bf76acd6f0f56ac9dbbcd223265dca30f49e1d0ff7d|2|EVIDENCE|first time the key fits
+V3-MUL-01|book-corpus-v1/book-chunking-v1/s007/c0006|87917|88008|3981f5b5cdbec69c1d3f13b0d53af382d9d2c2409f2ecea54b799a1a1bdc0b26|2|EVIDENCE|unlocks the garden door at last
+V3-MUL-02|book-corpus-v1/book-chunking-v1/s006/c0001|64005|64082|50ad6997a260aabd7bdc52986e5be67bb26ab9c95e7cfda55cab6cf58c644713|2|EVIDENCE|the Duchess in her kitchen
+V3-MUL-02|book-corpus-v1/book-chunking-v1/s009/c0000|102600|102670|62c564506d0a1334fa1ce27ef19799fa310f286e646891b1c5bb231fd99ca2cf|2|EVIDENCE|the Duchess at the croquet-ground
+V3-MUL-03|book-corpus-v1/book-chunking-v1/s002/c0005|21360|21397|dd98113425ff2255c85a942f6675300d4cc6f46c0d6a4e1629d8cc6b6ce335b5|2|EVIDENCE|Dinah praised to the Mouse
+V3-MUL-03|book-corpus-v1/book-chunking-v1/s003/c0004|32206|32280|61921af9186899c99272030b4935609aa75293357de5993c4d003fea42fba120|2|EVIDENCE|Dinah praised to the birds
+V3-MUL-04|book-corpus-v1/book-chunking-v1/s001/c0005|9429|9516|f3b941078b27484c4ee19b50219248c3b063d5439239419393a22a51b3a9da85|2|EVIDENCE|the first bottle
+V3-MUL-04|book-corpus-v1/book-chunking-v1/s002/c0003|18024|18084|c75ce1fb550f60176c53e2008de810124d2e272fcac3c0b7d164279a13830918|2|EVIDENCE|the fan
+V3-MUL-04|book-corpus-v1/book-chunking-v1/s004/c0006|44018|44113|b74f3e0b3d3165d97a684b03cfc248a45bf1bb33efd26dde34a0c86cf250b1c0|2|EVIDENCE|a pebble cake
+V3-MUL-04|book-corpus-v1/book-chunking-v1/s005/c0003|54681|54841|68be4c48164dd7be15a56fa0e3d5b6376826b05b0cac1ffd6211a5641d19b94d|2|EVIDENCE|the right-hand mushroom bit
+V3-MUL-05|book-corpus-v1/book-chunking-v1/s004/c0004|42149|42210|64dc3638fd6dfc6371fcc4a2db0545003d5d049c8d70d6caec54f9a7a803f5b3|2|EVIDENCE|Bill in the chimney
+V3-MUL-05|book-corpus-v1/book-chunking-v1/s011/c0001|130886|130957|b7aaf904146d77494e7afcd2ec0f86f6abe532672e156eb7add9d53dc71d3897|2|EVIDENCE|Bill as a juror
+V3-MUL-05|book-corpus-v1/book-chunking-v1/s012/c0004|146625|146673|257cbeb33b89f39702fdf1ea608d5ddca641aa1aec696cfdef8fd9de29539219|2|EVIDENCE|Bill hit by the inkstand
+V3-CON-01|book-corpus-v1/book-chunking-v1/s007/c0003|80901|80963|d6a3236a58f05d07ad4bdefafcfba87cdd88751b8968d13abd744293cdf512ab|2|EVIDENCE|the Hatter dates the quarrel
+V3-CON-01|book-corpus-v1/book-chunking-v1/s001/c0000|1370|1404|9ac8ab7615792dca6c45ca465b3bb2036b92c55988fb09ff487e5a0d0faf5db7|0|CONFOUNDER|the Rabbit is late: same theme of time, no quarrel
+V3-CON-02|book-corpus-v1/book-chunking-v1/s012/c0002|142921|142982|c2c44e3dc8937f0dc575078e2696cf4f1e636393f72a2c9f4b69a0b508e11fab|2|EVIDENCE|the Rabbit unfolds the paper
+V3-CON-02|book-corpus-v1/book-chunking-v1/s010/c0004|124233|124289|8ba158590cf34edbd2accbce95faa43b91234517ce24d3e811ab02555cc3692d|0|CONFOUNDER|a recited poem, unrelated to the trial
+V3-CON-03|book-corpus-v1/book-chunking-v1/s004/c0005|43443|43500|862b79630ead81b154e9a867a4980e8fbfe53ce6276eb993a1f78eb9343d17b2|2|EVIDENCE|pebbles through the window
+V3-CON-03|book-corpus-v1/book-chunking-v1/s006/c0002|65719|65829|a417d437c0534087f0a4684ae7130be5373f34f3e3c885ad193493ddc7afe09e|0|CONFOUNDER|things thrown in the kitchen: another scene
+V3-CON-04|book-corpus-v1/book-chunking-v1/s005/c0003|53901|53989|a10a675f92b610e9c1c8dcc17459fb7dfd8ae2060ade8f10d3e5143657b6af9d|2|EVIDENCE|the Caterpillar on the two sides
+V3-CON-04|book-corpus-v1/book-chunking-v1/s005/c0004|56365|56400|49c3943698077f65ab7c6ee75cdfd8e849759fa73bd605c1debb48ef7a39be27|0|CONFOUNDER|long-necked Alice and the Pigeon: no mushroom rule
+V3-CON-05|book-corpus-v1/book-chunking-v1/s008/c0000|89192|89243|a173da1cecf4d23f5ea5ee69c15c3b7446f865bd612c09c5cf712041de4210a1|2|EVIDENCE|Five gives the reason
+V3-CON-05|book-corpus-v1/book-chunking-v1/s007/c0003|81713|81764|d119b147505ebcd2ce4608cc7b271791c8fa09ff31cec12d6e17aae0fea59937|0|CONFOUNDER|another beheading order, about the Hatter
+V3-AMB-01|book-corpus-v1/book-chunking-v1/s006/c0003|67187|67223|92496d8b0669dc2fe28bfb2b425327a264e28ea3039a63dc481ebea430466d4a|2|EVIDENCE|the Duchess sings a lullaby
+V3-AMB-01|book-corpus-v1/book-chunking-v1/s007/c0003|81099|81165|f01ebecbda5706192dbdaefc47bf706f4d458877d15df5c890ef1bd6ba20c59a|2|EVIDENCE|the Hatter's song
+V3-AMB-01|book-corpus-v1/book-chunking-v1/s010/c0005|126831|126868|c46715e5e5ec716750360cd02689cca63c04fb9406c1add488a850b1c2acf5c8|2|EVIDENCE|the Mock Turtle sings
+V3-AMB-02|book-corpus-v1/book-chunking-v1/s001/c0000|1586|1686|82de08528fa2fba885256e9b4ba8abc9891a8c39d15131aae75b54065d58f3c1|2|EVIDENCE|the Rabbit's watch
+V3-AMB-02|book-corpus-v1/book-chunking-v1/s007/c0001|77625|77658|da3c18676d1916f18a7957efdb1c84949698ce48805a92e06481ffdf93391156|2|EVIDENCE|the Hatter's watch
+V3-AMB-03|book-corpus-v1/book-chunking-v1/s005/c0001|49861|49906|6d376f60bfc8f31f3e485655c621fcc3031bef2a74058925a72656b378332ae4|2|EVIDENCE|the Caterpillar's advice
+V3-AMB-03|book-corpus-v1/book-chunking-v1/s006/c0005|71123|71196|a326a5befad386585bec25ecb580550fd17a5434cf8fc54bc0d19d090fb732d4|2|EVIDENCE|the Cat on which way to go
+V3-AMB-03|book-corpus-v1/book-chunking-v1/s009/c0000|103777|103856|cfb5570bbd9b550fc7cb4328871fbfe878f420f33d7303d61b9957c17e19844f|1|EVIDENCE|the Duchess's morals
+V3-AMB-04|book-corpus-v1/book-chunking-v1/s011/c0000|129048|129084|d00af8f04bb8a6041a450f42c0d63ba9627b8821ff3c02e7a10e1411d2658f26|2|EVIDENCE|the King is the judge
+V3-AMB-04|book-corpus-v1/book-chunking-v1/s012/c0004|147185|147257|4d861371d96b700c8dfcc0f60dc6d3c6354ef6693dea490812c2677e3871093c|1|EVIDENCE|the Queen overrides the King
+V3-AMB-05|book-corpus-v1/book-chunking-v1/s007/c0000|74923|74971|8650095f51632e076cd6eb5f1909e54ecacd2a8d48e9e7cde06f11348c83b1a7|2|EVIDENCE|the Dormouse at the tea-party
+V3-AMB-05|book-corpus-v1/book-chunking-v1/s009/c0003|109316|109381|265c4d8c93fbb264c15201e145234fa20674e8d9b667a3d0232417857de2cded|2|EVIDENCE|the Gryphon asleep
+V3-AMB-05|book-corpus-v1/book-chunking-v1/s011/c0003|135402|135453|707210ff1e72e54e5ffd32cded9f4aecffed619378e79b233b68e3254f99d630|2|EVIDENCE|the Dormouse asleep at the trial
+V3-NOA-01|book-corpus-v1/book-chunking-v1/s004/c0000|34765|34819|89e667ce64ddd9a1e303f0fc528e2b27a522debfcad235c1f499e6a309e85918|0|CONFOUNDER|initial only, no first name
+V3-NOA-02|book-corpus-v1/book-chunking-v1/s006/c0002|64541|64570|91a57e21842a45dce515f22f0deafcc6c3aea7b8ee3a4e7c240058ea75a8740c|0|CONFOUNDER|the Cat on the hearth, no colour given
+V3-NOA-03|book-corpus-v1/book-chunking-v1/s002/c0002|16140|16181|f9b492d6e76c1a7b94c7b2a1b6522c7c44a2efabed8d4cda4568f2d771a4ca74|0|CONFOUNDER|London named, not as her home
+V3-NOA-04|book-corpus-v1/book-chunking-v1/s011/c0004|137330|137372|c9788caa74f128009e89de0cc9be2dfa3f6ef9958f056a1064cb9ac424a03ea6|0|CONFOUNDER|the cook as a witness, unnamed
+V3-NOA-05|book-corpus-v1/book-chunking-v1/s011/c0000|128350|128389|c438ee037163b84f26c505533883303d818105bfb8d258fe4f17bfbfc12c15b2|0|CONFOUNDER|a trumpet, held by the Rabbit
+V3-NOA-07|book-corpus-v1/book-chunking-v1/s003/c0002|28117|28175|d2e60e15e4e9cc36f0ddff69717005250968bf20f0aa4e0c1a2a1dfc116ef9b4|0|CONFOUNDER|Caucus-race prizes, not croquet
+V3-NOA-08|book-corpus-v1/book-chunking-v1/s004/c0000|34164|34232|90c4136ca7ffa2e2c92e4af30583b6c6da67415a2d741c6b9865a33564acea3c|0|CONFOUNDER|a mistaken name, not a surname
