@@ -1,0 +1,41 @@
+slot|split|category|answerable|text|rationale|draftedBy
+V3-LIT-01|DEV|LITERAL|true|What words are spelled out in currants on the small cake Alice finds in a glass box?|The cake inscription is quoted when Alice finds the glass box under the table.|claude
+V3-LIT-02|DEV|LITERAL|true|What does the March Hare keep insisting about the butter he put into the Hatter's watch?|The March Hare repeats the same remark twice while the watch is examined at the tea-party.|claude
+V3-LIT-03|FINAL_ONLY|LITERAL|true|What numbers do the three gardeners painting the rose-tree go by?|The gardeners address one another by their card numbers before the procession arrives.|claude
+V3-LIT-04|DEV|LITERAL|true|What does Pat answer when the Rabbit calls out to ask where he is?|Pat's reply is quoted from outside the Rabbit's house.|claude
+V3-PAR-01|DEV|PARAPHRASE|true|Which tedious lecture did the rodent deliver in the hope of drying off the soaked crowd?|The Mouse recites a passage of English history as the driest thing it knows.|claude
+V3-PAR-02|FINAL_ONLY|PARAPHRASE|true|Which bird took the long-necked girl for a snake that wanted to steal its eggs?|The Pigeon attacks Alice in the treetops and calls her a serpent.|claude
+V3-PAR-03|DEV|PARAPHRASE|true|What did the kitchen servant hurl at the noblewoman and the infant in the smoky room?|The cook throws everything within reach at the Duchess and the baby.|claude
+V3-PAR-04|DEV|PARAPHRASE|true|In the seaside dance described by the sea creatures, what gets flung as far out into the ocean as possible?|During the Lobster Quadrille explanation the partners are thrown out to sea.|claude
+V3-PAR-05|DEV|PARAPHRASE|true|Which winged beast did the ruler send to escort the girl to hear the weeping creature's life story?|The Queen wakes the Gryphon and orders it to take Alice to the Mock Turtle.|claude
+V3-PAR-06|FINAL_ONLY|PARAPHRASE|true|What sentence did the furious monarch keep shouting at the players during the outdoor game?|During croquet the Queen orders beheadings about once a minute.|claude
+V3-PAR-07|DEV|PARAPHRASE|true|Which nursery-rhyme parody about a small flying creature did the hat-maker perform at the royal concert?|The Hatter recalls the song he sang at the Queen of Hearts' concert.|claude
+V3-PAR-08|DEV|PARAPHRASE|true|What puzzle comparing a black bird with a piece of furniture did the hat-maker pose to the girl?|The Hatter asks a riddle at the tea table that nobody ever answers.|claude
+V3-NAR-01|DEV|NARRATIVE_TEMPORAL|true|What did the White Rabbit do that finally made Alice jump up and run after it?|Alice only follows the Rabbit after seeing it take out a watch from a waistcoat-pocket.|claude
+V3-NAR-02|DEV|NARRATIVE_TEMPORAL|true|What happened the first time Alice nibbled the piece of mushroom from her right hand?|Right after the Caterpillar leaves, the right-hand bit makes her shrink so fast her chin hits her foot.|claude
+V3-NAR-03|FINAL_ONLY|NARRATIVE_TEMPORAL|true|What did Alice do after she left the tea-party and found a tree with a door in it?|She goes back into the long hall, unlocks the garden door, nibbles the mushroom and enters the garden.|claude
+V3-NAR-04|DEV|NARRATIVE_TEMPORAL|true|What happened after Alice drank from the unlabelled bottle in the White Rabbit's house?|She grows until she fills the room, with an arm out of the window and a foot up the chimney.|claude
+V3-NAR-05|FINAL_ONLY|NARRATIVE_TEMPORAL|true|What did Alice's sister do after Alice ran off home to tea?|The sister stays on the bank and begins to dream of Alice's adventures herself.|claude
+V3-MUL-01|DEV|MULTI_EVIDENCE|true|At which moments does Alice use the tiny golden key to open the little door?|She opens the door with the key in the hall early on, and finally unlocks it after the tea-party.|claude
+V3-MUL-02|DEV|MULTI_EVIDENCE|true|In which scenes does the Duchess appear?|She is in her smoky kitchen with the baby, and later walks arm in arm with Alice at the croquet-ground.|claude
+V3-MUL-03|FINAL_ONLY|MULTI_EVIDENCE|true|To which creatures does Alice boast about her cat, upsetting them?|She talks about Dinah to the Mouse in the pool and again to the birds after the race.|claude
+V3-MUL-04|DEV|MULTI_EVIDENCE|true|What things made Alice become smaller during her adventures?|The first bottle, the Rabbit's fan, the pebble cakes and a side of the mushroom all shrink her.|claude
+V3-MUL-05|FINAL_ONLY|MULTI_EVIDENCE|true|Where in the story does Bill the Lizard turn up?|Bill is sent down the chimney, later sits on the jury, and is hit by an inkstand at the trial.|claude
+V3-CON-01|DEV|CONFOUNDER|true|When did the Hatter fall out with Time?|The Hatter dates the quarrel to last March, at the Queen's concert; the Rabbit's lateness is not about Time.|claude
+V3-CON-02|DEV|CONFOUNDER|true|What did the paper handed in as evidence at the trial turn out to be?|The White Rabbit unfolds it and finds a set of verses; Alice's muddled Lobster recitation is another poem, not evidence.|claude
+V3-CON-03|DEV|CONFOUNDER|true|What came flying in at the window while Alice was stuck inside the Rabbit's house?|A shower of pebbles is thrown in; the cook throwing dishes in the kitchen is a different scene.|claude
+V3-CON-04|FINAL_ONLY|CONFOUNDER|true|What did the Caterpillar say the two sides of the mushroom would do?|The Caterpillar explains it as it crawls away; the Pigeon scene also involves Alice's size but says nothing about the mushroom.|claude
+V3-CON-05|FINAL_ONLY|CONFOUNDER|true|Why, according to Five, did the Queen say Seven deserved to be beheaded?|Five gives the reason during the rose painting; the Queen's order against the Hatter at the concert is a different beheading.|claude
+V3-AMB-01|DEV|AMBIGUOUS|true|Who sings a song in the story?|Several characters sing: the Duchess's lullaby, the Hatter's concert song and the Mock Turtle's soup song.|claude
+V3-AMB-02|DEV|AMBIGUOUS|true|Who carries a watch?|Both the White Rabbit and the Hatter take a watch out of a pocket.|claude
+V3-AMB-03|DEV|AMBIGUOUS|true|Who gives Alice advice?|The Caterpillar, the Cheshire Cat and the Duchess each offer her guidance of a kind.|claude
+V3-AMB-04|FINAL_ONLY|AMBIGUOUS|true|Who is in charge of the trial of the Knave?|The King is the judge, but the Queen overrides the procedure.|claude
+V3-AMB-05|DEV|AMBIGUOUS|true|Which creature is found fast asleep?|The Dormouse sleeps at the tea-party and at the trial, and the Gryphon is found asleep in the sun.|claude
+V3-NOA-01|DEV|NO_ANSWER|false|What is the White Rabbit's first name?|The Rabbit is never given a first name; the brass plate shows only an initial.|claude
+V3-NOA-02|FINAL_ONLY|NO_ANSWER|false|What colour is the Cheshire Cat's fur?|The Cat's grin, claws and teeth are described, never the colour of its fur.|claude
+V3-NOA-03|DEV|NO_ANSWER|false|In which town or city does Alice live?|Alice's home town is never named; London appears only in her muddled geography.|claude
+V3-NOA-04|DEV|NO_ANSWER|false|What is the name of the Duchess's cook?|The cook speaks and is called as a witness but is never named.|claude
+V3-NOA-05|DEV|NO_ANSWER|false|Which musical instrument does the Caterpillar play?|The Caterpillar smokes a hookah and plays no instrument; only the White Rabbit handles a trumpet.|claude
+V3-NOA-06|DEV|NO_ANSWER|false|What is the March Hare's real name?|The March Hare is only ever called the March Hare.|claude
+V3-NOA-07|DEV|NO_ANSWER|false|What prize is promised to the winner of the Queen's croquet game?|No prize is mentioned at the croquet-ground; prizes appear only after the Caucus-race.|claude
+V3-NOA-08|FINAL_ONLY|NO_ANSWER|false|What is Alice's family name?|Alice's surname never appears; the Rabbit calls her Mary Ann by mistake.|claude

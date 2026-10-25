@@ -171,9 +171,9 @@ like v1 HOLDOUT. Any later selection needs a new prospective set.
 ./gradlew :monada-evaluation:test --tests '*BookQueryProtocolV3*' --tests '*BookQueryDatasetV3*' --tests '*BookQueriesFrozenResources*'
 ```
 
-Opt-in real-body validation does not apply yet: this issue commits no spans. Phase II 3/10 adds a real-corpus test
-that recomputes every v3 span digest against `MONADA_BOOK_CORPUS_V1_BODY`, as `BookQueryDatasetRealCorpusTest` does
-for v1.
+This issue commits no spans, so opt-in real-body validation does not apply to it. Phase II 3/10 ([QUERIES-V3.md](QUERIES-V3.md))
+adds the dataset and `BookQueryDatasetV3RealCorpusTest`, which recomputes every v3 span digest against
+`MONADA_BOOK_CORPUS_V1_BODY`.
 
 ## Non-goals respected
 

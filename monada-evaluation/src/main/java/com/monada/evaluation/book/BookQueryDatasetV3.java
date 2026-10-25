@@ -18,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -176,7 +177,15 @@ final class BookQueryDatasetV3 {
 
     /** Loads the dataset next to the protocol; fails when it has not been authored yet. */
     static BookQueryDatasetV3 load(Path dir) {
-        Path manifestFile = dir.resolve(MANIFEST_FILE);
+        return load(dir, dir);
+    }
+
+    /**
+     * Loads the dataset from {@code datasetDir} against the signed protocol and plan in {@code protocolDir} (the
+     * {@code book-corpus-v1} contract directory); fails when the dataset has not been authored yet.
+     */
+    static BookQueryDatasetV3 load(Path protocolDir, Path datasetDir) {
+        Path manifestFile = datasetDir.resolve(MANIFEST_FILE);
         check(Files.isRegularFile(manifestFile), "book-queries-v3 is not authored yet: " + MANIFEST_FILE
                 + " is missing");
         Properties manifest = BookQueryProtocolV3.readProperties(BookQueryProtocolV3.read(manifestFile),
@@ -185,11 +194,31 @@ final class BookQueryDatasetV3 {
                         && JUDGMENTS_FILE.equals(manifest.getProperty("judgments.file"))
                         && REVIEW_FILE.equals(manifest.getProperty("review.file")),
                 "queries.file, judgments.file and review.file must be the fixed v3 names");
-        return parse(BookQueryProtocolV3.read(dir.resolve(BookQueryProtocolV3.PROTOCOL_FILE)),
-                BookQueryProtocolV3.read(dir.resolve(BookQueryProtocolV3.PLAN_FILE)), manifest,
-                BookQueryProtocolV3.read(dir.resolve(QUERIES_FILE)),
-                BookQueryProtocolV3.read(dir.resolve(JUDGMENTS_FILE)),
-                BookQueryProtocolV3.read(dir.resolve(REVIEW_FILE)), BookQueryDataset.load());
+        return parse(BookQueryProtocolV3.read(protocolDir.resolve(BookQueryProtocolV3.PROTOCOL_FILE)),
+                BookQueryProtocolV3.read(protocolDir.resolve(BookQueryProtocolV3.PLAN_FILE)), manifest,
+                BookQueryProtocolV3.read(datasetDir.resolve(QUERIES_FILE)),
+                BookQueryProtocolV3.read(datasetDir.resolve(JUDGMENTS_FILE)),
+                BookQueryProtocolV3.read(datasetDir.resolve(REVIEW_FILE)), BookQueryDataset.load());
+    }
+
+    /**
+     * Recomputes every judged span's SHA-256 against the verified normalized {@code body} and returns how many were
+     * checked. It works in every review status, because it reveals no query, label or receipt: a mismatch names only
+     * the slot id and the byte range.
+     */
+    int verifySpans(byte[] body) {
+        int spans = 0;
+        for (Case c : cases) {
+            for (Judgment j : c.judgments()) {
+                check(j.byteEnd() <= body.length, c.slot().id() + ": span [" + j.byteStart() + "," + j.byteEnd()
+                        + ") lies outside the body");
+                byte[] span = Arrays.copyOfRange(body, (int) j.byteStart(), (int) j.byteEnd());
+                check(j.spanSha256().equals(BookQueryDataset.sha256(span)), c.slot().id() + ": span ["
+                        + j.byteStart() + "," + j.byteEnd() + ") no longer matches the body");
+                spans++;
+            }
+        }
+        return spans;
     }
 
     /**
