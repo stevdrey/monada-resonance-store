@@ -256,7 +256,7 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
         return cases;
     }
 
-    private static Map<String, List<Judgment>> judgments(byte[] bytes, Set<String> ids, Map<String, ChunkRef> chunks) {
+    static Map<String, List<Judgment>> judgments(byte[] bytes, Set<String> ids, Map<String, ChunkRef> chunks) {
         List<String> lines = lines(bytes, "judgments.psv");
         check(!lines.isEmpty() && JUDGMENTS_HEADER.equals(lines.get(0)),
                 "judgments.psv header must be " + JUDGMENTS_HEADER);
@@ -290,7 +290,7 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
         return byCase;
     }
 
-    private static void validateCase(Case c, Map<String, ChunkRef> chunks) {
+    static void validateCase(Case c, Map<String, ChunkRef> chunks) {
         int evidence = c.evidence().size();
         if (!c.answerable()) {
             check(evidence == 0, c.id() + ": NO_ANSWER case must not have evidence");
@@ -355,12 +355,12 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
         }
     }
 
-    private static void checkCount(Properties manifest, String key, long actual) {
+    static void checkCount(Properties manifest, String key, long actual) {
         check(String.valueOf(actual).equals(require(manifest, key)),
                 key + " is " + manifest.getProperty(key) + " but the data has " + actual);
     }
 
-    private static void checkDigest(Properties manifest, String key, byte[] bytes) {
+    static void checkDigest(Properties manifest, String key, byte[] bytes) {
         check(sha256(bytes).equals(manifest.getProperty(key)), key + " does not match the file");
     }
 
@@ -369,14 +369,14 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
                 + ", expected " + expected);
     }
 
-    private static List<String> lines(byte[] bytes, String name) {
+    static List<String> lines(byte[] bytes, String name) {
         String text = new String(bytes, StandardCharsets.UTF_8);
         check(Arrays.equals(utf8(text), bytes), name + " is not valid UTF-8");
         check(text.endsWith("\n") && !text.contains("\r"), name + " must use LF line ends and end with one");
         return List.of(text.substring(0, text.length() - 1).split("\n", -1));
     }
 
-    private static <E extends Enum<E>> E parseEnum(Class<E> type, String value, String id, String field) {
+    static <E extends Enum<E>> E parseEnum(Class<E> type, String value, String id, String field) {
         try {
             return Enum.valueOf(type, value);
         } catch (IllegalArgumentException e) {
@@ -392,17 +392,17 @@ record BookQueryDataset(Properties manifest, List<Case> cases, Map<String, Chunk
         }
     }
 
-    private static String require(Properties manifest, String key) {
+    static String require(Properties manifest, String key) {
         String value = manifest.getProperty(key);
         check(value != null && !value.isBlank(), "manifest is missing " + key);
         return value;
     }
 
-    private static byte[] utf8(String text) {
+    static byte[] utf8(String text) {
         return text.getBytes(StandardCharsets.UTF_8);
     }
 
-    private static void check(boolean condition, String message) {
+    static void check(boolean condition, String message) {
         if (!condition) {
             throw new IllegalStateException(message);
         }
